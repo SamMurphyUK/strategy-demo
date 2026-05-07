@@ -1,0 +1,81 @@
+{
+	"schema_version": "0.5",
+	"starting_units": [
+		{
+			"count": 4,
+			"faction_id": "red",
+			"region_id": "red_capital",
+			"unit_type_id": "infantry"
+		},
+		{
+			"count": 1,
+			"faction_id": "red",
+			"region_id": "red_capital",
+			"unit_type_id": "artillery"
+		},
+		{
+			"count": 1,
+			"faction_id": "red",
+			"region_id": "red_capital",
+			"unit_type_id": "tank"
+		},
+		{
+			"count": 3,
+			"faction_id": "red",
+			"region_id": "red_front",
+			"unit_type_id": "infantry"
+		},
+		{
+			"count": 1,
+			"faction_id": "red",
+			"region_id": "sea_west",
+			"unit_type_id": "battleship"
+		},
+		{
+			"count": 1,
+			"faction_id": "red",
+			"region_id": "sea_west",
+			"unit_type_id": "transport"
+		},
+		{
+			"count": 4,
+			"faction_id": "blue",
+			"region_id": "blue_capital",
+			"unit_type_id": "infantry"
+		},
+		{
+			"count": 1,
+			"faction_id": "blue",
+			"region_id": "blue_capital",
+			"unit_type_id": "artillery"
+		},
+		{
+			"count": 1,
+			"faction_id": "blue",
+			"region_id": "blue_capital",
+			"unit_type_id": "tank"
+		},
+		{
+			"count": 3,
+			"faction_id": "blue",
+			"region_id": "blue_front",
+			"unit_type_id": "infantry"
+		},
+		{
+			"count": 1,
+			"faction_id": "blue",
+			"region_id": "sea_east",
+			"unit_type_id": "battleship"
+		},
+		{
+			"count": 1,
+			"faction_id": "blue",
+			"region_id": "sea_east",
+			"unit_type_id": "transport"
+		}
+	],
+	"turn_order": [
+		"red",
+		"blue"
+	]
+}

@@ -1,0 +1,93 @@
+{
+	"adjacency": [
+		{
+			"from": "red_capital",
+			"to": "red_front"
+		},
+		{
+			"from": "red_capital",
+			"to": "sea_west"
+		},
+		{
+			"from": "red_front",
+			"to": "blue_front"
+		},
+		{
+			"from": "blue_front",
+			"to": "blue_capital"
+		},
+		{
+			"from": "blue_capital",
+			"to": "sea_east"
+		},
+		{
+			"from": "sea_west",
+			"to": "sea_east"
+		},
+		{
+			"from": "sea_west",
+			"to": "blue_capital"
+		},
+		{
+			"from": "sea_east",
+			"to": "red_capital"
+		}
+	],
+	"regions": [
+		{
+			"has_factory": true,
+			"id": "red_capital",
+			"ipc_value": 8,
+			"is_capital": true,
+			"name": "Red Capital",
+			"owner_faction_id": "red",
+			"type": "land"
+		},
+		{
+			"has_factory": false,
+			"id": "red_front",
+			"ipc_value": 4,
+			"is_capital": false,
+			"name": "Red Front",
+			"owner_faction_id": "red",
+			"type": "land"
+		},
+		{
+			"has_factory": true,
+			"id": "blue_capital",
+			"ipc_value": 8,
+			"is_capital": true,
+			"name": "Blue Capital",
+			"owner_faction_id": "blue",
+			"type": "land"
+		},
+		{
+			"has_factory": false,
+			"id": "blue_front",
+			"ipc_value": 4,
+			"is_capital": false,
+			"name": "Blue Front",
+			"owner_faction_id": "blue",
+			"type": "land"
+		},
+		{
+			"has_factory": false,
+			"id": "sea_west",
+			"ipc_value": 0,
+			"is_capital": false,
+			"name": "Western Sea",
+			"owner_faction_id": "",
+			"type": "sea"
+		},
+		{
+			"has_factory": false,
+			"id": "sea_east",
+			"ipc_value": 0,
+			"is_capital": false,
+			"name": "Eastern Sea",
+			"owner_faction_id": "",
+			"type": "sea"
+		}
+	],
+	"schema_version": "0.5"
+}

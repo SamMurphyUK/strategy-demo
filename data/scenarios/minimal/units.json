@@ -1,0 +1,65 @@
+{
+	"schema_version": "0.5",
+	"unit_types": [
+		{
+			"attack": 1,
+			"category": "land",
+			"container": null,
+			"cost": 3,
+			"defense": 2,
+			"id": "infantry",
+			"movement": 1,
+			"name": "Infantry"
+		},
+		{
+			"attack": 2,
+			"category": "land",
+			"container": null,
+			"cost": 4,
+			"defense": 2,
+			"id": "artillery",
+			"movement": 1,
+			"name": "Artillery"
+		},
+		{
+			"attack": 3,
+			"category": "land",
+			"container": null,
+			"cost": 6,
+			"defense": 3,
+			"id": "tank",
+			"movement": 2,
+			"name": "Tank"
+		},
+		{
+			"attack": 4,
+			"category": "sea",
+			"container": null,
+			"cost": 20,
+			"defense": 4,
+			"id": "battleship",
+			"movement": 2,
+			"name": "Battleship"
+		},
+		{
+			"attack": 0,
+			"category": "sea",
+			"container": {
+				"allowed_cargo_categories": [
+					"land"
+				],
+				"capacity": 2,
+				"max_per_type": {
+					"artillery": 1,
+					"infantry": 2,
+					"tank": 1
+				}
+			},
+			"cost": 7,
+			"defense": 0,
+			"id": "transport",
+			"movement": 2,
+			"name": "Transport"
+		}
+	]
+}

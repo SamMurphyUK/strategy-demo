@@ -1,0 +1,17 @@
+{
+	"factions": [
+		{
+			"color": "#CC0000",
+			"id": "red",
+			"name": "Red Army",
+			"starting_ipc": 24
+		},
+		{
+			"color": "#0000CC",
+			"id": "blue",
+			"name": "Blue Navy",
+			"starting_ipc": 24
+		}
+	],
+	"schema_version": "0.5"
+}

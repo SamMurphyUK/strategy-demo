@@ -1,0 +1,15 @@
+{
+	"combat_rules": {
+		"battle_order": "alphabetical_region_id",
+		"casualty_selection": "automatic_cheapest",
+		"retreat_allowed": false
+	},
+	"placement_rules": {
+		"lost_factory_behavior": "forfeit"
+	},
+	"schema_version": "0.5",
+	"victory_conditions": {
+		"check_timing": "end_of_turn",
+		"type": "all_enemy_capitals"
+	}
+}
