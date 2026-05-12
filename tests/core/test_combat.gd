@@ -90,11 +90,12 @@ func test_battle_produces_required_events() -> void:
 	
 	var events := combat.resolve_all_battles("red")
 	
-	var event_types := events.map(func(e): return e.type)
+	# Normalize event types to strings for stability
+	var event_types := events.map(func(e): return str(e.type))
 	
-	assert_true(GameEvent.Type.BATTLE_STARTED in event_types, "Should have BATTLE_STARTED")
-	assert_true(GameEvent.Type.DICE_ROLLED in event_types, "Should have DICE_ROLLED")
-	assert_true(GameEvent.Type.BATTLE_FINISHED in event_types, "Should have BATTLE_FINISHED")
+	assert_true("battle_started" in event_types, "Should have BATTLE_STARTED")
+	assert_true("dice_rolled" in event_types, "Should have DICE_ROLLED")
+	assert_true("battle_finished" in event_types, "Should have BATTLE_FINISHED")
 
 
 func test_battle_removes_casualties() -> void:
@@ -105,7 +106,6 @@ func test_battle_removes_casualties() -> void:
 	
 	combat.resolve_all_battles("red")
 	
-	# After battle, total units should be less than starting 7
 	var remaining: Array = state.region_units["battle_zone"]
 	var total := 0
 	for u in remaining:
@@ -115,7 +115,6 @@ func test_battle_removes_casualties() -> void:
 
 
 func test_attacker_wins_captures_region() -> void:
-	# Give attacker overwhelming force
 	_setup_land_battle(
 		[{"type": "tank", "count": 10}],
 		[{"type": "infantry", "count": 1}]
@@ -123,7 +122,6 @@ func test_attacker_wins_captures_region() -> void:
 	
 	var events := combat.resolve_all_battles("red")
 	
-	# Find battle result
 	var battle_finished = null
 	for e in events:
 		if e.type == GameEvent.Type.BATTLE_FINISHED:
@@ -136,7 +134,6 @@ func test_attacker_wins_captures_region() -> void:
 
 
 func test_defender_wins_keeps_region() -> void:
-	# Give defender overwhelming force
 	_setup_land_battle(
 		[{"type": "infantry", "count": 1}],
 		[{"type": "tank", "count": 10}]
@@ -151,16 +148,14 @@ func test_defender_wins_keeps_region() -> void:
 func test_casualties_cheapest_first() -> void:
 	_setup_land_battle(
 		[{"type": "infantry", "count": 2}, {"type": "tank", "count": 2}],
-		[{"type": "tank", "count": 5}]  # Will deal lots of damage
+		[{"type": "tank", "count": 5}]
 	)
 	
 	combat.resolve_all_battles("red")
 	
-	# After battle, if any red units remain, tanks should be more likely to survive
 	var red_units := state.get_faction_units_in_region("battle_zone", "red")
 	
 	if red_units.size() > 0:
-		# Find if tanks survived more than infantry
 		var infantry_count := 0
 		var tank_count := 0
 		for u in red_units:
@@ -169,12 +164,10 @@ func test_casualties_cheapest_first() -> void:
 			elif u.unit_type_id == "tank":
 				tank_count = u.count
 		
-		# Infantry (cost 3) should die before tanks (cost 6)
 		assert_true(tank_count >= infantry_count, "Tanks should survive longer than infantry")
 
 
 func test_deterministic_combat() -> void:
-	# Run same battle twice with same seed
 	_setup_land_battle(
 		[{"type": "infantry", "count": 3}],
 		[{"type": "infantry", "count": 3}]
@@ -184,7 +177,6 @@ func test_deterministic_combat() -> void:
 	var events1 := combat1.resolve_all_battles("red")
 	var final_state1 := state.to_snapshot()
 	
-	# Reset and run again
 	before_each()
 	_setup_land_battle(
 		[{"type": "infantry", "count": 3}],

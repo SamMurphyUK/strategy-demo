@@ -3,30 +3,11 @@ extends GutTest
 
 func test_identical_games_with_same_seed() -> void:
 	var commands := [
-		{
-			"command_id": "c1",
-			"player_id": "red",
-			"type": "end_phase",
-			"payload": {}
-		},
-		{
-			"command_id": "c2",
-			"player_id": "red",
-			"type": "move_units",
-			"payload": {
-				"moves": [{
-					"from_region_id": "red_front",
-					"to_region_id": "blue_front",
-					"units": [{"unit_type_id": "infantry", "count": 3}]
-				}]
-			}
-		},
-		{
-			"command_id": "c3",
-			"player_id": "red",
-			"type": "end_phase",
-			"payload": {}
-		}
+		{"command_id": "c1", "player_id": "red", "type": "end_phase", "payload": {}},
+		{"command_id": "c2", "player_id": "red", "type": "move_units", 
+		 "payload": {"moves": [{"from_region_id": "red_front", "to_region_id": "blue_front", 
+		 "units": [{"unit_type_id": "infantry", "count": 3}]}]}},
+		{"command_id": "c3", "player_id": "red", "type": "end_phase", "payload": {}}
 	]
 	
 	var session1 := _create_session(12345)
@@ -46,36 +27,17 @@ func test_identical_games_with_same_seed() -> void:
 	var state1 := session1.get_state()
 	var state2 := session2.get_state()
 	
-	assert_eq(str(state1.turn_info.current_phase), str(state2.turn_info.current_phase))
+	assert_eq(state1.turn_info.current_phase, state2.turn_info.current_phase)
 	assert_eq(state1.game_round, state2.game_round)
 
 
 func test_different_seeds_produce_different_combat() -> void:
 	var commands := [
-		{
-			"command_id": "c1",
-			"player_id": "red",
-			"type": "end_phase",
-			"payload": {}
-		},
-		{
-			"command_id": "c2",
-			"player_id": "red",
-			"type": "move_units",
-			"payload": {
-				"moves": [{
-					"from_region_id": "red_front",
-					"to_region_id": "blue_front",
-					"units": [{"unit_type_id": "infantry", "count": 3}]
-				}]
-			}
-		},
-		{
-			"command_id": "c3",
-			"player_id": "red",
-			"type": "end_phase",
-			"payload": {}
-		}
+		{"command_id": "c1", "player_id": "red", "type": "end_phase", "payload": {}},
+		{"command_id": "c2", "player_id": "red", "type": "move_units", 
+		 "payload": {"moves": [{"from_region_id": "red_front", "to_region_id": "blue_front", 
+		 "units": [{"unit_type_id": "infantry", "count": 3}]}]}},
+		{"command_id": "c3", "player_id": "red", "type": "end_phase", "payload": {}}
 	]
 	
 	var session1 := _create_session(11111)
@@ -85,14 +47,14 @@ func test_different_seeds_produce_different_combat() -> void:
 		session1.apply_command(cmd)
 		session2.apply_command(cmd)
 	
+	# Run multiple times to check - different seeds should eventually produce different results
+	# This is probabilistic but with very different seeds, outcomes should differ
 	var state1 := session1.get_state()
 	var state2 := session2.get_state()
 	
-	# Different seeds should eventually diverge in outcome
-	assert_false(
-		state1.game_over and state2.game_over and state1.winner_faction_id == state2.winner_faction_id,
-        "Different seeds should produce different outcomes (probabilistic)"
-	)
+	# At minimum, the games should both be valid
+	assert_false(state1.game_over and state2.game_over and state1.winner == state2.winner,
+		"Different seeds should produce different outcomes (probabilistic)")
 
 
 func _create_session(seed_state: int) -> GameSession:

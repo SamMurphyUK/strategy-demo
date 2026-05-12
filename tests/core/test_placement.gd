@@ -56,7 +56,7 @@ func test_placement_adds_units_to_region() -> void:
 	placement.process_placement(cmd)
 	
 	var units := state.get_faction_units_in_region("factory_region", "red")
-	assert_eq(units.size(), 1, "Should have 1 unit stack")
+	assert_eq(units.size(), 1)
 	assert_eq(units[0].unit_type_id, "infantry")
 	assert_eq(units[0].count, 3)
 
@@ -72,7 +72,7 @@ func test_placement_clears_pending_purchases() -> void:
 	
 	placement.process_placement(cmd)
 	
-	assert_eq(state.pending_purchases["red"].size(), 0, "Pending should be cleared")
+	assert_eq(state.pending_purchases["red"].size(), 0)
 
 
 func test_placement_emits_event() -> void:
@@ -87,7 +87,7 @@ func test_placement_emits_event() -> void:
 	var events := placement.process_placement(cmd)
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.UNITS_PLACED)
+	assert_eq(str(events[0].type), "units_placed")
 
 
 func test_placement_creates_transport_instances() -> void:
@@ -103,28 +103,25 @@ func test_placement_creates_transport_instances() -> void:
 	
 	placement.process_placement(cmd)
 	
-	# Check instances created
 	var instance_count := 0
 	for key in state.transport_instances:
 		if key.begins_with("transport_red_"):
 			instance_count += 1
 	
-	assert_eq(instance_count, 2, "Should create 2 transport instances")
+	assert_eq(instance_count, 2)
 
 
 func test_check_forfeited_when_factory_lost() -> void:
-	# Simulate losing factory
 	state.regions["factory_region"].owner_faction_id = "blue"
 	state.pending_purchases["red"] = [{"unit_type_id": "infantry", "count": 3}]
 	
 	var events := placement.check_forfeited("red")
 	
-	assert_eq(events.size(), 1, "Should emit forfeiture event")
-	assert_eq(events[0].type, GameEvent.Type.PLACEMENT_FORFEITED)
+	assert_eq(events.size(), 1)
+	assert_eq(str(events[0].type), "placement_forfeited")
 	assert_eq(events[0].payload.ipc_lost, 9)
 
 
 func test_no_forfeiture_when_factory_retained() -> void:
 	var events := placement.check_forfeited("red")
-	
-	assert_eq(events.size(), 0, "No forfeiture if factory retained")
+	assert_eq(events.size(), 0)

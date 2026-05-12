@@ -90,7 +90,7 @@ func test_move_units_emits_event() -> void:
 	var events := movement.process_move(cmd)
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.UNITS_MOVED)
+	assert_eq(str(events[0].type), "units_moved")
 	assert_eq(events[0].payload.faction_id, "red")
 
 
@@ -144,7 +144,7 @@ func test_load_transport_emits_event() -> void:
 	var events := movement.process_load(cmd)
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.TRANSPORT_LOADED)
+	assert_eq(str(events[0].type), "transport_loaded")
 	assert_eq(events[0].payload.transport_instance_id, "transport_red_001")
 
 
@@ -188,9 +188,4 @@ func test_unload_transport_emits_event() -> void:
 	var events := movement.process_unload(cmd)
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.TRANSPORT_UNLOADED)
-
-
-func _load_json(path: String) -> Dictionary:
-	var file := FileAccess.open(path, FileAccess.READ)
-	return JSON.parse_string(file.get_as_text())
+	assert_eq(str(events[0].type), "transport_unloaded")

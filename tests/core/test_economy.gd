@@ -59,7 +59,6 @@ func test_purchase_multiple_unit_types() -> void:
 	
 	economy.process_purchase(cmd)
 	
-	# 2 infantry (6) + 1 tank (6) = 12 IPC
 	assert_eq(state.get_faction_ipc("red"), 12, "Should deduct 12 IPC")
 
 
@@ -86,7 +85,7 @@ func test_purchase_emits_event() -> void:
 	var events := economy.process_purchase(cmd)
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.UNITS_PURCHASED)
+	assert_eq(str(events[0].type), "units_purchased")
 	assert_eq(events[0].payload.faction_id, "red")
 	assert_eq(events[0].payload.ipc_spent, 6)
 	assert_eq(events[0].payload.ipc_remaining, 18)
@@ -95,7 +94,6 @@ func test_purchase_emits_event() -> void:
 func test_collect_income_from_owned_land() -> void:
 	var events := economy.collect_income("red")
 	
-	# capital (8) + territory (4) = 12
 	assert_eq(state.get_faction_ipc("red"), 36, "Should add 12 IPC")
 
 
@@ -127,7 +125,7 @@ func test_collect_income_emits_event() -> void:
 	var events := economy.collect_income("red")
 	
 	assert_eq(events.size(), 1)
-	assert_eq(events[0].type, GameEvent.Type.INCOME_COLLECTED)
+	assert_eq(str(events[0].type), "income_collected")
 	assert_eq(events[0].payload.faction_id, "red")
 	assert_eq(events[0].payload.amount, 12)
 	assert_eq(events[0].payload.new_total, 36)

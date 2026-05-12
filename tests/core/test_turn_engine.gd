@@ -37,7 +37,7 @@ func test_start_game_emits_phase_changed() -> void:
 	var events := engine.start_game()
 	
 	assert_eq(events.size(), 1, "Should emit 1 event")
-	assert_eq(events[0].type, GameEvent.Type.PHASE_CHANGED)
+	assert_eq(str(events[0].type), "phase_changed")
 	assert_eq(events[0].payload.faction_id, "red")
 	assert_eq(events[0].payload.new_phase, "purchase")
 
@@ -58,18 +58,17 @@ func test_advance_phase_cycles_through_all_phases() -> void:
 		var events := engine.advance_phase()
 		assert_eq(state.current_phase, expected, "Phase should be %s" % expected)
 		assert_eq(events.size(), 1, "Should emit phase_changed event")
+		assert_eq(str(events[0].type), "phase_changed")
 
 
 func test_advance_phase_stops_at_collect_income() -> void:
 	engine.start_game()
 	
-	# Advance through all phases
 	for i in range(5):
 		engine.advance_phase()
 	
 	assert_eq(state.current_phase, "collect_income")
 	
-	# Try to advance again
 	var events := engine.advance_phase()
 	assert_eq(events.size(), 0, "Should not advance past collect_income")
 	assert_eq(state.current_phase, "collect_income")
@@ -90,11 +89,9 @@ func test_end_turn_increments_round_after_all_factions() -> void:
 	engine.start_game()
 	state.current_phase = "collect_income"
 	
-	# Red's turn ends
 	engine.end_turn()
 	assert_eq(state.game_round, 1, "Still round 1 after red")
 	
-	# Blue's turn ends
 	state.current_phase = "collect_income"
 	engine.end_turn()
 	
@@ -109,5 +106,5 @@ func test_end_turn_emits_turn_ended_and_phase_changed() -> void:
 	var events := engine.end_turn()
 	
 	assert_eq(events.size(), 2, "Should emit 2 events")
-	assert_eq(events[0].type, GameEvent.Type.TURN_ENDED)
-	assert_eq(events[1].type, GameEvent.Type.PHASE_CHANGED)
+	assert_eq(str(events[0].type), "turn_ended")
+	assert_eq(str(events[1].type), "phase_changed")

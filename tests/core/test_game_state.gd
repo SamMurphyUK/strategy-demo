@@ -9,7 +9,6 @@ func before_each() -> void:
 
 
 func _setup_basic_state() -> void:
-	# Add regions
 	var region_a := Region.from_dict({
 		"id": "region_a", "name": "Region A", "type": "land",
 		"ipc_value": 5, "owner_faction_id": "red",
@@ -44,20 +43,20 @@ func _setup_basic_state() -> void:
 
 func test_get_adjacent_regions() -> void:
 	var adjacent := state.get_adjacent_regions("region_a")
-	assert_eq(adjacent.size(), 2, "Region A should have 2 adjacent regions")
-	assert_true("region_b" in adjacent, "Should include region_b")
-	assert_true("sea_1" in adjacent, "Should include sea_1")
+	assert_eq(adjacent.size(), 2)
+	assert_true("region_b" in adjacent)
+	assert_true("sea_1" in adjacent)
 
 
 func test_get_adjacent_regions_empty() -> void:
 	var adjacent := state.get_adjacent_regions("nonexistent")
-	assert_eq(adjacent.size(), 0, "Nonexistent region should return empty array")
+	assert_eq(adjacent.size(), 0)
 
 
 func test_is_adjacent() -> void:
-	assert_true(state.is_adjacent("region_a", "region_b"), "A and B are adjacent")
-	assert_true(state.is_adjacent("region_a", "sea_1"), "A and sea_1 are adjacent")
-	assert_false(state.is_adjacent("region_b", "sea_1"), "B and sea_1 are not adjacent")
+	assert_true(state.is_adjacent("region_a", "region_b"))
+	assert_true(state.is_adjacent("region_a", "sea_1"))
+	assert_false(state.is_adjacent("region_b", "sea_1"))
 
 
 func test_get_region_owner() -> void:
@@ -84,9 +83,9 @@ func test_generate_instance_id_unique() -> void:
 	var id2 := state.generate_instance_id("transport", "red")
 	var id3 := state.generate_instance_id("transport", "blue")
 	
-	assert_ne(id1, id2, "Same faction IDs should be unique")
-	assert_true(id1.begins_with("transport_red_"), "ID format should be type_faction_seq")
-	assert_true(id3.begins_with("transport_blue_"), "Different faction should have different prefix")
+	assert_ne(id1, id2)
+	assert_true(id1.begins_with("transport_red_"))
+	assert_true(id3.begins_with("transport_blue_"))
 
 
 func test_get_faction_units_in_region() -> void:
@@ -98,9 +97,9 @@ func test_get_faction_units_in_region() -> void:
 	var red_units := state.get_faction_units_in_region("region_a", "red")
 	var blue_units := state.get_faction_units_in_region("region_a", "blue")
 	
-	assert_eq(red_units.size(), 1, "Red should have 1 unit stack")
-	assert_eq(red_units[0].count, 3, "Red should have 3 infantry")
-	assert_eq(blue_units.size(), 1, "Blue should have 1 unit stack")
+	assert_eq(red_units.size(), 1)
+	assert_eq(red_units[0].count, 3)
+	assert_eq(blue_units.size(), 1)
 
 
 func test_get_enemy_units_in_region() -> void:
@@ -110,8 +109,8 @@ func test_get_enemy_units_in_region() -> void:
 	]
 	
 	var enemies := state.get_enemy_units_in_region("region_a", "red")
-	assert_eq(enemies.size(), 1, "Should find 1 enemy stack")
-	assert_eq(enemies[0].faction_id, "blue", "Enemy should be blue")
+	assert_eq(enemies.size(), 1)
+	assert_eq(enemies[0].faction_id, "blue")
 
 
 func test_to_snapshot() -> void:
@@ -123,7 +122,7 @@ func test_to_snapshot() -> void:
 	var snapshot := state.to_snapshot()
 	
 	assert_eq(snapshot.turn_info.current_faction_id, "red")
-	assert_eq(snapshot.turn_info.current_phase, "purchase")
+	assert_eq(str(snapshot.turn_info.current_phase), "purchase")
 	assert_eq(snapshot.game_round, 1)
-	assert_true("ipc" in snapshot, "Snapshot should include IPC")
-	assert_true("regions" in snapshot, "Snapshot should include regions")
+	assert_true("ipc" in snapshot)
+	assert_true("regions" in snapshot)

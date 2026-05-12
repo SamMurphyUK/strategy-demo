@@ -26,6 +26,8 @@ func before_each() -> void:
 	})
 	
 	state.rules = {"victory_conditions": {"type": "all_enemy_capitals"}}
+	state.game_over = false
+	state.winner_faction_id = ""
 	
 	victory = VictoryEngine.new(state)
 
@@ -33,24 +35,22 @@ func before_each() -> void:
 func test_no_victory_initially() -> void:
 	var events := victory.check_victory()
 	
-	assert_eq(events.size(), 0, "No victory at game start")
-	assert_false(state.game_over, "Game should not be over")
+	assert_eq(events.size(), 0)
+	assert_false(state.game_over)
 
 
 func test_victory_when_all_capitals_captured() -> void:
-	# Red captures blue's capital
 	state.regions["blue_capital"].owner_faction_id = "red"
 	
 	var events := victory.check_victory()
 	
-	assert_eq(events.size(), 1, "Should emit victory event")
-	assert_eq(events[0].type, GameEvent.Type.GAME_FINISHED)
-	assert_true(state.game_over, "Game should be over")
-	assert_eq(state.winner, "red", "Red should win")
+	assert_eq(events.size(), 1)
+	assert_eq(str(events[0].type), "game_finished")
+	assert_true(state.game_over)
+	assert_eq(state.winner_faction_id, "red")
 
 
 func test_no_victory_with_partial_capture() -> void:
-	# Add a third capital that red doesn't control
 	state.regions["neutral_capital"] = Region.from_dict({
 		"id": "neutral_capital", "name": "Neutral", "type": "land",
 		"ipc_value": 5, "owner_faction_id": "neutral",
@@ -60,12 +60,12 @@ func test_no_victory_with_partial_capture() -> void:
 		"id": "neutral", "name": "Neutral", "color": "#888888", "starting_ipc": 10
 	})
 	
-	# Red captures blue's capital but not neutral
 	state.regions["blue_capital"].owner_faction_id = "red"
 	
 	var events := victory.check_victory()
 	
-	assert_eq(events.size(), 0, "No victory with capitals remaining")
+	assert_eq(events.size(), 0)
+	assert_false(state.game_over)
 
 
 func test_victory_event_payload() -> void:
@@ -73,6 +73,7 @@ func test_victory_event_payload() -> void:
 	
 	var events := victory.check_victory()
 	
+	assert_eq(events.size(), 1)
 	assert_eq(events[0].payload.winner_faction_id, "red")
 	assert_eq(events[0].payload.reason, "all_enemy_capitals_captured")
 
@@ -80,7 +81,8 @@ func test_victory_event_payload() -> void:
 func test_no_double_victory() -> void:
 	state.regions["blue_capital"].owner_faction_id = "red"
 	
-	victory.check_victory()  # First check
-	var events := victory.check_victory()  # Second check
+	victory.check_victory()
+	var events := victory.check_victory()
 	
-	assert_eq(events.size(), 0, "Should not emit victory twice")
+	assert_eq(events.size(), 0)
+	assert_true(state.game_over)

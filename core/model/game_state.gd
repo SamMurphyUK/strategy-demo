@@ -19,7 +19,7 @@ var factories_controlled_at_turn_start: Dictionary = {}
 var next_instance_id: Dictionary = {}
 var transport_instances: Dictionary = {}
 var game_over: bool = false
-var winner: String = ""
+var winner_faction_id: String = ""
 
 func get_adjacent_regions(region_id: String) -> Array:
 	return adjacency.get(region_id, [])
@@ -66,4 +66,17 @@ func to_snapshot() -> Dictionary:
 	var region_data: Array = []
 	for region_id in regions:
 		region_data.append({"region_id": region_id, "owner_faction_id": regions[region_id].owner_faction_id, "units": get_units_in_region(region_id)})
-	return {"game_round": game_round, "turn_info": {"current_faction_id": current_faction_id, "current_phase": current_phase, "turn_number": turn_number}, "regions": region_data, "ipc": ipc.duplicate(), "pending_purchases": pending_purchases.duplicate(true), "pending_amphibious_assaults": pending_amphibious_assaults.duplicate(true), "game_over": game_over, "winner": winner}
+	return {
+		"game_round": game_round,
+		"turn_info": {
+			"current_faction_id": current_faction_id,
+			"current_phase": current_phase,
+			"turn_number": turn_number
+		},
+		"regions": region_data,
+		"ipc": ipc.duplicate(),
+		"pending_purchases": pending_purchases.duplicate(true),
+		"pending_amphibious_assaults": pending_amphibious_assaults.duplicate(true),
+		"game_over": game_over,
+		"winner_faction_id": winner_faction_id
+	}
