@@ -1,0 +1,15 @@
+{
+  "id": "global_1940_minimal",
+  "name": "Global 1940 – Minimal Demo",
+  "units_file": "res://data/units.json",
+  "regions_file": "res://data/regions.json",
+  "factions_file": "res://data/factions.json",
+  "starting_units_file": "res://data/starting_units.json",
+  "rules": {
+    "victory_conditions": {
+      "type": "all_enemy_capitals"
+    }
+  },
+  "starting_phase": "purchase",
+  "starting_round": 1
+}

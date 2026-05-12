@@ -1,0 +1,44 @@
+{
+  "regions": [
+    {
+      "id": "germany",
+      "name": "Germany",
+      "type": "land",
+      "ipc_value": 10,
+      "owner_faction_id": "germany",
+      "is_capital": true,
+      "has_factory": true,
+      "adjacent": ["western_europe", "poland"]
+    },
+    {
+      "id": "western_europe",
+      "name": "Western Europe",
+      "type": "land",
+      "ipc_value": 6,
+      "owner_faction_id": "germany",
+      "is_capital": false,
+      "has_factory": false,
+      "adjacent": ["germany", "uk_sea_zone"]
+    },
+    {
+      "id": "uk",
+      "name": "United Kingdom",
+      "type": "land",
+      "ipc_value": 8,
+      "owner_faction_id": "uk",
+      "is_capital": true,
+      "has_factory": true,
+      "adjacent": ["uk_sea_zone"]
+    },
+    {
+      "id": "uk_sea_zone",
+      "name": "UK Sea Zone",
+      "type": "sea",
+      "ipc_value": 0,
+      "owner_faction_id": "",
+      "is_capital": false,
+      "has_factory": false,
+      "adjacent": ["western_europe", "uk"]
+    }
+  ]
+}

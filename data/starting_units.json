@@ -1,0 +1,40 @@
+{
+  "starting_units": [
+    {
+      "region_id": "germany",
+      "faction_id": "germany",
+      "unit_type_id": "infantry",
+      "count": 6
+    },
+    {
+      "region_id": "germany",
+      "faction_id": "germany",
+      "unit_type_id": "tank",
+      "count": 2
+    },
+    {
+      "region_id": "western_europe",
+      "faction_id": "germany",
+      "unit_type_id": "infantry",
+      "count": 3
+    },
+    {
+      "region_id": "uk",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 6
+    },
+    {
+      "region_id": "uk",
+      "faction_id": "uk",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "uk_sea_zone",
+      "faction_id": "uk",
+      "unit_type_id": "transport",
+      "count": 1
+    }
+  ]
+}

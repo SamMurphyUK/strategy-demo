@@ -1,0 +1,18 @@
+{
+  "factions": [
+    {
+      "id": "germany",
+      "name": "Germany",
+      "color": "#444444",
+      "starting_ipc": 30,
+      "turn_order": 1
+    },
+    {
+      "id": "uk",
+      "name": "United Kingdom",
+      "color": "#0044AA",
+      "starting_ipc": 28,
+      "turn_order": 2
+    }
+  ]
+}
