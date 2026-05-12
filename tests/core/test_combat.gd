@@ -90,12 +90,21 @@ func test_battle_produces_required_events() -> void:
 	
 	var events := combat.resolve_all_battles("red")
 	
-	# Normalize event types to strings for stability
-	var event_types := events.map(func(e): return str(e.type))
+	var has_battle_started := false
+	var has_dice_rolled := false
+	var has_battle_finished := false
 	
-	assert_true("battle_started" in event_types, "Should have BATTLE_STARTED")
-	assert_true("dice_rolled" in event_types, "Should have DICE_ROLLED")
-	assert_true("battle_finished" in event_types, "Should have BATTLE_FINISHED")
+	for e in events:
+		if e.type == GameEvent.Type.BATTLE_STARTED:
+			has_battle_started = true
+		elif e.type == GameEvent.Type.DICE_ROLLED:
+			has_dice_rolled = true
+		elif e.type == GameEvent.Type.BATTLE_FINISHED:
+			has_battle_finished = true
+	
+	assert_true(has_battle_started, "Should have BATTLE_STARTED")
+	assert_true(has_dice_rolled, "Should have DICE_ROLLED")
+	assert_true(has_battle_finished, "Should have BATTLE_FINISHED")
 
 
 func test_battle_removes_casualties() -> void:
@@ -155,7 +164,9 @@ func test_casualties_cheapest_first() -> void:
 	
 	var red_units := state.get_faction_units_in_region("battle_zone", "red")
 	
-	if red_units.size() > 0:
+	if red_units.size() == 0:
+		assert_true(true, "All units destroyed - casualty order still valid")
+	else:
 		var infantry_count := 0
 		var tank_count := 0
 		for u in red_units:

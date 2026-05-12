@@ -37,7 +37,7 @@ func test_start_game_emits_phase_changed() -> void:
 	var events := engine.start_game()
 	
 	assert_eq(events.size(), 1, "Should emit 1 event")
-	assert_eq(str(events[0].type), "phase_changed")
+	assert_eq(events[0].type, GameEvent.Type.PHASE_CHANGED)
 	assert_eq(events[0].payload.faction_id, "red")
 	assert_eq(events[0].payload.new_phase, "purchase")
 
@@ -58,7 +58,7 @@ func test_advance_phase_cycles_through_all_phases() -> void:
 		var events := engine.advance_phase()
 		assert_eq(state.current_phase, expected, "Phase should be %s" % expected)
 		assert_eq(events.size(), 1, "Should emit phase_changed event")
-		assert_eq(str(events[0].type), "phase_changed")
+		assert_eq(events[0].type, GameEvent.Type.PHASE_CHANGED)
 
 
 func test_advance_phase_stops_at_collect_income() -> void:
@@ -106,5 +106,5 @@ func test_end_turn_emits_turn_ended_and_phase_changed() -> void:
 	var events := engine.end_turn()
 	
 	assert_eq(events.size(), 2, "Should emit 2 events")
-	assert_eq(str(events[0].type), "turn_ended")
-	assert_eq(str(events[1].type), "phase_changed")
+	assert_eq(events[0].type, GameEvent.Type.TURN_ENDED)
+	assert_eq(events[1].type, GameEvent.Type.PHASE_CHANGED)

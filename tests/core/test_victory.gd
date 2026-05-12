@@ -45,7 +45,7 @@ func test_victory_when_all_capitals_captured() -> void:
 	var events := victory.check_victory()
 	
 	assert_eq(events.size(), 1)
-	assert_eq(str(events[0].type), "game_finished")
+	assert_eq(events[0].type, GameEvent.Type.GAME_FINISHED)
 	assert_true(state.game_over)
 	assert_eq(state.winner_faction_id, "red")
 
