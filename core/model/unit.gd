@@ -1,18 +1,23 @@
 class_name Unit
 extends RefCounted
 
-var id: String
+# Instance identifier (numeric, used everywhere in your tests + builder)
+var id: int
+
+# Static unit type data (comes from ruleset)
 var name: String
 var category: String
 var attack: int
 var defense: int
 var movement: int
 var cost: int
-var container: Dictionary
+
+# Optional container metadata (transports, carriers, etc.)
+var container: Dictionary = {}
 
 static func from_dict(data: Dictionary) -> Unit:
 	var unit := Unit.new()
-	unit.id = data.get("id", "")
+	unit.id = int(data.get("id", 0))
 	unit.name = data.get("name", "")
 	unit.category = data.get("category", "")
 	unit.attack = data.get("attack", 0)
