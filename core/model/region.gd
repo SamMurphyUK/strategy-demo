@@ -8,37 +8,43 @@ var ipc_value: int
 var owner_faction_id: String
 var is_capital: bool
 var has_factory: bool
-
-var is_land: bool = false
 var adjacent: Array[String] = []
 
 
 static func from_dict(data: Dictionary) -> Region:
 	var region := Region.new()
 	region.id = str(data.get("id", ""))
-	region.name = data.get("name", "")
-	region.type = data.get("type", "")
+	region.name = str(data.get("name", ""))
+	region.type = str(data.get("type", "land"))
 	region.ipc_value = int(data.get("ipc_value", 0))
 	region.owner_faction_id = str(data.get("owner_faction_id", ""))
 	region.is_capital = bool(data.get("is_capital", false))
 	region.has_factory = bool(data.get("has_factory", false))
-
-	if data.has("is_land"):
-		region.is_land = bool(data["is_land"])
-	else:
-		region.is_land = (region.type == "land")
-
+	
 	var adj = data.get("adjacent", [])
 	region.adjacent = []
 	for a in adj:
 		region.adjacent.append(str(a))
-
+	
 	return region
 
 
 func is_land_region() -> bool:
-	return is_land
+	return type == "land"
 
 
 func is_sea_region() -> bool:
-	return not is_land
+	return type == "sea"
+
+
+func to_dict() -> Dictionary:
+	return {
+		"id": id,
+		"name": name,
+		"type": type,
+		"ipc_value": ipc_value,
+		"owner_faction_id": owner_faction_id,
+		"is_capital": is_capital,
+		"has_factory": has_factory,
+		"adjacent": adjacent
+	}

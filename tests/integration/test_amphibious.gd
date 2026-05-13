@@ -6,6 +6,15 @@ var session: GameSession
 func before_each() -> void:
 	session = _create_session()
 
+	# Use the REAL GameState, not the snapshot
+	var state: GameState = session.state
+
+	# Insert the transport instance expected by MovementEngine
+	state.transport_instances["transport_red_001"] = {
+		"region_id": "sea_west",
+		"cargo": []
+	}
+
 
 func test_load_transport_from_adjacent_land() -> void:
 	# Skip to combat move
@@ -30,12 +39,11 @@ func test_load_transport_from_adjacent_land() -> void:
 	
 	assert_eq(str(result.result_type), "ok")
 	
-	# Verify cargo (light check)
-	var state := session.get_state()
-	for region in state.regions:
-		for unit in region.units:
-			if unit.has("instance_id") and unit.instance_id == "transport_red_001":
-				pass
+	# Verify cargo from REAL state (not snapshot)
+	var cargo = session.state.transport_instances["transport_red_001"].cargo
+	assert_eq(cargo.size(), 1)
+	assert_eq(cargo[0].unit_type_id, "infantry")
+	assert_eq(cargo[0].count, 2)
 
 
 func test_designate_amphibious_assault() -> void:
@@ -73,8 +81,9 @@ func test_designate_amphibious_assault() -> void:
 	
 	assert_eq(str(result.result_type), "ok")
 	
-	var state := session.get_state()
-	assert_eq(state.pending_amphibious_assaults.size(), 1)
+	# pending_amphibious_assaults IS in the snapshot, so this is correct
+	var state_snapshot := session.get_state()
+	assert_eq(state_snapshot.pending_amphibious_assaults.size(), 1)
 
 
 func _create_session() -> GameSession:

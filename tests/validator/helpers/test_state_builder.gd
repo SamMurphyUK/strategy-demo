@@ -10,25 +10,36 @@ func _init():
 
 func with_region(name: String, is_land: bool = true, owner := "red") -> TestStateBuilder:
 	var r := Region.new()
+	r.id = name
 	r.name = name
-	r.is_land = is_land
-	r.owner_faction_id = str(owner)   # <-- NORMALISE TO STRING
-	r.adjacent.clear()
+	r.type = "land" if is_land else "sea"
+	r.owner_faction_id = str(owner)
+	r.ipc_value = 0
+	r.is_capital = false
+	r.has_factory = false
+
 	state.regions[name] = r
+	state.region_units[name] = []
+	state.adjacency[name] = []
+
 	return self
 
 func with_adjacent(a: String, b: String) -> TestStateBuilder:
-	state.regions[a].adjacent.append(b)
-	state.regions[b].adjacent.append(a)
+	state.adjacency[a].append(b)
+	state.adjacency[b].append(a)
 	return self
 
-func with_unit(id: int, unit_type: String, region: String, faction := "red") -> TestStateBuilder:
-	var u := Unit.new()
-	u.id = id
-	u.unit_type = unit_type
-	u.region = region
-	u.faction = str(faction)          # <-- ALSO NORMALISE (prevents future issues)
-	state.units[id] = u
+func with_unit(id: int, unit_type_id: String, region: String, faction := "red") -> TestStateBuilder:
+	var entry := {
+		"faction_id": str(faction),
+		"unit_type_id": unit_type_id,
+		"count": 1
+	}
+
+	if region not in state.region_units:
+		state.region_units[region] = []
+
+	state.region_units[region].append(entry)
 	return self
 
 func build_state() -> GameState:

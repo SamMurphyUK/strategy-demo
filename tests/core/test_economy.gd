@@ -87,8 +87,9 @@ func test_purchase_emits_event() -> void:
 	assert_eq(events.size(), 1)
 	assert_eq(events[0].type, GameEvent.Type.UNITS_PURCHASED)
 	assert_eq(events[0].payload.faction_id, "red")
-	assert_eq(events[0].payload.ipc_spent, 6)
-	assert_eq(events[0].payload.ipc_remaining, 18)
+	assert_eq(events[0].payload.units[0].unit_type_id, "infantry")
+	assert_eq(events[0].payload.units[0].count, 2)
+	assert_eq(events[0].payload.cost, 6)
 
 
 func test_collect_income_from_owned_land() -> void:

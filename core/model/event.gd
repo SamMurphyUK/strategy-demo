@@ -4,6 +4,7 @@ extends RefCounted
 enum Type {
 	PHASE_CHANGED,
 	UNITS_PURCHASED,
+	PURCHASE_FAILED,
 	UNITS_MOVED,
 	TRANSPORT_LOADED,
 	TRANSPORT_UNLOADED,
@@ -21,6 +22,7 @@ enum Type {
 	TURN_ENDED,
 	GAME_FINISHED
 }
+
 
 var event_id: String
 var sequence: int
