@@ -1,6 +1,7 @@
 extends RefCounted
 
 const VT := preload("res://core/validation/validation_types.gd")
+const PlaneLandingRequirement := preload("res://core/validation/plane_landing_requirement.gd")
 
 func validate_carrier_moves_with_plane_dependencies(
 		batch: VT.NonCombatMovementBatch,
@@ -12,7 +13,7 @@ func validate_carrier_moves_with_plane_dependencies(
 	var carrier_positions := _simulate_carrier_positions(batch, state)
 
 	for plane_id in plane_dependencies.keys():
-		var dep: VT.PlaneLandingDependency = plane_dependencies[plane_id] as VT.PlaneLandingDependency
+		var dep: PlaneLandingRequirement = plane_dependencies[plane_id] as PlaneLandingRequirement
 		if dep == null:
 			continue
 

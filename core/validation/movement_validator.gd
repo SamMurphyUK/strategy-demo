@@ -37,7 +37,7 @@ func validate_combat_movement_batch(
 	result.plane_landing_dependencies = solver.call("compute_plane_dependencies", batch, state, ruleset)
 
 	for plane_id in result.plane_landing_dependencies.keys():
-		var dep: VT.PlaneLandingDependency = result.plane_landing_dependencies[plane_id] as VT.PlaneLandingDependency
+		var dep: PlaneLandingRequirement = result.plane_landing_dependencies[plane_id] as PlaneLandingRequirement
 		if dep == null:
 			continue
 

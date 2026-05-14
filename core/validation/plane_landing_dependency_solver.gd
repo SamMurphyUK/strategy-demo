@@ -1,11 +1,55 @@
 class_name PlaneLandingDependencySolver
 extends RefCounted
 
+const PlaneLandingRequirement := preload("res://core/validation/plane_landing_requirement.gd")
+
 var state: GameState
 
 
 func _init(p_state: GameState = null) -> void:
 	state = p_state
+
+
+func compute_plane_dependencies(batch, p_state: GameState, ruleset: Ruleset) -> Dictionary:
+	state = p_state
+
+	var deps: Dictionary = {}  # plane_id -> PlaneLandingRequirement
+
+	for move in batch.moves:
+		var unit: Unit = state.get_unit(move.unit_id) as Unit
+		if unit == null:
+			continue
+
+		# Unit type data is a DICTIONARY, not a UnitType class
+		var unit_type_data = state.unit_types.get(unit.unit_type)
+		if unit_type_data == null:
+			continue
+
+		if unit_type_data.get("category", "") != "air":
+			continue
+
+		# Simple movement spent: path length or 0
+		var movement_spent := 0
+		if move.path is Array:
+			movement_spent = move.path.size()
+
+		var landing_zones: Array[String] = find_valid_landing_zones(
+			unit.unit_type,
+			state.current_faction_id,
+			move.to_region,
+			movement_spent
+		)
+
+		var dep := PlaneLandingRequirement.new()
+		dep.unit_instance_id = str(unit.id)
+		dep.current_region_id = move.to_region
+		dep.movement_spent = movement_spent
+		dep.possible_landing_regions = landing_zones
+
+		deps[str(unit.id)] = dep
+
+	return deps
+
 
 
 func find_valid_landing_zones(unit_type_id: String, faction_id: String, current_region_id: String, movement_spent: int) -> Array[String]:
@@ -67,7 +111,6 @@ func _has_carrier_capacity(region_id: String, faction_id: String) -> bool:
 		if u == null:
 			continue
 		
-		# FIX: Compare against unit_entry.unit_type_id (String), not u.id (int)
 		if unit_entry.unit_type_id in ["carrier", "aircraft_carrier"]:
 			var count: int = unit_entry.get("count", 1)
 			carrier_capacity += count * 2
