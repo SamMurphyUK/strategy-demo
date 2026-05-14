@@ -20,7 +20,7 @@ func validate_carrier_moves_with_plane_dependencies(
 		var valid := false
 
 		for region_value in dep.possible_landing_regions:
-			var region: String = String(region_value)
+			var region: String = str(region_value)
 			if _region_is_valid_landing(region, carrier_positions, state):
 				valid = true
 				break
@@ -43,12 +43,12 @@ func _simulate_carrier_positions(batch: VT.NonCombatMovementBatch, state: GameSt
 		if typeof(unit) != TYPE_DICTIONARY:
 			continue
 
-		var unit_type_id: String = String(unit.get("unit_type_id", ""))
-		var unit_region: String = String(unit.get("region", ""))
-		var unit_id_str: String = String(unit.get("id", ""))
+		var unit_type_id: String = str(unit.get("unit_type_id", ""))
+		var unit_region: String = str(unit.get("region", ""))
+		var unit_id_str: String = str(unit.get("id", ""))
 
 		if unit_type_id == "carrier":
-			positions[unit_id_str] = move.to_region
+			positions[unit_id_str] = str(move.to_region)
 		else:
 			positions[unit_id_str] = unit_region
 
@@ -60,7 +60,7 @@ func _region_is_valid_landing(region: String, carrier_positions: Dictionary, sta
 		return true
 
 	for carrier_id in carrier_positions.keys():
-		var carrier_region: String = String(carrier_positions[carrier_id])
+		var carrier_region: String = str(carrier_positions[carrier_id])
 		if carrier_region == region:
 			return true
 

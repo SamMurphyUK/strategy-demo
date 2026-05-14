@@ -76,6 +76,14 @@ func test_complete_peaceful_turn() -> void:
 	result = session.apply_command({
 		"command_id": "c7", "player_id": "red", "type": "end_turn", "payload": {}
 	})
+
+	# ⭐ DEBUG: PRINT EVENT LOG
+	print("\n=== EVENT LOG (peaceful turn) ===")
+	for e in result.events:
+		print(e)
+	print("=== EVENT COUNT: %s ===" % result.events.size())
+	# ⭐ END DEBUG
+
 	assert_eq(result.new_state.turn_info.current_faction_id, "blue")
 	assert_eq(str(result.new_state.turn_info.current_phase), "purchase")
 	assert_eq(result.new_state.ipc.red, 30)

@@ -13,11 +13,11 @@ func compute_plane_dependencies(
 	var deps: Dictionary = {}   # plane_id (String) -> PlaneLandingRequirement
 
 	for move in batch.moves:
-		var unit: Unit = state.get_unit(move.unit_id)
+		var unit: Dictionary = state.get_unit(move.unit_id)
 		if unit == null:
 			continue
 
-		if unit.unit_type != "fighter" and unit.unit_type != "bomber":
+		if unit.get("unit_type") not in ["fighter", "bomber"]:
 			continue
 
 		var req := PlaneLandingRequirement.new()
@@ -26,24 +26,22 @@ func compute_plane_dependencies(
 		req.to_region = move.to_region
 		req.possible_landing_regions = _compute_possible_landing_regions(unit, state, ruleset)
 
-		# IMPORTANT FIX: store dependency under STRING key
 		deps[str(move.unit_id)] = req
 
 	return deps
 
 
 func _compute_possible_landing_regions(
-		unit: Unit,
+		unit: Dictionary,
 		state: GameState,
 		ruleset: Ruleset
 	) -> Array[String]:
 
 	var result: Array[String] = []
-	var move_range := ruleset.get_unit_move_range(unit.unit_type)
+	var move_range: int = ruleset.get_unit_move_range(unit["unit_type"])
 
-	# BFS to find all reachable regions within move range
-	var frontier := [unit.region]
-	var visited := { unit.region: true }
+	var frontier: Array[String] = [unit["region"]]
+	var visited: Dictionary = { unit["region"]: true }
 	var depth := 0
 
 	while depth < move_range:
@@ -58,7 +56,6 @@ func _compute_possible_landing_regions(
 		frontier = next_frontier
 		depth += 1
 
-	# All visited regions are potential landing spots
 	for region in visited.keys():
 		result.append(region)
 

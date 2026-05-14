@@ -1,10 +1,12 @@
 extends RefCounted
 
-# Import the renamed standalone class
+# Standalone requirement class
 const PlaneLandingRequirement = preload("res://core/validation/plane_landing_requirement.gd")
 
+# -----------------------------
+# Error + Result Types
+# -----------------------------
 
-# All your other inner classes remain unchanged
 class MoveError:
 	var code: String = ""
 	var message: String = ""
@@ -14,10 +16,23 @@ class ValidationResult:
 	var ok: bool = false
 	var errors: Array[MoveError] = []
 
+class CombatMovementValidationResult:
+	var ok: bool = false
+	var errors: Array[MoveError] = []
+	var plane_landing_dependencies: Dictionary = {}
+
+# -----------------------------
+# Movement Preview Types
+# -----------------------------
+
 class UnitMovePreview:
 	var legal_regions: Array[String] = []
 	var illegal_regions: Dictionary = {}
 	var special_actions: Array = []
+
+# -----------------------------
+# Combat Movement Types
+# -----------------------------
 
 class CombatMove:
 	var unit_id: int = 0
@@ -30,6 +45,10 @@ class CombatMove:
 class CombatMovementBatch:
 	var moves: Array[CombatMove] = []
 
+# -----------------------------
+# Non‑Combat Movement Types
+# -----------------------------
+
 class NonCombatMove:
 	var unit_id: int = 0
 	var from_region: String = ""
@@ -39,12 +58,19 @@ class NonCombatMove:
 class NonCombatMovementBatch:
 	var moves: Array[NonCombatMove] = []
 
-class CombatMovementValidationResult:
-	var ok: bool = false
-	var errors: Array[MoveError] = []
-	var plane_landing_dependencies: Dictionary = {}
+# -----------------------------
+# Special Actions
+# -----------------------------
 
 class SpecialAction:
 	var action_type: String = ""
 	var target_region: String = ""
 	var extra: Dictionary = {}
+
+# -----------------------------
+# Plane Landing Dependency (missing class restored)
+# -----------------------------
+
+class PlaneLandingDependency:
+	var plane_id: int = 0
+	var possible_landing_regions: Array[String] = []
