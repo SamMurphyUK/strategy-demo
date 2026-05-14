@@ -6,8 +6,8 @@ var current_region_id: String = ""
 var movement_spent: int = 0
 var required_landing: bool = true
 
-var possible_landing_regions: Array[String] = []
-var dependent_carrier_ids: Array[int] = []
+var possible_landing_regions: Array = []
+var dependent_carrier_ids: Array = []
 
 func _init(
 	p_unit_id: String = "",

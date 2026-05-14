@@ -41,7 +41,7 @@ func set_region_owner(region_id: String, faction_id: String) -> void:
 		region.owner_faction_id = faction_id
 
 # ---------------------------------------------------------
-# REGION TYPE + OWNERSHIP HELPERS (used by validators)
+# REGION TYPE + OWNERSHIP HELPERS
 # ---------------------------------------------------------
 
 func is_region_land(region_id: String) -> bool:
@@ -73,7 +73,7 @@ func generate_instance_id(unit_type_id: String, faction_id: String) -> String:
 	return "%s_%s_%03d" % [unit_type_id, faction_id, seq]
 
 # ---------------------------------------------------------
-# UNIT LOOKUP HELPERS (required by validators)
+# UNIT LOOKUP HELPERS (dictionary-based)
 # ---------------------------------------------------------
 
 func get_units_in_region(region_id: String) -> Array:
@@ -93,15 +93,14 @@ func get_enemy_units_in_region(region_id: String, faction_id: String) -> Array:
 			result.append(entry)
 	return result
 
-# NEW: Fetch a unit anywhere on the map by ID
-func get_unit(id: int) -> Unit:
+# Corrected: return Dictionary, not Unit
+func get_unit(id: int) -> Dictionary:
 	for region_id in region_units.keys():
 		for entry in region_units[region_id]:
 			if entry.get("id") == id:
 				return entry
-	return null
+	return {}
 
-# NEW: Find which region a unit is currently in
 func get_unit_region(id: int) -> String:
 	for region_id in region_units.keys():
 		for entry in region_units[region_id]:
@@ -109,7 +108,6 @@ func get_unit_region(id: int) -> String:
 				return region_id
 	return ""
 
-# NEW: Get all units belonging to a faction across the whole map
 func get_units_for_faction(faction_id: String) -> Array:
 	var result: Array = []
 	for region_id in region_units.keys():

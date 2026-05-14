@@ -31,8 +31,10 @@ func with_adjacent(a: String, b: String) -> TestStateBuilder:
 
 func with_unit(id: int, unit_type_id: String, region: String, faction := "red") -> TestStateBuilder:
 	var entry := {
-		"faction_id": str(faction),
+		"id": id,
 		"unit_type_id": unit_type_id,
+		"faction_id": str(faction),
+		"region": region,
 		"count": 1
 	}
 

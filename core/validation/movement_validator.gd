@@ -6,18 +6,24 @@ const PlaneLandingDependencySolverScript := preload("res://core/validation/plane
 const CarrierConstraintCheckerScript := preload("res://core/validation/carrier_constraint_checker.gd")
 
 func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) -> VT.UnitMovePreview:
-	var preview := VT.UnitMovePreview.new()
+	var preview: VT.UnitMovePreview = VT.UnitMovePreview.new()
 
-	var unit: Unit = state.get_unit(unit_id) as Unit
-	if unit == null:
+	var unit: Dictionary = state.get_unit(unit_id)
+	if typeof(unit) != TYPE_DICTIONARY:
 		return preview
 
-	var start: String = unit.region
-	var range: int = ruleset.get_unit_move_range(unit.unit_type)
-	var reachable: Array[String] = _flood_fill(start, range, state)
+	var start: String = String(unit.get("region", ""))
+	if start == "":
+		return preview
 
-	for region in reachable:
-		if ruleset.can_unit_enter_region(unit.unit_type, region, state, state.current_phase):
+	var unit_type_id: String = String(unit.get("unit_type_id", ""))
+	var range: int = ruleset.get_unit_move_range(unit_type_id)
+
+	var reachable: Array = _flood_fill(start, range, state)
+
+	for region_value in reachable:
+		var region: String = String(region_value)
+		if ruleset.can_unit_enter_region(unit_type_id, region, state, state.current_phase):
 			preview.legal_regions.append(region)
 		else:
 			preview.illegal_regions[region] = "ILLEGAL_DESTINATION"
@@ -25,24 +31,19 @@ func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) 
 	return preview
 
 
-func validate_combat_movement_batch(
-		batch: VT.CombatMovementBatch,
-		state: GameState,
-		ruleset: Ruleset
-	) -> VT.CombatMovementValidationResult:
-
-	var result := VT.CombatMovementValidationResult.new()
+func validate_combat_movement_batch(batch, state: GameState, ruleset: Ruleset):
+	var result: VT.CombatMovementValidationResult = VT.CombatMovementValidationResult.new()
 
 	var solver = PlaneLandingDependencySolverScript.new()
 	result.plane_landing_dependencies = solver.call("compute_plane_dependencies", batch, state, ruleset)
 
 	for plane_id in result.plane_landing_dependencies.keys():
-		var dep: PlaneLandingRequirement = result.plane_landing_dependencies[plane_id] as PlaneLandingRequirement
+		var dep = result.plane_landing_dependencies[plane_id]
 		if dep == null:
 			continue
 
 		if dep.possible_landing_regions.is_empty():
-			var err := VT.MoveError.new()
+			var err: VT.MoveError = VT.MoveError.new()
 			err.code = "NO_LANDING_SPOT"
 			err.message = "Fighter %s has no legal landing options after combat movement." % plane_id
 			result.errors.append(err)
@@ -51,14 +52,8 @@ func validate_combat_movement_batch(
 	return result
 
 
-func validate_non_combat_movement_batch(
-		batch: VT.NonCombatMovementBatch,
-		state: GameState,
-		ruleset: Ruleset,
-		plane_dependencies: Dictionary
-	) -> VT.ValidationResult:
-
-	var result := VT.ValidationResult.new()
+func validate_non_combat_movement_batch(batch, state: GameState, ruleset: Ruleset, plane_dependencies: Dictionary):
+	var result: VT.ValidationResult = VT.ValidationResult.new()
 
 	var checker = CarrierConstraintCheckerScript.new()
 	var carrier_result = checker.call("validate_carrier_moves_with_plane_dependencies", batch, state, plane_dependencies)
@@ -70,16 +65,17 @@ func validate_non_combat_movement_batch(
 	return result
 
 
-func _flood_fill(start: String, range: int, state: GameState) -> Array[String]:
-	var visited := {}  # region -> bool
-	var frontier: Array[Dictionary] = [ { "region": start, "dist": 0 } ]
-	var result: Array[String] = []
+func _flood_fill(start: String, range: int, state: GameState) -> Array:
+	var visited: Dictionary = {}
+	var frontier: Array = [ { "region": start, "dist": 0 } ]
+	var result: Array = []
 
 	while frontier.size() > 0:
-		var current: Dictionary = frontier.pop_front()
+		var raw: Variant = frontier.pop_front()
+		var current: Dictionary = Dictionary(raw)
 
-		var region: String = current["region"]
-		var dist: int = current["dist"]
+		var region: String = String(current["region"])
+		var dist: int = int(current["dist"])
 
 		if dist > range:
 			continue
@@ -91,8 +87,9 @@ func _flood_fill(start: String, range: int, state: GameState) -> Array[String]:
 		if region != start:
 			result.append(region)
 
-		var neighbors: Array[String] = state.get_adjacent_regions(region)
-		for n in neighbors:
+		var neighbors: Array = state.get_adjacent_regions(region)
+		for n_value in neighbors:
+			var n: String = String(n_value)
 			frontier.append({ "region": n, "dist": dist + 1 })
 
 	return result
