@@ -1,9 +1,4 @@
 extends RefCounted
-class_name ValidationTypes
-
-# Fires when the file is loaded
-func _init():
-	print(">>> Loaded validation_types.gd (THIS FILE WAS USED)")
 
 # -------------------------
 # MoveError
@@ -64,16 +59,19 @@ class NonCombatMovementBatch:
 # PlaneLandingDependency
 # -------------------------
 class PlaneLandingDependency:
-	var plane_id: int = 0
+	var unit_instance_id: String = ""
+	var current_region_id: String = ""
+	var movement_spent: int = 0
+	var required_landing: bool = true
+
+	# MUST have defaults or Godot won't create the fields
 	var possible_landing_regions: Array[String] = []
 	var dependent_carrier_ids: Array[int] = []
-	var requires_carrier_movement: bool = false
-	var requires_territory_capture: bool = false
-	var requires_airbase: bool = false
 
-	# Fires when the dependency object is created
-	func _init():
-		print(">>> Constructed PlaneLandingDependency. Fields present: ", self)
+	func _init(p_unit_id: String = "", p_region_id: String = "", p_movement: int = 0) -> void:
+		unit_instance_id = p_unit_id
+		current_region_id = p_region_id
+		movement_spent = p_movement
 
 # -------------------------
 # CombatMovementValidationResult

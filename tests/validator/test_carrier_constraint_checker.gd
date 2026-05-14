@@ -21,10 +21,17 @@ func test_plane_stranded_without_carrier():
 	move.to_region = "Sea2"
 	batch.moves.append(move)
 
+	# --- DEBUG: create PLD BEFORE putting it in the dictionary ---
+	var p = VT.PlaneLandingDependency.new()
+	print("DEBUG CLASS: ", p.get_class())
+	print("DEBUG SCRIPT: ", p.get_script())
+	# -------------------------------------------------------------
+
 	var deps: Dictionary = {
-		"1": VT.PlaneLandingDependency.new()
+		"1": p
 	}
-	deps["1"].possible_landing_regions = []
+
+	p.possible_landing_regions = []
 
 	var checker := CheckerScript.new()
 	var result: VT.ValidationResult = checker.call(
