@@ -1,4 +1,5 @@
 extends RefCounted
+class_name PurchaseValidator
 
 const VT := preload("res://core/validation/validation_types.gd")
 
@@ -22,7 +23,11 @@ func validate_purchase_batch(batch: Dictionary, state: GameState, ruleset: Rules
 
 		total_cost += def.get("cost", 0) * count
 
-	if total_cost > state.current_ipc:
+	# FIX: IPC is stored per faction, not globally
+	var faction_id := state.current_faction_id
+	var available_ipc: int = state.ipc.get(faction_id, 0)
+
+	if total_cost > available_ipc:
 		var err := VT.MoveError.new()
 		err.code = "INSUFFICIENT_IPC"
 		err.message = "Purchase exceeds available IPC."

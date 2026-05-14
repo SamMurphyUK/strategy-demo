@@ -21,6 +21,10 @@ var transport_instances: Dictionary = {}
 var game_over: bool = false
 var winner_faction_id: String = ""
 
+# ---------------------------------------------------------
+# REGION + ADJACENCY HELPERS
+# ---------------------------------------------------------
+
 func get_adjacent_regions(region_id: String) -> Array:
 	return adjacency.get(region_id, [])
 
@@ -33,7 +37,24 @@ func get_region_owner(region_id: String) -> String:
 
 func set_region_owner(region_id: String, faction_id: String) -> void:
 	var region: Region = regions.get(region_id)
-	if region: region.owner_faction_id = faction_id
+	if region:
+		region.owner_faction_id = faction_id
+
+# ---------------------------------------------------------
+# REGION TYPE + OWNERSHIP HELPERS (used by validators)
+# ---------------------------------------------------------
+
+func is_region_land(region_id: String) -> bool:
+	var region: Region = regions.get(region_id)
+	return region != null and region.type == "land"
+
+func is_region_owned_by(region_id: String, faction_id: String) -> bool:
+	var region: Region = regions.get(region_id)
+	return region != null and region.owner_faction_id == faction_id
+
+# ---------------------------------------------------------
+# IPC + ECONOMY
+# ---------------------------------------------------------
 
 func get_faction_ipc(faction_id: String) -> int:
 	return ipc.get(faction_id, 0)
@@ -41,11 +62,19 @@ func get_faction_ipc(faction_id: String) -> int:
 func modify_ipc(faction_id: String, amount: int) -> void:
 	ipc[faction_id] = ipc.get(faction_id, 0) + amount
 
+# ---------------------------------------------------------
+# INSTANCE ID GENERATION
+# ---------------------------------------------------------
+
 func generate_instance_id(unit_type_id: String, faction_id: String) -> String:
 	var key := unit_type_id + "_" + faction_id
 	var seq: int = next_instance_id.get(key, 1)
 	next_instance_id[key] = seq + 1
 	return "%s_%s_%03d" % [unit_type_id, faction_id, seq]
+
+# ---------------------------------------------------------
+# UNIT LOOKUP HELPERS (required by validators)
+# ---------------------------------------------------------
 
 func get_units_in_region(region_id: String) -> Array:
 	return region_units.get(region_id, [])
@@ -53,19 +82,54 @@ func get_units_in_region(region_id: String) -> Array:
 func get_faction_units_in_region(region_id: String, faction_id: String) -> Array:
 	var result: Array = []
 	for entry in get_units_in_region(region_id):
-		if entry.get("faction_id") == faction_id: result.append(entry)
+		if entry.get("faction_id") == faction_id:
+			result.append(entry)
 	return result
 
 func get_enemy_units_in_region(region_id: String, faction_id: String) -> Array:
 	var result: Array = []
 	for entry in get_units_in_region(region_id):
-		if entry.get("faction_id") != faction_id: result.append(entry)
+		if entry.get("faction_id") != faction_id:
+			result.append(entry)
 	return result
+
+# NEW: Fetch a unit anywhere on the map by ID
+func get_unit(id: int) -> Unit:
+	for region_id in region_units.keys():
+		for entry in region_units[region_id]:
+			if entry.get("id") == id:
+				return entry
+	return null
+
+# NEW: Find which region a unit is currently in
+func get_unit_region(id: int) -> String:
+	for region_id in region_units.keys():
+		for entry in region_units[region_id]:
+			if entry.get("id") == id:
+				return region_id
+	return ""
+
+# NEW: Get all units belonging to a faction across the whole map
+func get_units_for_faction(faction_id: String) -> Array:
+	var result: Array = []
+	for region_id in region_units.keys():
+		for entry in region_units[region_id]:
+			if entry.get("faction_id") == faction_id:
+				result.append(entry)
+	return result
+
+# ---------------------------------------------------------
+# SNAPSHOT SERIALISATION
+# ---------------------------------------------------------
 
 func to_snapshot() -> Dictionary:
 	var region_data: Array = []
 	for region_id in regions:
-		region_data.append({"region_id": region_id, "owner_faction_id": regions[region_id].owner_faction_id, "units": get_units_in_region(region_id)})
+		region_data.append({
+			"region_id": region_id,
+			"owner_faction_id": regions[region_id].owner_faction_id,
+			"units": get_units_in_region(region_id)
+		})
 	return {
 		"game_round": game_round,
 		"turn_info": {

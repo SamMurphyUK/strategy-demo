@@ -4,6 +4,7 @@ const CheckerScript := preload("res://core/validation/carrier_constraint_checker
 const VT := preload("res://core/validation/validation_types.gd")
 const TestStateBuilder := preload("res://tests/validator/helpers/test_state_builder.gd")
 
+# Leave this untyped — this avoids preload-time type resolution issues
 const PlaneLandingRequirement := preload("res://core/validation/plane_landing_requirement.gd")
 
 func test_plane_stranded_without_carrier():
@@ -23,7 +24,8 @@ func test_plane_stranded_without_carrier():
 	move.to_region = "Sea2"
 	batch.moves.append(move)
 
-	var p = PlaneLandingRequirement.new()
+	# Correct static typing happens HERE, not on the preload
+	var p: PlaneLandingRequirement = PlaneLandingRequirement.new()
 
 	print("DEBUG CLASS: ", p.get_class())
 	print("DEBUG SCRIPT: ", p.get_script())

@@ -17,13 +17,12 @@ func test_cannot_place_in_enemy_region():
 		]
 	}
 
-	var validator := Validator.new()
-	var result: VT.ValidationResult = validator.call(
-		"validate_placement_batch",
-		batch,
-		state,
-		ruleset
-	)
+	# Instantiate validator and inject state
+	var validator: PlacementValidator = Validator.new()
+	validator.state = state
+
+	# Call the corrected batch method
+	var result: VT.ValidationResult = validator.validate_placement_batch(batch, ruleset)
 
 	assert_false(result.ok)
 	assert_eq(result.errors.size(), 1)

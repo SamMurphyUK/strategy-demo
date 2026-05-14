@@ -14,7 +14,9 @@ func test_basic_movement_range():
 	var ruleset := builder.build_ruleset()
 	ruleset.unit_move_ranges = { "infantry": 2 }
 
-	var validator := MovementValidator.new()
+	# Correct static typing for the validator instance
+	var validator: MovementValidator = MovementValidator.new()
+
 	var preview := validator.get_legal_moves_for_unit(1, state, ruleset)
 
 	assert_true("B" in preview.legal_regions)

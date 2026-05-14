@@ -7,7 +7,9 @@ const TestStateBuilder := preload("res://tests/validator/helpers/test_state_buil
 func test_purchase_exceeds_ipc():
 	var builder := TestStateBuilder.new()
 	var state := builder.build_state()
-	state.current_ipc = 5
+
+	# Correct way to set IPC for the current faction
+	state.ipc[state.current_faction_id] = 5
 
 	var ruleset := builder.build_ruleset()
 	ruleset.unit_defs = {
@@ -20,7 +22,8 @@ func test_purchase_exceeds_ipc():
 		]
 	}
 
-	var validator := Validator.new()
+	var validator: PurchaseValidator = Validator.new()
+
 	var result := validator.validate_purchase_batch(batch, state, ruleset)
 
 	assert_false(result.ok)
