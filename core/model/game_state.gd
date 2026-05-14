@@ -9,7 +9,7 @@ var unit_types: Dictionary = {}
 var factions: Dictionary = {}
 var regions: Dictionary = {}
 var adjacency: Dictionary = {}
-var turn_order: Array = []
+var turn_order: Array = [] # ← untyped to accept JSON array
 var rules: Dictionary = {}
 var region_units: Dictionary = {}
 var ipc: Dictionary = {}
@@ -93,7 +93,6 @@ func get_enemy_units_in_region(region_id: String, faction_id: String) -> Array:
 			result.append(entry)
 	return result
 
-# Corrected: return Dictionary, not Unit
 func get_unit(id: int) -> Dictionary:
 	for region_id in region_units.keys():
 		for entry in region_units[region_id]:

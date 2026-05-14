@@ -182,7 +182,6 @@ func _append(events: Array) -> void:
 	_events.append_array(events)
 
 
-# ⭐ FIXED VERSION — supports both "units" and "unit_types"
 func _load_units(data: Dictionary) -> void:
 	var list := []
 
@@ -236,7 +235,14 @@ func _load_setup(data: Dictionary) -> void:
 		var cnt: int = entry.count
 		var ut: Unit = state.unit_types.get(utid)
 
-		if ut and ut.is_container():
+		var is_container := (
+			ut != null
+			and ut.container != null
+			and ut.container is Dictionary
+			and not ut.container.is_empty()
+		)
+
+		if is_container:
 			for i in range(cnt):
 				var iid := state.generate_instance_id(utid, fid)
 				state.transport_instances[iid] = {
@@ -258,6 +264,7 @@ func _load_setup(data: Dictionary) -> void:
 					u.count += cnt
 					found = true
 					break
+
 			if not found:
 				state.region_units[rid].append({
 					"faction_id": fid,
