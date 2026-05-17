@@ -1,0 +1,9 @@
+{
+  "turn_order": ["red", "blue"],
+
+  "starting_units": [
+    { "region_id": "land_a", "faction_id": "red",  "unit_type_id": "infantry",  "count": 2 },
+    { "region_id": "land_b", "faction_id": "blue", "unit_type_id": "infantry",  "count": 2 },
+    { "region_id": "sea_1",  "faction_id": "red",  "unit_type_id": "transport", "count": 1 }
+  ]
+}

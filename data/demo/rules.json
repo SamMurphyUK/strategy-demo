@@ -1,0 +1,6 @@
+{
+  "max_rounds": 50,
+  "victory_conditions": {
+    "capture_capital": true
+  }
+}

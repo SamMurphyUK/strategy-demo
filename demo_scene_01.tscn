@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://cpni1aka4ra1s"]
+
+[node name="DemoScene01" type="Control" unique_id=1416275085]
+layout_mode = 3
+anchors_preset = 0
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1286792348]
+
+[node name="UI" type="Control" parent="HUD" unique_id=638729758]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Control" type="Control" parent="HUD/UI" unique_id=1521644775]
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0

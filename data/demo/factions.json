@@ -1,0 +1,6 @@
+{
+  "factions": [
+    { "id": "red",  "name": "Red Faction",  "starting_ipc": 20 },
+    { "id": "blue", "name": "Blue Faction", "starting_ipc": 20 }
+  ]
+}

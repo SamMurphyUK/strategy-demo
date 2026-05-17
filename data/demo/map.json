@@ -1,0 +1,13 @@
+{
+  "regions": [
+    { "id": "land_a", "type": "land", "owner_faction_id": "red" },
+    { "id": "land_b", "type": "land", "owner_faction_id": "blue" },
+    { "id": "sea_1",  "type": "sea",  "owner_faction_id": "" }
+  ],
+
+  "adjacency": [
+    { "from": "land_a", "to": "land_b" },
+    { "from": "land_a", "to": "sea_1" },
+    { "from": "land_b", "to": "sea_1" }
+  ]
+}
