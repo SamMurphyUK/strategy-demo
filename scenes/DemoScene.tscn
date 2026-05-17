@@ -39,6 +39,7 @@ offset_top = 622.0
 offset_right = 829.0
 offset_bottom = 718.0
 script = ExtResource("1_sat1r")
+region_id = "Nazi Germany"
 
 [node name="land_b" type="Button" parent="HUD/UI/RegionContainer" unique_id=1816617173]
 custom_minimum_size = Vector2(96, 96)
@@ -48,6 +49,7 @@ offset_top = 756.0
 offset_right = 824.0
 offset_bottom = 852.0
 script = ExtResource("1_sat1r")
+region_id = "Nigera"
 
 [node name="sea_1" type="Button" parent="HUD/UI/RegionContainer" unique_id=1558710224]
 custom_minimum_size = Vector2(96, 96)
@@ -57,6 +59,7 @@ offset_top = 889.0
 offset_right = 834.0
 offset_bottom = 985.0
 script = ExtResource("1_sat1r")
+region_id = "Atlantis"
 
 [node name="InfoLabel" type="Label" parent="HUD/UI" unique_id=172143399]
 custom_minimum_size = Vector2(0, 40)
