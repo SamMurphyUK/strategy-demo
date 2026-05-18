@@ -8,10 +8,10 @@ class_name RegionMetadata
 @export var has_factory: bool = false
 
 func to_dict() -> Dictionary:
-    return {
-        "region_id": region_id,
-        "ipc": ipc_value,
-        "faction": faction,
-        "victory": is_victory_city,
-        "factory": has_factory
-    }
+	return {
+		"region_id": region_id,
+		"ipc": ipc_value,
+		"faction": faction,
+		"victory": is_victory_city,
+		"factory": has_factory
+	}

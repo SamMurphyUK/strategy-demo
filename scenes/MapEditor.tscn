@@ -6,9 +6,11 @@
 [node name="MapEditor" type="Node2D" unique_id=400672322]
 script = ExtResource("1_36806")
 
-[node name="BaseMap" type="Sprite2D" parent="." unique_id=1376611886]
+[node name="MapRoot" type="Node2D" parent="." unique_id=383440590]
 
-[node name="RegionLayer" type="Node2D" parent="." unique_id=703489435]
+[node name="BaseMap" type="Sprite2D" parent="MapRoot" unique_id=1376611886]
+
+[node name="RegionLayer" type="Node2D" parent="MapRoot" unique_id=703489435]
 
 [node name="ToolLayer" type="CanvasLayer" parent="." unique_id=479176826]
 
@@ -91,3 +93,7 @@ text = "Has Factory"
 [node name="ApplyButton" type="Button" parent="ToolLayer/UI/InspectorPanel" unique_id=601574065]
 layout_mode = 2
 text = "Apply"
+
+[connection signal="pressed" from="ToolLayer/UI/Toolbar/LoadMapButton" to="." method="_on_load_map_button_pressed"]
+[connection signal="pressed" from="ToolLayer/UI/Toolbar/AddRegionButton" to="." method="_on_add_region_button_pressed"]
+[connection signal="pressed" from="ToolLayer/UI/Toolbar/SaveButton" to="." method="_on_save_button_pressed"]
