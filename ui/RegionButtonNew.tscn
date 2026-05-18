@@ -1,0 +1,38 @@
+[gd_scene format=3 uid="uid://cy1o2qgek5x4i"]
+
+[ext_resource type="Script" uid="uid://d2q5mrp6nye7g" path="res://scripts/region_button.gd" id="1_c0ey5"]
+
+[node name="RegionButtonNew" type="Control" unique_id=936228073]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_c0ey5")
+
+[node name="OverflowBadge" type="Label" parent="." unique_id=2085658064]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="VictoryIcon" type="TextureRect" parent="." unique_id=1653393734]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="StackContainer" type="HBoxContainer" parent="." unique_id=9161827]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="FactoryIcon" type="TextureRect" parent="." unique_id=60085294]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Background" type="TextureRect" parent="." unique_id=575761113]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Highlight" type="ColorRect" parent="." unique_id=801531715]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0

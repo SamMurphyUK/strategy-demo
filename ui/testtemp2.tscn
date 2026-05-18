@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://cpqc412m4lfy1"]
+
+[ext_resource type="PackedScene" uid="uid://cgknydfd81xqc" path="res://scenes/RegionButton2.tscn" id="1_t3k5u"]
+
+[node name="Node2D" type="Control" unique_id=842189679]
+layout_mode = 3
+anchors_preset = 0
+
+[node name="RegionButtonNew" parent="." unique_id=936228073 instance=ExtResource("1_t3k5u")]
+layout_mode = 0

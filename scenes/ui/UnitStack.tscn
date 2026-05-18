@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://bowqna7ct2por"]
+
+[node name="UnitStack" type="Control" unique_id=1530281850]
+layout_mode = 3
+anchors_preset = 0
+
+[node name="Background" type="TextureRect" parent="." unique_id=1025757962]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Icon" type="TextureRect" parent="." unique_id=2016046255]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="CountLabel" type="Label" parent="." unique_id=1212246437]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 23.0
+
+[node name="DragPreview" type="Control" parent="." unique_id=1088195616]
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0

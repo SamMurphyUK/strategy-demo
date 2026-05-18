@@ -1,0 +1,116 @@
+[gd_scene format=3 uid="uid://demoscene_dummy"]
+
+[ext_resource type="Script" uid="uid://demo_scene_script" path="res://scripts/demo_scene.gd" id="1"]
+[ext_resource type="Script" uid="uid://hud_script" path="res://scripts/hud.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://rb_new_scene" path="res://scenes/ui/RegionButtonNew.tscn" id="3"]
+
+[node name="DemoSceneDummy" type="Control"]
+custom_minimum_size = Vector2(1280, 720)
+layout_mode = 3
+script = ExtResource("1")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("2")
+
+[node name="UI" type="Control" parent="HUD"]
+layout_mode = 3
+anchors_preset = 0
+offset_top = -24.0
+offset_right = 40.0
+offset_bottom = 16.0
+mouse_filter = 2
+
+[node name="RegionContainer" type="Control" parent="HUD/UI"]
+custom_minimum_size = Vector2(900, 500)
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+mouse_filter = 2
+
+[node name="land_a" type="Control" parent="HUD/UI/RegionContainer"]
+custom_minimum_size = Vector2(720, 100)
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="RegionButtonNew" parent="HUD/UI/RegionContainer/land_a" instance=ExtResource("3")]
+layout_mode = 1
+
+[node name="land_b" type="Control" parent="HUD/UI/RegionContainer"]
+custom_minimum_size = Vector2(720, 100)
+anchors_preset = 0
+offset_left = -7.0
+offset_top = 120.0
+offset_right = 713.0
+offset_bottom = 220.0
+
+[node name="RegionButtonNew" parent="HUD/UI/RegionContainer/land_b" instance=ExtResource("3")]
+layout_mode = 1
+
+[node name="sea_1" type="Control" parent="HUD/UI/RegionContainer"]
+custom_minimum_size = Vector2(720, 100)
+anchors_preset = 0
+offset_left = 99.0
+offset_top = 240.0
+offset_right = 819.0
+offset_bottom = 340.0
+
+[node name="RegionButtonNew" parent="HUD/UI/RegionContainer/sea_1" instance=ExtResource("3")]
+layout_mode = 1
+
+[node name="MainRow" type="HBoxContainer" parent="HUD/UI"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 844.0
+offset_top = 21.0
+offset_right = 2248.0
+offset_bottom = 1549.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 6
+size_flags_vertical = 4
+mouse_filter = 2
+
+[node name="LeftPanel" type="VBoxContainer" parent="HUD/UI/MainRow"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="HUD/UI/MainRow/LeftPanel"]
+custom_minimum_size = Vector2(720, 520)
+layout_mode = 2
+tooltip_text = "Murphy Land"
+text = "MURPHYLAND _DEMO"
+
+[node name="RightPanel" type="VBoxContainer" parent="HUD/UI"]
+custom_minimum_size = Vector2(1, 1)
+layout_mode = 0
+offset_left = 1568.0
+offset_top = 21.0
+offset_right = 2288.0
+offset_bottom = 1589.0
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="FactionLabel" type="Label" parent="HUD/UI/RightPanel"]
+custom_minimum_size = Vector2(720, 520)
+layout_mode = 2
+tooltip_text = "Faction"
+
+[node name="PhaseLabel" type="Label" parent="HUD/UI/RightPanel"]
+custom_minimum_size = Vector2(720, 520)
+layout_mode = 2
+tooltip_text = "Phase"
+
+[node name="DebugPanel" type="Label" parent="HUD/UI/RightPanel"]
+custom_minimum_size = Vector2(720, 520)
+layout_mode = 2
+
+[node name="InfoLabel" type="Label" parent="HUD"]
+custom_minimum_size = Vector2(720, 520)
+layout_mode = 0
+text = "Info: ready"

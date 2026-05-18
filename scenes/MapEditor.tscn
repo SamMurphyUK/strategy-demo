@@ -1,0 +1,93 @@
+[gd_scene format=3 uid="uid://cckim1o3rywos"]
+
+[ext_resource type="Script" uid="uid://cavm4fbd2l6tr" path="res://scripts/MapEditor.gd" id="1_36806"]
+[ext_resource type="Script" uid="uid://b01oreslref5x" path="res://scripts/InspectorPanel.gd" id="2_bwris"]
+
+[node name="MapEditor" type="Node2D" unique_id=400672322]
+script = ExtResource("1_36806")
+
+[node name="BaseMap" type="Sprite2D" parent="." unique_id=1376611886]
+
+[node name="RegionLayer" type="Node2D" parent="." unique_id=703489435]
+
+[node name="ToolLayer" type="CanvasLayer" parent="." unique_id=479176826]
+
+[node name="UI" type="Control" parent="ToolLayer" unique_id=1959060947]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Toolbar" type="HBoxContainer" parent="ToolLayer/UI" unique_id=1254328190]
+layout_mode = 0
+anchor_right = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = 40.0
+
+[node name="LoadMapButton" type="Button" parent="ToolLayer/UI/Toolbar" unique_id=431462766]
+layout_mode = 2
+text = "Load Map"
+
+[node name="AddRegionButton" type="Button" parent="ToolLayer/UI/Toolbar" unique_id=512120285]
+layout_mode = 2
+text = "Add Region"
+
+[node name="SaveButton" type="Button" parent="ToolLayer/UI/Toolbar" unique_id=1342002544]
+layout_mode = 2
+text = "Save Map"
+
+[node name="RegionList" type="ItemList" parent="ToolLayer/UI" unique_id=1520515457]
+layout_mode = 0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 48.0
+offset_right = 208.0
+offset_bottom = -8.0
+
+[node name="InspectorPanel" type="VBoxContainer" parent="ToolLayer/UI" unique_id=181110478]
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -208.0
+offset_top = 48.0
+offset_right = -8.0
+offset_bottom = -8.0
+script = ExtResource("2_bwris")
+
+[node name="RegionIDLabel" type="Label" parent="ToolLayer/UI/InspectorPanel" unique_id=721632431]
+layout_mode = 2
+text = "Region ID"
+
+[node name="RegionIDField" type="LineEdit" parent="ToolLayer/UI/InspectorPanel" unique_id=638464818]
+layout_mode = 2
+
+[node name="IPCLabel" type="Label" parent="ToolLayer/UI/InspectorPanel" unique_id=989879008]
+layout_mode = 2
+text = "IPC"
+
+[node name="IPCField" type="SpinBox" parent="ToolLayer/UI/InspectorPanel" unique_id=1274966243]
+layout_mode = 2
+
+[node name="FactionLabel" type="Label" parent="ToolLayer/UI/InspectorPanel" unique_id=1380406774]
+layout_mode = 2
+text = "Faction"
+
+[node name="FactionDropdown" type="OptionButton" parent="ToolLayer/UI/InspectorPanel" unique_id=1516479153]
+layout_mode = 2
+
+[node name="VictoryCityCheckbox" type="CheckBox" parent="ToolLayer/UI/InspectorPanel" unique_id=1214836666]
+layout_mode = 2
+text = "Victory City"
+
+[node name="FactoryCheckbox" type="CheckBox" parent="ToolLayer/UI/InspectorPanel" unique_id=1646125608]
+layout_mode = 2
+text = "Has Factory"
+
+[node name="ApplyButton" type="Button" parent="ToolLayer/UI/InspectorPanel" unique_id=601574065]
+layout_mode = 2
+text = "Apply"

@@ -1,5 +1,5 @@
-class_name GameSession
 extends RefCounted
+class_name GameSession
 
 var state: GameState
 var rng: PCG
@@ -11,9 +11,14 @@ var combat: CombatEngine
 var placement: PlacementEngine
 var victory: VictoryEngine
 var amphibious: AmphibiousEngine
+
 var _events: Array = []
 var _seq: int = 0
 
+
+# -------------------------------------------------------------------
+# FACTORY
+# -------------------------------------------------------------------
 static func create(
 	map_data: Dictionary,
 	units_data: Dictionary,
@@ -27,6 +32,9 @@ static func create(
 	return s
 
 
+# -------------------------------------------------------------------
+# INITIALIZATION
+# -------------------------------------------------------------------
 func _init_session(
 	map_data: Dictionary,
 	units_data: Dictionary,
@@ -35,6 +43,7 @@ func _init_session(
 	rules_data: Dictionary,
 	rng_seed: Dictionary
 ) -> void:
+
 	state = GameState.new()
 	rng = PCG.from_seed(rng_seed)
 
@@ -57,6 +66,9 @@ func _init_session(
 	_append(_sync_seq(turn_engine.start_game()))
 
 
+# -------------------------------------------------------------------
+# COMMAND APPLICATION
+# -------------------------------------------------------------------
 func apply_command(cmd_dict: Dictionary) -> Dictionary:
 	var cmd := Command.from_dict(cmd_dict)
 
@@ -73,18 +85,25 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 	match cmd.type:
 		Command.Type.PURCHASE_UNITS:
 			events = _sync_seq(economy.process_purchase(cmd))
+
 		Command.Type.MOVE_UNITS:
 			events = _sync_seq(movement.process_move(cmd))
+
 		Command.Type.LOAD_TRANSPORT:
 			events = _sync_seq(movement.process_load(cmd))
+
 		Command.Type.UNLOAD_TRANSPORT:
 			events = _sync_seq(movement.process_unload(cmd))
+
 		Command.Type.DESIGNATE_AMPHIBIOUS:
 			events = _sync_seq(amphibious.designate_assault(cmd))
+
 		Command.Type.PLACE_UNITS:
 			events = _sync_seq(placement.process_placement(cmd))
+
 		Command.Type.END_PHASE:
 			events = _handle_end_phase()
+
 		Command.Type.END_TURN:
 			events = _handle_end_turn()
 
@@ -97,6 +116,9 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 	}
 
 
+# -------------------------------------------------------------------
+# TURN / PHASE HANDLING
+# -------------------------------------------------------------------
 func _handle_end_phase() -> Array:
 	var events: Array = []
 	var phase := state.current_phase
@@ -106,9 +128,11 @@ func _handle_end_phase() -> Array:
 		events.append_array(_sync_seq(amphibious.resolve_assaults(state.current_faction_id, combat)))
 		events.append_array(_sync_seq(combat.resolve_all_battles(state.current_faction_id)))
 		events.append_array(_sync_seq(turn_engine.advance_phase()))
+
 	elif phase == "mobilize":
 		events.append_array(_sync_seq(placement.check_forfeited(state.current_faction_id)))
 		events.append_array(_sync_seq(turn_engine.advance_phase()))
+
 	else:
 		events.append_array(_sync_seq(turn_engine.advance_phase()))
 
@@ -129,6 +153,9 @@ func _handle_end_turn() -> Array:
 	return events
 
 
+# -------------------------------------------------------------------
+# QUERY HELPERS
+# -------------------------------------------------------------------
 func get_state() -> Dictionary:
 	return state.to_snapshot()
 
@@ -148,20 +175,28 @@ func get_legal_commands(player: String) -> Array:
 	match state.current_phase:
 		"purchase":
 			return ["purchase_units", "end_phase"]
+
 		"combat_move":
 			return ["move_units", "load_transport", "designate_amphibious", "end_phase"]
+
 		"combat":
 			return []
+
 		"noncombat_move":
 			return ["move_units", "load_transport", "unload_transport", "end_phase"]
+
 		"mobilize":
 			return ["place_units", "end_phase"]
+
 		"collect_income":
 			return ["end_turn"]
 
 	return []
 
 
+# -------------------------------------------------------------------
+# INTERNAL HELPERS
+# -------------------------------------------------------------------
 func _sync_seq(events: Array) -> Array:
 	for e in events:
 		if e.sequence > _seq:
@@ -182,6 +217,9 @@ func _append(events: Array) -> void:
 	_events.append_array(events)
 
 
+# -------------------------------------------------------------------
+# DATA LOADERS
+# -------------------------------------------------------------------
 func _load_units(data: Dictionary) -> void:
 	var list := []
 
@@ -215,10 +253,12 @@ func _load_map(data: Dictionary) -> void:
 	for edge in data.adjacency:
 		var f: String = edge.from
 		var t: String = edge.to
+
 		if f not in state.adjacency:
 			state.adjacency[f] = []
 		if t not in state.adjacency:
 			state.adjacency[t] = []
+
 		if t not in state.adjacency[f]:
 			state.adjacency[f].append(t)
 		if f not in state.adjacency[t]:
