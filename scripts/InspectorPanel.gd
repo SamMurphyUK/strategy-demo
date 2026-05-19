@@ -4,13 +4,13 @@ var region: Node2D = null
 
 var FACTIONS := ["Neutral", "Allies", "Axis", "Independent"]
 
-func _ready():
+func _ready() -> void:
 	$FactionDropdown.clear()
 	for f in FACTIONS:
 		$FactionDropdown.add_item(f)
 
 
-func set_region(r: Node2D):
+func set_region(r: Node2D) -> void:
 	region = r
 
 	var meta = r.get_node_or_null("RegionMetadata")
@@ -35,7 +35,7 @@ func set_region(r: Node2D):
 	$FactoryCheckbox.button_pressed = meta.has_factory
 
 
-func _on_ApplyButton_pressed():
+func _on_ApplyButton_pressed() -> void:
 	if region == null:
 		return
 
@@ -56,9 +56,7 @@ func _on_ApplyButton_pressed():
 	meta.is_victory_city = $VictoryCityCheckbox.button_pressed
 	meta.has_factory = $FactoryCheckbox.button_pressed
 
-	# update on-map IPC label immediately
-	var label := region.get_node_or_null("IPCLabel")
-	if label:
-		label.text = str(meta.ipc_value)
-
-	# update region list label if you maintain a mapping (optional)
+	# update on-map IPC UI label via MapEditor (safe lookup)
+	var editor := get_tree().get_root().get_node_or_null("MapEditor")
+	if editor != null:
+		editor.update_ipc_ui_label(region)

@@ -1,13 +1,24 @@
 extends Node2D
 class_name MapEditor
 
+# -------------------------
+# Core scene nodes (must exist)
+# -------------------------
 @onready var map_root: Node2D = $MapRoot
 @onready var base_map: Sprite2D = $MapRoot/BaseMap
 @onready var region_layer: Node2D = $MapRoot/RegionLayer
 
-@onready var inspector = $ToolLayer/UI/InspectorPanel
-@onready var region_list = $ToolLayer/UI/RegionList
+# UI nodes (Inspector is expected; others optional)
+@onready var inspector: Node = $ToolLayer/UI/InspectorPanel
+@onready var region_list: ItemList = $ToolLayer/UI/RegionList
+@onready var ui_root: Node = $ToolLayer/UI
 
+# Optional UI nodes (looked up in _ready)
+var load_regions_button: Button = null
+# CanvasLayer to hold IPC labels (created if missing)
+var ipc_canvas: CanvasLayer = null
+
+# Editor state
 var current_region: Node2D = null
 var drawing_points: Array = []
 var is_drawing: bool = false
@@ -16,14 +27,75 @@ var preview_poly: Line2D = null
 var pan_speed: float = 500.0
 
 
+# -------------------------
+# Utility helpers
+# -------------------------
+func _has_property_by_name(node: Object, prop_name: String) -> bool:
+	if node == null:
+		return false
+	var plist := node.get_property_list()
+	for p in plist:
+		if typeof(p) == TYPE_DICTIONARY and p.get("name", "") == prop_name:
+			return true
+	return false
+
+
+func _set_control_position(control: Object, pos: Vector2) -> void:
+	# Set position on a Control in a safe, cross-build way.
+	if control == null:
+		return
+	# Prefer rect_position for Control
+	if _has_property_by_name(control, "rect_position"):
+		control.set("rect_position", pos)
+		return
+	# Fallback to position property
+	if _has_property_by_name(control, "position"):
+		control.set("position", pos)
+		return
+	# Last resort: try set("rect_position", pos) anyway
+	control.set("rect_position", pos)
+
+
+# Convert a world-space point to canvas coordinates for labels in a CanvasLayer
+func _world_to_canvas_point(world_point: Vector2) -> Vector2:
+	# get_canvas_transform maps canvas -> world; we need inverse to map world -> canvas
+	var canvas_t := get_viewport().get_canvas_transform()
+	var inv := canvas_t.affine_inverse()
+	return inv * world_point
+
+
+# -------------------------
+# Ready
+# -------------------------
 func _ready() -> void:
 	print("MapEditor ready")
-	inspector.visible = false
+
+	# Safe optional lookups
+	load_regions_button = ui_root.get_node_or_null("LoadRegionsButton")
+	ipc_canvas = ui_root.get_node_or_null("IPCCanvas")
+
+	# Create IPCCanvas if missing (CanvasLayer under ToolLayer/UI)
+	if ipc_canvas == null:
+		ipc_canvas = CanvasLayer.new()
+		ipc_canvas.name = "IPCCanvas"
+		ui_root.add_child(ipc_canvas)
+
+	# Connect LoadRegionsButton if present
+	if load_regions_button != null:
+		load_regions_button.connect("pressed", Callable(self, "_on_load_regions_button_pressed"))
+	else:
+		print("LoadRegionsButton not found; skipping connection (optional).")
+
+	# Inspector may be required for editing; warn if missing but don't crash
+	if inspector == null:
+		push_error("InspectorPanel not found at ToolLayer/UI/InspectorPanel. Some UI features will be disabled.")
+	else:
+		inspector.visible = false
 
 
-# ---------------------------------------------------------
-# CAMERA PANNING
-# ---------------------------------------------------------
+# -------------------------
+# Camera panning
+# -------------------------
 func _process(delta: float) -> void:
 	if map_root == null:
 		return
@@ -42,13 +114,13 @@ func _process(delta: float) -> void:
 	map_root.position += move
 
 
-# ---------------------------------------------------------
-# LOAD MAP OR JSON
-# ---------------------------------------------------------
+# -------------------------
+# Load map or texture
+# -------------------------
 func load_map(path: String) -> void:
 	print("Loading map:", path)
 	if path.to_lower().ends_with(".json"):
-		_load_map_from_json(path)
+		load_map_from_json(path)
 		return
 
 	var tex = load(path)
@@ -61,41 +133,81 @@ func load_map(path: String) -> void:
 	print("Map texture loaded successfully.")
 
 
-func _load_map_from_json(path: String) -> void:
+# -------------------------
+# Robust JSON loader
+# -------------------------
+func load_map_from_json(path: String) -> void:
 	print("Loading map data from JSON:", path)
-	var file := FileAccess.open(path, FileAccess.READ)
+	var file = FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		push_error("Could not open JSON: " + path)
 		return
 	var text: String = file.get_as_text()
 	file.close()
 
+	print("DEBUG JSON head:", text.substr(0, min(400, text.length())))
+
 	var parsed = JSON.parse_string(text)
-	# parsed is a Dictionary; access keys with get()
-	var parse_error = parsed.get("error", null)
-	if parse_error != null and parse_error != OK:
-		push_error("JSON parse error: " + str(parse_error))
-		return
 
-	var data = parsed.get("result", {})
+	var data: Dictionary = {}
+	if typeof(parsed) == TYPE_DICTIONARY:
+		var parse_err = parsed.get("error", null)
+		if parse_err != null and parse_err != OK:
+			push_error("JSON parse error (dict): " + str(parse_err))
+			return
+		data = parsed.get("result", {})
+	else:
+		# fallback: try reparsing into dictionary
+		var fallback = JSON.parse_string(text)
+		if typeof(fallback) == TYPE_DICTIONARY:
+			data = fallback.get("result", {})
+		else:
+			push_error("Unable to extract JSON result from parse output.")
+			return
+
 	if typeof(data) != TYPE_DICTIONARY:
-		push_error("JSON did not contain an object at top level.")
+		push_error("JSON top-level result is not a Dictionary. Type: " + str(typeof(data)))
 		return
 
-	# clear existing regions
+	print("DEBUG: parsed top-level keys:", data.keys())
+
+	# If JSON contains a base_map path, load it
+	if data.has("base_map"):
+		var bm = str(data.get("base_map", ""))
+		if bm != "":
+			var tex = load(bm)
+			if tex != null:
+				base_map.texture = tex
+				base_map.position = Vector2.ZERO
+				print("Loaded base_map from JSON:", bm)
+			else:
+				push_error("Could not load base_map texture from JSON path: " + bm)
+
+	# Clear existing regions and IPC labels
 	for child in region_layer.get_children():
 		child.queue_free()
+	if region_list:
+		region_list.clear()
+	# Clear IPCCanvas children
+	if ipc_canvas:
+		for c in ipc_canvas.get_children():
+			c.queue_free()
 
+	# Recreate regions
+	var created_count: int = 0
 	for key in data.keys():
+		if key == "base_map":
+			continue
+
 		var entry = data.get(key, null)
 		if typeof(entry) != TYPE_DICTIONARY:
-			push_error("Skipping invalid region entry for key: " + str(key))
+			push_error("Skipping non-dict entry for key: " + str(key))
 			continue
 
 		var meta_dict: Dictionary = entry.get("metadata", {})
 		var poly_points = entry.get("polygon", [])
 		if typeof(poly_points) != TYPE_ARRAY:
-			push_error("Skipping region with invalid polygon: " + str(key))
+			push_error("Skipping region with invalid polygon for key: " + str(key))
 			continue
 
 		var pts: Array = []
@@ -103,7 +215,11 @@ func _load_map_from_json(path: String) -> void:
 			if typeof(p) == TYPE_ARRAY and p.size() >= 2:
 				pts.append(Vector2(p[0], p[1]))
 			else:
-				push_error("Invalid point in polygon for region: " + str(key))
+				push_error("Invalid polygon point in key: " + str(key))
+
+		if pts.size() == 0:
+			push_error("No valid points for region key: " + str(key))
+			continue
 
 		var region: Node2D = Node2D.new()
 		region_layer.add_child(region)
@@ -126,25 +242,32 @@ func _load_map_from_json(path: String) -> void:
 
 		var meta: RegionMetadata = RegionMetadata.new()
 		meta.name = "RegionMetadata"
-		meta.region_id = str(meta_dict.get("region_id", ""))
-		meta.ipc_value = int(meta_dict.get("ipc", 0))
+		meta.region_id = str(meta_dict.get("region_id", meta_dict.get("regionid", "")))
+		meta.ipc_value = int(meta_dict.get("ipc", meta_dict.get("ipc_value", 0)))
 		meta.faction = str(meta_dict.get("faction", ""))
 		meta.is_victory_city = bool(meta_dict.get("victory", false))
 		meta.has_factory = bool(meta_dict.get("factory", false))
 		region.add_child(meta)
 
+		# create IPC label (Control under CanvasLayer)
 		_create_ipc_label_for_region(region, meta.ipc_value)
 
-		# Use a Callable bound to the region (no ambiguous overloads)
+		# connect input using Callable.bind to avoid overload ambiguity
 		var cb: Callable = Callable(self, "_on_region_input_event").bind(region)
 		area.connect("input_event", cb)
 
-	print("Map JSON loaded.")
+		var list_name: String = meta.region_id if meta.region_id != "" else "Region_" + str(region.get_index())
+		if region_list:
+			region_list.add_item(list_name)
+
+		created_count += 1
+
+	print("Map JSON loaded. Regions:", created_count)
 
 
-# ---------------------------------------------------------
-# START DRAWING A NEW REGION
-# ---------------------------------------------------------
+# -------------------------
+# Start drawing a new region
+# -------------------------
 func start_new_region() -> void:
 	print("Starting new region...")
 	is_drawing = true
@@ -158,9 +281,9 @@ func start_new_region() -> void:
 	map_root.add_child(preview_poly)
 
 
-# ---------------------------------------------------------
-# HANDLE MOUSE INPUT FOR DRAWING
-# ---------------------------------------------------------
+# -------------------------
+# Mouse input for drawing
+# -------------------------
 func _input(event: InputEvent) -> void:
 	if not is_drawing:
 		return
@@ -182,9 +305,9 @@ func _input(event: InputEvent) -> void:
 				preview_poly.points = drawing_points
 
 
-# ---------------------------------------------------------
-# FINALIZE REGION CREATION
-# ---------------------------------------------------------
+# -------------------------
+# Finalize region creation
+# -------------------------
 func _finalize_region() -> void:
 	print("Finalizing region...")
 	is_drawing = false
@@ -216,6 +339,7 @@ func _finalize_region() -> void:
 	meta.name = "RegionMetadata"
 	region.add_child(meta)
 
+	# create IPC label (Control under CanvasLayer)
 	_create_ipc_label_for_region(region, meta.ipc_value)
 
 	# Use a Callable bound to the region (no ambiguous overloads)
@@ -225,42 +349,70 @@ func _finalize_region() -> void:
 	current_region = region
 	_select_region(region)
 
-	region_list.add_item("New Region")
+	if region_list:
+		region_list.add_item("New Region")
 
 
-# Create a Label (Control) showing IPC at polygon centroid
+# -------------------------
+# IPC label creation (Control under CanvasLayer)
+# -------------------------
 func _create_ipc_label_for_region(region: Node2D, ipc_value: int) -> void:
-	var existing = region.get_node_or_null("IPCLabel")
+	if ipc_canvas == null:
+		return
+
+	# unique key per region
+	var key: String = "IPC_UI_" + str(region.get_index())
+	var existing := ipc_canvas.get_node_or_null(key)
 	if existing:
 		existing.queue_free()
 
-	var poly: Polygon2D = region.get_node_or_null("Polygon2D")
-	if poly == null:
-		return
-
-	var centroid: Vector2 = _polygon_centroid(poly.polygon)
-
-	var label: Label = Label.new()
-	label.name = "IPCLabel"
+	# Create a Control Label under the CanvasLayer
+	var label := Label.new()
+	label.name = key
 	label.text = str(ipc_value)
-	# Use position (works for Control in Godot 4) instead of rect_position
-	# position is in parent local coordinates
-	label.position = centroid
-	label.z_index = 100
-	region.add_child(label)
+	# optional style tweaks
+	# label.add_theme_color_override("font_color", Color.white)  # if you use theme overrides
+	# label.add_theme_font_override("font", preload("res://path/to/font.tres"))
 
-	# Defer centering so minimum size is available
-	call_deferred("_deferred_center_label", label)
+	# compute centroid in region local coords and convert to canvas coords
+	var poly: Polygon2D = region.get_node_or_null("Polygon2D")
+	var centroid: Vector2 = Vector2.ZERO
+	if poly:
+		centroid = _polygon_centroid(poly.polygon)
+	# region.to_global converts local centroid to world
+	var global_pos := region.to_global(centroid)
+	var ui_pos := _world_to_canvas_point(global_pos)
+
+	# set position safely
+	_set_control_position(label, ui_pos)
+
+	# z_index on Control is sometimes available; set if present
+	if _has_property_by_name(label, "z_index"):
+		label.set("z_index", -10)
+
+	ipc_canvas.add_child(label)
 
 
-func _deferred_center_label(label: Label) -> void:
-	if not is_instance_valid(label):
+# Update IPC label for a region (call after metadata changes)
+func update_ipc_label_for_region(region: Node2D) -> void:
+	if ipc_canvas == null or region == null:
 		return
-	var size: Vector2 = label.get_minimum_size()
-	# center the label on the centroid
-	label.position -= size * 0.5
+	var key: String = "IPC_UI_" + str(region.get_index())
+	var label := ipc_canvas.get_node_or_null(key)
+	var meta: RegionMetadata = region.get_node_or_null("RegionMetadata")
+	if label and meta:
+		label.text = str(meta.ipc_value)
+		var poly: Polygon2D = region.get_node_or_null("Polygon2D")
+		if poly:
+			var centroid := _polygon_centroid(poly.polygon)
+			var global_pos := region.to_global(centroid)
+			var ui_pos := _world_to_canvas_point(global_pos)
+			_set_control_position(label, ui_pos)
 
 
+# -------------------------
+# Polygon centroid
+# -------------------------
 func _polygon_centroid(points: Array) -> Vector2:
 	if points.size() == 0:
 		return Vector2.ZERO
@@ -270,23 +422,23 @@ func _polygon_centroid(points: Array) -> Vector2:
 	return sum / points.size()
 
 
-# ---------------------------------------------------------
-# REGION SELECTION (click)
-# ---------------------------------------------------------
-# Handler signature: (viewport, event, shape_idx, region)
+# -------------------------
+# Region input handler
+# -------------------------
 func _on_region_input_event(viewport, event, shape_idx, region: Node) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_select_region(region)
 
 
-# ---------------------------------------------------------
-# SELECT REGION
-# ---------------------------------------------------------
+# -------------------------
+# Select region
+# -------------------------
 func _select_region(region: Node2D) -> void:
 	print("Selected region:", region)
 	current_region = region
-	inspector.visible = true
-	inspector.set_region(region)
+	if inspector != null:
+		inspector.visible = true
+		inspector.set_region(region)
 
 	for r in region_layer.get_children():
 		var p: Polygon2D = r.get_node_or_null("Polygon2D")
@@ -294,17 +446,26 @@ func _select_region(region: Node2D) -> void:
 			p.color = Color(1, 0, 0, 0.4) if r != region else Color(0.2, 0.8, 0.2, 0.5)
 
 
-# ---------------------------------------------------------
-# BUTTON HANDLERS
-# ---------------------------------------------------------
+# -------------------------
+# Button handlers
+# -------------------------
 func _on_load_map_button_pressed() -> void:
 	print("Load Map button pressed")
-	var dialog: FileDialog = FileDialog.new()
+	var dialog = FileDialog.new()
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dialog.filters = ["*.png ; PNG Images", "*.jpg ; JPEG Images", "*.json ; Map JSON"]
 	add_child(dialog)
-	# connect using Callable (no binds)
 	dialog.connect("file_selected", Callable(self, "load_map"))
+	dialog.popup_centered()
+
+
+func _on_load_regions_button_pressed() -> void:
+	print("Load Regions button pressed")
+	var dialog = FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.filters = ["*.json ; Map JSON"]
+	add_child(dialog)
+	dialog.connect("file_selected", Callable(self, "load_map_from_json"))
 	dialog.popup_centered()
 
 
@@ -318,13 +479,19 @@ func _on_save_button_pressed() -> void:
 	save_map("res://exported_map.json")
 
 
-# ---------------------------------------------------------
-# SAVE MAP TO JSON (robust, numeric arrays)
-# ---------------------------------------------------------
+# -------------------------
+# Save map to JSON
+# -------------------------
 func save_map(path: String) -> void:
 	print("Saving map...")
 
 	var data: Dictionary = {}
+
+	# include base_map texture path if available
+	var bm_path: String = ""
+	if base_map.texture != null and base_map.texture.resource_path != "":
+		bm_path = base_map.texture.resource_path
+		data["base_map"] = bm_path
 
 	for region in region_layer.get_children():
 		var meta: RegionMetadata = region.get_node_or_null("RegionMetadata")
@@ -347,7 +514,7 @@ func save_map(path: String) -> void:
 			"polygon": pts
 		}
 
-	var file := FileAccess.open(path, FileAccess.WRITE)
+	var file = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		push_error("Could not open file for writing: " + path)
 		return
