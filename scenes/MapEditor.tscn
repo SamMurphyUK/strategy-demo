@@ -97,3 +97,4 @@ text = "Apply"
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/LoadMapButton" to="." method="_on_load_map_button_pressed"]
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/AddRegionButton" to="." method="_on_add_region_button_pressed"]
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/SaveButton" to="." method="_on_save_button_pressed"]
+[connection signal="pressed" from="ToolLayer/UI/InspectorPanel/ApplyButton" to="ToolLayer/UI/InspectorPanel" method="_on_apply_button_pressed"]

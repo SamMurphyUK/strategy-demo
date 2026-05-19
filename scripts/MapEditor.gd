@@ -523,3 +523,7 @@ func save_map(path: String) -> void:
 	file.close()
 
 	print("Map saved to:", path)
+
+
+func _on_apply_button_pressed() -> void:
+	pass # Replace with function body.
