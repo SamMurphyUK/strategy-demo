@@ -408,6 +408,7 @@ func update_ipc_label_for_region(region: Node2D) -> void:
 			var global_pos := region.to_global(centroid)
 			var ui_pos := _world_to_canvas_point(global_pos)
 			_set_control_position(label, ui_pos)
+			print("update_ipc_label_for_region called for:", region)  # debug onlyfunc _on_apply_button_pressed() -> void:
 
 
 # -------------------------
