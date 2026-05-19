@@ -7,19 +7,16 @@ var _selected_region: Node2D = null
 # Faction list (mutable)
 var _faction_list := ["Neutral", "Allies", "Axis", "Independent"]
 
-# UI nodes (renamed to avoid ANY constant collisions)
-@onready var _field_region_id: LineEdit = $RegionIDField
-@onready var _field_ipc: SpinBox = $IPCField
-@onready var _dropdown_faction: OptionButton = $FactionDropdown
-@onready var _check_victory_city: CheckBox = $VictoryCityCheckbox
-@onready var _check_factory: CheckBox = $FactoryCheckbox
-@onready var _button_apply: Button = $ApplyButton
-
 # Optional: safer MapEditor reference
 @export var map_editor_path: NodePath = NodePath("../..")
 
+# Cached references
+@onready var _field_region_id: LineEdit = $RegionIDField
+@onready var _field_ipc: SpinBox = $IPCField
+@onready var _dropdown_faction: OptionButton = $FactionDropdown
+@onready var _button_apply: Button = $ApplyButton
+
 func _ready() -> void:
-	# DEBUG: print which script Godot is actually using
 	print("InspectorPanel script loaded from:", get_script().resource_path)
 
 	# Populate faction dropdown
@@ -57,8 +54,8 @@ func _populate_fields_from_region() -> void:
 		_field_region_id.text = ""
 		_field_ipc.value = 0
 		_dropdown_faction.select(0)
-		_check_victory_city.pressed = false
-		_check_factory.pressed = false
+		$VictoryCityCheckbox.button_pressed = false
+		$FactoryCheckbox.button_pressed = false
 		return
 
 	var meta = _selected_region.get_node_or_null("RegionMetadata")
@@ -67,8 +64,8 @@ func _populate_fields_from_region() -> void:
 		_field_region_id.text = ""
 		_field_ipc.value = 0
 		_dropdown_faction.select(0)
-		_check_victory_city.pressed = false
-		_check_factory.pressed = false
+		$VictoryCityCheckbox.button_pressed = false
+		$FactoryCheckbox.button_pressed = false
 		return
 
 	_field_region_id.text = str(meta.region_id)
@@ -79,8 +76,8 @@ func _populate_fields_from_region() -> void:
 		idx = 0
 	_dropdown_faction.select(idx)
 
-	_check_victory_city.pressed = bool(meta.is_victory_city)
-	_check_factory.pressed = bool(meta.has_factory)
+	$VictoryCityCheckbox.button_pressed = bool(meta.is_victory_city)
+	$FactoryCheckbox.button_pressed = bool(meta.has_factory)
 
 
 func _on_apply_pressed() -> void:
@@ -103,26 +100,7 @@ func _on_apply_pressed() -> void:
 	else:
 		meta.faction = ""
 
-	meta.is_victory_city = _check_victory_city.pressed
-	meta.has_factory = _check_factory.pressed
+	meta.is_victory_city = $VictoryCityCheckbox.button_pressed
+	meta.has_factory = $FactoryCheckbox.button_pressed
 
 	print("Inspector Apply: wrote meta:", meta.to_dict())
-
-	# Notify MapEditor
-	var editor = null
-	if map_editor_path != NodePath(""):
-		editor = get_node_or_null(map_editor_path)
-	else:
-		editor = get_tree().get_root().get_node_or_null("MapEditor")
-
-	if editor != null:
-		if editor.has_method("update_ipc_label_for_region"):
-			editor.update_ipc_label_for_region(_selected_region)
-		elif editor.has_method("update_ipc_label2d"):
-			editor.update_ipc_label2d(_selected_region)
-		elif editor.has_method("update_ipc_ui_label"):
-			editor.update_ipc_ui_label(_selected_region)
-		else:
-			print("Inspector Apply: MapEditor found but no update method.")
-	else:
-		print("Inspector Apply: MapEditor not found at path:", map_editor_path)
