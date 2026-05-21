@@ -9,11 +9,11 @@ class_name MapEditor
 @onready var region_layer: Node2D = $MapRoot/RegionLayer
 
 # UI nodes
-@onready var inspector: InspectorPanel = $ToolLayer/UI/InspectorPanel
+@onready var inspector: Node = $ToolLayer/UI/InspectorPanel
 @onready var region_list: ItemList = $ToolLayer/UI/RegionList
-@onready var ui_root: Node = $ToolLayer/UI
+@onready var ui_root: Control = $ToolLayer/UI
 
-# Reusable dialogs (avoid accumulating nodes)
+# Reusable dialogs
 var _file_dialog: FileDialog = null
 
 # Editor state
@@ -23,14 +23,14 @@ var is_drawing: bool = false
 var preview_poly: Line2D = null
 var pan_speed: float = 500.0
 
-# Undo/Redo system with diff support
+# Undo/Redo
 var undo_stack: Array = []
 var redo_stack: Array = []
 const MAX_UNDO_STEPS: int = 50
 
 # Region index for fast lookups
 var _region_index: Array = []
-var _region_id_set: Dictionary = {}  # For uniqueness checks
+var _region_id_set: Dictionary = {}
 var _anchor_counter: int = 0
 var _region_counter: int = 0
 
@@ -53,7 +53,7 @@ var autosave_interval: float = 120.0
 var autosave_enabled: bool = true
 var last_save_path: String = "user://exported_map.json"
 
-# Debug logging flag
+# Debug logging
 var debug_logging: bool = false
 
 # Signals
@@ -65,7 +65,7 @@ signal map_loaded(path: String)
 
 
 # -------------------------
-# Debug logging helper
+# Helpers
 # -------------------------
 func _log(message: String) -> void:
 	if debug_logging:
@@ -83,7 +83,10 @@ func _ready() -> void:
 	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	add_child(_file_dialog)
 
-	# Validate inspector
+	# Setup UI mouse filters safely:
+	_setup_ui_mouse_filters()
+
+	# Validate inspector and connect region_selected -> inspector.set_region
 	if inspector == null:
 		push_error("InspectorPanel not found at ToolLayer/UI/InspectorPanel.")
 	else:
@@ -91,11 +94,33 @@ func _ready() -> void:
 			push_error("InspectorPanel missing set_region method!")
 		else:
 			inspector.visible = false
-			# Safe signal connection (avoid duplicates)
 			if not region_selected.is_connected(Callable(inspector, "set_region")):
 				region_selected.connect(Callable(inspector, "set_region"))
+				_log("Connected region_selected -> inspector.set_region")
 
 	_setup_autosave()
+
+
+func _setup_ui_mouse_filters() -> void:
+	if ui_root == null:
+		return
+	# Make the main UI container ignore mouse so map receives clicks.
+	# Interactive children must explicitly receive input (we set them to STOP).
+	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Toolbar and interactive controls should still receive input
+	var toolbar := ui_root.get_node_or_null("Toolbar")
+	if toolbar and toolbar is Control:
+		toolbar.mouse_filter = Control.MOUSE_FILTER_STOP
+		for child in toolbar.get_children():
+			if child is Control:
+				child.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	if region_list:
+		region_list.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	if inspector and inspector is Control:
+		inspector.mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 func _setup_autosave() -> void:
@@ -119,7 +144,7 @@ func set_autosave_enabled(enabled: bool) -> void:
 
 
 func set_autosave_interval(seconds: float) -> void:
-	autosave_interval = max(10.0, seconds)  # Minimum 10 seconds
+	autosave_interval = max(10.0, seconds)
 	if autosave_timer:
 		autosave_timer.wait_time = autosave_interval
 	_log("Autosave interval set to " + str(autosave_interval) + "s")
@@ -133,7 +158,7 @@ func _on_autosave_timeout() -> void:
 
 
 # -------------------------
-# Region Registration (centralized index management)
+# Region Registration
 # -------------------------
 func _register_region(region: Node2D) -> void:
 	if region not in _region_index:
@@ -191,7 +216,7 @@ func _is_region_id_unique(id: String, exclude_region: Node2D = null) -> bool:
 
 
 # -------------------------
-# Undo/Redo System (with diff support for common actions)
+# Undo/Redo System
 # -------------------------
 enum UndoType { FULL_SNAPSHOT, METADATA_CHANGE, REGION_CREATE, REGION_DELETE }
 
@@ -269,17 +294,14 @@ func _capture_map_state() -> Dictionary:
 func _restore_map_state(state: Dictionary) -> void:
 	_clear_all_regions()
 	
-	# Restore counters
 	_anchor_counter = state.get("anchor_counter", 0)
 	_region_counter = state.get("region_counter", 0)
 
-	# Restore base map
 	if state.has("base_map") and state["base_map"] != "":
 		var tex = ResourceLoader.load(state["base_map"])
 		if tex:
 			base_map.texture = tex
 
-	# Restore regions
 	var regions_data: Array = state.get("regions", [])
 	for region_data in regions_data:
 		_create_region_from_data(region_data)
@@ -449,7 +471,7 @@ func _update_all_region_colors() -> void:
 
 func _update_region_color(region: Node2D) -> void:
 	var meta: RegionMetadata = region.get_node_or_null("RegionMetadata")
-	var poly: Polygon2D = region.get_node_or_null("Polygon2D")
+	var poly: Polygon2D = region.get_node_or_null("Polygon2D") as Polygon2D
 	if meta and poly:
 		var base_color := get_faction_color(meta.faction)
 		if region == current_region:
@@ -471,7 +493,6 @@ func _update_region_color(region: Node2D) -> void:
 
 
 func on_region_metadata_changed(region: Node2D) -> void:
-	# Update ID tracking
 	var meta: RegionMetadata = region.get_node_or_null("RegionMetadata")
 	if meta:
 		# Remove old ID if changed
@@ -547,7 +568,6 @@ func batch_set_faction(faction: String) -> void:
 		print("No regions selected for batch operation")
 		return
 	
-	# Single undo entry for entire batch
 	_save_undo_state("batch_set_faction")
 	
 	for region in batch_selected_regions:
@@ -765,7 +785,7 @@ func _get_polygon_bounds(points: Array) -> Rect2:
 
 
 # -------------------------
-# Create region from data (single definitive implementation)
+# Create region from data
 # -------------------------
 func _create_region_from_data(region_data: Dictionary) -> Node2D:
 	var meta_dict: Dictionary = region_data.get("metadata", {})
@@ -800,11 +820,16 @@ func _create_region_from_data(region_data: Dictionary) -> Node2D:
 	col.polygon = pts
 	area.add_child(col)
 
+	_log("Created Area2D/CollisionPolygon2D for region with " + str(pts.size()) + " points")
+
+	# Connect input_event with region bound via Callable.bind (bind returns a Callable)
+	area.connect("input_event", Callable(self, "_on_region_input_event").bind(region))
+
 	var meta: RegionMetadata = RegionMetadata.new()
 	meta.name = "RegionMetadata"
 	
 	var loaded_id: String = str(meta_dict.get("region_id", ""))
-	# Ensure unique ID
+
 	if loaded_id == "" or _region_id_set.has(loaded_id):
 		loaded_id = _generate_unique_region_id()
 	
@@ -814,14 +839,12 @@ func _create_region_from_data(region_data: Dictionary) -> Node2D:
 	meta.is_victory_city = bool(meta_dict.get("victory", false))
 	meta.has_factory = bool(meta_dict.get("factory", false))
 	
-	# Load custom fields
 	var custom_data: Dictionary = region_data.get("custom", meta_dict.get("custom", {}))
 	for custom_key in custom_data.keys():
 		meta.set_meta(custom_key, custom_data[custom_key])
 	
 	region.add_child(meta)
 
-	# Load anchors
 	if region_data.has("anchors"):
 		for anchor_data in region_data["anchors"]:
 			var anchor_type: String = anchor_data.get("type", "unit")
@@ -829,13 +852,8 @@ func _create_region_from_data(region_data: Dictionary) -> Node2D:
 			var capacity: int = anchor_data.get("capacity", 1)
 			add_anchor_to_region(region, anchor_type, anchor_pos, capacity)
 
-	# Set color and register
 	_update_region_color(region)
 	_register_region(region)
-
-	# Connect click handler
-	var cb: Callable = Callable(self, "_on_region_input_event").bind(region)
-	area.connect("input_event", cb)
 
 	return region
 
@@ -910,6 +928,11 @@ func _finalize_region() -> void:
 	col.polygon = drawing_points
 	area.add_child(col)
 
+	_log("Created Area2D/CollisionPolygon2D for new region, pts: " + str(drawing_points.size()))
+
+	# Connect input_event with region bound via Callable.bind
+	area.connect("input_event", Callable(self, "_on_region_input_event").bind(region))
+
 	var meta: RegionMetadata = RegionMetadata.new()
 	meta.name = "RegionMetadata"
 	meta.region_id = _generate_unique_region_id()
@@ -918,9 +941,6 @@ func _finalize_region() -> void:
 	# Add default unit anchor at centroid
 	var centroid := _polygon_centroid(drawing_points)
 	add_anchor_to_region(region, "unit", centroid, 5)
-
-	var cb: Callable = Callable(self, "_on_region_input_event").bind(region)
-	area.connect("input_event", cb)
 
 	_register_region(region)
 
@@ -943,11 +963,13 @@ func _polygon_centroid(points: Array) -> Vector2:
 # Region input handler
 # -------------------------
 func _on_region_input_event(viewport: Viewport, event: InputEvent, shape_idx: int, region: Node2D) -> void:
+	_log("on_region_input_event: " + str(event) + " for " + str(region))
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if batch_mode:
 			_toggle_batch_selection(region)
 		else:
 			_select_region(region)
+		get_viewport().set_input_as_handled()
 
 
 func _toggle_batch_selection(region: Node2D) -> void:
@@ -1023,7 +1045,7 @@ func _on_save_file_selected(path: String) -> void:
 
 
 # -------------------------
-# Save map to JSON (ARRAY format + validation)
+# Save map to JSON
 # -------------------------
 func save_map(path: String, silent: bool = false) -> void:
 	if not silent:
@@ -1061,7 +1083,7 @@ func save_map(path: String, silent: bool = false) -> void:
 		if meta == null:
 			continue
 
-		var poly: Polygon2D = region.get_node_or_null("Polygon2D")
+		var poly: Polygon2D = region.get_node_or_null("Polygon2D") as Polygon2D
 		if poly == null:
 			continue
 
@@ -1097,7 +1119,7 @@ func save_map(path: String, silent: bool = false) -> void:
 
 	data["regions"] = regions_array
 
-	# Simple, robust write (no platform-specific static file ops)
+	# Simple, robust write
 	var content := JSON.stringify(data, "\t")
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -1129,3 +1151,48 @@ func _validate_map_data() -> Array:
 			else:
 				ids[id] = true
 	return errors
+
+
+# -------------------------
+# Fallback selection (diagnostic)
+# -------------------------
+# If UI blocks events, this fallback uses point-in-polygon to select regions.
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		# If we already handled selection via Area2D, skip
+		if current_region != null:
+			return
+		# Convert global mouse to map_root local
+		var pos := map_root.to_local(get_global_mouse_position())
+		for region in _region_index:
+			var poly := region.get_node_or_null("Polygon2D") as Polygon2D
+			if poly and _is_point_in_polygon(pos, poly.polygon):
+				_select_region(region)
+				get_viewport().set_input_as_handled()
+				return
+
+
+# -------------------------
+# Point-in-polygon helper (ray casting)
+# -------------------------
+func _is_point_in_polygon(point: Vector2, polygon: Array) -> bool:
+	# Ray casting algorithm (robust, typed locals)
+	var inside: bool = false
+	var n: int = polygon.size()
+	if n < 3:
+		return false
+	var j: int = n - 1
+	for i in range(n):
+		var pi: Vector2 = polygon[i]
+		var pj: Vector2 = polygon[j]
+		# Avoid division by zero when edge is horizontal
+		var denom: float = (pj.y - pi.y)
+		var intersect: bool = false
+		if denom != 0.0:
+			intersect = ((pi.y > point.y) != (pj.y > point.y)) and \
+				(point.x < (pj.x - pi.x) * (point.y - pi.y) / denom + pi.x)
+		# If denom == 0.0, the horizontal edge cannot intersect the horizontal ray in a meaningful way
+		if intersect:
+			inside = not inside
+		j = i
+	return inside
