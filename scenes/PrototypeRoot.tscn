@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://bn4g5f0anh8jn"]
+
+[ext_resource type="Script" uid="uid://bp1mx8k0ige37" path="res://scripts/GameController.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://bdrjl7r3jjgr3" path="res://unit_test.tscn" id="2_xhi3s"]
+
+[node name="PrototypeRoot" type="Node2D" unique_id=100000000]
+
+[node name="MapRoot" type="Node2D" parent="." unique_id=100000001]
+
+[node name="BaseMap" type="Sprite2D" parent="MapRoot" unique_id=100000002]
+
+[node name="RegionLayer" type="Node2D" parent="MapRoot" unique_id=100000003]
+
+[node name="UnitLayer" type="Node2D" parent="MapRoot" unique_id=100000004]
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=100000005]
+
+[node name="Buttons" type="HBoxContainer" parent="UI" unique_id=100000006]
+anchors_preset = 10
+anchor_right = 1.0
+
+[node name="SpawnButton" type="Button" parent="UI/Buttons" unique_id=100000007]
+layout_mode = 2
+text = "Spawn Test Unit"
+
+[node name="SaveButton" type="Button" parent="UI/Buttons" unique_id=100000008]
+layout_mode = 2
+text = "Save Game"
+
+[node name="LoadButton" type="Button" parent="UI/Buttons" unique_id=100000009]
+layout_mode = 2
+text = "Load Game"
+
+[node name="GameController" type="Node" parent="." unique_id=100000010]
+script = ExtResource("1")
+unit_scene = ExtResource("2_xhi3s")
+
+[connection signal="pressed" from="UI/Buttons/SpawnButton" to="GameController" method="_on_spawn_button_pressed"]
+[connection signal="pressed" from="UI/Buttons/SaveButton" to="GameController" method="_on_save_button_pressed"]
+[connection signal="pressed" from="UI/Buttons/LoadButton" to="GameController" method="_on_load_button_pressed"]

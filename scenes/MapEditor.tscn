@@ -94,7 +94,12 @@ text = "Has Factory"
 layout_mode = 2
 text = "Apply"
 
+[node name="SpawnUnitButton" type="Button" parent="ToolLayer/UI/InspectorPanel" unique_id=1840852145]
+layout_mode = 2
+text = "Spawn Unit"
+
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/LoadMapButton" to="." method="_on_load_map_button_pressed"]
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/AddRegionButton" to="." method="_on_add_region_button_pressed"]
 [connection signal="pressed" from="ToolLayer/UI/Toolbar/SaveButton" to="." method="_on_save_button_pressed"]
 [connection signal="pressed" from="ToolLayer/UI/InspectorPanel/ApplyButton" to="ToolLayer/UI/InspectorPanel" method="_on_apply_button_pressed"]
+[connection signal="pressed" from="ToolLayer/UI/InspectorPanel/SpawnUnitButton" to="ToolLayer/UI/InspectorPanel" method="_on_spawn_unit_button_pressed"]
