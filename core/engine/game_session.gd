@@ -11,6 +11,9 @@ var combat: CombatEngine
 var placement: PlacementEngine
 var victory: VictoryEngine
 var amphibious: AmphibiousEngine
+var purchase_phase_controller: PurchasePhaseController
+var end_phase_controller: EndPhaseController
+var place_units_phase_controller: PlaceUnitsPhaseController
 
 var _events: Array = []
 var _seq: int = 0
@@ -62,6 +65,9 @@ func _init_session(
 	placement = PlacementEngine.new(state)
 	victory = VictoryEngine.new(state)
 	amphibious = AmphibiousEngine.new(state)
+	purchase_phase_controller = PurchasePhaseController.new()
+	end_phase_controller = EndPhaseController.new()
+	place_units_phase_controller = PlaceUnitsPhaseController.new()
 
 	_append(_sync_seq(turn_engine.start_game()))
 
@@ -84,7 +90,11 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 
 	match cmd.type:
 		Command.Type.PURCHASE_UNITS:
-			events = _sync_seq(economy.process_purchase(cmd))
+			var batch: PurchaseBatchResource = PurchaseBatchResource.from_command(cmd)
+			var purchase_result: PurchasePhaseResultResource = (
+				purchase_phase_controller.process_purchase(batch, economy, cmd)
+			)
+			events = _sync_seq(purchase_result.get_events())
 
 		Command.Type.MOVE_UNITS:
 			events = _sync_seq(movement.process_move(cmd))
@@ -99,10 +109,26 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 			events = _sync_seq(amphibious.designate_assault(cmd))
 
 		Command.Type.PLACE_UNITS:
-			events = _sync_seq(placement.process_placement(cmd))
+			var batch: PlaceUnitsBatchResource = PlaceUnitsBatchResource.from_command(cmd)
+			var placement_result: PlaceUnitsPhaseResultResource = (
+				place_units_phase_controller.process_placement(batch, placement, cmd)
+			)
+			events = _sync_seq(placement_result.get_events())
 
 		Command.Type.END_PHASE:
-			events = _handle_end_phase()
+			var request: EndPhaseRequestResource = EndPhaseRequestResource.from_command(
+				cmd, state.current_phase
+			)
+			var end_result: EndPhaseResultResource = end_phase_controller.process_end_phase(
+				request,
+				state,
+				turn_engine,
+				amphibious,
+				combat,
+				placement,
+				Callable(self, "_sync_seq")
+			)
+			events = end_result.get_events()
 
 		Command.Type.END_TURN:
 			events = _handle_end_turn()
@@ -119,26 +145,6 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 # -------------------------------------------------------------------
 # TURN / PHASE HANDLING
 # -------------------------------------------------------------------
-func _handle_end_phase() -> Array:
-	var events: Array = []
-	var phase := state.current_phase
-
-	if phase == "combat_move":
-		events.append_array(_sync_seq(turn_engine.advance_phase()))
-		events.append_array(_sync_seq(amphibious.resolve_assaults(state.current_faction_id, combat)))
-		events.append_array(_sync_seq(combat.resolve_all_battles(state.current_faction_id)))
-		events.append_array(_sync_seq(turn_engine.advance_phase()))
-
-	elif phase == "mobilize":
-		events.append_array(_sync_seq(placement.check_forfeited(state.current_faction_id)))
-		events.append_array(_sync_seq(turn_engine.advance_phase()))
-
-	else:
-		events.append_array(_sync_seq(turn_engine.advance_phase()))
-
-	return events
-
-
 func _handle_end_turn() -> Array:
 	var events: Array = []
 
