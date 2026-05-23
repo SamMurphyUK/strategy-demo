@@ -10,6 +10,7 @@ func process_end_phase(
 	turn_engine: TurnEngine,
 	amphibious_engine: AmphibiousEngine,
 	combat_engine: CombatEngine,
+	battle_phase_controller: BattlePhaseController,
 	placement_engine: PlacementEngine,
 	sync_seq: Callable
 ) -> EndPhaseResultResource:
@@ -19,12 +20,16 @@ func process_end_phase(
 
 	if phase == "combat_move":
 		events.append_array(sync_seq.call(turn_engine.advance_phase()))
-		events.append_array(sync_seq.call(
-			amphibious_engine.resolve_assaults(game_state.current_faction_id, combat_engine)
-		))
-		events.append_array(sync_seq.call(
-			combat_engine.resolve_all_battles(game_state.current_faction_id)
-		))
+		var battle_request: BattlePhaseRequestResource = (
+			BattlePhaseRequestResource.from_faction(game_state.current_faction_id)
+		)
+		var battle_result: BattlePhaseResultResource = battle_phase_controller.resolve_phase(
+			battle_request,
+			amphibious_engine,
+			combat_engine,
+			sync_seq
+		)
+		events.append_array(battle_result.get_events())
 		events.append_array(sync_seq.call(turn_engine.advance_phase()))
 
 	elif phase == "mobilize":
