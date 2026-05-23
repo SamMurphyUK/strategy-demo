@@ -152,7 +152,7 @@ func _on_apply_button_pressed() -> void:
 	meta.region_id = region_id_field.text.strip_edges()
 	meta.ipc_value = int(ipc_field.value)
 
-	var faction_idx = faction_dropdown.get_selected_index()
+	var faction_idx = faction_dropdown.selected
 	if faction_idx >= 0 and faction_idx < faction_list.size():
 		meta.faction = faction_list[faction_idx]
 	else:
