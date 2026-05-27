@@ -1,0 +1,98 @@
+[gd_scene format=3 uid="uid://cgamescene001"]
+
+[ext_resource type="Script" uid="uid://bkjroftvhpake" path="res://scenes/game_scene.gd" id="1_scene"]
+[ext_resource type="Script" uid="uid://b5d3xqv80d7ux" path="res://scenes/game_map_root.gd" id="2_map"]
+[ext_resource type="Texture2D" uid="uid://bdoi6lkrtx3f5" path="res://texture/test.jpg" id="3_cxv17"]
+[ext_resource type="Script" uid="uid://ux0km6bjtopn" path="res://scripts/unit_visualizer.gd" id="4_7s5hy"]
+[ext_resource type="PackedScene" uid="uid://uniticon123" path="res://scenes/ui/UnitIcon.tscn" id="5_xs4ih"]
+
+[node name="GameScene" type="Control" unique_id=693337335]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_scene")
+
+[node name="layer = 0" type="CanvasLayer" parent="." unique_id=1508508737]
+
+[node name="MapRoot" type="Node2D" parent="layer = 0" unique_id=206317708]
+script = ExtResource("2_map")
+
+[node name="BaseMap" type="Sprite2D" parent="layer = 0/MapRoot" unique_id=1220295928]
+position = Vector2(954.99994, 424.99997)
+scale = Vector2(0.63683337, 0.6151239)
+texture = ExtResource("3_cxv17")
+
+[node name="RegionLayer" type="Node2D" parent="layer = 0/MapRoot" unique_id=1850460547]
+
+[node name="UnitLayer" type="Node2D" parent="layer = 0/MapRoot" unique_id=2122723888]
+
+[node name="UnitVisualizer" type="Node2D" parent="layer = 0/MapRoot/UnitLayer" unique_id=1617422682]
+script = ExtResource("4_7s5hy")
+debug_logging = true
+
+[node name="UnitIcon" parent="layer = 0/MapRoot/UnitLayer/UnitVisualizer" unique_id=1380998926 instance=ExtResource("5_xs4ih")]
+
+[node name="layer = 1" type="CanvasLayer" parent="." unique_id=488379091]
+
+[node name="UIRoot" type="Control" parent="layer = 1" unique_id=905029186]
+layout_mode = 3
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -360.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="Panel" type="VBoxContainer" parent="layer = 1/UIRoot" unique_id=266054697]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="StateLabel" type="Label" parent="layer = 1/UIRoot/Panel" unique_id=638844510]
+layout_mode = 2
+text = "Loading..."
+
+[node name="FactionLabel" type="Label" parent="layer = 1/UIRoot/Panel" unique_id=1424902391]
+layout_mode = 2
+text = "Command as:"
+
+[node name="FactionSelector" type="OptionButton" parent="layer = 1/UIRoot/Panel" unique_id=943396868]
+layout_mode = 2
+
+[node name="Buttons" type="VBoxContainer" parent="layer = 1/UIRoot/Panel" unique_id=190313724]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SpawnInfantryButton" type="Button" parent="layer = 1/UIRoot/Panel/Buttons" unique_id=1715429584]
+layout_mode = 2
+text = "Spawn Infantry"
+
+[node name="MoveUnitButton" type="Button" parent="layer = 1/UIRoot/Panel/Buttons" unique_id=464711175]
+layout_mode = 2
+text = "Move Unit"
+
+[node name="EndPhaseButton" type="Button" parent="layer = 1/UIRoot/Panel/Buttons" unique_id=530076375]
+layout_mode = 2
+text = "End Phase"
+
+[node name="EndTurnButton" type="Button" parent="layer = 1/UIRoot/Panel/Buttons" unique_id=1593504829]
+layout_mode = 2
+text = "End Turn"
+
+[node name="EventLogLabel" type="Label" parent="layer = 1/UIRoot/Panel" unique_id=1427365671]
+layout_mode = 2
+text = "Event log:"
+
+[node name="EventLog" type="RichTextLabel" parent="layer = 1/UIRoot/Panel" unique_id=2037338683]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+scroll_following = true

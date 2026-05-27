@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ScenarioPathsResource" load_steps=2 format=3 uid="uid://cdefaultscenpaths"]
+
+[ext_resource type="Script" path="res://tests/unit_spawn_test/scenario_paths_resource.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+map_path = "res://data/scenarios/minimal/map.json"
+units_path = "res://data/scenarios/minimal/units.json"
+factions_path = "res://data/scenarios/minimal/factions.json"
+setup_path = "res://data/scenarios/minimal/setup.json"
+rules_path = "res://data/scenarios/minimal/rules.json"
+rng_state = 12345
+rng_sequence = 1

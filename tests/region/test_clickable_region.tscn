@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://btn4akedyepn"]
+
+[ext_resource type="Script" uid="uid://b88sbivpgmmau" path="res://tests/region/test_clickable_region.gd" id="1_vsvsl"]
+
+[node name="TestClickableRegion" type="Node2D" unique_id=456869652]
+script = ExtResource("1_vsvsl")
+
+[node name="RegionLayer" type="Node2D" parent="." unique_id=514313111]

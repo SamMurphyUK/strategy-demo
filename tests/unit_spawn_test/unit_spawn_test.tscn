@@ -1,0 +1,127 @@
+[gd_scene load_steps=9 format=3 uid="uid://cunitspawntest01"]
+
+[ext_resource type="Script" path="res://tests/unit_spawn_test/unit_spawn_test.gd" id="1_root"]
+[ext_resource type="Script" path="res://tests/unit_spawn_test/game_session_bridge.gd" id="2_bridge"]
+[ext_resource type="Script" path="res://tests/unit_spawn_test/region_markers.gd" id="3_markers"]
+[ext_resource type="Script" path="res://tests/unit_spawn_test/unit_board_view.gd" id="4_board"]
+[ext_resource type="Script" path="res://tests/unit_spawn_test/state_panel.gd" id="5_state"]
+[ext_resource type="Script" path="res://tests/unit_spawn_test/command_panel.gd" id="6_command"]
+[ext_resource type="PackedScene" uid="uid://bdrjl7r3jjgr3" path="res://unit_test.tscn" id="7_unit"]
+[ext_resource type="Resource" path="res://tests/unit_spawn_test/default_scenario_paths.tres" id="8_scenario"]
+
+[node name="UnitSpawnTest" type="Node2D"]
+script = ExtResource("1_root")
+bridge = NodePath("GameSessionBridge")
+state_panel = NodePath("UI/StatePanel")
+unit_board_view = NodePath("WorldView/UnitBoardView")
+
+[node name="GameSessionBridge" type="Node" parent="."]
+script = ExtResource("2_bridge")
+scenario_paths = ExtResource("8_scenario")
+
+[node name="WorldView" type="Node2D" parent="."]
+
+[node name="RegionMarkers" type="Node2D" parent="WorldView"]
+script = ExtResource("3_markers")
+
+[node name="UnitBoardView" type="Node2D" parent="WorldView"]
+script = ExtResource("4_board")
+bridge = NodePath("../../GameSessionBridge")
+unit_scene = ExtResource("7_unit")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="StatePanel" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 120.0
+grow_horizontal = 2
+script = ExtResource("5_state")
+bridge = NodePath("../../GameSessionBridge")
+labels_box = NodePath("Margin/VBox")
+
+[node name="Margin" type="MarginContainer" parent="UI/StatePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="UI/StatePanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FactionLabel" type="Label" parent="UI/StatePanel/Margin/VBox"]
+layout_mode = 2
+text = "Faction: —"
+
+[node name="PhaseLabel" type="Label" parent="UI/StatePanel/Margin/VBox"]
+layout_mode = 2
+text = "Phase: —"
+
+[node name="TurnLabel" type="Label" parent="UI/StatePanel/Margin/VBox"]
+layout_mode = 2
+text = "Turn —  Round —"
+
+[node name="IpcLabel" type="Label" parent="UI/StatePanel/Margin/VBox"]
+layout_mode = 2
+text = "IPC  red: —  blue: —"
+
+[node name="ErrorLabel" type="Label" parent="UI/StatePanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.35, 0.35, 1)
+text = ""
+
+[node name="CommandPanel" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -64.0
+grow_horizontal = 2
+grow_vertical = 0
+script = ExtResource("6_command")
+buttons_box = NodePath("Buttons")
+
+[node name="Buttons" type="HBoxContainer" parent="UI/CommandPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="PurchaseInfantryBtn" type="Button" parent="UI/CommandPanel/Buttons"]
+layout_mode = 2
+text = "Purchase Infantry x2"
+
+[node name="EndPhaseBtn" type="Button" parent="UI/CommandPanel/Buttons"]
+layout_mode = 2
+text = "End Phase"
+
+[node name="EndTurnBtn" type="Button" parent="UI/CommandPanel/Buttons"]
+layout_mode = 2
+text = "End Turn"
+
+[node name="QuickMoveBtn" type="Button" parent="UI/CommandPanel/Buttons"]
+layout_mode = 2
+text = "Quick Move"
+
+[node name="PlaceUnitsBtn" type="Button" parent="UI/CommandPanel/Buttons"]
+layout_mode = 2
+text = "Place Units"
+
+[connection signal="purchase_units_requested" from="UI/CommandPanel" to="GameSessionBridge" method="on_purchase_units_requested"]
+[connection signal="move_units_requested" from="UI/CommandPanel" to="GameSessionBridge" method="on_move_units_requested"]
+[connection signal="place_units_requested" from="UI/CommandPanel" to="GameSessionBridge" method="on_place_units_requested"]
+[connection signal="end_phase_requested" from="UI/CommandPanel" to="GameSessionBridge" method="on_end_phase_requested"]
+[connection signal="end_turn_requested" from="UI/CommandPanel" to="GameSessionBridge" method="on_end_turn_requested"]
