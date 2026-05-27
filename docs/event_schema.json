@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GameEvent",
+  "type": "object",
+  "required": ["event_id", "sequence", "type", "payload", "source_command_id", "timestamp"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^e_?[0-9]{5}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "source_command_id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}
