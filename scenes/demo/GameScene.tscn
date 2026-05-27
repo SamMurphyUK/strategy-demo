@@ -1,0 +1,64 @@
+[gd_scene load_steps=5 format=3]
+
+[node name="GameScene" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="GameMapRoot" type="Node2D" parent="."]
+script = ExtResource("res://scenes/game_map_root.gd")
+position = Vector2(0, 0)
+
+[node name="UnitLayer" type="Node2D" parent="."]
+
+[node name="GameController" type="Node" parent="."]
+script = ExtResource("res://scenes/game_controller.gd")
+
+[node name="UIRoot" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="VBox" type="VBoxContainer" parent="UIRoot"]
+layout_mode = 2
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 250.0
+offset_bottom = 600.0
+
+[node name="StateLabel" type="Label" parent="UIRoot/VBox"]
+text = "Loading..."
+
+[node name="FactionSelect" type="OptionButton" parent="UIRoot/VBox"]
+text = "Faction"
+
+[node name="SpawnInfantry" type="Button" parent="UIRoot/VBox"]
+text = "Spawn Infantry"
+
+[node name="MoveUnit" type="Button" parent="UIRoot/VBox"]
+text = "Move Unit"
+
+[node name="EndPhase" type="Button" parent="UIRoot/VBox"]
+text = "End Phase"
+
+[node name="EndTurn" type="Button" parent="UIRoot/VBox"]
+text = "End Turn"
+
+[node name="EventLog" type="RichTextLabel" parent="UIRoot/VBox"]
+size_flags_vertical = 3
+text = "Event log:"
+scroll_active = true
