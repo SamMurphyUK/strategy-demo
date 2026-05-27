@@ -1,5 +1,7 @@
 # Demo session (controller-driven stub)
 
+[![GUT CI](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml/badge.svg)](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml)
+
 ## Overview
 
 `GameSessionFactory` selects between a lightweight demo stub and the full rules engine:
@@ -11,6 +13,16 @@
 
 `GameScene` uses `GameSessionFactory.Mode.STUB` by default.
 
+## Demo rules (stub)
+
+- **IPC / costs**: `UNIT_COSTS` table; purchases rejected when IPC is insufficient (`PURCHASE_FAILED`, no `unitspurchased`).
+- **Pending purchases**: tracked per faction in snapshot; merged across multiple purchase commands.
+- **Placement**: validated against pending counts and region ownership/factory.
+- **Mobilize forfeit**: ending mobilize with unplaced pending emits `placementforfeited` and clears pending.
+- **Idempotency**: duplicate `command_id` returns the cached prior result without double-applying.
+- **Determinism**: `initialize_demo(seed)` seeds RNG and fixed event timestamps for tests.
+- **Snapshot extras**: `cost_table`, `applied_event_ids`, `pending_purchases`, `gameover` alias.
+
 ## Toggle factory mode
 
 In `res://scenes/game_scene.gd`:
@@ -20,21 +32,17 @@ session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)  # demo
 # session = GameSessionFactory.create(GameSessionFactory.Mode.FULL)  # full engine
 ```
 
-Or from code:
-
-```gdscript
-var session = GameSessionFactory.create(GameSessionFactory.Mode.FULL)
-```
-
 ## Command / state API
 
 Both stub and full session expose:
 
 - `apply_command(cmd: Dictionary) -> Dictionary` with `result_type` (`ok` / `error`) and `events[]`
-- `get_state() -> Dictionary` (snake_case snapshot: `turn_info`, `regions`, `ipc`, `pending_purchases`, `gameover`, …)
+- `get_state() -> Dictionary` (snake_case snapshot)
 - `session.state` for UI helpers that read `GameState` directly
 
-Event dict shape:
+### Event schema
+
+Canonical events are defined in [docs/event_schema.json](event_schema.json):
 
 ```json
 {
@@ -47,6 +55,8 @@ Event dict shape:
 }
 ```
 
+Validate in tests with `EventSchemaValidator.validate_event(evt)`.
+
 ## Adapter
 
 `GameSessionAdapter` wraps any session and normalizes event dictionaries (canonical `type` without underscores, `source_command_id`, `timestamp`).
@@ -56,19 +66,44 @@ var adapter := GameSessionAdapter.wrap(GameSessionFactory.create())
 var result := adapter.apply_command({...})
 ```
 
-## Running tests
+## Running tests locally
 
 ```bash
-godot --headless -s addons/gut/gut_cmdln.gd \
-  -gdir=res://tests/integration -gexit -ginclude_subdirs
+./tools/run_demo_smoke.sh
 ```
 
-Integration tests under `res://tests/integration/`:
+Or individually:
 
-- `test_session_stub_purchase.gd`
-- `test_session_stub_place.gd`
-- `test_session_stub_endphase.gd`
-- `test_session_adapter_integration.gd` (includes `GameScene.tscn` smoke test)
+```bash
+# GUT integration tests
+godot --headless --path . -s addons/gut/gut_cmdln.gd \
+  -gdir=res://tests/integration -gexit -ginclude_subdirs
+
+# Headless smoke (writes JSON)
+godot --headless --path . -s res://scripts/demo_smoke_runner.gd \
+  -- --seed=12345 --output=/tmp/smoke_result.json
+```
+
+### Integration test files
+
+| File | Purpose |
+|------|---------|
+| `test_session_stub_purchase.gd` | IPC + purchase event |
+| `test_session_stub_place.gd` | Placement consumes pending |
+| `test_session_stub_endphase.gd` | Mobilize forfeit |
+| `test_session_stub_rules.gd` | Idempotency, schema, affordability |
+| `test_session_adapter_normalization.gd` | Adapter canonical output |
+| `test_event_schema.gd` | JSON schema validation |
+| `test_scene_smoke.gd` | `GameScene.tscn` headless flow |
+| `test_session_adapter_integration.gd` | Adapter + scene smoke |
+
+## CI
+
+Workflow: `.github/workflows/gut-ci.yml`
+
+- **On PR/push**: GUT integration suite + smoke runner (seed `12345`)
+- **Nightly**: smoke runner with seed `99999`
+- **On failure**: uploads `gut.log`, `smoke.log`, and `smoke_result.json`
 
 ## Manual demo checklist
 
