@@ -13,8 +13,8 @@ var end_phase_button: Button = null
 var end_turn_button: Button = null
 var event_log: RichTextLabel = null
 
-# Game session
-var session: GameSession = null
+# Game session (GameSessionStub via factory, or full GameSession)
+var session = null
 var _command_counter: int = 0
 var _pending_spawn_count: int = 0
 
@@ -60,22 +60,17 @@ func _ready() -> void:
 				if debug:
 					print("GameScene: UnitIcon.tscn not found; UnitVisualizer will use placeholder icons")
 
-	# Build session using your existing builder (preferred)
-	if typeof(GameSceneSessionBuilder) != TYPE_NIL:
+	if typeof(GameSessionFactory) != TYPE_NIL:
+		session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
+		if debug:
+			print("GameScene: Session created via GameSessionFactory (STUB)")
+	elif typeof(GameSceneSessionBuilder) != TYPE_NIL:
 		session = GameSceneSessionBuilder.create_session_from_newmap()
 		if debug:
-			print("GameScene: Session created from newmap.json via builder")
+			print("GameScene: Session created from newmap.json via builder (fallback)")
 	else:
-		# fallback: try to create GameSession directly if available
-		if typeof(GameSession) != TYPE_NIL:
-			session = GameSession.new()
-			if session and session.has_method("load_from_json"):
-				session.load_from_json("res://newmap.json")
-			if debug:
-				print("GameScene: Session created directly (fallback)")
-		else:
-			if debug:
-				print("GameScene: No builder or GameSession class found; session left null")
+		if debug:
+			print("GameScene: No session factory found; session left null")
 
 	_refresh_all()
 
