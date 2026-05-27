@@ -1,7 +1,7 @@
 extends Control
 class_name GameScene
 
-# Auto-bound scene references
+# Auto‑bound scene references
 var map_root: Node = null
 var unit_visualizer: Node = null
 
@@ -23,96 +23,108 @@ var debug: bool = true
 
 
 func _ready() -> void:
+	print("Loaded scene file:", get_tree().current_scene.scene_file_path)
+
 	if debug:
 		print("GameScene _ready: this node path=", get_path())
 		print("GameScene _ready: children=", get_children().map(func(c): return c.name))
 
-	# Try to set UIRoot.mouse_filter if UIRoot exists anywhere under this node
+	# Allow map clicks through UI
 	var ui_root_node = find_child("UIRoot", true, false)
-	if ui_root_node:
-		if ui_root_node is Control:
-			ui_root_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			if debug:
-				print("GameScene: Set UIRoot.mouse_filter = IGNORE (found via find_child).")
-		else:
-			if debug:
-				print("GameScene: UIRoot found but is not Control:", ui_root_node)
-	else:
+	if ui_root_node and ui_root_node is Control:
+		ui_root_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		if debug:
-			print("GameScene: UIRoot not found via find_child at _ready(); UI mouse_filter not changed.")
+			print("GameScene: Set UIRoot.mouse_filter = IGNORE")
 
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
 
-	# Build a fresh session from the newmap
-	if Engine.has_singleton("GameSceneSessionBuilder"):
+	# Confirm event_log binding for visibility debugging
+	if debug:
+		print("GameScene: event_log bound ->", event_log)
+
+	# Try to enable UnitVisualizer debug logging and assign a default icon scene at runtime
+	if unit_visualizer:
+		# enable debug logging (UnitVisualizer exports this)
+		unit_visualizer.debug_logging = true
+
+		# if no unit_icon_scene assigned, try to assign a simple UnitIcon if it exists
+		if unit_visualizer.unit_icon_scene == null:
+			var candidate_path := "res://scenes/UnitIcon.tscn"
+			if ResourceLoader.exists(candidate_path):
+				unit_visualizer.unit_icon_scene = load(candidate_path)
+				if debug:
+					print("GameScene: assigned UnitVisualizer.unit_icon_scene ->", candidate_path)
+			else:
+				if debug:
+					print("GameScene: UnitIcon.tscn not found; UnitVisualizer will use placeholder icons")
+
+	# Build session using your existing builder (preferred)
+	if typeof(GameSceneSessionBuilder) != TYPE_NIL:
 		session = GameSceneSessionBuilder.create_session_from_newmap()
-	else:
 		if debug:
-			print("GameScene: GameSceneSessionBuilder not found; session left null.")
+			print("GameScene: Session created from newmap.json via builder")
+	else:
+		# fallback: try to create GameSession directly if available
+		if typeof(GameSession) != TYPE_NIL:
+			session = GameSession.new()
+			if session and session.has_method("load_from_json"):
+				session.load_from_json("res://newmap.json")
+			if debug:
+				print("GameScene: Session created directly (fallback)")
+		else:
+			if debug:
+				print("GameScene: No builder or GameSession class found; session left null")
 
 	_refresh_all()
 
-	# Connect region selection if map_root exists and has the signal
-	if map_root:
-		if map_root.has_signal("region_selected"):
-			map_root.connect("region_selected", Callable(self, "_on_region_selected"))
-			if debug:
-				print("GameScene: Connected to map_root.region_selected (via find_child).")
-		else:
-			if debug:
-				print("GameScene: map_root found but has no 'region_selected' signal.")
+	# Connect region selection
+	if map_root and map_root.has_signal("region_selected"):
+		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
+		if debug:
+			print("GameScene: Connected to map_root.region_selected")
 	else:
-		push_warning("GameScene: map_root not found; region selection will not work.")
+		push_warning("GameScene: map_root not found or missing region_selected signal.")
 
 
 # ---------------------------------------------------------
-# AUTO-BINDING (robust)
+# AUTO‑BINDING
 # ---------------------------------------------------------
 func _autobind_nodes() -> void:
-	# Try direct child first, then fallback to find_child anywhere under this scene
-	map_root = get_node_or_null("MapRoot")
-	if map_root == null:
-		map_root = find_child("MapRoot", true, false)
+	# MapRoot lives under CanvasLayer
+	map_root = find_child("MapRoot", true, false)
 	if debug:
-		print("GameScene: map_root ->", map_root, " path:", (str(map_root.get_path()) if map_root != null else "null"))
+		print("GameScene: map_root ->", map_root, " path:", (map_root.get_path() if map_root else "null"))
 
-	# UnitVisualizer: try UnitLayer/UnitVisualizer, then find_child
-	var unit_layer = get_node_or_null("UnitLayer")
-	if unit_layer:
-		unit_visualizer = unit_layer.get_node_or_null("UnitVisualizer")
-		if unit_visualizer == null:
-			unit_visualizer = unit_layer.find_child("UnitVisualizer", true, false)
-	if unit_visualizer == null:
-		unit_visualizer = find_child("UnitVisualizer", true, false)
+	# UnitVisualizer lives under MapRoot/UnitLayer
+	unit_visualizer = find_child("UnitVisualizer", true, false)
 	if debug:
-		print("GameScene: unit_visualizer ->", unit_visualizer, " path:", (str(unit_visualizer.get_path()) if unit_visualizer != null else "null"))
+		print("GameScene: unit_visualizer ->", unit_visualizer, " path:", (unit_visualizer.get_path() if unit_visualizer else "null"))
 
-	# UI: try direct path, then find_child
-	var vbox = get_node_or_null("UIRoot/VBox")
-	if vbox == null:
-		var ui_root = find_child("UIRoot", true, false)
-		if ui_root:
-			vbox = ui_root.get_node_or_null("VBox")
-			if vbox == null:
-				vbox = ui_root.find_child("VBox", true, false)
-	if vbox == null:
-		vbox = find_child("VBox", true, false)
+	# UI lives under UIRoot/Panel
+	var ui_root = find_child("UIRoot", true, false)
+	var panel: Control = null
 
-	if vbox:
-		state_label = vbox.get_node_or_null("StateLabel")
-		faction_selector = vbox.get_node_or_null("FactionSelect")
-		spawn_infantry_button = vbox.get_node_or_null("SpawnInfantry")
-		move_unit_button = vbox.get_node_or_null("MoveUnit")
-		end_phase_button = vbox.get_node_or_null("EndPhase")
-		end_turn_button = vbox.get_node_or_null("EndTurn")
-		event_log = vbox.get_node_or_null("EventLog")
+	if ui_root:
+		panel = ui_root.get_node_or_null("Panel")
+		if panel == null:
+			panel = ui_root.find_child("Panel", true, false)
+
+	if panel:
+		state_label = panel.find_child("StateLabel", true, false)
+		faction_selector = panel.find_child("FactionSelect", true, false)
+		spawn_infantry_button = panel.find_child("SpawnInfantry", true, false)
+		move_unit_button = panel.find_child("MoveUnit", true, false)
+		end_phase_button = panel.find_child("EndPhase", true, false)
+		end_turn_button = panel.find_child("EndTurn", true, false)
+		event_log = panel.find_child("EventLog", true, false)
+
 		if debug:
-			print("GameScene: UI nodes bound from vbox path:", vbox.get_path())
+			print("GameScene: UI nodes bound from Panel path:", panel.get_path())
 	else:
 		if debug:
-			print("GameScene: UIRoot/VBox not found after all fallbacks.")
+			print("GameScene: Panel not found under UIRoot")
 
 	if debug:
 		print("GameScene: autobind complete. map_root=", map_root, " unit_visualizer=", unit_visualizer)
@@ -140,10 +152,10 @@ func _connect_ui() -> void:
 	if end_turn_button:
 		end_turn_button.pressed.connect(_on_end_turn_pressed)
 
-	# Create a toggle action and bind the U key
+	# Toggle UI visibility with U
 	if not InputMap.has_action("toggle_ui_debug"):
 		InputMap.add_action("toggle_ui_debug")
-		var ev = InputEventKey.new()
+		var ev := InputEventKey.new()
 		ev.keycode = KEY_U
 		InputMap.action_add_event("toggle_ui_debug", ev)
 		if debug:
@@ -151,7 +163,6 @@ func _connect_ui() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Quick debug toggle: press U to toggle UI visibility
 	if Input.is_action_just_pressed("toggle_ui_debug"):
 		var ui_root = find_child("UIRoot", true, false)
 		if ui_root:
@@ -163,9 +174,10 @@ func _input(event: InputEvent) -> void:
 # REGION SELECTION
 # ---------------------------------------------------------
 func _on_region_selected(region_id: String) -> void:
-	_log_system("Selected region: %s" % region_id)
+	# debug trace to confirm signal path
 	if debug:
-		print("GameScene: region selected ->", region_id)
+		print("GameScene: _on_region_selected called with ->", region_id)
+	_log_system("Selected region: %s" % region_id)
 
 
 # ---------------------------------------------------------
@@ -211,27 +223,16 @@ func _on_move_unit_pressed() -> void:
 		return
 
 	var to_region = ""
-	if map_root and session:
-		if map_root.has_method("get_first_adjacent_region"):
-			to_region = map_root.call("get_first_adjacent_region", from_region, session.state.adjacency)
-		else:
-			to_region = ""
+	if map_root and session and map_root.has_method("get_first_adjacent_region"):
+		to_region = map_root.call("get_first_adjacent_region", from_region, session.state.adjacency)
 
 	if to_region.is_empty():
 		_log_system("No adjacent region found for %s." % from_region)
 		return
 
 	var faction_id = _selected_faction_id()
-	if faction_id != str(session.state.current_faction_id):
-		_log_system(
-			"Move requires active faction %s (selector is %s)."
-			% [
-				GameSceneSessionBuilder.display_name_for_faction_id(
-					str(session.state.current_faction_id)
-				),
-				_selected_faction_display(),
-			]
-		)
+	if session and faction_id != str(session.state.current_faction_id):
+		_log_system("Move requires active faction.")
 		return
 
 	var move_units = _first_movable_stack(from_region, faction_id)
@@ -278,16 +279,14 @@ func _apply_command(type_name: String, payload: Dictionary) -> void:
 			_log_event(event_dict)
 	else:
 		var err: Dictionary = result.get("error", {})
-		_log_system(
-			"Command failed [%s]: %s"
-			% [str(err.get("code", "UNKNOWN")), str(err.get("message", ""))]
-		)
+		_log_system("Command failed [%s]: %s"
+			% [str(err.get("code", "UNKNOWN")), str(err.get("message", ""))])
 
 	_refresh_all()
 
 
 # ---------------------------------------------------------
-# SNAPSHOT -> MAP + UNITS + UI
+# SNAPSHOT → MAP + UNITS + UI
 # ---------------------------------------------------------
 func _refresh_all() -> void:
 	_update_state_label()
@@ -300,9 +299,8 @@ func _refresh_all() -> void:
 	if map_root.has_method("update_from_snapshot"):
 		map_root.call("update_from_snapshot", snapshot)
 
-	if unit_visualizer:
-		if unit_visualizer.has_method("refresh_from_snapshot"):
-			unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
+	if unit_visualizer and unit_visualizer.has_method("refresh_from_snapshot"):
+		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
 
 
 # ---------------------------------------------------------
@@ -319,11 +317,11 @@ func _update_state_label() -> void:
 	var phase = str(turn_info.get("current_phase", ""))
 
 	state_label.text = (
-		"Turn %s  Round %s\nActive: %s  Phase: %s\nIPC  allies: %s  axis: %s\nSelected faction: %s"
+        "Turn %s  Round %s\nActive: %s  Phase: %s\nIPC allies: %s  axis: %s\nSelected faction: %s"
 		% [
 			str(turn_info.get("turn_number", "?")),
 			str(snapshot.get("game_round", "?")),
-			GameSceneSessionBuilder.display_name_for_faction_id(faction_id),
+			faction_id.capitalize(),
 			phase,
 			str(ipc.get("allies", 0)),
 			str(ipc.get("axis", 0)),
@@ -354,9 +352,7 @@ func _first_movable_stack(region_id: String, faction_id: String) -> Dictionary:
 func _selected_faction_id() -> String:
 	if faction_selector == null:
 		return "allies"
-	return GameSceneSessionBuilder.faction_id_from_display(
-		faction_selector.get_item_text(faction_selector.selected)
-	)
+	return faction_selector.get_item_text(faction_selector.selected).to_lower()
 
 
 func _selected_faction_display() -> String:
@@ -390,10 +386,15 @@ func _next_command_id() -> String:
 func _log_event(event_dict: Dictionary) -> void:
 	if event_log:
 		event_log.append_text("%s\n" % str(event_dict))
+		# auto scroll to bottom
+		event_log.scroll_vertical = event_log.get_line_count()
+	if debug:
+		print("GameScene: event ->", event_dict)
 
 
 func _log_system(message: String) -> void:
 	if event_log:
 		event_log.append_text("[system] %s\n" % message)
+		event_log.scroll_vertical = event_log.get_line_count()
 	if debug:
-		print("GameScene: ", message)
+		print("GameScene:", message)

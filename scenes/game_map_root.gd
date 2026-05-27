@@ -17,10 +17,13 @@ var faction_colors = {
 	"": Color(1.0, 0.0, 0.0, 0.4),
 }
 
+var highlight_color := Color(1, 1, 0, 0.8) # bright yellow outline
+
 
 func _ready() -> void:
 	_autobind()
 	load_map_from_json(map_json_path)
+	set_process_unhandled_input(true)
 
 
 # ---------------------------------------------------------
@@ -46,15 +49,13 @@ func load_map_from_json(path: String) -> void:
 		push_error("GameMapRoot: Could not open map JSON: " + path)
 		return
 
-	var text := file.get_as_text()
-	var parsed = JSON.parse_string(text)
-	if parsed == null:
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
 		push_error("GameMapRoot: JSON parse error in " + path)
 		return
 
 	var data: Dictionary = parsed
 
-	# Optional: load faction colors from JSON
 	if data.has("faction_colors"):
 		_load_faction_colors(data["faction_colors"])
 
@@ -72,7 +73,6 @@ func _build_regions(data: Dictionary) -> void:
 		var meta: Dictionary = region_dict.get("metadata", {})
 		var region_id = str(meta.get("region_id", ""))
 
-		# Skip invalid regions
 		if region_id == "":
 			push_warning("GameMapRoot: Region with missing ID skipped.")
 			continue
@@ -103,6 +103,17 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 	poly.color = _owner_color(faction)
 	region.add_child(poly)
 
+	# Highlight outline
+	var outline := Line2D.new()
+	outline.name = "Outline"
+	outline.width = 4
+	outline.default_color = highlight_color
+	outline.visible = false
+	for pt in points:
+		outline.add_point(pt)
+	outline.add_point(points[0]) # close loop
+	region.add_child(outline)
+
 	# Metadata
 	var meta := RegionMetadata.new()
 	meta.name = "RegionMetadata"
@@ -117,10 +128,8 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 
 	var col := CollisionPolygon2D.new()
 	col.polygon = points
-	col.disabled = false
 	area.add_child(col)
 
-	# Godot 4: (area, event, shape_idx)
 	area.input_event.connect(_on_region_input_event.bind(region_id))
 	region.add_child(area)
 
@@ -132,8 +141,41 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 # ---------------------------------------------------------
 func _on_region_input_event(area: Area2D, event: InputEvent, shape_idx: int, region_id: String) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		selected_region_id = region_id
-		emit_signal("region_selected", region_id)
+		_select_region(region_id)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		var click_pos = event.position
+		var region_id = _find_region_at_point(click_pos)
+		if region_id != "":
+			_select_region(region_id)
+
+
+func _select_region(region_id: String) -> void:
+	# Remove highlight from previous
+	if selected_region_id != "" and regions.has(selected_region_id):
+		var old_outline = regions[selected_region_id].get_node_or_null("Outline")
+		if old_outline:
+			old_outline.visible = false
+
+	selected_region_id = region_id
+
+	# Highlight new region
+	var outline = regions[region_id].get_node_or_null("Outline")
+	if outline:
+		outline.visible = true
+
+	emit_signal("region_selected", region_id)
+
+
+func _find_region_at_point(pos: Vector2) -> String:
+	for region_id in regions.keys():
+		var region = regions[region_id]
+		var poly = region.get_node_or_null("Polygon2D")
+		if poly and Geometry2D.is_point_in_polygon(pos, poly.polygon):
+			return region_id
+	return ""
 
 
 func get_selected_region_id() -> String:
