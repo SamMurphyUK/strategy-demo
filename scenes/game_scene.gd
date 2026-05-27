@@ -1,61 +1,121 @@
 extends Control
 class_name GameScene
 
-# Auto‑bound scene references
-var map_root: GameMapRoot
-var unit_visualizer: UnitVisualizer
+# Auto-bound scene references
+var map_root: Node = null
+var unit_visualizer: Node = null
 
-var state_label: Label
-var faction_selector: OptionButton
-var spawn_infantry_button: Button
-var move_unit_button: Button
-var end_phase_button: Button
-var end_turn_button: Button
-var event_log: RichTextLabel
+var state_label: Label = null
+var faction_selector: OptionButton = null
+var spawn_infantry_button: Button = null
+var move_unit_button: Button = null
+var end_phase_button: Button = null
+var end_turn_button: Button = null
+var event_log: RichTextLabel = null
 
 # Game session
-var session: GameSession
+var session: GameSession = null
 var _command_counter: int = 0
 var _pending_spawn_count: int = 0
 
+# Debug
+var debug: bool = true
+
 
 func _ready() -> void:
+	if debug:
+		print("GameScene _ready: this node path=", get_path())
+		print("GameScene _ready: children=", get_children().map(func(c): return c.name))
+
+	# Try to set UIRoot.mouse_filter if UIRoot exists anywhere under this node
+	var ui_root_node = find_child("UIRoot", true, false)
+	if ui_root_node:
+		if ui_root_node is Control:
+			ui_root_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			if debug:
+				print("GameScene: Set UIRoot.mouse_filter = IGNORE (found via find_child).")
+		else:
+			if debug:
+				print("GameScene: UIRoot found but is not Control:", ui_root_node)
+	else:
+		if debug:
+			print("GameScene: UIRoot not found via find_child at _ready(); UI mouse_filter not changed.")
+
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
 
-	session = GameSceneSessionBuilder.create_session_from_newmap()
+	# Build a fresh session from the newmap
+	if Engine.has_singleton("GameSceneSessionBuilder"):
+		session = GameSceneSessionBuilder.create_session_from_newmap()
+	else:
+		if debug:
+			print("GameScene: GameSceneSessionBuilder not found; session left null.")
+
 	_refresh_all()
 
+	# Connect region selection if map_root exists and has the signal
 	if map_root:
-		map_root.region_selected.connect(_on_region_selected)
+		if map_root.has_signal("region_selected"):
+			map_root.connect("region_selected", Callable(self, "_on_region_selected"))
+			if debug:
+				print("GameScene: Connected to map_root.region_selected (via find_child).")
+		else:
+			if debug:
+				print("GameScene: map_root found but has no 'region_selected' signal.")
+	else:
+		push_warning("GameScene: map_root not found; region selection will not work.")
 
 
 # ---------------------------------------------------------
-# AUTO‑BINDING
+# AUTO-BINDING (robust)
 # ---------------------------------------------------------
 func _autobind_nodes() -> void:
-	# MapRoot
-	map_root = get_node_or_null("GameMapRoot")
+	# Try direct child first, then fallback to find_child anywhere under this scene
+	map_root = get_node_or_null("MapRoot")
+	if map_root == null:
+		map_root = find_child("MapRoot", true, false)
+	if debug:
+		print("GameScene: map_root ->", map_root, " path:", (str(map_root.get_path()) if map_root != null else "null"))
 
-	# UnitVisualizer (inside UnitLayer)
-	var unit_layer := get_node_or_null("UnitLayer")
+	# UnitVisualizer: try UnitLayer/UnitVisualizer, then find_child
+	var unit_layer = get_node_or_null("UnitLayer")
 	if unit_layer:
 		unit_visualizer = unit_layer.get_node_or_null("UnitVisualizer")
+		if unit_visualizer == null:
+			unit_visualizer = unit_layer.find_child("UnitVisualizer", true, false)
+	if unit_visualizer == null:
+		unit_visualizer = find_child("UnitVisualizer", true, false)
+	if debug:
+		print("GameScene: unit_visualizer ->", unit_visualizer, " path:", (str(unit_visualizer.get_path()) if unit_visualizer != null else "null"))
 
-	# UI
-	var ui_root := get_node_or_null("UIRoot/VBox")
-	if ui_root == null:
-		push_error("UIRoot/VBox not found.")
-		return
+	# UI: try direct path, then find_child
+	var vbox = get_node_or_null("UIRoot/VBox")
+	if vbox == null:
+		var ui_root = find_child("UIRoot", true, false)
+		if ui_root:
+			vbox = ui_root.get_node_or_null("VBox")
+			if vbox == null:
+				vbox = ui_root.find_child("VBox", true, false)
+	if vbox == null:
+		vbox = find_child("VBox", true, false)
 
-	state_label = ui_root.get_node_or_null("StateLabel")
-	faction_selector = ui_root.get_node_or_null("FactionSelect")
-	spawn_infantry_button = ui_root.get_node_or_null("SpawnInfantry")
-	move_unit_button = ui_root.get_node_or_null("MoveUnit")
-	end_phase_button = ui_root.get_node_or_null("EndPhase")
-	end_turn_button = ui_root.get_node_or_null("EndTurn")
-	event_log = ui_root.get_node_or_null("EventLog")
+	if vbox:
+		state_label = vbox.get_node_or_null("StateLabel")
+		faction_selector = vbox.get_node_or_null("FactionSelect")
+		spawn_infantry_button = vbox.get_node_or_null("SpawnInfantry")
+		move_unit_button = vbox.get_node_or_null("MoveUnit")
+		end_phase_button = vbox.get_node_or_null("EndPhase")
+		end_turn_button = vbox.get_node_or_null("EndTurn")
+		event_log = vbox.get_node_or_null("EventLog")
+		if debug:
+			print("GameScene: UI nodes bound from vbox path:", vbox.get_path())
+	else:
+		if debug:
+			print("GameScene: UIRoot/VBox not found after all fallbacks.")
+
+	if debug:
+		print("GameScene: autobind complete. map_root=", map_root, " unit_visualizer=", unit_visualizer)
 
 
 # ---------------------------------------------------------
@@ -80,19 +140,39 @@ func _connect_ui() -> void:
 	if end_turn_button:
 		end_turn_button.pressed.connect(_on_end_turn_pressed)
 
+	# Create a toggle action and bind the U key
+	if not InputMap.has_action("toggle_ui_debug"):
+		InputMap.add_action("toggle_ui_debug")
+		var ev = InputEventKey.new()
+		ev.keycode = KEY_U
+		InputMap.action_add_event("toggle_ui_debug", ev)
+		if debug:
+			print("GameScene: Created input action 'toggle_ui_debug' bound to KEY_U")
+
+
+func _input(event: InputEvent) -> void:
+	# Quick debug toggle: press U to toggle UI visibility
+	if Input.is_action_just_pressed("toggle_ui_debug"):
+		var ui_root = find_child("UIRoot", true, false)
+		if ui_root:
+			ui_root.visible = not ui_root.visible
+			print("GameScene: toggled UIRoot.visible -> ", ui_root.visible)
+
 
 # ---------------------------------------------------------
 # REGION SELECTION
 # ---------------------------------------------------------
 func _on_region_selected(region_id: String) -> void:
 	_log_system("Selected region: %s" % region_id)
+	if debug:
+		print("GameScene: region selected ->", region_id)
 
 
 # ---------------------------------------------------------
 # COMMAND HANDLERS
 # ---------------------------------------------------------
 func _on_spawn_infantry_pressed() -> void:
-	var phase := _current_phase()
+	var phase = _current_phase()
 
 	if phase == "purchase":
 		_apply_command("purchase_units", {
@@ -104,12 +184,12 @@ func _on_spawn_infantry_pressed() -> void:
 		_log_system("Purchased 1 infantry. Advance to mobilize phase to place.")
 
 	elif phase == "mobilize":
-		var region_id := _selected_region_id()
+		var region_id = _selected_region_id()
 		if region_id.is_empty():
 			_log_system("Select a region before placing units.")
 			return
 
-		var count := maxi(_pending_spawn_count, 1)
+		var count = maxi(_pending_spawn_count, 1)
 		_apply_command("place_units", {
 			"placements": [
 				{
@@ -125,36 +205,36 @@ func _on_spawn_infantry_pressed() -> void:
 
 
 func _on_move_unit_pressed() -> void:
-	var from_region := _selected_region_id()
+	var from_region = _selected_region_id()
 	if from_region.is_empty():
 		_log_system("Select a source region first.")
 		return
 
-	var to_region := ""
+	var to_region = ""
 	if map_root and session:
-		to_region = map_root.get_first_adjacent_region(
-			from_region,
-			session.state.adjacency
-		)
+		if map_root.has_method("get_first_adjacent_region"):
+			to_region = map_root.call("get_first_adjacent_region", from_region, session.state.adjacency)
+		else:
+			to_region = ""
 
 	if to_region.is_empty():
 		_log_system("No adjacent region found for %s." % from_region)
 		return
 
-	var faction_id := _selected_faction_id()
+	var faction_id = _selected_faction_id()
 	if faction_id != str(session.state.current_faction_id):
 		_log_system(
-            "Move requires active faction %s (selector is %s)."
+			"Move requires active faction %s (selector is %s)."
 			% [
 				GameSceneSessionBuilder.display_name_for_faction_id(
 					str(session.state.current_faction_id)
 				),
-				_selected_faction_display()
+				_selected_faction_display(),
 			]
 		)
 		return
 
-	var move_units := _first_movable_stack(from_region, faction_id)
+	var move_units = _first_movable_stack(from_region, faction_id)
 	if move_units.is_empty():
 		_log_system("No movable units for current faction in %s." % from_region)
 		return
@@ -199,7 +279,7 @@ func _apply_command(type_name: String, payload: Dictionary) -> void:
 	else:
 		var err: Dictionary = result.get("error", {})
 		_log_system(
-            "Command failed [%s]: %s"
+			"Command failed [%s]: %s"
 			% [str(err.get("code", "UNKNOWN")), str(err.get("message", ""))]
 		)
 
@@ -207,7 +287,7 @@ func _apply_command(type_name: String, payload: Dictionary) -> void:
 
 
 # ---------------------------------------------------------
-# SNAPSHOT → MAP + UNITS + UI
+# SNAPSHOT -> MAP + UNITS + UI
 # ---------------------------------------------------------
 func _refresh_all() -> void:
 	_update_state_label()
@@ -215,12 +295,14 @@ func _refresh_all() -> void:
 	if session == null or map_root == null:
 		return
 
-	var snapshot := session.get_state()
+	var snapshot = session.get_state()
 
-	map_root.update_from_snapshot(snapshot)
+	if map_root.has_method("update_from_snapshot"):
+		map_root.call("update_from_snapshot", snapshot)
 
 	if unit_visualizer:
-		unit_visualizer.refresh_from_snapshot(snapshot, map_root)
+		if unit_visualizer.has_method("refresh_from_snapshot"):
+			unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
 
 
 # ---------------------------------------------------------
@@ -230,14 +312,14 @@ func _update_state_label() -> void:
 	if state_label == null or session == null:
 		return
 
-	var snapshot := session.get_state()
+	var snapshot = session.get_state()
 	var turn_info = snapshot.get("turn_info", {})
 	var ipc = snapshot.get("ipc", {})
-	var faction_id := str(turn_info.get("current_faction_id", ""))
-	var phase := str(turn_info.get("current_phase", ""))
+	var faction_id = str(turn_info.get("current_faction_id", ""))
+	var phase = str(turn_info.get("current_phase", ""))
 
 	state_label.text = (
-        "Turn %s  Round %s\nActive: %s  Phase: %s\nIPC  allies: %s  axis: %s\nSelected faction: %s"
+		"Turn %s  Round %s\nActive: %s  Phase: %s\nIPC  allies: %s  axis: %s\nSelected faction: %s"
 		% [
 			str(turn_info.get("turn_number", "?")),
 			str(snapshot.get("game_round", "?")),
@@ -286,7 +368,9 @@ func _selected_faction_display() -> String:
 func _selected_region_id() -> String:
 	if map_root == null:
 		return ""
-	return map_root.get_selected_region_id()
+	if map_root.has_method("get_selected_region_id"):
+		return str(map_root.call("get_selected_region_id"))
+	return ""
 
 
 func _current_phase() -> String:
@@ -311,3 +395,5 @@ func _log_event(event_dict: Dictionary) -> void:
 func _log_system(message: String) -> void:
 	if event_log:
 		event_log.append_text("[system] %s\n" % message)
+	if debug:
+		print("GameScene: ", message)

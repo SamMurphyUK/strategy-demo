@@ -15,22 +15,24 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_scene")
 
-[node name="MapRoot" type="Node2D" parent="." unique_id=206317708]
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=1508508737]
+
+[node name="MapRoot" type="Node2D" parent="CanvasLayer" unique_id=206317708]
 script = ExtResource("2_map")
 
-[node name="BaseMap" type="Sprite2D" parent="MapRoot" unique_id=1220295928]
+[node name="BaseMap" type="Sprite2D" parent="CanvasLayer/MapRoot" unique_id=1220295928]
 position = Vector2(954.99994, 424.99997)
 scale = Vector2(0.63683337, 0.6151239)
 texture = ExtResource("3_cxv17")
 
-[node name="RegionLayer" type="Node2D" parent="MapRoot" unique_id=1850460547]
+[node name="RegionLayer" type="Node2D" parent="CanvasLayer/MapRoot" unique_id=1850460547]
 
-[node name="UnitLayer" type="Node2D" parent="MapRoot" unique_id=2122723888]
+[node name="UnitLayer" type="Node2D" parent="CanvasLayer/MapRoot" unique_id=2122723888]
 
-[node name="UnitVisualizer" type="Node2D" parent="MapRoot/UnitLayer" unique_id=1617422682]
+[node name="UnitVisualizer" type="Node2D" parent="CanvasLayer/MapRoot/UnitLayer" unique_id=1617422682]
 script = ExtResource("4_7s5hy")
 
-[node name="UnitIcon" parent="MapRoot/UnitLayer/UnitVisualizer" unique_id=1380998926 instance=ExtResource("5_xs4ih")]
+[node name="UnitIcon" parent="CanvasLayer/MapRoot/UnitLayer/UnitVisualizer" unique_id=1380998926 instance=ExtResource("5_xs4ih")]
 
 [node name="UIRoot" type="Control" parent="." unique_id=329575919]
 layout_mode = 1
