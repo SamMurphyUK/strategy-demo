@@ -49,8 +49,15 @@ func _ready() -> void:
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
-	if typeof(GameSessionFactory) != TYPE_NIL:
+	if ClassDB.class_exists("GameSessionFactory"):
 		session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
+	else:
+		session = GameSessionStub.new()
+		session.initialize_demo()
+
+	if session == null:
+		push_error("GameScene: Failed to create session")
+
 	_refresh_all()
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
