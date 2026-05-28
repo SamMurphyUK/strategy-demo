@@ -23,6 +23,12 @@ var region_info_vbox: VBoxContainer = null
 var region_name_label: Label = null
 var region_owner_label: Label = null
 var region_unitcount_label: Label = null
+var purchase_panel: Control = null
+var mobilize_panel: Control = null
+var staged_units_list: VBoxContainer = null
+var region_stack: Control = null
+var region_stack_list: VBoxContainer = null
+var battle_overlay: CanvasLayer = null
 
 var session = null
 var _command_counter: int = 0
@@ -41,9 +47,12 @@ func _ready() -> void:
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
 	if unit_visualizer and unit_visualizer.get("unit_icon_scene") == null:
-		var candidate_path := "res://scenes/ui/UnitIcon.tscn"
-		if ResourceLoader.exists(candidate_path):
-			unit_visualizer.unit_icon_scene = load(candidate_path)
+		var preferred := "res://scenes/UnitIcon.tscn"
+		var fallback := "res://scenes/ui/UnitIcon.tscn"
+		if ResourceLoader.exists(preferred):
+			unit_visualizer.unit_icon_scene = load(preferred)
+		elif ResourceLoader.exists(fallback):
+			unit_visualizer.unit_icon_scene = load(fallback)
 
 func _autobind_nodes() -> void:
 	map_root = find_child("MapRoot", true, false)
@@ -79,6 +88,12 @@ func _autobind_nodes() -> void:
 	region_name_label = panel.find_child("RegionNameLabel", true, false)
 	region_owner_label = panel.find_child("OwnerLabel", true, false)
 	region_unitcount_label = panel.find_child("UnitCountLabel", true, false)
+	purchase_panel = panel.find_child("PurchasePanel", true, false)
+	mobilize_panel = panel.find_child("MobilizePanel", true, false)
+	staged_units_list = panel.find_child("StagedUnitsList", true, false)
+	region_stack = panel.find_child("RegionStack", true, false)
+	region_stack_list = panel.find_child("RegionStackList", true, false)
+	battle_overlay = find_child("BattleOverlay", true, false)
 
 func _setup_faction_selector() -> void:
 	if faction_selector == null:
@@ -221,14 +236,41 @@ func _refresh_all() -> void:
 		return
 	var snapshot: Dictionary = session.get_state()
 	_update_state_label(snapshot)
+	_refresh_phase_ui(snapshot)
 	_refresh_purchase_panels(snapshot)
 	_refresh_region_info(_selected_region_id())
+	_refresh_region_stack(_selected_region_id(), snapshot)
 	if map_root and map_root.has_method("update_from_snapshot"):
 		map_root.call("update_from_snapshot", snapshot)
 	if map_root and map_root.has_method("update_region_colors"):
 		map_root.call("update_region_colors", snapshot)
 	if unit_visualizer and unit_visualizer.has_method("refresh_from_snapshot"):
 		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
+	if battle_overlay:
+		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
+
+func _refresh_phase_ui(snapshot: Dictionary) -> void:
+	var phase := str(snapshot.get("turn_info", {}).get("current_phase", ""))
+	if purchase_panel:
+		purchase_panel.visible = phase == "purchase"
+	if mobilize_panel:
+		mobilize_panel.visible = phase == "mobilize"
+	# Legacy nodes still remain outside PurchasePanel in this scene; hide them phase-wise as well.
+	var purchase_visible := phase == "purchase"
+	if ipc_allies_label:
+		ipc_allies_label.visible = purchase_visible
+	if ipc_axis_label:
+		ipc_axis_label.visible = purchase_visible
+	if unit_catalog:
+		unit_catalog.visible = purchase_visible
+	if pending_list:
+		pending_list.visible = purchase_visible
+	if pending_total_label:
+		pending_total_label.visible = purchase_visible
+	if purchase_confirm_button:
+		purchase_confirm_button.visible = purchase_visible
+	if cancel_purchase_button:
+		cancel_purchase_button.visible = purchase_visible
 
 func _refresh_region_info(selected_region_id: String) -> void:
 	if region_name_label == null or session == null:
@@ -299,6 +341,81 @@ func _refresh_purchase_panels(snapshot: Dictionary) -> void:
 				var buy_btn := row.get_child(1) as Button
 				var utid := text.split(" ")[0]
 				buy_btn.disabled = _unit_cost(utid) > remaining or _current_phase() != "purchase"
+	_refresh_mobilize_staged_list(snapshot)
+
+func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
+	if staged_units_list == null:
+		return
+	for child in staged_units_list.get_children():
+		child.queue_free()
+	var faction_pending: Array = snapshot.get("pending_purchases", {}).get(_selected_faction_id(), [])
+	for line in faction_pending:
+		var unit_type_id := str(line.get("unit_type_id", ""))
+		var count := int(line.get("count", 0))
+		if count <= 0:
+			continue
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%s x%d" % [unit_type_id.capitalize(), count]
+		row.add_child(label)
+		var icon := DraggableStagedIcon.new()
+		icon.custom_minimum_size = Vector2(24, 24)
+		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
+		icon.drag_data = {
+			"unit_type_id": unit_type_id,
+			"count": 1,
+		}
+		icon.dropped_on_map.connect(_on_staged_drag_drop)
+		row.add_child(icon)
+		staged_units_list.add_child(row)
+
+func _on_staged_drag_drop(data: Dictionary, global_position: Vector2) -> void:
+	if session == null or map_root == null:
+		return
+	if not map_root.has_method("drop_staged_unit"):
+		return
+	var result: Dictionary = map_root.call("drop_staged_unit", global_position, data, session, _next_command_id(), _selected_faction_id())
+	if str(result.get("result_type", "")) == "ok":
+		for event_dict in result.get("events", []):
+			_log_event(event_dict)
+		_refresh_all()
+	else:
+		var err: Dictionary = result.get("error", {})
+		_log_system("Place failed [%s]: %s" % [str(err.get("code", "UNKNOWN")), str(err.get("message", ""))])
+		_refresh_all()
+
+func _refresh_region_stack(selected_region_id: String, snapshot: Dictionary) -> void:
+	if region_stack_list == null:
+		return
+	if map_root and map_root.has_method("show_region_stack"):
+		map_root.call("show_region_stack", selected_region_id, snapshot, region_stack_list)
+		return
+	for child in region_stack_list.get_children():
+		child.queue_free()
+	var header := Label.new()
+	header.text = "Region Stack"
+	region_stack_list.add_child(header)
+	if selected_region_id.is_empty():
+		var empty := Label.new()
+		empty.text = "Select a region."
+		region_stack_list.add_child(empty)
+		return
+	for region_entry in snapshot.get("regions", []):
+		if str(region_entry.get("region_id", "")) != selected_region_id:
+			continue
+		var grouped := {"allies": {}, "axis": {}, "neutral": {}}
+		for u in region_entry.get("units", []):
+			var faction := str(u.get("faction_id", "neutral")).to_lower()
+			if not grouped.has(faction):
+				grouped[faction] = {}
+			var unit_type_id := str(u.get("unit_type_id", ""))
+			grouped[faction][unit_type_id] = int(grouped[faction].get(unit_type_id, 0)) + int(u.get("count", 0))
+		for faction in grouped.keys():
+			for unit_type_id in grouped[faction].keys():
+				var row := Label.new()
+				row.text = "%s: %s x%d" % [faction.capitalize(), unit_type_id, int(grouped[faction][unit_type_id])]
+				region_stack_list.add_child(row)
+		return
 
 func _update_state_label(snapshot: Dictionary) -> void:
 	if state_label == null:
@@ -358,7 +475,13 @@ func _unit_cost(unit_type_id: String) -> int:
 
 func _on_region_selected(region_id: String) -> void:
 	_refresh_region_info(region_id)
+	_refresh_region_stack(region_id, session.get_state() if session else {})
 	_log_system("Selected region: %s" % region_id)
+
+func _get_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
+	if unit_visualizer and unit_visualizer.has_method("_load_unit_texture"):
+		return unit_visualizer.call("_load_unit_texture", unit_type_id, faction)
+	return null
 
 func _log_event(event_dict: Dictionary) -> void:
 	if event_log:

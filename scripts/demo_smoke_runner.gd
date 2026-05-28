@@ -94,16 +94,21 @@ func _run_smoke() -> void:
 	var snap := stub.get_state()
 	var placed := _region_has_infantry(snap, region_id)
 	var has_units_placed := _event_types().has("unitsplaced")
+	var has_units_purchased := _event_types().has("unitspurchased")
+	var active_faction := str(snap.get("turn_info", {}).get("current_faction_id", ""))
 
 	result["errors"] = _errors.duplicate()
 	result["event_types"] = _event_types().keys()
 	result["events"] = _events.duplicate(true)
 	result["snapshot_phase"] = str(snap.get("turn_info", {}).get("current_phase", ""))
 	result["placed_infantry"] = placed
+	result["active_faction"] = active_faction
 	result["success"] = (
 		_errors.is_empty()
+		and has_units_purchased
 		and has_units_placed
 		and placed
+		and active_faction == "axis"
 	)
 
 	_write_result(result)

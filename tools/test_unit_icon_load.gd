@@ -1,7 +1,7 @@
 extends SceneTree
 
 func _init() -> void:
-	var scene_path = "res://scenes/ui/UnitIcon.tscn"
+	var scene_path = "res://scenes/UnitIcon.tscn"
 	print("exists:", ResourceLoader.exists(scene_path))
 	var p = ResourceLoader.load(scene_path)
 	if p:
