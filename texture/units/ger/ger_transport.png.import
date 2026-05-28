@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dyf4385qcbhk5"
-path="res://.godot/imported/Copilot_20260521_020052.png-60b5c812a819b01cc40824e774d555fe.ctex"
+uid="uid://b2ltvo2jts3t7"
+path="res://.godot/imported/ger_transport.png-27c3853c3e0739d854d860cc86038c9c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://texture/units/Copilot_20260521_020052.png"
-dest_files=["res://.godot/imported/Copilot_20260521_020052.png-60b5c812a819b01cc40824e774d555fe.ctex"]
+source_file="res://texture/units/ger/ger_transport.png"
+dest_files=["res://.godot/imported/ger_transport.png-27c3853c3e0739d854d860cc86038c9c.ctex"]
 
 [params]
 

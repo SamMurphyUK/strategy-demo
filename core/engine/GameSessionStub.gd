@@ -204,7 +204,29 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 					Callable(self, "_sync_seq")
 				)
 			)
-			events = end_turn_result.get_events()
+
+			var controller_events: Array = _sync_seq(end_turn_result.get_events())
+
+			var prev_faction := str(state.current_faction_id)
+			var next_faction := prev_faction
+
+			if state.turn_order and state.turn_order.size() > 0:
+				var idx := state.turn_order.find(prev_faction)
+				if idx == -1:
+					next_faction = "axis" if prev_faction == "allies" else "allies"
+				else:
+					var next_idx := (idx + 1) % state.turn_order.size()
+					next_faction = state.turn_order[next_idx]
+					if next_idx == 0:
+						state.turn_number = int(state.turn_number) + 1
+						state.game_round = int(state.game_round) + 1
+			else:
+				next_faction = "axis" if prev_faction == "allies" else "allies"
+
+			state.current_faction_id = next_faction
+			state.current_phase = "purchase"
+
+			events = controller_events
 
 		_:
 			return {
@@ -450,7 +472,7 @@ func _validate_placement_command(cmd: Command) -> Dictionary:
 			var count := int(u.get("count", 1))
 			if pending_counts.get(unit_type_id, 0) < count:
 				return _placement_error(
-					"Not enough pending %s (have %d, need %d)"
+                    "Not enough pending %s (have %d, need %d)"
 					% [unit_type_id, pending_counts.get(unit_type_id, 0), count]
 				)
 			pending_counts[unit_type_id] = pending_counts.get(unit_type_id, 0) - count
