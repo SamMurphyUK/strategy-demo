@@ -62,7 +62,7 @@ Validate in tests with `EventSchemaValidator.validate_event(evt)`.
 `GameSessionAdapter` wraps any session and normalizes event dictionaries (canonical `type` without underscores, `source_command_id`, `timestamp`).
 
 ```gdscript
-var adapter := GameSessionAdapter.wrap(GameSessionFactory.create())
+var adapter := GameSessionAdapter.from_session(GameSessionFactory.create())
 var result := adapter.apply_command({...})
 ```
 

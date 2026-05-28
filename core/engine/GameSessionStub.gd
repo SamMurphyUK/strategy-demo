@@ -372,7 +372,7 @@ func _validate_purchase_affordability(cmd: Command) -> Dictionary:
 	for purchase in purchases:
 		var utid := str(purchase.get("unit_type_id", ""))
 		var count := int(purchase.get("count", 1))
-		var cost := UNIT_COSTS.get(utid, 0)
+		var cost: int = int(UNIT_COSTS.get(utid, 0))
 		if cost == 0:
 			var ut: Unit = state.unit_types.get(utid)
 			if ut:
@@ -474,7 +474,7 @@ func _forfeit_pending_at_mobilize_end(faction_id: String) -> Array:
 	for p in pending:
 		var utid := str(p.get("unit_type_id", ""))
 		var count := int(p.get("count", 1))
-		var cost := UNIT_COSTS.get(utid, 0)
+		var cost: int = int(UNIT_COSTS.get(utid, 0))
 		if cost == 0:
 			var ut: Unit = state.unit_types.get(utid)
 			if ut:

@@ -1,26 +1,26 @@
 extends GutTest
 
-var stub: GameSessionStub
+var demo_stub: GameSessionStub
 
 
 func before_each() -> void:
-	stub = GameSessionStub.new()
-	stub.initialize_demo(12345)
+	demo_stub = GameSessionStub.new()
+	demo_stub.initialize_demo(12345)
 
 
 func test_place_consumes_pending_and_updates_region_units() -> void:
-	stub.apply_command({
+	demo_stub.apply_command({
 		"command_id": "cmd_purchase",
 		"player_id": "allies",
 		"type": "purchase_units",
 		"payload": {"purchases": [{"unit_type_id": "infantry", "count": 1}]},
 	})
-	_advance_to_mobilize(stub)
+	_advance_to_mobilize(demo_stub)
 
-	var region_id := _first_allies_factory_region(stub)
-	var count_before := _infantry_count_in_region(stub, region_id)
+	var region_id := _first_allies_factory_region(demo_stub)
+	var count_before := _infantry_count_in_region(demo_stub, region_id)
 
-	var res := stub.apply_command({
+	var res := demo_stub.apply_command({
 		"command_id": "cmd_place",
 		"player_id": "allies",
 		"type": "place_units",
@@ -33,12 +33,12 @@ func test_place_consumes_pending_and_updates_region_units() -> void:
 	})
 	assert_eq(res["result_type"], "ok")
 	assert_eq(res["events"][0]["type"], "unitsplaced")
-	assert_eq(stub.get_state()["pending_purchases"]["allies"], [])
-	assert_eq(_infantry_count_in_region(stub, region_id), count_before + 1)
+	assert_eq(demo_stub.get_state()["pending_purchases"]["allies"], [])
+	assert_eq(_infantry_count_in_region(demo_stub, region_id), count_before + 1)
 
 
 func _advance_to_mobilize(s: GameSessionStub) -> void:
-	for i in 4:
+	for i in 3:
 		s.apply_command({
 			"command_id": "adv_%d" % i,
 			"player_id": "allies",

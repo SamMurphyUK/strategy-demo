@@ -1,15 +1,15 @@
 extends GutTest
 
-var stub: GameSessionStub
+var demo_stub: GameSessionStub
 
 
 func before_each() -> void:
-	stub = GameSessionStub.new()
-	stub.initialize_demo(12345)
+	demo_stub = GameSessionStub.new()
+	demo_stub.initialize_demo(12345)
 
 
 func test_snapshot_includes_cost_table_and_applied_event_ids() -> void:
-	var snap := stub.get_state()
+	var snap := demo_stub.get_state()
 	assert_true(snap.has("cost_table"))
 	assert_true(snap.has("pending_purchases"))
 	assert_true(snap.has("applied_event_ids"))
@@ -17,8 +17,8 @@ func test_snapshot_includes_cost_table_and_applied_event_ids() -> void:
 
 
 func test_rejects_purchase_when_ipc_insufficient() -> void:
-	stub.state.ipc["allies"] = 2
-	var res := stub.apply_command({
+	demo_stub.state.ipc["allies"] = 2
+	var res := demo_stub.apply_command({
 		"command_id": "cmd_no_ipc",
 		"player_id": "allies",
 		"type": "purchase_units",
@@ -31,7 +31,7 @@ func test_rejects_purchase_when_ipc_insufficient() -> void:
 
 
 func test_successful_purchase_emits_unitspurchased_only() -> void:
-	var res := stub.apply_command({
+	var res := demo_stub.apply_command({
 		"command_id": "cmd_ok",
 		"player_id": "allies",
 		"type": "purchase_units",
@@ -49,28 +49,28 @@ func test_duplicate_command_id_returns_prior_result() -> void:
 		"type": "purchase_units",
 		"payload": {"purchases": [{"unit_type_id": "infantry", "count": 1}]},
 	}
-	var first := stub.apply_command(cmd)
-	var ipc_after_first: int = stub.get_state()["ipc"]["allies"]
-	var second := stub.apply_command(cmd)
+	var first := demo_stub.apply_command(cmd)
+	var ipc_after_first: int = demo_stub.get_state()["ipc"]["allies"]
+	var second := demo_stub.apply_command(cmd)
 	assert_eq(first, second)
-	assert_eq(stub.get_state()["ipc"]["allies"], ipc_after_first)
+	assert_eq(demo_stub.get_state()["ipc"]["allies"], ipc_after_first)
 
 
 func test_place_rejects_unowned_region() -> void:
-	stub.apply_command({
+	demo_stub.apply_command({
 		"command_id": "p1",
 		"player_id": "allies",
 		"type": "purchase_units",
 		"payload": {"purchases": [{"unit_type_id": "infantry", "count": 1}]},
 	})
-	_advance_to_mobilize(stub)
-	var res := stub.apply_command({
+	_advance_to_mobilize(demo_stub)
+	var res := demo_stub.apply_command({
 		"command_id": "pl1",
 		"player_id": "allies",
 		"type": "place_units",
 		"payload": {
 			"placements": [{
-				"region_id": _axis_factory_region(stub),
+				"region_id": _axis_factory_region(demo_stub),
 				"units": [{"unit_type_id": "infantry", "count": 1}],
 			}],
 		},
@@ -80,14 +80,14 @@ func test_place_rejects_unowned_region() -> void:
 
 
 func test_mobilize_end_forfeits_pending_and_emits_event() -> void:
-	stub.apply_command({
+	demo_stub.apply_command({
 		"command_id": "p2",
 		"player_id": "allies",
 		"type": "purchase_units",
 		"payload": {"purchases": [{"unit_type_id": "infantry", "count": 1}]},
 	})
-	_advance_to_mobilize(stub)
-	var res := stub.apply_command({
+	_advance_to_mobilize(demo_stub)
+	var res := demo_stub.apply_command({
 		"command_id": "ep1",
 		"player_id": "allies",
 		"type": "end_phase",
@@ -95,11 +95,11 @@ func test_mobilize_end_forfeits_pending_and_emits_event() -> void:
 	})
 	assert_eq(res["result_type"], "ok")
 	assert_true(_has_event_type(res["events"], "placementforfeited"))
-	assert_eq(stub.get_state()["pending_purchases"]["allies"], [])
+	assert_eq(demo_stub.get_state()["pending_purchases"]["allies"], [])
 
 
 func test_events_conform_to_schema() -> void:
-	var res := stub.apply_command({
+	var res := demo_stub.apply_command({
 		"command_id": "schema1",
 		"player_id": "allies",
 		"type": "purchase_units",
@@ -137,7 +137,7 @@ func _has_event_type(events: Array, type_name: String) -> bool:
 
 
 func _advance_to_mobilize(s: GameSessionStub) -> void:
-	for i in 4:
+	for i in 3:
 		s.apply_command({
 			"command_id": "adv_%d_%d" % [s.get_demo_seed(), i],
 			"player_id": "allies",

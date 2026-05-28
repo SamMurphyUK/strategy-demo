@@ -48,7 +48,7 @@ func _run_smoke() -> void:
 	if str(purchase.get("result_type", "")) != "ok":
 		_errors.append("Purchase failed: %s" % str(purchase.get("error", {})))
 
-	for i in 4:
+	for i in 3:
 		var ep := stub.apply_command({
 			"command_id": "smoke_ep_%d" % i,
 			"player_id": "allies",

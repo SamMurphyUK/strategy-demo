@@ -2,9 +2,9 @@ extends GutTest
 
 
 func test_normalizes_stub_event() -> void:
-	var stub := GameSessionStub.new()
-	stub.initialize_demo(42)
-	var adapter := GameSessionAdapter.wrap(stub)
+	var demo_stub := GameSessionStub.new()
+	demo_stub.initialize_demo(42)
+	var adapter := GameSessionAdapter.from_session(demo_stub)
 	var res := adapter.apply_command({
 		"command_id": "norm_stub",
 		"player_id": "allies",
@@ -16,7 +16,7 @@ func test_normalizes_stub_event() -> void:
 
 
 func test_normalizes_full_engine_style_event() -> void:
-	var adapter := GameSessionAdapter.wrap(null)
+	var adapter := GameSessionAdapter.from_session(null)
 	var raw := GameEvent.create(
 		GameEvent.Type.UNITS_PURCHASED,
 		{"faction_id": "allies", "units": [{"unit_type_id": "infantry", "count": 1}], "cost": 3},
@@ -29,7 +29,7 @@ func test_normalizes_full_engine_style_event() -> void:
 
 
 func test_normalizes_underscore_event_id() -> void:
-	var adapter := GameSessionAdapter.wrap(null)
+	var adapter := GameSessionAdapter.from_session(null)
 	var raw_dict := {
 		"event_id": "e_00012",
 		"sequence": 12,

@@ -9,7 +9,7 @@ func _init(p_session = null) -> void:
 	session = p_session
 
 
-static func wrap(session_instance) -> GameSessionAdapter:
+static func from_session(session_instance) -> GameSessionAdapter:
 	return GameSessionAdapter.new(session_instance)
 
 
@@ -100,7 +100,7 @@ func _map_command_type(type_name: String) -> String:
 
 func _to_canonical_event(raw, source_command_id: String) -> Dictionary:
 	if raw is Dictionary:
-		var d := raw.duplicate(true)
+		var d: Dictionary = raw.duplicate(true)
 		if not d.has("source_command_id"):
 			d["source_command_id"] = source_command_id
 		d["type"] = _normalize_type(str(d.get("type", "")))
