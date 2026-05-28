@@ -29,6 +29,7 @@ var staged_units_list: VBoxContainer = null
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
+var right_panel: Control = null
 
 var session = null
 var _command_counter: int = 0
@@ -57,42 +58,43 @@ func _ready() -> void:
 func _autobind_nodes() -> void:
 	map_root = find_child("MapRoot", true, false)
 	unit_visualizer = find_child("UnitVisualizer", true, false)
-	var panel: Control = find_child("Panel", true, false)
-	if panel == null:
+	var main_ui: Control = find_child("MainUI", true, false)
+	if main_ui == null:
 		return
-	state_label = panel.find_child("StateLabel", true, false)
-	faction_selector = panel.find_child("FactionSelector", true, false)
+	state_label = main_ui.find_child("StateLabel", true, false)
+	faction_selector = main_ui.find_child("FactionSelector", true, false)
 	if faction_selector == null:
-		faction_selector = panel.find_child("FactionSelect", true, false)
-	ipc_allies_label = panel.find_child("AlliesIPCLabel", true, false)
-	ipc_axis_label = panel.find_child("AxisIPCLabel", true, false)
-	pending_list = panel.find_child("PendingPurchasesList", true, false)
-	pending_total_label = panel.find_child("PendingTotalLabel", true, false)
-	unit_catalog = panel.find_child("UnitCatalogList", true, false)
-	purchase_confirm_button = panel.find_child("PurchaseConfirmButton", true, false)
-	cancel_purchase_button = panel.find_child("CancelPurchaseButton", true, false)
-	spawn_infantry_button = panel.find_child("SpawnInfantryButton", true, false)
+		faction_selector = main_ui.find_child("FactionSelect", true, false)
+	ipc_allies_label = main_ui.find_child("AlliesIPCLabel", true, false)
+	ipc_axis_label = main_ui.find_child("AxisIPCLabel", true, false)
+	pending_list = main_ui.find_child("PendingPurchasesList", true, false)
+	pending_total_label = main_ui.find_child("PendingTotalLabel", true, false)
+	unit_catalog = main_ui.find_child("UnitCatalogList", true, false)
+	purchase_confirm_button = main_ui.find_child("PurchaseConfirmButton", true, false)
+	cancel_purchase_button = main_ui.find_child("CancelPurchaseButton", true, false)
+	spawn_infantry_button = main_ui.find_child("SpawnInfantryButton", true, false)
 	if spawn_infantry_button == null:
-		spawn_infantry_button = panel.find_child("SpawnInfantry", true, false)
-	move_unit_button = panel.find_child("MoveUnitButton", true, false)
+		spawn_infantry_button = main_ui.find_child("SpawnInfantry", true, false)
+	move_unit_button = main_ui.find_child("MoveUnitButton", true, false)
 	if move_unit_button == null:
-		move_unit_button = panel.find_child("MoveUnit", true, false)
-	end_phase_button = panel.find_child("EndPhaseButton", true, false)
+		move_unit_button = main_ui.find_child("MoveUnit", true, false)
+	end_phase_button = main_ui.find_child("EndPhaseButton", true, false)
 	if end_phase_button == null:
-		end_phase_button = panel.find_child("EndPhase", true, false)
-	end_turn_button = panel.find_child("EndTurnButton", true, false)
+		end_phase_button = main_ui.find_child("EndPhase", true, false)
+	end_turn_button = main_ui.find_child("EndTurnButton", true, false)
 	if end_turn_button == null:
-		end_turn_button = panel.find_child("EndTurn", true, false)
-	event_log = panel.find_child("EventLog", true, false)
-	region_info_vbox = panel.find_child("RegionInfo", true, false)
-	region_name_label = panel.find_child("RegionNameLabel", true, false)
-	region_owner_label = panel.find_child("OwnerLabel", true, false)
-	region_unitcount_label = panel.find_child("UnitCountLabel", true, false)
-	purchase_panel = panel.find_child("PurchasePanel", true, false)
-	mobilize_panel = panel.find_child("MobilizePanel", true, false)
-	staged_units_list = panel.find_child("StagedUnitsList", true, false)
-	region_stack = panel.find_child("RegionStack", true, false)
-	region_stack_list = panel.find_child("RegionStackList", true, false)
+		end_turn_button = main_ui.find_child("EndTurn", true, false)
+	event_log = main_ui.find_child("EventLog", true, false)
+	region_info_vbox = main_ui.find_child("RegionInfo", true, false)
+	region_name_label = main_ui.find_child("RegionNameLabel", true, false)
+	region_owner_label = main_ui.find_child("OwnerLabel", true, false)
+	region_unitcount_label = main_ui.find_child("UnitCountLabel", true, false)
+	purchase_panel = main_ui.find_child("PurchasePanel", true, false)
+	mobilize_panel = main_ui.find_child("MobilizePanel", true, false)
+	staged_units_list = main_ui.find_child("StagedUnitsList", true, false)
+	region_stack = main_ui.find_child("RegionStack", true, false)
+	region_stack_list = main_ui.find_child("RegionStackList", true, false)
+	right_panel = main_ui.find_child("RightPanel", true, false)
 	battle_overlay = find_child("BattleOverlay", true, false)
 
 func _setup_faction_selector() -> void:
@@ -236,7 +238,7 @@ func _refresh_all() -> void:
 		return
 	var snapshot: Dictionary = session.get_state()
 	_update_state_label(snapshot)
-	_refresh_phase_ui(snapshot)
+	on_state_updated(snapshot)
 	_refresh_purchase_panels(snapshot)
 	_refresh_region_info(_selected_region_id())
 	_refresh_region_stack(_selected_region_id(), snapshot)
@@ -249,8 +251,15 @@ func _refresh_all() -> void:
 	if battle_overlay:
 		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
 
-func _refresh_phase_ui(snapshot: Dictionary) -> void:
-	var phase := str(snapshot.get("turn_info", {}).get("current_phase", ""))
+func _update_phase_ui(phase: String) -> void:
+	if right_panel:
+		right_panel.visible = phase == "purchase"
+
+func on_state_updated(new_state: Dictionary) -> void:
+	var phase := str(new_state.get("current_phase", ""))
+	if phase.is_empty():
+		phase = str(new_state.get("turn_info", {}).get("current_phase", ""))
+	_update_phase_ui(phase)
 	if purchase_panel:
 		purchase_panel.visible = phase == "purchase"
 	if mobilize_panel:
@@ -359,7 +368,8 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		label.text = "%s x%d" % [unit_type_id.capitalize(), count]
 		row.add_child(label)
 		var icon := DraggableStagedIcon.new()
-		icon.custom_minimum_size = Vector2(24, 24)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.custom_minimum_size = Vector2(48, 48)
 		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
 		icon.drag_data = {
 			"unit_type_id": unit_type_id,
