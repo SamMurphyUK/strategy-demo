@@ -29,7 +29,7 @@ var staged_units_list: VBoxContainer = null
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
-var right_panel: Control = null
+var right_ui_root: Control = null
 
 var session = null
 var _command_counter: int = 0
@@ -58,43 +58,44 @@ func _ready() -> void:
 func _autobind_nodes() -> void:
 	map_root = find_child("MapRoot", true, false)
 	unit_visualizer = find_child("UnitVisualizer", true, false)
-	var main_ui: Control = find_child("MainUI", true, false)
-	if main_ui == null:
+	var left_ui: Control = get_node_or_null("LeftUIRoot")
+	var right_ui: Control = get_node_or_null("RightUIRoot")
+	if left_ui == null or right_ui == null:
 		return
-	state_label = main_ui.find_child("StateLabel", true, false)
-	faction_selector = main_ui.find_child("FactionSelector", true, false)
+	state_label = left_ui.find_child("StateLabel", true, false)
+	faction_selector = left_ui.find_child("FactionSelector", true, false)
 	if faction_selector == null:
-		faction_selector = main_ui.find_child("FactionSelect", true, false)
-	ipc_allies_label = main_ui.find_child("AlliesIPCLabel", true, false)
-	ipc_axis_label = main_ui.find_child("AxisIPCLabel", true, false)
-	pending_list = main_ui.find_child("PendingPurchasesList", true, false)
-	pending_total_label = main_ui.find_child("PendingTotalLabel", true, false)
-	unit_catalog = main_ui.find_child("UnitCatalogList", true, false)
-	purchase_confirm_button = main_ui.find_child("PurchaseConfirmButton", true, false)
-	cancel_purchase_button = main_ui.find_child("CancelPurchaseButton", true, false)
-	spawn_infantry_button = main_ui.find_child("SpawnInfantryButton", true, false)
+		faction_selector = left_ui.find_child("FactionSelect", true, false)
+	ipc_allies_label = right_ui.find_child("AlliesIPCLabel", true, false)
+	ipc_axis_label = right_ui.find_child("AxisIPCLabel", true, false)
+	pending_list = right_ui.find_child("PendingPurchasesList", true, false)
+	pending_total_label = right_ui.find_child("PendingTotalLabel", true, false)
+	unit_catalog = right_ui.find_child("UnitCatalogList", true, false)
+	purchase_confirm_button = right_ui.find_child("PurchaseConfirmButton", true, false)
+	cancel_purchase_button = right_ui.find_child("CancelPurchaseButton", true, false)
+	spawn_infantry_button = left_ui.find_child("SpawnInfantryButton", true, false)
 	if spawn_infantry_button == null:
-		spawn_infantry_button = main_ui.find_child("SpawnInfantry", true, false)
-	move_unit_button = main_ui.find_child("MoveUnitButton", true, false)
+		spawn_infantry_button = left_ui.find_child("SpawnInfantry", true, false)
+	move_unit_button = left_ui.find_child("MoveUnitButton", true, false)
 	if move_unit_button == null:
-		move_unit_button = main_ui.find_child("MoveUnit", true, false)
-	end_phase_button = main_ui.find_child("EndPhaseButton", true, false)
+		move_unit_button = left_ui.find_child("MoveUnit", true, false)
+	end_phase_button = left_ui.find_child("EndPhaseButton", true, false)
 	if end_phase_button == null:
-		end_phase_button = main_ui.find_child("EndPhase", true, false)
-	end_turn_button = main_ui.find_child("EndTurnButton", true, false)
+		end_phase_button = left_ui.find_child("EndPhase", true, false)
+	end_turn_button = left_ui.find_child("EndTurnButton", true, false)
 	if end_turn_button == null:
-		end_turn_button = main_ui.find_child("EndTurn", true, false)
-	event_log = main_ui.find_child("EventLog", true, false)
-	region_info_vbox = main_ui.find_child("RegionInfo", true, false)
-	region_name_label = main_ui.find_child("RegionNameLabel", true, false)
-	region_owner_label = main_ui.find_child("OwnerLabel", true, false)
-	region_unitcount_label = main_ui.find_child("UnitCountLabel", true, false)
-	purchase_panel = main_ui.find_child("PurchasePanel", true, false)
-	mobilize_panel = main_ui.find_child("MobilizePanel", true, false)
-	staged_units_list = main_ui.find_child("StagedUnitsList", true, false)
-	region_stack = main_ui.find_child("RegionStack", true, false)
-	region_stack_list = main_ui.find_child("RegionStackList", true, false)
-	right_panel = main_ui.find_child("RightPanel", true, false)
+		end_turn_button = left_ui.find_child("EndTurn", true, false)
+	event_log = left_ui.find_child("EventLog", true, false)
+	region_info_vbox = left_ui.find_child("RegionInfo", true, false)
+	region_name_label = left_ui.find_child("RegionNameLabel", true, false)
+	region_owner_label = left_ui.find_child("OwnerLabel", true, false)
+	region_unitcount_label = left_ui.find_child("UnitCountLabel", true, false)
+	purchase_panel = right_ui.find_child("PurchasePanel", true, false)
+	mobilize_panel = left_ui.find_child("MobilizePanel", true, false)
+	staged_units_list = left_ui.find_child("StagedUnitsList", true, false)
+	region_stack = left_ui.find_child("RegionStack", true, false)
+	region_stack_list = left_ui.find_child("RegionStackList", true, false)
+	right_ui_root = right_ui
 	battle_overlay = find_child("BattleOverlay", true, false)
 
 func _setup_faction_selector() -> void:
@@ -252,8 +253,8 @@ func _refresh_all() -> void:
 		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
 
 func _update_phase_ui(phase: String) -> void:
-	if right_panel:
-		right_panel.visible = phase == "purchase"
+	if right_ui_root:
+		right_ui_root.visible = phase == "purchase"
 
 func on_state_updated(new_state: Dictionary) -> void:
 	var phase := str(new_state.get("current_phase", ""))

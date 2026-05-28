@@ -35,168 +35,176 @@ debug_logging = true
 
 [node name="UnitIcon" parent="layer = 0/MapRoot/UnitLayer/UnitVisualizer" unique_id=1380998926 instance=ExtResource("5_xs4ih")]
 
-[node name="layer = 1" type="CanvasLayer" parent="." unique_id=488379091]
-
-[node name="UIRoot" type="Control" parent="layer = 1" unique_id=905029186]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="MainUI" type="HBoxContainer" parent="layer = 1/UIRoot" unique_id=1474874037]
+[node name="LeftUIRoot" type="Control" parent="."]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
+anchors_preset = 1
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
 anchor_bottom = 1.0
-offset_top = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 12
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 260.0
+offset_bottom = 0.0
 
-[node name="LeftPanel" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI" unique_id=1774648285]
+[node name="LeftVBox" type="VBoxContainer" parent="LeftUIRoot"]
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 250.0
+offset_bottom = 600.0
 theme_override_constants/separation = 8
 
-[node name="StateLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=638844510]
+[node name="StateLabel" type="Label" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 text = "Loading..."
 
-[node name="FactionLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=1424902391]
+[node name="FactionLabel" type="Label" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 text = "Command as:"
 
-[node name="FactionSelector" type="OptionButton" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=943396868]
+[node name="FactionSelect" type="OptionButton" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 
-[node name="Buttons" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=190313724]
+[node name="Buttons" type="VBoxContainer" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SpawnInfantryButton" type="Button" parent="layer = 1/UIRoot/MainUI/LeftPanel/Buttons" unique_id=1715429584]
+[node name="SpawnInfantry" type="Button" parent="LeftUIRoot/LeftVBox/Buttons"]
 layout_mode = 2
 text = "Spawn Infantry"
 
-[node name="MoveUnitButton" type="Button" parent="layer = 1/UIRoot/MainUI/LeftPanel/Buttons" unique_id=464711175]
+[node name="MoveUnit" type="Button" parent="LeftUIRoot/LeftVBox/Buttons"]
 layout_mode = 2
 text = "Move Unit"
 
-[node name="EndPhaseButton" type="Button" parent="layer = 1/UIRoot/MainUI/LeftPanel/Buttons" unique_id=530076375]
+[node name="EndPhase" type="Button" parent="LeftUIRoot/LeftVBox/Buttons"]
 layout_mode = 2
 text = "End Phase"
 
-[node name="EndTurnButton" type="Button" parent="layer = 1/UIRoot/MainUI/LeftPanel/Buttons" unique_id=1593504829]
+[node name="EndTurn" type="Button" parent="LeftUIRoot/LeftVBox/Buttons"]
 layout_mode = 2
 text = "End Turn"
 
-[node name="RegionInfo" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=488526728]
+[node name="RegionInfo" type="VBoxContainer" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 
-[node name="RegionNameLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel/RegionInfo" unique_id=1049530228]
+[node name="RegionNameLabel" type="Label" parent="LeftUIRoot/LeftVBox/RegionInfo"]
 layout_mode = 2
 text = "Region: —"
 
-[node name="OwnerLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel/RegionInfo" unique_id=140817336]
+[node name="OwnerLabel" type="Label" parent="LeftUIRoot/LeftVBox/RegionInfo"]
 layout_mode = 2
 text = "Owner: —"
 
-[node name="UnitCountLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel/RegionInfo" unique_id=843389716]
+[node name="UnitCountLabel" type="Label" parent="LeftUIRoot/LeftVBox/RegionInfo"]
 layout_mode = 2
 text = "Units: —"
 
-[node name="MobilizePanel" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=1412780892]
+[node name="MobilizePanel" type="VBoxContainer" parent="LeftUIRoot/LeftVBox"]
 visible = false
 layout_mode = 2
 
-[node name="MobilizeHeader" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel/MobilizePanel" unique_id=435274406]
+[node name="MobilizeHeader" type="Label" parent="LeftUIRoot/LeftVBox/MobilizePanel"]
 layout_mode = 2
 text = "Mobilize Staged Units (drag to map)"
 
-[node name="StagedUnitsList" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel/MobilizePanel" unique_id=288606369]
+[node name="StagedUnitsList" type="VBoxContainer" parent="LeftUIRoot/LeftVBox/MobilizePanel"]
 layout_mode = 2
 
-[node name="RegionStack" type="PanelContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=199972426]
+[node name="RegionStack" type="PanelContainer" parent="LeftUIRoot/LeftVBox"]
+layout_mode = 2
 custom_minimum_size = Vector2(0, 90)
-layout_mode = 2
 
-[node name="RegionStackMargin" type="MarginContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel/RegionStack" unique_id=883633100]
+[node name="RegionStackMargin" type="MarginContainer" parent="LeftUIRoot/LeftVBox/RegionStack"]
 layout_mode = 2
 theme_override_constants/margin_left = 6
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_bottom = 6
 
-[node name="RegionStackList" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/LeftPanel/RegionStack/RegionStackMargin" unique_id=1371429922]
+[node name="RegionStackList" type="VBoxContainer" parent="LeftUIRoot/LeftVBox/RegionStack/RegionStackMargin"]
 layout_mode = 2
 
-[node name="EventLogLabel" type="Label" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=1427365671]
+[node name="EventLogLabel" type="Label" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 text = "Event log:"
 
-[node name="EventLog" type="RichTextLabel" parent="layer = 1/UIRoot/MainUI/LeftPanel" unique_id=2037338683]
+[node name="EventLog" type="RichTextLabel" parent="LeftUIRoot/LeftVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 bbcode_enabled = true
 scroll_following = true
 
-[node name="RightPanel" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI" unique_id=914240329]
+[node name="RightUIRoot" type="Control" parent="."]
 visible = false
-custom_minimum_size = Vector2(360, 0)
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="RightVBox" type="VBoxContainer" parent="RightUIRoot"]
 layout_mode = 2
-size_flags_vertical = 3
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 250.0
+offset_bottom = 600.0
 theme_override_constants/separation = 8
 
-[node name="PurchasePanel" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=933300495]
+[node name="PurchasePanel" type="VBoxContainer" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 
-[node name="IPCHeader" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=1754560803]
+[node name="IPCHeader" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "IPC"
 
-[node name="AlliesIPCLabel" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=1602509615]
+[node name="AlliesIPCLabel" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "Allies IPC: 0"
 
-[node name="AxisIPCLabel" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=367877710]
+[node name="AxisIPCLabel" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "Axis IPC: 0"
 
-[node name="UnitCatalogHeader" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=1293438633]
+[node name="UnitCatalogHeader" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "Unit Catalog"
 
-[node name="UnitCatalogList" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=523087418]
+[node name="UnitCatalogList" type="VBoxContainer" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 
-[node name="PendingHeader" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=1821067254]
+[node name="PendingHeader" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "Pending Purchases"
 
-[node name="PendingPurchasesList" type="VBoxContainer" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=1326597811]
+[node name="PendingPurchasesList" type="VBoxContainer" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 
-[node name="PendingTotalLabel" type="Label" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=259966510]
+[node name="PendingTotalLabel" type="Label" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 text = "Pending total: 0"
 
-[node name="PurchaseButtons" type="HBoxContainer" parent="layer = 1/UIRoot/MainUI/RightPanel" unique_id=794974140]
+[node name="PurchaseButtons" type="HBoxContainer" parent="RightUIRoot/RightVBox"]
 layout_mode = 2
 
-[node name="PurchaseConfirmButton" type="Button" parent="layer = 1/UIRoot/MainUI/RightPanel/PurchaseButtons" unique_id=66479122]
+[node name="PurchaseConfirmButton" type="Button" parent="RightUIRoot/RightVBox/PurchaseButtons"]
 layout_mode = 2
 text = "Confirm Purchase"
 
-[node name="CancelPurchaseButton" type="Button" parent="layer = 1/UIRoot/MainUI/RightPanel/PurchaseButtons" unique_id=972113407]
+[node name="CancelPurchaseButton" type="Button" parent="RightUIRoot/RightVBox/PurchaseButtons"]
 layout_mode = 2
 text = "Cancel Pending"
 
-[node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=777102]
+[node name="BattleOverlay" type="CanvasLayer" parent="."]
 visible = false
 
-[node name="BattleColorRect" type="ColorRect" parent="BattleOverlay" unique_id=507014146]
+[node name="BattleColorRect" type="ColorRect" parent="BattleOverlay"]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -204,7 +212,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.45)
 
-[node name="BattlePanel" type="PanelContainer" parent="BattleOverlay/BattleColorRect" unique_id=219738432]
+[node name="BattlePanel" type="PanelContainer" parent="BattleOverlay/BattleColorRect"]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -215,10 +223,8 @@ offset_left = -140.0
 offset_top = -50.0
 offset_right = 140.0
 offset_bottom = 50.0
-grow_horizontal = 2
-grow_vertical = 2
 
-[node name="BattleLabel" type="Label" parent="BattleOverlay/BattleColorRect/BattlePanel" unique_id=83326776]
+[node name="BattleLabel" type="Label" parent="BattleOverlay/BattleColorRect/BattlePanel"]
 layout_mode = 2
-text = "Combat Phase (placeholder)"
 horizontal_alignment = 1
+text = "Combat Phase (placeholder)"
