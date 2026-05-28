@@ -30,6 +30,7 @@ func _run_smoke() -> void:
 		"seed": _seed,
 		"errors": [],
 		"event_types": [],
+		"events": [],
 		"snapshot_phase": "",
 		"placed_infantry": false,
 	}
@@ -96,6 +97,7 @@ func _run_smoke() -> void:
 
 	result["errors"] = _errors.duplicate()
 	result["event_types"] = _event_types().keys()
+	result["events"] = _events.duplicate(true)
 	result["snapshot_phase"] = str(snap.get("turn_info", {}).get("current_phase", ""))
 	result["placed_infantry"] = placed
 	result["success"] = (

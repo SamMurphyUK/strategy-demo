@@ -47,7 +47,7 @@ func test_game_scene_smoke_purchase_mobilize_place() -> void:
 	assert_eq(str(scene.session.state.current_phase), "mobilize")
 	var pending = scene.session.get_state()["pending_purchases"]["allies"]
 	assert_eq(pending, [])
-	var snap := scene.session.get_state()
+	var snap: Dictionary = scene.session.get_state()
 	assert_true(_region_has_infantry(snap, region_id))
 
 

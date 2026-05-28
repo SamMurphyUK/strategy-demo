@@ -128,3 +128,32 @@ session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
 ```
 
 Use `Mode.FULL` when you need the unchanged full engine path.
+
+## Purchase phase UI walkthrough
+
+In `GameScene.tscn`, the right panel now includes:
+
+- **Allies IPC / Axis IPC** labels
+- **Unit Catalog** rows with a `+` buy button
+- **Pending Purchases** rows (`unit_type x count (cost)`), row cancel for staged items, and pending total
+- **Confirm Purchase** and **Cancel Pending** buttons
+- **Event Log** showing canonical event dictionaries returned by `apply_command`
+
+### Purchase flow
+
+1. During `purchase` phase, use `+` buttons to stage purchases locally.
+2. Click **Confirm Purchase** to send one `purchase_units` command with all staged entries.
+3. End phases to `mobilize`, select a region, and place via **Spawn Infantry** (existing behavior).
+4. End mobilize with leftover pending to trigger `placementforfeited`.
+
+### Test commands
+
+```bash
+godot --headless --no-window --path . --import
+
+godot --headless --no-window --path . --script res://addons/gut/gut_cmdln.gd -- \
+  -gdir=res://tests/integration -gexit -ginclude_subdirs
+
+godot --headless --no-window --path . --script res://scripts/demo_smoke_runner.gd -- \
+  --seed=99999 --output=/tmp/smoke_result.json
+```
