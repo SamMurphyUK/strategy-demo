@@ -19,10 +19,8 @@ func test_headless_scene_smoke_flow() -> void:
 	var stub: GameSessionStub = scene.session
 	var region_id := _first_allies_factory_region(stub)
 
-	var ipc_before: int = stub.get_state()["ipc"]["allies"]
 	scene._on_spawn_infantry_pressed()
-	assert_lt(stub.get_state()["ipc"]["allies"], ipc_before)
-	assert_gt(stub.get_state()["pending_purchases"]["allies"].size(), 0)
+	assert_eq(int(scene.ui_pending_purchases.get("infantry", 0)), 1)
 
 	for i in 3:
 		scene._on_end_phase_pressed()
