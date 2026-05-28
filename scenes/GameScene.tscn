@@ -4,7 +4,7 @@
 [ext_resource type="Script" uid="uid://b5d3xqv80d7ux" path="res://scenes/game_map_root.gd" id="2_map"]
 [ext_resource type="Texture2D" uid="uid://bdoi6lkrtx3f5" path="res://texture/test.jpg" id="3_cxv17"]
 [ext_resource type="Script" uid="uid://ux0km6bjtopn" path="res://scripts/unit_visualizer.gd" id="4_7s5hy"]
-[ext_resource type="PackedScene" uid="uid://uniticon123" path="res://scenes/ui/UnitIcon.tscn" id="5_xs4ih"]
+[ext_resource type="PackedScene" path="res://scenes/UnitIcon.tscn" id="5_xs4ih"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -65,6 +65,9 @@ layout_mode = 2
 text = "Command as:"
 
 [node name="FactionSelector" type="OptionButton" parent="layer = 1/UIRoot/Panel" unique_id=943396868]
+layout_mode = 2
+
+[node name="PurchasePanel" type="VBoxContainer" parent="layer = 1/UIRoot/Panel"]
 layout_mode = 2
 
 [node name="IPCHeader" type="Label" parent="layer = 1/UIRoot/Panel"]
@@ -143,6 +146,31 @@ text = "Owner: —"
 layout_mode = 2
 text = "Units: —"
 
+[node name="MobilizePanel" type="VBoxContainer" parent="layer = 1/UIRoot/Panel"]
+visible = false
+layout_mode = 2
+
+[node name="MobilizeHeader" type="Label" parent="layer = 1/UIRoot/Panel/MobilizePanel"]
+layout_mode = 2
+text = "Mobilize Staged Units (drag to map)"
+
+[node name="StagedUnitsList" type="VBoxContainer" parent="layer = 1/UIRoot/Panel/MobilizePanel"]
+layout_mode = 2
+
+[node name="RegionStack" type="PanelContainer" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 90)
+
+[node name="RegionStackMargin" type="MarginContainer" parent="layer = 1/UIRoot/Panel/RegionStack"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="RegionStackList" type="VBoxContainer" parent="layer = 1/UIRoot/Panel/RegionStack/RegionStackMargin"]
+layout_mode = 2
+
 [node name="EventLogLabel" type="Label" parent="layer = 1/UIRoot/Panel" unique_id=1427365671]
 layout_mode = 2
 text = "Event log:"
@@ -152,3 +180,31 @@ layout_mode = 2
 size_flags_vertical = 3
 bbcode_enabled = true
 scroll_following = true
+
+[node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=777102]
+visible = false
+
+[node name="BattleColorRect" type="ColorRect" parent="BattleOverlay"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.45)
+
+[node name="BattlePanel" type="PanelContainer" parent="BattleOverlay/BattleColorRect"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -140.0
+offset_top = -50.0
+offset_right = 140.0
+offset_bottom = 50.0
+
+[node name="BattleLabel" type="Label" parent="BattleOverlay/BattleColorRect/BattlePanel"]
+layout_mode = 2
+horizontal_alignment = 1
+text = "Combat Phase (placeholder)"

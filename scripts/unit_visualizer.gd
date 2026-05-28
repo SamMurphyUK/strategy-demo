@@ -22,6 +22,13 @@ var UNIT_TEXTURES := {
 }
 
 func _ready() -> void:
+	if unit_icon_scene == null:
+		if ResourceLoader.exists("res://scenes/UnitIcon.tscn"):
+			unit_icon_scene = load("res://scenes/UnitIcon.tscn")
+		elif ResourceLoader.exists("res://scenes/ui/UnitIcon.tscn"):
+			unit_icon_scene = load("res://scenes/ui/UnitIcon.tscn")
+		elif debug_logging:
+			push_warning("UnitVisualizer: UnitIcon scene missing; using placeholder icons.")
 	if debug_logging:
 		print("UnitVisualizer ready. unit_icon_scene set:", unit_icon_scene != null)
 
