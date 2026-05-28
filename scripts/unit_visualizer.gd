@@ -6,21 +6,6 @@ class_name UnitVisualizer
 
 var _icons := {}
 
-var UNIT_TEXTURES := {
-	"infantry": {
-		"allies": "res://textures/units/allies_infantry.png",
-		"axis": "res://textures/units/axis_infantry.png",
-	},
-	"tank": {
-		"allies": "res://textures/units/allies_tank.png",
-		"axis": "res://textures/units/axis_tank.png",
-	},
-	"artillery": {
-		"allies": "res://textures/units/allies_artillery.png",
-		"axis": "res://textures/units/axis_artillery.png",
-	},
-}
-
 func _ready() -> void:
 	if unit_icon_scene == null:
 		if ResourceLoader.exists("res://scenes/UnitIcon.tscn"):
@@ -67,6 +52,7 @@ func _spawn_icon(region_id: String, type_id: String, count: int, map_root: Node2
 		placeholder.color = Color(1, 0.6, 0.0, 0.9)
 		icon.add_child(placeholder)
 	icon.position = local_pos
+	icon.scale = Vector2(0.25, 0.25)
 	var faction := "neutral"
 	var meta := region_node.get_node_or_null("RegionMetadata")
 	if meta:
@@ -86,13 +72,18 @@ func _spawn_icon(region_id: String, type_id: String, count: int, map_root: Node2
 	_icons[region_id][type_id] = icon
 
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
-	var path := str(UNIT_TEXTURES.get(unit_type_id, {}).get(faction, ""))
+	var path := _get_unit_icon(unit_type_id, faction)
 	if path != "" and ResourceLoader.exists(path):
 		return load(path)
 	var fallback := "res://texture/units/Copilot_20260521_020052.png"
 	if ResourceLoader.exists(fallback):
 		return load(fallback)
 	return null
+
+func _get_unit_icon(unit_type: String, faction: String) -> String:
+	var base := "res://texture/units/"
+	var folder := "us" if faction == "allies" else "ger"
+	return "%s%s/%s.png" % [base, folder, unit_type]
 
 func _find_region_node(region_id: String, map_root: Node2D) -> Node2D:
 	if map_root == null:
