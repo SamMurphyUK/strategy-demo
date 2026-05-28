@@ -82,7 +82,7 @@ func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
 
 func _get_unit_icon(unit_type: String, faction: String) -> String:
 	var base := "res://texture/units/"
-	var folder := "us" if faction == "allies" else "ger"
+	var folder := "us" if faction.to_lower() == "allies" else "ger"
 	return "%s%s/%s.png" % [base, folder, unit_type]
 
 func _find_region_node(region_id: String, map_root: Node2D) -> Node2D:

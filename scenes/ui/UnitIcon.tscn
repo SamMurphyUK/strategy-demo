@@ -4,12 +4,12 @@
 [ext_resource type="Texture2D" path="res://texture/units/Copilot_20260521_020052.png" id=2]
 
 [node name="UnitIcon" type="Node2D"]
-scale = Vector2(0.05, 0.05)
+scale = Vector2(0.02, 0.02)
 script = ExtResource("1")
 
 [node name="Sprite" type="Sprite2D" parent="."]
 texture = ExtResource("2")
-scale = Vector2(0.12, 0.12)
+scale = Vector2(1, 1)
 centered = true
 
 [node name="CountLabel" type="Label" parent="."]

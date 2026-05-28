@@ -100,12 +100,17 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 	return region
 
 func _on_region_input_event(viewport: Node, event: InputEvent, shape_idx: int, region_id: String) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton \
+			and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT:
 		select_region(region_id)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var region_id := _find_region_at_point(event.position)
+	if event is InputEventMouseButton \
+			and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT:
+		var global_pos: Vector2 = get_viewport().get_mouse_position()
+		var region_id := _find_region_at_point(global_pos)
 		if region_id != "":
 			select_region(region_id)
 
