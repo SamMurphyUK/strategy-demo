@@ -67,6 +67,47 @@ text = "Command as:"
 [node name="FactionSelector" type="OptionButton" parent="layer = 1/UIRoot/Panel" unique_id=943396868]
 layout_mode = 2
 
+[node name="IPCHeader" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "IPC"
+
+[node name="AlliesIPCLabel" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "Allies IPC: 0"
+
+[node name="AxisIPCLabel" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "Axis IPC: 0"
+
+[node name="UnitCatalogHeader" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "Unit Catalog"
+
+[node name="UnitCatalogList" type="VBoxContainer" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+
+[node name="PendingHeader" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "Pending Purchases"
+
+[node name="PendingPurchasesList" type="VBoxContainer" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+
+[node name="PendingTotalLabel" type="Label" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+text = "Pending total: 0"
+
+[node name="PurchaseButtons" type="HBoxContainer" parent="layer = 1/UIRoot/Panel"]
+layout_mode = 2
+
+[node name="PurchaseConfirmButton" type="Button" parent="layer = 1/UIRoot/Panel/PurchaseButtons"]
+layout_mode = 2
+text = "Confirm Purchase"
+
+[node name="CancelPurchaseButton" type="Button" parent="layer = 1/UIRoot/Panel/PurchaseButtons"]
+layout_mode = 2
+text = "Cancel Pending"
+
 [node name="Buttons" type="VBoxContainer" parent="layer = 1/UIRoot/Panel" unique_id=190313724]
 layout_mode = 2
 theme_override_constants/separation = 6
