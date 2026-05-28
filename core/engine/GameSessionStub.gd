@@ -34,6 +34,7 @@ var debug: bool = false
 var _events: Array = []
 var _seq: int = 0
 var _applied_event_ids: Dictionary = {}
+var _command_results: Dictionary = {}
 var _demo_seed: int = 12345
 var _fixed_timestamp: int = 0
 
@@ -96,10 +97,25 @@ func _init_session(
 
 
 func apply_command(cmd_dict: Dictionary) -> Dictionary:
-	var type_str := str(cmd_dict.get("type", "")).to_lower()
-	if type_str == "collect_income":
-		return _apply_collect_income(cmd_dict)
+	var command_id := str(cmd_dict.get("command_id", ""))
+	if not command_id.is_empty() and _command_results.has(command_id):
+		if debug:
+			print("GameSessionStub: returning cached result for command_id=", command_id)
+		return _command_results[command_id].duplicate(true)
 
+	var type_str := str(cmd_dict.get("type", "")).to_lower()
+	var result: Dictionary
+	if type_str == "collect_income":
+		result = _apply_collect_income(cmd_dict)
+	else:
+		result = _apply_game_command(cmd_dict)
+
+	if not command_id.is_empty():
+		_command_results[command_id] = result.duplicate(true)
+	return result
+
+
+func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 	var cmd := Command.from_dict(cmd_dict)
 	if not validator.validate(cmd):
 		return {
@@ -113,10 +129,20 @@ func apply_command(cmd_dict: Dictionary) -> Dictionary:
 
 	match cmd.type:
 		Command.Type.PURCHASE_UNITS:
+			var afford_error := _validate_purchase_affordability(cmd)
+			if afford_error.has("result_type"):
+				return afford_error
+			var existing_pending: Array = state.pending_purchases.get(cmd.player_id, []).duplicate(true)
 			var batch: PurchaseBatchResource = PurchaseBatchResource.from_command(cmd)
 			var purchase_result: PurchasePhaseResultResource = (
 				purchase_phase_controller.process_purchase(batch, economy, cmd)
 			)
+			if not purchase_result.success:
+				return _purchase_failure_result(purchase_result, source_id)
+			var new_lines: Array = cmd.payload.get("purchases", [])
+			if new_lines.is_empty():
+				new_lines = cmd.payload.get("units", [])
+			_apply_merged_pending(cmd.player_id, existing_pending, new_lines)
 			events = _sync_seq(purchase_result.get_events())
 
 		Command.Type.PLACE_UNITS:
@@ -209,7 +235,22 @@ func _apply_collect_income(cmd_dict: Dictionary) -> Dictionary:
 func get_state() -> Dictionary:
 	var snap := state.to_snapshot()
 	snap["gameover"] = snap.get("game_over", false)
+	snap["cost_table"] = get_cost_table()
+	snap["applied_event_ids"] = _applied_event_ids.keys()
 	return snap
+
+
+func get_cost_table() -> Dictionary:
+	var table := UNIT_COSTS.duplicate()
+	for utid in state.unit_types.keys():
+		var ut: Unit = state.unit_types[utid]
+		if ut and not table.has(utid):
+			table[utid] = ut.cost
+	return table
+
+
+func get_demo_seed() -> int:
+	return _demo_seed
 
 
 func get_legal_commands(player_id: String) -> Array:
@@ -232,6 +273,8 @@ func get_legal_commands(player_id: String) -> Array:
 
 
 static func validate_event_shape(evt: Dictionary) -> bool:
+	if not EventSchemaValidator.validate_event(evt):
+		return false
 	var required := [
 		"event_id", "sequence", "type", "payload", "source_command_id", "timestamp"
 	]
@@ -321,6 +364,70 @@ func _sync_seq(events: Array) -> Array:
 	return events
 
 
+func _validate_purchase_affordability(cmd: Command) -> Dictionary:
+	var purchases: Array = cmd.payload.get("purchases", [])
+	if purchases.is_empty():
+		purchases = cmd.payload.get("units", [])
+	var total_cost := 0
+	for purchase in purchases:
+		var utid := str(purchase.get("unit_type_id", ""))
+		var count := int(purchase.get("count", 1))
+		var cost: int = int(UNIT_COSTS.get(utid, 0))
+		if cost == 0:
+			var ut: Unit = state.unit_types.get(utid)
+			if ut:
+				cost = ut.cost
+		if cost == 0:
+			return {
+				"result_type": "error",
+				"error": {"code": "UNKNOWN_UNIT", "message": "Unknown unit type: %s" % utid},
+				"events": [],
+			}
+		total_cost += cost * count
+
+	if total_cost > state.ipc.get(cmd.player_id, 0):
+		var fail_evt := create_event(
+			"purchase_failed",
+			{"faction_id": cmd.player_id, "reason": "insufficient_ipc"},
+			str(cmd.command_id)
+		)
+		var recorded := _record_events([fail_evt], str(cmd.command_id))
+		return {
+			"result_type": "error",
+			"error": {"code": "PURCHASE_FAILED", "message": "insufficient_ipc"},
+			"events": recorded,
+		}
+	return {}
+
+
+func _purchase_failure_result(
+	purchase_result: PurchasePhaseResultResource,
+	source_command_id: String
+) -> Dictionary:
+	var raw_events := _sync_seq(purchase_result.get_events())
+	var canonical := _record_events(raw_events, source_command_id)
+	return {
+		"result_type": "error",
+		"error": {
+			"code": purchase_result.error_code,
+			"message": purchase_result.error_message,
+		},
+		"events": canonical,
+	}
+
+
+func _apply_merged_pending(faction_id: String, existing: Array, new_lines: Array) -> void:
+	var merged := {}
+	for line in existing + new_lines:
+		var utid := str(line.get("unit_type_id", ""))
+		merged[utid] = merged.get(utid, 0) + int(line.get("count", 0))
+	var result: Array = []
+	for utid in merged.keys():
+		if merged[utid] > 0:
+			result.append({"unit_type_id": utid, "count": merged[utid]})
+	state.pending_purchases[faction_id] = result
+
+
 func _validate_placement_command(cmd: Command) -> Dictionary:
 	var placements: Array = cmd.payload.get("placements", [])
 	var faction_id := cmd.player_id
@@ -367,7 +474,7 @@ func _forfeit_pending_at_mobilize_end(faction_id: String) -> Array:
 	for p in pending:
 		var utid := str(p.get("unit_type_id", ""))
 		var count := int(p.get("count", 1))
-		var cost := UNIT_COSTS.get(utid, 0)
+		var cost: int = int(UNIT_COSTS.get(utid, 0))
 		if cost == 0:
 			var ut: Unit = state.unit_types.get(utid)
 			if ut:

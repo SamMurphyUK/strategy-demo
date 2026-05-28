@@ -23,7 +23,9 @@ var debug: bool = true
 
 
 func _ready() -> void:
-	print("Loaded scene file:", get_tree().current_scene.scene_file_path)
+	var current := get_tree().current_scene
+	if current:
+		print("Loaded scene file:", current.scene_file_path)
 
 	if debug:
 		print("GameScene _ready: this node path=", get_path())
