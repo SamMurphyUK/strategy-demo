@@ -19,6 +19,11 @@ var end_phase_button: Button = null
 var end_turn_button: Button = null
 var event_log: RichTextLabel = null
 
+var region_info_vbox: VBoxContainer = null
+var region_name_label: Label = null
+var region_owner_label: Label = null
+var region_unitcount_label: Label = null
+
 var session = null
 var _command_counter: int = 0
 var ui_pending_purchases: Dictionary = {}
@@ -35,6 +40,10 @@ func _ready() -> void:
 	_refresh_all()
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
+	if unit_visualizer and unit_visualizer.get("unit_icon_scene") == null:
+		var candidate_path := "res://scenes/ui/UnitIcon.tscn"
+		if ResourceLoader.exists(candidate_path):
+			unit_visualizer.unit_icon_scene = load(candidate_path)
 
 func _autobind_nodes() -> void:
 	map_root = find_child("MapRoot", true, false)
@@ -66,6 +75,10 @@ func _autobind_nodes() -> void:
 	if end_turn_button == null:
 		end_turn_button = panel.find_child("EndTurn", true, false)
 	event_log = panel.find_child("EventLog", true, false)
+	region_info_vbox = panel.find_child("RegionInfo", true, false)
+	region_name_label = panel.find_child("RegionNameLabel", true, false)
+	region_owner_label = panel.find_child("OwnerLabel", true, false)
+	region_unitcount_label = panel.find_child("UnitCountLabel", true, false)
 
 func _setup_faction_selector() -> void:
 	if faction_selector == null:
@@ -209,10 +222,35 @@ func _refresh_all() -> void:
 	var snapshot: Dictionary = session.get_state()
 	_update_state_label(snapshot)
 	_refresh_purchase_panels(snapshot)
+	_refresh_region_info(_selected_region_id())
 	if map_root and map_root.has_method("update_from_snapshot"):
 		map_root.call("update_from_snapshot", snapshot)
+	if map_root and map_root.has_method("update_region_colors"):
+		map_root.call("update_region_colors", snapshot)
 	if unit_visualizer and unit_visualizer.has_method("refresh_from_snapshot"):
 		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
+
+func _refresh_region_info(selected_region_id: String) -> void:
+	if region_name_label == null or session == null:
+		return
+	if selected_region_id == "":
+		region_name_label.text = "Region: —"
+		region_owner_label.text = "Owner: —"
+		region_unitcount_label.text = "Units: —"
+		return
+	var snapshot: Dictionary = session.get_state()
+	var region_entry: Dictionary = {}
+	for entry in snapshot.get("regions", []):
+		if str(entry.get("region_id", "")) == selected_region_id:
+			region_entry = entry
+			break
+	region_name_label.text = "Region: %s" % selected_region_id
+	var owner := str(region_entry.get("owner_faction_id", "neutral"))
+	region_owner_label.text = "Owner: %s" % owner.capitalize()
+	var units_total := 0
+	for u in region_entry.get("units", []):
+		units_total += int(u.get("count", 0))
+	region_unitcount_label.text = "Units: %d" % units_total
 
 func _refresh_purchase_panels(snapshot: Dictionary) -> void:
 	var ipc: Dictionary = snapshot.get("ipc", {})
@@ -319,6 +357,7 @@ func _unit_cost(unit_type_id: String) -> int:
 	return 0
 
 func _on_region_selected(region_id: String) -> void:
+	_refresh_region_info(region_id)
 	_log_system("Selected region: %s" % region_id)
 
 func _log_event(event_dict: Dictionary) -> void:

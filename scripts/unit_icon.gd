@@ -1,29 +1,44 @@
 extends Node2D
 class_name UnitIcon
 
-@onready var sprite: Sprite2D = $Sprite
-@onready var label: Label = $CountLabel
-@onready var tint: ColorRect = $FactionTint
+@export var icon_sprite: Sprite2D
+@export var count_label: Label
 
-var unit_type_id: String = ""
-var faction: String = ""
+func _ready() -> void:
+	if icon_sprite == null:
+		icon_sprite = get_node_or_null("Sprite")
+	if icon_sprite == null:
+		icon_sprite = get_node_or_null("IconSprite")
+	if count_label == null:
+		count_label = get_node_or_null("CountLabel")
 
-func set_count(n: int) -> void:
-	if label:
-		label.text = str(n)
-
-func set_unit_type(t: String) -> void:
-	unit_type_id = t
+func set_icon(texture: Texture2D, count: int, faction: String) -> void:
+	if icon_sprite and texture:
+		icon_sprite.texture = texture
+	if count_label:
+		count_label.text = str(count)
+	if icon_sprite:
+		match faction.to_lower():
+			"allies":
+				icon_sprite.modulate = Color(0.8, 1.0, 0.8)
+			"axis":
+				icon_sprite.modulate = Color(1.0, 0.8, 0.8)
+			_:
+				icon_sprite.modulate = Color(1, 1, 1)
 
 func set_faction_color(faction_name: String) -> void:
-	faction = faction_name.to_lower()
-
-	match faction:
+	if icon_sprite == null:
+		icon_sprite = get_node_or_null("Sprite")
+	if icon_sprite == null:
+		return
+	match faction_name.to_lower():
 		"allies":
-			tint.color = Color(0.2, 0.4, 0.9, 0.25)
+			icon_sprite.modulate = Color(0.8, 1.0, 0.8)
 		"axis":
-			tint.color = Color(0.9, 0.2, 0.2, 0.25)
-		"independent":
-			tint.color = Color(0.2, 0.8, 0.2, 0.25)
+			icon_sprite.modulate = Color(1.0, 0.8, 0.8)
 		_:
-			tint.color = Color(1, 1, 1, 0.15)
+			icon_sprite.modulate = Color(1, 1, 1)
+
+func set_count(n: int) -> void:
+	if count_label:
+		count_label.text = str(n)
