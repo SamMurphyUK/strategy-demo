@@ -99,18 +99,17 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 	region.add_child(area)
 	return region
 
-func _on_region_input_event(area: Area2D, event: InputEvent, shape_idx: int, region_id: String) -> void:
+func _on_region_input_event(viewport: Node, event: InputEvent, shape_idx: int, region_id: String) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_select_region(region_id)
+		select_region(region_id)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		var click_pos = event.position
-		var region_id = _find_region_at_point(click_pos)
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var region_id := _find_region_at_point(event.position)
 		if region_id != "":
-			_select_region(region_id)
+			select_region(region_id)
 
-func _select_region(region_id: String) -> void:
+func select_region(region_id: String) -> void:
 	if selected_region_id != "" and regions.has(selected_region_id):
 		var old_outline = regions[selected_region_id].get_node_or_null("Outline")
 		if old_outline:
@@ -121,11 +120,14 @@ func _select_region(region_id: String) -> void:
 		outline.visible = true
 	emit_signal("region_selected", region_id)
 
-func _find_region_at_point(pos: Vector2) -> String:
+func _find_region_at_point(global_pos: Vector2) -> String:
 	for region_id in regions.keys():
-		var region = regions[region_id]
-		var poly = region.get_node_or_null("Polygon2D")
-		if poly and Geometry2D.is_point_in_polygon(pos, poly.polygon):
+		var region := regions[region_id]
+		var poly := region.get_node_or_null("Polygon2D")
+		if poly == null:
+			continue
+		var local_pos := region.to_local(global_pos)
+		if Geometry2D.is_point_in_polygon(local_pos, poly.polygon):
 			return region_id
 	return ""
 
@@ -171,8 +173,7 @@ func update_region_colors(snapshot: Dictionary) -> void:
 			poly.self_modulate = Color(1, 1, 1, 0.9)
 
 func _region_id_at_position(global_pos: Vector2) -> String:
-	var local_pos := to_local(global_pos)
-	return _find_region_at_point(local_pos)
+	return _find_region_at_point(global_pos)
 
 func _can_drop_at_region(region_id: String, drag_data: Dictionary) -> bool:
 	return not region_id.is_empty() and not str(drag_data.get("unit_type_id", "")).is_empty()

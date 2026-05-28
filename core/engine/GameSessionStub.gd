@@ -191,42 +191,7 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 			events = forfeit_events + end_result.get_events()
 
 		Command.Type.END_TURN:
-			var end_turn_request: EndTurnRequestResource = EndTurnRequestResource.from_command(
-				cmd, state.current_phase
-			)
-			var end_turn_result: EndTurnPhaseResultResource = (
-				end_turn_phase_controller.process_end_turn(
-					end_turn_request,
-					state,
-					economy,
-					victory,
-					turn_engine,
-					Callable(self, "_sync_seq")
-				)
-			)
-
-			var controller_events: Array = _sync_seq(end_turn_result.get_events())
-
-			var prev_faction := str(state.current_faction_id)
-			var next_faction := prev_faction
-
-			if state.turn_order and state.turn_order.size() > 0:
-				var idx := state.turn_order.find(prev_faction)
-				if idx == -1:
-					next_faction = "axis" if prev_faction == "allies" else "allies"
-				else:
-					var next_idx := (idx + 1) % state.turn_order.size()
-					next_faction = state.turn_order[next_idx]
-					if next_idx == 0:
-						state.turn_number = int(state.turn_number) + 1
-						state.game_round = int(state.game_round) + 1
-			else:
-				next_faction = "axis" if prev_faction == "allies" else "allies"
-
-			state.current_faction_id = next_faction
-			state.current_phase = "purchase"
-
-			events = controller_events
+			return handle_end_turn(cmd.player_id, source_id)
 
 		_:
 			return {
@@ -237,6 +202,38 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 
 	var canonical := _record_events(events, source_id)
 	return {"result_type": "ok", "events": canonical}
+
+
+func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
+	var factions := ["allies", "axis"]
+	var current := player_id.to_lower()
+	var idx := factions.find(current)
+	if idx == -1:
+		return {
+			"result_type": "error",
+			"error": {"code": "INVALID_FACTION", "message": "Unknown faction: %s" % player_id},
+			"events": [],
+		}
+
+	var next_idx := (idx + 1) % factions.size()
+	var next_faction := factions[next_idx]
+
+	if next_idx == 0:
+		state.game_round += 1
+
+	state.turn_number += 1
+	state.current_faction_id = next_faction
+	state.current_phase = "purchase"
+
+	var recorded := _record_events([
+		create_event("turn_ended", {
+			"faction_id": current,
+			"next_faction_id": next_faction,
+			"new_turn_number": state.turn_number,
+			"new_round": state.game_round,
+		}, command_id),
+	], command_id)
+	return {"result_type": "ok", "events": recorded}
 
 
 func _apply_collect_income(cmd_dict: Dictionary) -> Dictionary:
