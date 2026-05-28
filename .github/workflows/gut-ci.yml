@@ -15,10 +15,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Godot
-        uses: chickensoft-games/setup-godot@v2
+        uses: game-ci/godot-action@v2
         with:
-          version: 4.3.3-stable
-          use-dotnet: false
+          godot-version: '4.6.2'
+          export-templates: true
+
+      - name: Verify Godot
+        run: godot --version
 
       - name: Run GUT integration tests
         run: |
@@ -52,10 +55,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Godot
-        uses: chickensoft-games/setup-godot@v2
+        uses: game-ci/godot-action@v2
         with:
-          version: 4.3.3-stable
-          use-dotnet: false
+          godot-version: '4.6.2'
+          export-templates: true
+
+      - name: Verify Godot
+        run: godot --version
 
       - name: Nightly smoke alternate seed
         run: |
