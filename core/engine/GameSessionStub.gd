@@ -42,7 +42,7 @@ var _fixed_timestamp: int = 0
 func initialize_demo(seed: int = 12345) -> void:
 	_demo_seed = seed
 	_fixed_timestamp = 1680000000
-	var map_json: Dictionary = GameSessionFactory.load_json("res://newmap.json")
+	var map_json: Dictionary = GameSessionFactory.load_json("res://demomap01.json")
 	_init_session(
 		GameSceneSessionBuilder.build_map_data(map_json),
 		GameSessionFactory.load_json("res://data/scenarios/minimal/units.json"),

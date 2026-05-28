@@ -3,7 +3,7 @@ class_name GameMapRoot
 
 signal region_selected(region_id: String)
 
-@export var map_json_path: String = "res://newmap.json"
+@export var map_json_path: String = "res://demomap01.json"
 @export var region_layer: Node2D
 
 var regions = {}

@@ -9,7 +9,7 @@
 | Mode | Class | Use |
 |------|--------|-----|
 | `STUB` (default) | `GameSessionStub` | UI demo, deterministic GUT tests |
-| `FULL` | `GameSession` via `GameSceneSessionBuilder` | Full scenario from `newmap.json` |
+| `FULL` | `GameSession` via `GameSceneSessionBuilder` | Full scenario from `demomap01.json` |
 
 `GameScene` uses `GameSessionFactory.Mode.STUB` by default.
 
