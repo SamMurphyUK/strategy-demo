@@ -39,6 +39,13 @@ var debug: bool = true
 const CATALOG_UNITS := ["infantry", "artillery", "tank", "transport", "battleship"]
 
 func _ready() -> void:
+	print("LeftUIRoot size =", $"01/LeftUIRoot".size)
+	print("LeftUIRoot pos =", $"01/LeftUIRoot".global_position)
+	print("LeftUIRoot visible =", $"01/LeftUIRoot".visible)
+	print("LeftVBox size =", $"01/LeftUIRoot/LeftVBox".size)
+
+
+
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
@@ -56,16 +63,21 @@ func _ready() -> void:
 			unit_visualizer.unit_icon_scene = load(fallback)
 
 func _autobind_nodes() -> void:
-	map_root = find_child("MapRoot", true, false)
+	map_root = get_node_or_null("GameMapRoot")
 	unit_visualizer = find_child("UnitVisualizer", true, false)
-	var left_ui: Control = get_node_or_null("LeftUIRoot")
-	var right_ui: Control = get_node_or_null("RightUIRoot")
+
+	var left_ui: Control = get_node_or_null("01/LeftUIRoot")
+	var right_ui: Control = get_node_or_null("02/RightUIRoot")
 	if left_ui == null or right_ui == null:
+		push_warning("LeftUIRoot or RightUIRoot not found in scene.")
 		return
+
 	state_label = left_ui.find_child("StateLabel", true, false)
+
 	faction_selector = left_ui.find_child("FactionSelector", true, false)
 	if faction_selector == null:
 		faction_selector = left_ui.find_child("FactionSelect", true, false)
+
 	ipc_allies_label = right_ui.find_child("AlliesIPCLabel", true, false)
 	ipc_axis_label = right_ui.find_child("AxisIPCLabel", true, false)
 	pending_list = right_ui.find_child("PendingPurchasesList", true, false)
@@ -73,18 +85,23 @@ func _autobind_nodes() -> void:
 	unit_catalog = right_ui.find_child("UnitCatalogList", true, false)
 	purchase_confirm_button = right_ui.find_child("PurchaseConfirmButton", true, false)
 	cancel_purchase_button = right_ui.find_child("CancelPurchaseButton", true, false)
+
 	spawn_infantry_button = left_ui.find_child("SpawnInfantryButton", true, false)
 	if spawn_infantry_button == null:
 		spawn_infantry_button = left_ui.find_child("SpawnInfantry", true, false)
+
 	move_unit_button = left_ui.find_child("MoveUnitButton", true, false)
 	if move_unit_button == null:
 		move_unit_button = left_ui.find_child("MoveUnit", true, false)
+
 	end_phase_button = left_ui.find_child("EndPhaseButton", true, false)
 	if end_phase_button == null:
 		end_phase_button = left_ui.find_child("EndPhase", true, false)
+
 	end_turn_button = left_ui.find_child("EndTurnButton", true, false)
 	if end_turn_button == null:
 		end_turn_button = left_ui.find_child("EndTurn", true, false)
+
 	event_log = left_ui.find_child("EventLog", true, false)
 	region_info_vbox = left_ui.find_child("RegionInfo", true, false)
 	region_name_label = left_ui.find_child("RegionNameLabel", true, false)
