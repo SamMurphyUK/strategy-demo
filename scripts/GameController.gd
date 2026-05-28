@@ -43,7 +43,7 @@ func _ready() -> void:
 
 	# Create GameSession
 	session = GameSession.new()
-	session.load_from_json("res://newmap.json")
+	session.load_from_json("res://demomap01.json")
 
 	# Initial snapshot
 	var snap = session.get_snapshot()
