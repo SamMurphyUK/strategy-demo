@@ -127,11 +127,13 @@ func select_region(region_id: String) -> void:
 
 func _find_region_at_point(global_pos: Vector2) -> String:
 	for region_id in regions.keys():
-		var region := regions[region_id]
-		var poly := region.get_node_or_null("Polygon2D")
+		var region: Node2D = regions[region_id] as Node2D
+		if region == null:
+			continue
+		var poly: Polygon2D = region.get_node_or_null("Polygon2D") as Polygon2D
 		if poly == null:
 			continue
-		var local_pos := region.to_local(global_pos)
+		var local_pos: Vector2 = region.to_local(global_pos)
 		if Geometry2D.is_point_in_polygon(local_pos, poly.polygon):
 			return region_id
 	return ""
