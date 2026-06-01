@@ -49,12 +49,7 @@ func _ready() -> void:
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
-	if ClassDB.class_exists("GameSessionFactory"):
-		session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
-	else:
-		session = GameSessionStub.new()
-		session.initialize_demo()
-
+	session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
 	if session == null:
 		push_error("GameScene: Failed to create session")
 
@@ -70,7 +65,9 @@ func _ready() -> void:
 			unit_visualizer.unit_icon_scene = load(fallback)
 
 func _autobind_nodes() -> void:
-	map_root = get_node_or_null("GameMapRoot")
+	map_root = get_node_or_null("layer = 0/MapRoot")
+	if map_root == null:
+		map_root = find_child("MapRoot", true, false)
 	unit_visualizer = find_child("UnitVisualizer", true, false)
 
 	var left_ui: Control = get_node_or_null("01/LeftUIRoot")
