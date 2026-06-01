@@ -4,6 +4,9 @@ class_name UnitIcon
 @export var icon_sprite: Sprite2D
 @export var count_label: Label
 
+var faction_id: String = ""
+var unit_type_id: String = ""
+
 func _ready() -> void:
 	if icon_sprite == null:
 		icon_sprite = get_node_or_null("Sprite")
@@ -42,3 +45,21 @@ func set_faction_color(faction_name: String) -> void:
 func set_count(n: int) -> void:
 	if count_label:
 		count_label.text = str(n)
+
+func load_texture() -> void:
+	var sprite := get_node_or_null("Sprite") as Sprite2D
+	if sprite == null:
+		return
+
+	var paths := [
+		"res://texture/units/%s_%s.png" % [faction_id, unit_type_id],
+		"res://texture/units/%s.png" % unit_type_id,
+		"res://texture/units/default.png"
+	]
+
+	for p in paths:
+		if ResourceLoader.exists(p):
+			sprite.texture = load(p)
+			return
+
+	push_warning("UnitIcon: No texture found for %s/%s" % [faction_id, unit_type_id])

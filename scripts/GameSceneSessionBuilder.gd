@@ -1,7 +1,7 @@
 extends RefCounted
 class_name GameSceneSessionBuilder
 
-const NEWMAP_PATH := "res://newmap.json"
+const NEWMAP_PATH := "res://demomap01.json"
 const UNITS_PATH := "res://data/scenarios/minimal/units.json"
 const RULES_PATH := "res://data/scenarios/minimal/rules.json"
 

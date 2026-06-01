@@ -9,7 +9,7 @@
 | Mode | Class | Use |
 |------|--------|-----|
 | `STUB` (default) | `GameSessionStub` | UI demo, deterministic GUT tests |
-| `FULL` | `GameSession` via `GameSceneSessionBuilder` | Full scenario from `newmap.json` |
+| `FULL` | `GameSession` via `GameSceneSessionBuilder` | Full scenario from `demomap01.json` |
 
 `GameScene` uses `GameSessionFactory.Mode.STUB` by default.
 
@@ -137,14 +137,18 @@ In `GameScene.tscn`, the right panel now includes:
 - **Unit Catalog** rows with a `+` buy button
 - **Pending Purchases** rows (`unit_type x count (cost)`), row cancel for staged items, and pending total
 - **Confirm Purchase** and **Cancel Pending** buttons
+- **MobilizePanel** with draggable staged unit icons (`StagedUnitsList`)
+- **RegionInfo** and **RegionStack** panels for selected territory details
+- **BattleOverlay** placeholder shown only during `combat`
 - **Event Log** showing canonical event dictionaries returned by `apply_command`
 
 ### Purchase flow
 
 1. During `purchase` phase, use `+` buttons to stage purchases locally.
 2. Click **Confirm Purchase** to send one `purchase_units` command with all staged entries.
-3. End phases to `mobilize`, select a region, and place via **Spawn Infantry** (existing behavior).
+3. End phases to `mobilize`; use drag-and-drop from **MobilizePanel** onto a map region to place one staged unit.
 4. End mobilize with leftover pending to trigger `placementforfeited`.
+5. End turn to switch to the opposite faction and reset phase to `purchase`.
 
 ### Test commands
 

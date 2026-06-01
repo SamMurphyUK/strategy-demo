@@ -3,7 +3,7 @@ class_name GameMapRoot
 
 signal region_selected(region_id: String)
 
-@export var map_json_path: String = "res://newmap.json"
+@export var map_json_path: String = "res://demomap01.json"
 @export var region_layer: Node2D
 
 var regions = {}
@@ -178,6 +178,59 @@ func update_region_colors(snapshot: Dictionary) -> void:
 		var poly := region_node.get_node_or_null("Polygon2D")
 		if poly and poly is CanvasItem:
 			poly.self_modulate = Color(1, 1, 1, 0.9)
+
+func _region_id_at_position(global_pos: Vector2) -> String:
+	return _find_region_at_point(global_pos)
+
+func _can_drop_at_region(region_id: String, drag_data: Dictionary) -> bool:
+	return not region_id.is_empty() and not str(drag_data.get("unit_type_id", "")).is_empty()
+
+func drop_staged_unit(
+	global_pos: Vector2,
+	drag_data: Dictionary,
+	session,
+	command_id: String,
+	player_id: String
+) -> Dictionary:
+	var region_id := _region_id_at_position(global_pos)
+	if not _can_drop_at_region(region_id, drag_data):
+		return {"result_type": "error", "error": {"code": "DROP_INVALID", "message": "Invalid drop target"}, "events": []}
+	return session.apply_command({
+		"command_id": command_id,
+		"player_id": player_id,
+		"type": "place_units",
+		"payload": {
+			"placements": [{
+				"region_id": region_id,
+				"units": [{
+					"unit_type_id": str(drag_data.get("unit_type_id", "")),
+					"count": int(drag_data.get("count", 1)),
+				}],
+			}],
+		},
+	})
+
+func show_region_stack(region_id: String, session_snapshot: Dictionary, stack_container: VBoxContainer) -> void:
+	if stack_container == null:
+		return
+	for child in stack_container.get_children():
+		child.queue_free()
+	for region_entry in session_snapshot.get("regions", []):
+		if str(region_entry.get("region_id", "")) != region_id:
+			continue
+		var by_faction := {}
+		for u in region_entry.get("units", []):
+			var faction := str(u.get("faction_id", "neutral")).to_lower()
+			if not by_faction.has(faction):
+				by_faction[faction] = {}
+			var unit_type := str(u.get("unit_type_id", ""))
+			by_faction[faction][unit_type] = int(by_faction[faction].get(unit_type, 0)) + int(u.get("count", 0))
+		for faction in by_faction.keys():
+			for unit_type in by_faction[faction].keys():
+				var row := Label.new()
+				row.text = "%s: %s x%d" % [faction.capitalize(), unit_type, int(by_faction[faction][unit_type])]
+				stack_container.add_child(row)
+		return
 
 func _owner_color(faction_name: String) -> Color:
 	return faction_colors.get(faction_name, faction_colors[""])
