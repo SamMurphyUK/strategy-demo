@@ -37,6 +37,7 @@ var ui_pending_purchases: Dictionary = {}
 var debug: bool = true
 
 const CATALOG_UNITS := ["infantry", "artillery", "tank", "transport", "battleship"]
+const DraggableStagedIconScript := preload("res://scripts/draggable_staged_icon.gd")
 
 func _ready() -> void:
 	print("LeftUIRoot size =", $"01/LeftUIRoot".size)
@@ -389,7 +390,7 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		var label := Label.new()
 		label.text = "%s x%d" % [unit_type_id.capitalize(), count]
 		row.add_child(label)
-		var icon := DraggableStagedIcon.new()
+		var icon: TextureRect = DraggableStagedIconScript.new()
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.custom_minimum_size = Vector2(48, 48)
 		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
