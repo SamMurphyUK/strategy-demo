@@ -205,9 +205,9 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 
 
 func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
-	var factions := ["allies", "axis"]
-	var current := player_id.to_lower()
-	var idx := factions.find(current)
+	var factions: Array[String] = ["allies", "axis"]
+	var current: String = player_id.to_lower()
+	var idx: int = factions.find(current)
 	if idx == -1:
 		return {
 			"result_type": "error",
@@ -215,8 +215,8 @@ func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
 			"events": [],
 		}
 
-	var next_idx := (idx + 1) % factions.size()
-	var next_faction := factions[next_idx]
+	var next_idx: int = (idx + 1) % factions.size()
+	var next_faction: String = factions[next_idx]
 
 	if next_idx == 0:
 		state.game_round += 1
