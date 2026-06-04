@@ -43,9 +43,21 @@ func load_map_from_json(path: String) -> void:
 		push_error("GameMapRoot: JSON parse error in " + path)
 		return
 	var data: Dictionary = parsed
+	_apply_base_map(data)
 	if data.has("faction_colors"):
 		_load_faction_colors(data["faction_colors"])
 	_build_regions(data)
+
+func _apply_base_map(data: Dictionary) -> void:
+	var base_map := get_node_or_null("BaseMap") as Sprite2D
+	if base_map == null:
+		return
+	base_map.position = Vector2.ZERO
+	base_map.scale = Vector2.ONE
+	base_map.centered = true
+	var tex_path := str(data.get("base_map", ""))
+	if tex_path != "" and ResourceLoader.exists(tex_path):
+		base_map.texture = load(tex_path)
 
 func _build_regions(data: Dictionary) -> void:
 	for region_dict in data.get("regions", []):

@@ -27,7 +27,7 @@ script = ExtResource("2_map")
 [node name="BaseMap" type="Sprite2D" parent="layer = 0/MapRoot" unique_id=1220295928]
 position = Vector2(0, 0)
 scale = Vector2(1, 1)
-centered = false
+centered = true
 texture = ExtResource("3_cxv17")
 
 [node name="RegionLayer" type="Node2D" parent="layer = 0/MapRoot" unique_id=1850460547]

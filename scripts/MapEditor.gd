@@ -301,6 +301,9 @@ func _restore_map_state(state: Dictionary) -> void:
 		var tex = ResourceLoader.load(state["base_map"])
 		if tex:
 			base_map.texture = tex
+			base_map.position = Vector2.ZERO
+			base_map.scale = Vector2.ONE
+			base_map.centered = true
 
 	var regions_data: Array = state.get("regions", [])
 	for region_data in regions_data:
@@ -639,6 +642,8 @@ func load_map(path: String) -> void:
 
 	base_map.texture = tex
 	base_map.position = Vector2.ZERO
+	base_map.scale = Vector2.ONE
+	base_map.centered = true
 	print("Map texture loaded successfully.")
 
 
@@ -682,6 +687,8 @@ func load_map_from_json(path: String) -> void:
 			if tex != null:
 				base_map.texture = tex
 				base_map.position = Vector2.ZERO
+				base_map.scale = Vector2.ONE
+				base_map.centered = true
 				_log("Loaded base_map: " + bm)
 			else:
 				push_error("Could not load base_map texture: " + bm)
