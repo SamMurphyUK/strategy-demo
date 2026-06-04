@@ -221,8 +221,10 @@ func _on_move_unit_pressed() -> void:
 		_log_system("Select a source region first.")
 		return
 	var to_region := ""
-	if map_root and session and map_root.has_method("get_first_adjacent_region"):
-		to_region = map_root.call("get_first_adjacent_region", from_region, session.state.adjacency)
+	if session and session.state:
+		var neighbors: Array = session.state.get_adjacent_regions(from_region)
+		if not neighbors.is_empty():
+			to_region = str(neighbors[0])
 	if to_region.is_empty():
 		_log_system("No adjacent region found for %s." % from_region)
 		return

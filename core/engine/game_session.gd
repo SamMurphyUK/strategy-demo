@@ -298,8 +298,10 @@ func _load_map(data: Dictionary) -> void:
 		state.region_units[r.id] = []
 
 	for edge in data.adjacency:
-		var f: String = edge.from
-		var t: String = edge.to
+		var f: String = str(edge.get("from", ""))
+		var t: String = str(edge.get("to", ""))
+		if f.is_empty() or t.is_empty():
+			continue
 
 		if f not in state.adjacency:
 			state.adjacency[f] = []

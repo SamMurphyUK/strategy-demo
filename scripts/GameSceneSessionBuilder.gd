@@ -10,9 +10,6 @@ const FACTION_DISPLAY := {
 	"Allies": "allies",
 	"Axis": "axis",
 }
-const ADJACENCY_DISTANCE := 180.0
-
-
 static func create_session_from_newmap() -> GameSession:
 	var map_json: Dictionary = _load_json(NEWMAP_PATH)
 	return GameSession.create(
@@ -31,8 +28,6 @@ static func load_newmap() -> Dictionary:
 
 static func build_map_data(map_json: Dictionary) -> Dictionary:
 	var regions: Array = []
-	var centroids: Dictionary = {}
-	var region_ids: Array[String] = []
 
 	for region_entry in _extract_regions(map_json):
 		var meta: Dictionary = region_entry.get("metadata", {})
@@ -53,13 +48,10 @@ static func build_map_data(map_json: Dictionary) -> Dictionary:
 			"is_capital": bool(meta.get("victory", false)),
 			"has_factory": bool(meta.get("factory", false)) or owner in PLAYABLE_FACTIONS,
 		})
-		centroids[region_id] = _polygon_centroid(region_entry.get("polygon", []))
-		region_ids.append(region_id)
-
 	return {
 		"schema_version": "0.5",
 		"regions": regions,
-		"adjacency": _build_adjacency(region_ids, centroids),
+		"adjacency": _build_adjacency_from_polygons(map_json),
 	}
 
 
@@ -154,19 +146,28 @@ static func _polygon_centroid(polygon_points: Array) -> Vector2:
 	return sum / float(count)
 
 
-static func _build_adjacency(
-	region_ids: Array[String],
-	centroids: Dictionary
-) -> Array:
+static func _build_adjacency_from_polygons(map_json: Dictionary) -> Array:
+	const VERTEX_EPS := 5.0
+	const MIN_SHARED_VERTICES := 2
+	var polygons: Dictionary = {}
+	var region_ids: Array[String] = []
+	for region_entry in _extract_regions(map_json):
+		var meta: Dictionary = region_entry.get("metadata", {})
+		var region_id: String = str(meta.get("region_id", ""))
+		if region_id.is_empty():
+			continue
+		region_ids.append(region_id)
+		polygons[region_id] = _polygon_points(region_entry.get("polygon", []))
+
 	var edges: Array = []
 	var seen: Dictionary = {}
 	for i in range(region_ids.size()):
 		for j in range(i + 1, region_ids.size()):
 			var from_id: String = region_ids[i]
 			var to_id: String = region_ids[j]
-			var a: Vector2 = centroids.get(from_id, Vector2.ZERO)
-			var b: Vector2 = centroids.get(to_id, Vector2.ZERO)
-			if a.distance_to(b) > ADJACENCY_DISTANCE:
+			var poly_a: PackedVector2Array = polygons.get(from_id, PackedVector2Array())
+			var poly_b: PackedVector2Array = polygons.get(to_id, PackedVector2Array())
+			if _count_shared_vertices(poly_a, poly_b, VERTEX_EPS) < MIN_SHARED_VERTICES:
 				continue
 			var key := "%s|%s" % [from_id, to_id]
 			if seen.has(key):
@@ -174,6 +175,28 @@ static func _build_adjacency(
 			seen[key] = true
 			edges.append({"from": from_id, "to": to_id})
 	return edges
+
+
+static func _polygon_points(points_raw: Array) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	for p in points_raw:
+		if typeof(p) == TYPE_ARRAY and p.size() >= 2:
+			points.append(Vector2(float(p[0]), float(p[1])))
+	return points
+
+
+static func _count_shared_vertices(
+	poly_a: PackedVector2Array,
+	poly_b: PackedVector2Array,
+	eps: float
+) -> int:
+	var shared := 0
+	var eps_sq := eps * eps
+	for a in poly_a:
+		for b in poly_b:
+			if a.distance_squared_to(b) <= eps_sq:
+				shared += 1
+	return shared
 
 
 static func _load_json(path: String) -> Dictionary:
