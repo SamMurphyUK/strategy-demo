@@ -174,22 +174,14 @@ func update_region_colors(snapshot: Dictionary) -> void:
 		if typeof(region_entry) != TYPE_DICTIONARY:
 			continue
 		var region_id := str(region_entry.get("region_id", ""))
-		var owner := str(region_entry.get("owner_faction_id", "neutral")).to_lower()
-		var region_node: Node2D = get_node_or_null("RegionLayer/%s" % region_id)
+		var owner := str(region_entry.get("owner_faction_id", ""))
+		var region_node: Node2D = regions.get(region_id, null)
 		if region_node == null:
 			continue
-		var color := Color(0.8, 0.8, 0.8)
-		match owner:
-			"allies":
-				color = Color(0.0, 0.6, 0.0)
-			"axis":
-				color = Color(0.6, 0.0, 0.0)
-			_:
-				color = Color(0.8, 0.8, 0.8)
-		region_node.modulate = color
-		var poly := region_node.get_node_or_null("Polygon2D")
-		if poly and poly is CanvasItem:
-			poly.self_modulate = Color(1, 1, 1, 0.9)
+		region_node.modulate = Color.WHITE
+		var poly := region_node.get_node_or_null("Polygon2D") as Polygon2D
+		if poly:
+			poly.color = _owner_color(owner)
 
 func _region_id_at_position(global_pos: Vector2) -> String:
 	return _find_region_at_point(global_pos)
@@ -245,7 +237,21 @@ func show_region_stack(region_id: String, session_snapshot: Dictionary, stack_co
 		return
 
 func _owner_color(faction_name: String) -> Color:
-	return faction_colors.get(faction_name, faction_colors[""])
+	match faction_name.to_lower():
+		"allies":
+			return Color(0.5, 0.85, 0.5, 0.35)
+		"axis":
+			return Color(0.6, 0.6, 0.6, 0.35)
+		"neutral":
+			return Color(0.5, 0.5, 0.5, 0.25)
+		_:
+			match faction_name:
+				"Allies":
+					return Color(0.5, 0.85, 0.5, 0.35)
+				"Axis":
+					return Color(0.6, 0.6, 0.6, 0.35)
+				_:
+					return Color(0.5, 0.5, 0.5, 0.25)
 
 func _load_faction_colors(raw_colors: Dictionary) -> void:
 	for faction_name in raw_colors.keys():
