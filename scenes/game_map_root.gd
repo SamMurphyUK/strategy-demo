@@ -70,11 +70,17 @@ func _build_regions(data: Dictionary) -> void:
 		var faction = str(meta.get("faction", ""))
 		var ipc = int(meta.get("ipc", 0))
 		var points_raw = region_dict.get("polygon", [])
-		var region_node = _create_region(region_id, points_raw, faction, ipc)
+		var region_node = _create_region(region_id, points_raw, faction, ipc, region_dict)
 		region_layer.add_child(region_node)
 		regions[region_id] = region_node
 
-func _create_region(region_id: String, points_raw: Array, faction: String, ipc: int) -> Node2D:
+func _create_region(
+	region_id: String,
+	points_raw: Array,
+	faction: String,
+	ipc: int,
+	region_dict: Dictionary = {}
+) -> Node2D:
 	var region := Node2D.new()
 	region.name = region_id
 	var points := PackedVector2Array()
@@ -101,6 +107,17 @@ func _create_region(region_id: String, points_raw: Array, faction: String, ipc: 
 	meta.region_id = region_id
 	meta.faction = faction
 	meta.ipc_value = ipc
+	var meta_dict: Dictionary = region_dict.get("metadata", {})
+	meta.has_factory = bool(meta_dict.get("factory", false))
+	meta.unit_bounds = _polygon_bounds(points)
+	meta.unit_anchor = Vector2.ZERO
+	if region_dict.has("anchors"):
+		for anchor_data in region_dict["anchors"]:
+			if str(anchor_data.get("type", "")) == "unit":
+				meta.unit_anchor = Vector2(float(anchor_data.get("x", 0)), float(anchor_data.get("y", 0)))
+				break
+	if meta.unit_anchor == Vector2.ZERO:
+		meta.unit_anchor = _region_unit_anchor(points_raw, meta.unit_bounds)
 	region.add_child(meta)
 	var area := Area2D.new()
 	area.input_pickable = true
@@ -182,6 +199,66 @@ func update_region_colors(snapshot: Dictionary) -> void:
 		var poly := region_node.get_node_or_null("Polygon2D") as Polygon2D
 		if poly:
 			poly.color = _owner_color(owner)
+
+func highlight_movement_targets(from_region_id: String, adjacency: Dictionary, hover_region_id: String = "") -> void:
+	var valid: Array = adjacency.get(from_region_id, [])
+	for region_id in regions.keys():
+		var region_node: Node2D = regions[region_id]
+		var poly: Polygon2D = region_node.get_node_or_null("Polygon2D") as Polygon2D
+		if poly == null:
+			continue
+		if region_id == from_region_id:
+			poly.color = _owner_color(_region_owner_id(region_node)).lightened(0.15)
+		elif region_id in valid:
+			var c := _owner_color(_region_owner_id(region_node))
+			poly.color = Color(c.r, c.g, c.b, 0.55) if region_id == hover_region_id else Color(c.r, c.g, c.b, 0.42)
+		else:
+			var base := _owner_color(_region_owner_id(region_node))
+			poly.color = Color(base.r * 0.55, base.g * 0.55, base.b * 0.55, 0.18)
+
+
+func clear_movement_highlights(snapshot: Dictionary) -> void:
+	update_region_colors(snapshot)
+
+
+func _region_owner_id(region_node: Node2D) -> String:
+	var meta := region_node.get_node_or_null("RegionMetadata")
+	if meta:
+		return str(meta.faction)
+	return ""
+
+
+func _polygon_bounds(points: PackedVector2Array) -> Rect2:
+	if points.is_empty():
+		return Rect2()
+	var min_pt := points[0]
+	var max_pt := points[0]
+	for p in points:
+		min_pt.x = min(min_pt.x, p.x)
+		min_pt.y = min(min_pt.y, p.y)
+		max_pt.x = max(max_pt.x, p.x)
+		max_pt.y = max(max_pt.y, p.y)
+	return Rect2(min_pt, max_pt - min_pt)
+
+
+func _region_unit_anchor(points_raw: Array, bounds: Rect2) -> Vector2:
+	if bounds.size != Vector2.ZERO:
+		return bounds.get_center() + Vector2(0, -10)
+	return _polygon_centroid_from_raw(points_raw) + Vector2(0, -10)
+
+
+func _polygon_centroid_from_raw(points_raw: Array) -> Vector2:
+	var points := PackedVector2Array()
+	for p in points_raw:
+		if typeof(p) == TYPE_ARRAY and p.size() >= 2:
+			points.append(Vector2(p[0], p[1]))
+	if points.is_empty():
+		return Vector2.ZERO
+	var sum := Vector2.ZERO
+	for pt in points:
+		sum += pt
+	return sum / float(points.size())
+
 
 func _region_id_at_position(global_pos: Vector2) -> String:
 	return _find_region_at_point(global_pos)

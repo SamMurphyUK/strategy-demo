@@ -64,6 +64,8 @@ func _ready() -> void:
 			unit_visualizer.unit_icon_scene = load(preferred)
 		elif ResourceLoader.exists(fallback):
 			unit_visualizer.unit_icon_scene = load(fallback)
+	if unit_visualizer and unit_visualizer.has_signal("movement_drop_requested"):
+		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
 
 func _autobind_nodes() -> void:
 	map_root = get_node_or_null("layer = 0/MapRoot")
@@ -272,7 +274,10 @@ func _refresh_all() -> void:
 	if map_root and map_root.has_method("update_region_colors"):
 		map_root.call("update_region_colors", snapshot)
 	if unit_visualizer and unit_visualizer.has_method("refresh_from_snapshot"):
-		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root)
+		var phase := str(snapshot.get("turn_info", {}).get("current_phase", ""))
+		var faction := str(snapshot.get("turn_info", {}).get("current_faction_id", ""))
+		var adjacency: Dictionary = session.state.adjacency if session and session.state else {}
+		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root, adjacency, phase, faction)
 	if battle_overlay:
 		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
 
@@ -507,6 +512,21 @@ func _unit_cost(unit_type_id: String) -> int:
 		var costs: Dictionary = session.get_state().get("cost_table", {})
 		return int(costs.get(unit_type_id, 0))
 	return 0
+
+func _on_unit_movement_drop(
+	from_region_id: String,
+	to_region_id: String,
+	unit_type_id: String,
+	count: int
+) -> void:
+	_apply_command("move_units", {
+		"moves": [{
+			"from_region_id": from_region_id,
+			"to_region_id": to_region_id,
+			"units": [{"unit_type_id": unit_type_id, "count": count}],
+		}],
+	})
+
 
 func _on_region_selected(region_id: String) -> void:
 	_refresh_region_info(region_id)

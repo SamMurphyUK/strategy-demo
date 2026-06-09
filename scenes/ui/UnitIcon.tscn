@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://uniticon123"]
 
-[ext_resource type="Script" path="res://scripts/unit_icon.gd" id=1]
+[ext_resource type="Script" path="res://scenes/UnitIcon.gd" id=1]
 [ext_resource type="Texture2D" path="res://texture/units/Copilot_20260521_020052.png" id=2]
 
 [node name="UnitIcon" type="Node2D"]

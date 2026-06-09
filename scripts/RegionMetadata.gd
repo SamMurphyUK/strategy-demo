@@ -6,6 +6,8 @@ class_name RegionMetadata
 @export var faction: String = ""
 @export var is_victory_city: bool = false
 @export var has_factory: bool = false
+@export var unit_anchor: Vector2 = Vector2.ZERO
+@export var unit_bounds: Rect2 = Rect2()
 
 func to_dict() -> Dictionary:
 	return {

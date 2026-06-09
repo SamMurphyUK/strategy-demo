@@ -1,5 +1,4 @@
 extends Node2D
-class_name UnitIcon
 
 @export var icon_sprite: Sprite2D
 @export var count_label: Label
