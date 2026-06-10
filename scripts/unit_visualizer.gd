@@ -305,8 +305,7 @@ func _region_owner_faction(meta: RegionMetadata) -> String:
 
 
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
-	var path := UnitTextureCache.build_path(unit_type_id, faction)
-	print("[VIS] load_unit_texture:", unit_type_id, faction, "->", path)
+	print("[VIS] load_unit_texture:", unit_type_id, faction)
 	return UnitTextureCache.get_texture(unit_type_id, faction)
 
 

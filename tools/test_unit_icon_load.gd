@@ -9,6 +9,6 @@ func _init() -> void:
 		print("instantiated:", inst)
 	else:
 		print("failed to load UnitIcon.tscn")
-	var tex_path = "res://texture/units/us/infantry.png"
-	print("tex exists:", ResourceLoader.exists(tex_path))
+	var tex := UnitTextureCache.get_texture("infantry", "allies")
+	print("tex loaded:", tex != null)
 	quit()
