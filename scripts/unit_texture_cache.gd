@@ -3,35 +3,48 @@ class_name UnitTextureCache
 
 static var _cache: Dictionary = {}
 
-const BASE_TEXTURES := "res://textures/units/"
-const LEGACY_TEXTURES := "res://texture/units/"
-const FACTORY_PLACEHOLDER := "res://textures/units/factory_placeholder.png"
+const TEXTURE_ROOT := "res://texture/units/"
 
-const FACTION_FOLDERS := {
-	"allies": ["american", "allies", "us"],
-	"axis": ["ger", "axis", "germany"],
-	"american": ["american", "allies", "us"],
-	"ger": ["ger", "axis", "germany"],
-	"germany": ["ger", "axis", "germany"],
-	"us": ["american", "allies", "us"],
-}
+const DEBUG_UNIT_TYPES := [
+	"infantry",
+	"artillery",
+	"tank",
+	"battleship",
+	"transport",
+	"fighter",
+	"factory",
+]
 
-const FACTION_PREFIX := {
-	"allies": "allies",
-	"axis": "axis",
-	"american": "allies",
-	"ger": "axis",
-	"germany": "axis",
-	"us": "allies",
-}
+const DEBUG_FACTIONS := ["us", "ger"]
 
 
-static func get_texture(unit_type: String, faction: String) -> Texture2D:
-	var key := "%s|%s" % [faction.to_lower(), unit_type.to_lower()]
+static func faction_folder(faction_id: String) -> String:
+	match faction_id.to_lower():
+		"allies", "american", "us":
+			return "us"
+		"axis", "ger", "germany":
+			return "ger"
+		_:
+			return faction_id.to_lower()
+
+
+static func build_path(unit_type_id: String, faction_id: String) -> String:
+	var folder := faction_folder(faction_id)
+	var unit := unit_type_id.to_lower()
+	return "%s%s/%s.png" % [TEXTURE_ROOT, folder, unit]
+
+
+static func get_texture(unit_type_id: String, faction_id: String) -> Texture2D:
+	var key := "%s|%s" % [faction_folder(faction_id), unit_type_id.to_lower()]
 	if _cache.has(key):
 		return _cache[key]
 
-	var tex := _load_texture(unit_type, faction)
+	var path := build_path(unit_type_id, faction_id)
+	print("[TEX] Loading:", path, "exists:", ResourceLoader.exists(path))
+	if not ResourceLoader.exists(path):
+		return null
+
+	var tex: Texture2D = load(path)
 	if tex != null:
 		_cache[key] = tex
 	return tex
@@ -41,28 +54,14 @@ static func clear_cache() -> void:
 	_cache.clear()
 
 
-static func _load_texture(unit_type: String, faction: String) -> Texture2D:
-	var ut := unit_type.to_lower()
-	var fid := faction.to_lower()
-
-	if ut == "factory":
-		if ResourceLoader.exists(FACTORY_PLACEHOLDER):
-			return load(FACTORY_PLACEHOLDER)
-
-	var folders: Array = FACTION_FOLDERS.get(fid, [fid])
-	for folder in folders:
-		var path := "%s%s/%s.png" % [BASE_TEXTURES, folder, ut]
-		if ResourceLoader.exists(path):
-			return load(path)
-
-	var prefix: String = str(FACTION_PREFIX.get(fid, fid))
-	var flat := "%s%s_%s.png" % [BASE_TEXTURES, prefix, ut]
-	if ResourceLoader.exists(flat):
-		return load(flat)
-
-	for legacy_folder in folders:
-		var legacy := "%s%s/%s.png" % [LEGACY_TEXTURES, legacy_folder, ut]
-		if ResourceLoader.exists(legacy):
-			return load(legacy)
-
-	return null
+static func debug_print_all_unit_textures() -> void:
+	print("[TEX] === Unit texture startup audit ===")
+	for folder in DEBUG_FACTIONS:
+		for unit_type in DEBUG_UNIT_TYPES:
+			var path := "%s%s/%s.png" % [TEXTURE_ROOT, folder, unit_type]
+			var exists := ResourceLoader.exists(path)
+			var absolute := ProjectSettings.globalize_path(path) if exists else "(missing)"
+			print("[TEX] startup:", path, "exists:", exists, "absolute:", absolute)
+			if exists:
+				get_texture(unit_type, folder)
+	print("[TEX] === End unit texture audit ===")
