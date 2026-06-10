@@ -37,6 +37,34 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 
 
+# -------------------------------------------------------------------
+# 🔥 NEW: Unified texture loader for mobilize + map icons
+# -------------------------------------------------------------------
+func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
+	var f := faction.to_lower()
+	var u := unit_type_id.to_lower()
+
+	var path := "res://texture/units/%s/%s.png" % [f, u]
+	if ResourceLoader.exists(path):
+		if debug_logging:
+			print("[UnitVisualizer] Loaded:", path)
+		return load(path)
+
+	# fallback: neutral folder
+	var fallback := "res://texture/units/neutral/%s.png" % u
+	if ResourceLoader.exists(fallback):
+		if debug_logging:
+			print("[UnitVisualizer] Fallback:", fallback)
+		return load(fallback)
+
+	if debug_logging:
+		print("[UnitVisualizer] Missing texture for:", faction, unit_type_id)
+	return null
+
+
+# -------------------------------------------------------------------
+# Snapshot refresh
+# -------------------------------------------------------------------
 func refresh_from_snapshot(
 	snapshot: Dictionary,
 	map_root: Node2D,
@@ -134,6 +162,9 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		_factory_icons[region_id] = factory_icon
 
 
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
 func _group_units(units_array: Array) -> Dictionary:
 	var grouped := {}
 	for u in units_array:

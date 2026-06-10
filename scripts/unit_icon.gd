@@ -14,6 +14,24 @@ func _ready() -> void:
 	if count_label == null:
 		count_label = get_node_or_null("CountLabel")
 
+	# 🔥 Try to bind DragArea if it exists
+	var drag_area := get_node_or_null("DragArea")
+	if drag_area:
+		drag_area.input_pickable = true
+		if not drag_area.input_event.is_connected(_on_drag_area_input):
+			drag_area.input_event.connect(_on_drag_area_input)
+
+
+# -------------------------------------------------------------------
+# ⭐ DRAG INPUT HANDLER (added for debugging)
+# -------------------------------------------------------------------
+func _on_drag_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) -> void:
+	print("DRAG AREA INPUT:", event)   # ← DEBUG PRINT
+
+	# This does NOT implement dragging yet — this is just to confirm input works.
+	# Once this prints, we know the hitbox is alive and receiving events.
+
+
 func set_icon(texture: Texture2D, count: int, faction: String) -> void:
 	if icon_sprite and texture:
 		icon_sprite.texture = texture
