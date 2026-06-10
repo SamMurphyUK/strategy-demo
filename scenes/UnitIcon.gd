@@ -36,6 +36,8 @@ func _ready() -> void:
 func _autobind() -> void:
 	if icon_sprite == null:
 		icon_sprite = get_node_or_null("IconSprite") as Sprite2D
+	if icon_sprite == null:
+		icon_sprite = get_node_or_null("Sprite") as Sprite2D
 	if count_label == null:
 		count_label = get_node_or_null("CountLabel") as Label
 	if faction_tint == null:
@@ -63,14 +65,26 @@ func reset_for_pool() -> void:
 		faction_tint.visible = true
 
 
-func set_unit_type(type: String) -> void:
-	unit_type_id = type.to_lower()
+func configure(p_unit_type_id: String, p_faction_id: String, p_count: int = 1) -> void:
+	var parsed := UnitTextureCache.normalize_unit_type_and_faction(p_unit_type_id, p_faction_id)
+	unit_type_id = str(parsed["unit_type_id"])
+	faction_id = str(parsed["faction_id"])
+	stack_count = max(1, p_count)
+	_update_count_label()
 	_apply_texture()
+	_apply_faction_tint()
+
+
+func set_unit_type(type: String) -> void:
+	unit_type_id = str(UnitTextureCache.normalize_unit_type_and_faction(type, faction_id)["unit_type_id"])
+	if not faction_id.is_empty():
+		_apply_texture()
 
 
 func set_faction(faction: String) -> void:
-	faction_id = faction.to_lower()
-	_apply_texture()
+	faction_id = UnitTextureCache.normalize_faction_id(faction)
+	if not unit_type_id.is_empty():
+		_apply_texture()
 	_apply_faction_tint()
 
 
@@ -95,7 +109,7 @@ func get_z_layer() -> int:
 func _apply_texture() -> void:
 	if icon_sprite == null or unit_type_id.is_empty():
 		return
-	print("[ICON] Applying texture for:", unit_type_id, faction_id)
+	print("[ICON] Applying texture for:", unit_type_id, "|", faction_id)
 	var tex := UnitTextureCache.get_texture(unit_type_id, faction_id)
 	if tex:
 		icon_sprite.texture = tex

@@ -37,18 +37,12 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 
 
-# -------------------------------------------------------------------
-# Unified texture loader (delegates to UnitTextureCache)
-# -------------------------------------------------------------------
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
 	if debug_logging:
-		print("[VIS] load_unit_texture:", unit_type_id, faction)
+		print("[VIS] load_unit_texture:", unit_type_id, "|", faction)
 	return UnitTextureCache.get_texture(unit_type_id, faction)
 
 
-# -------------------------------------------------------------------
-# Snapshot refresh
-# -------------------------------------------------------------------
 func refresh_from_snapshot(
 	snapshot: Dictionary,
 	map_root: Node2D,
@@ -120,15 +114,8 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		var entry: Dictionary = units[unit_type]
 		var icon := _acquire_icon()
 		icon.source_region_id = region_id
-		icon.set_unit_type(str(unit_type))
-		icon.set_faction(str(entry.get("faction", "neutral")))
-		icon.set_count(int(entry.get("count", 1)))
-
-		# ⭐ APPLY TEXTURE HERE
-		var tex := _load_unit_texture(unit_type, entry.get("faction", "neutral"))
-		if icon.icon_sprite:
-			icon.icon_sprite.texture = tex
-
+		var faction_id := str(entry.get("faction_id", entry.get("faction", "neutral")))
+		icon.configure(str(unit_type), faction_id, int(entry.get("count", 1)))
 		icon.position = local_anchor + layout_slots[slot_idx]
 		icon.z_index = icon.get_z_layer()
 		icon.visible = true
@@ -139,19 +126,10 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 
 	_region_icons[region_id] = icons_for_region
 
-	# Factory icon
 	if meta.has_factory:
 		var factory_icon := _acquire_icon()
 		factory_icon.source_region_id = region_id
-		factory_icon.set_unit_type("factory")
-		factory_icon.set_faction(_region_owner_faction(meta))
-		factory_icon.set_count(1)
-
-		# ⭐ APPLY FACTORY TEXTURE
-		var ftex := _load_unit_texture("factory", _region_owner_faction(meta))
-		if factory_icon.icon_sprite:
-			factory_icon.icon_sprite.texture = ftex
-
+		factory_icon.configure("factory", _region_owner_faction(meta), 1)
 		factory_icon.position = local_anchor + UnitLayout.FACTORY_OFFSET
 		factory_icon.z_index = UnitLayout.get_z_order("factory")
 		factory_icon.visible = true
@@ -159,21 +137,22 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		_factory_icons[region_id] = factory_icon
 
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
 func _group_units(units_array: Array) -> Dictionary:
 	var grouped := {}
 	for u in units_array:
 		if typeof(u) != TYPE_DICTIONARY:
 			continue
-		var unit_type := str(u.get("unit_type_id", ""))
+		var parsed := UnitTextureCache.normalize_unit_type_and_faction(
+			str(u.get("unit_type_id", "")),
+			str(u.get("faction_id", ""))
+		)
+		var unit_type := str(parsed["unit_type_id"])
 		if unit_type.is_empty():
 			continue
-		var faction := str(u.get("faction_id", "neutral"))
+		var faction_id := str(parsed["faction_id"])
 		var count := int(u.get("count", 0))
 		if not grouped.has(unit_type):
-			grouped[unit_type] = {"faction": faction, "count": 0}
+			grouped[unit_type] = {"faction_id": faction_id, "count": 0}
 		grouped[unit_type]["count"] = int(grouped[unit_type]["count"]) + count
 	return grouped
 
@@ -298,7 +277,7 @@ func _region_at_global(global_pos: Vector2) -> String:
 
 
 func _region_owner_faction(meta: RegionMetadata) -> String:
-	return str(meta.faction).to_lower()
+	return UnitTextureCache.normalize_faction_id(str(meta.faction))
 
 
 func _find_region_node(region_id: String, map_root: Node2D) -> Node2D:

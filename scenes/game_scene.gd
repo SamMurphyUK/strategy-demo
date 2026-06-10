@@ -538,7 +538,7 @@ func _on_region_selected(region_id: String) -> void:
 func _get_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
 	if unit_visualizer and unit_visualizer.has_method("_load_unit_texture"):
 		return unit_visualizer.call("_load_unit_texture", unit_type_id, faction)
-	return null
+	return UnitTextureCache.get_texture(unit_type_id, faction)
 
 func _log_event(event_dict: Dictionary) -> void:
 	if event_log:
