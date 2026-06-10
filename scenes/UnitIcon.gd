@@ -95,9 +95,12 @@ func get_z_layer() -> int:
 func _apply_texture() -> void:
 	if icon_sprite == null or unit_type_id.is_empty():
 		return
+	print("[ICON] Applying texture for:", unit_type_id, faction_id)
 	var tex := UnitTextureCache.get_texture(unit_type_id, faction_id)
 	if tex:
 		icon_sprite.texture = tex
+	else:
+		push_warning("UnitIcon: missing texture for %s/%s" % [faction_id, unit_type_id])
 
 
 func _apply_faction_tint() -> void:

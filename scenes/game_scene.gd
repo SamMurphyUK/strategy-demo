@@ -54,6 +54,8 @@ func _ready() -> void:
 	if session == null:
 		push_error("GameScene: Failed to create session")
 
+	UnitTextureCache.debug_print_all_unit_textures()
+
 	_refresh_all()
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))

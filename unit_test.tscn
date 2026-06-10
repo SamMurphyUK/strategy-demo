@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://bdrjl7r3jjgr3"]
 
 [ext_resource type="Script" uid="uid://cuvuljosvtm34" path="res://scripts/unit_test.gd" id="1_irko1"]
-[ext_resource type="Texture2D" uid="uid://dyf4385qcbhk5" path="res://texture/units/Copilot_20260521_020052.png" id="2_objgc"]
+[ext_resource type="Texture2D" path="res://texture/units/us/infantry.png" id="2_objgc"]
 
 [node name="Unit" type="Node2D" unique_id=349308769]
 script = ExtResource("1_irko1")
