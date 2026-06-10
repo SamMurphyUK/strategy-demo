@@ -64,8 +64,5 @@ static func _load_texture(unit_type: String, faction: String) -> Texture2D:
 		var legacy := "%s%s/%s.png" % [LEGACY_TEXTURES, legacy_folder, ut]
 		if ResourceLoader.exists(legacy):
 			return load(legacy)
-		var legacy_prefixed := "%s%s_%s.png" % [LEGACY_TEXTURES, legacy_folder, ut]
-		if ResourceLoader.exists(legacy_prefixed):
-			return load(legacy_prefixed)
 
 	return null

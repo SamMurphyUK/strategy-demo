@@ -50,15 +50,9 @@ func load_texture() -> void:
 	if sprite == null:
 		return
 
-	var paths := [
-		"res://texture/units/%s_%s.png" % [faction_id, unit_type_id],
-		"res://texture/units/%s.png" % unit_type_id,
-		"res://texture/units/default.png"
-	]
-
-	for p in paths:
-		if ResourceLoader.exists(p):
-			sprite.texture = load(p)
-			return
+	var tex := UnitTextureCache.get_texture(unit_type_id, faction_id)
+	if tex:
+		sprite.texture = tex
+		return
 
 	push_warning("UnitIcon: No texture found for %s/%s" % [faction_id, unit_type_id])
