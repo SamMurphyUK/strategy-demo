@@ -29,6 +29,7 @@ var staged_units_list: VBoxContainer = null
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
+var drag_controller = null  # DragController
 var right_ui_root: Control = null
 
 var session = null
@@ -57,11 +58,23 @@ func _ready() -> void:
 	UnitTextureCache.debug_print_all_unit_textures()
 
 	_ensure_unit_visualizer_scene()
+	_wire_drag_controller()
 	_refresh_all()
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
 	if unit_visualizer and unit_visualizer.has_signal("movement_drop_requested"):
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
+	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
+		drag_controller.mobilize_drop_requested.connect(_on_mobilize_drag_drop)
+
+func _wire_drag_controller() -> void:
+	drag_controller = find_child("DragLayer", true, false)
+	if drag_controller == null:
+		push_warning("GameScene: DragController / DragLayer not found")
+		return
+	if unit_visualizer and unit_visualizer.has_method("set_drag_controller"):
+		unit_visualizer.call("set_drag_controller", drag_controller)
+
 
 func _ensure_unit_visualizer_scene() -> void:
 	if unit_visualizer == null:
@@ -419,6 +432,10 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		staged_units_list.add_child(row)
 
 func _on_staged_drag_drop(data: Dictionary, global_position: Vector2) -> void:
+	_on_mobilize_drag_drop(data, global_position)
+
+
+func _on_mobilize_drag_drop(data: Dictionary, global_position: Vector2) -> void:
 	if session == null or map_root == null:
 		return
 	if not map_root.has_method("drop_staged_unit"):

@@ -21,27 +21,28 @@ var _region_icons: Dictionary = {}
 var _factory_icons: Dictionary = {}
 var _icon_pool: Array = []
 var _movement_arrow: Line2D = null
-var _drag_icon: UnitIcon = null
-var _drag_hover_region: String = ""
+var _drag_controller = null  # DragController
 
 
 func _ready() -> void:
-	print("DEBUG: unit_icon_scene =", unit_icon_scene)
-	if unit_icon_scene:
-		print("DEBUG: unit_icon_scene path =", unit_icon_scene.resource_path)
-	else:
-		print("DEBUG: unit_icon_scene is NULL")
 	_ensure_unit_icon_scene()
-	if unit_icon_scene:
-		print("DEBUG: after ensure, path =", unit_icon_scene.resource_path)
-		print("DEBUG: instantiate callable =", unit_icon_scene.has_method("instantiate"))
 	_movement_arrow = Line2D.new()
 	_movement_arrow.width = 3.0
 	_movement_arrow.default_color = Color(1, 0.9, 0.2, 0.9)
 	_movement_arrow.visible = false
 	_movement_arrow.z_index = UnitLayout.get_z_order("movement_arrow")
 	add_child(_movement_arrow)
-	set_process_unhandled_input(true)
+
+
+func set_drag_controller(controller) -> void:
+	if _drag_controller == controller:
+		return
+	_drag_controller = controller
+	if _drag_controller == null:
+		return
+	_drag_controller.configure(self, _map_root, _movement_arrow, unit_icon_scene)
+	if not _drag_controller.movement_drop_requested.is_connected(_on_controller_movement_drop):
+		_drag_controller.movement_drop_requested.connect(_on_controller_movement_drop)
 
 
 func _ensure_unit_icon_scene() -> void:
@@ -54,9 +55,8 @@ func _ensure_unit_icon_scene() -> void:
 	for path in candidates:
 		if ResourceLoader.exists(path):
 			unit_icon_scene = load(path)
-			print("DEBUG: loaded unit_icon_scene from", path)
 			return
-	push_error("DEBUG: failed to load unit_icon_scene from any candidate path")
+	push_error("UnitVisualizer: failed to load unit_icon_scene")
 
 
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
@@ -77,10 +77,15 @@ func refresh_from_snapshot(
 	_adjacency = adjacency
 	_current_phase = current_phase
 	_current_faction = current_faction
+	if _drag_controller:
+		_drag_controller.configure(self, _map_root, _movement_arrow, unit_icon_scene)
+		_drag_controller.set_context(_current_phase, _adjacency, _last_snapshot)
 	refresh_all()
 
 
 func refresh_all() -> void:
+	if _drag_controller:
+		_drag_controller.cancel_active_drag()
 	clear_all_units()
 	if _map_root == null or _last_snapshot.is_empty():
 		return
@@ -93,7 +98,8 @@ func refresh_all() -> void:
 
 
 func clear_all_units() -> void:
-	_cancel_active_drag()
+	if _drag_controller:
+		_drag_controller.cancel_active_drag()
 	for region_id in _region_icons.keys():
 		for icon in _region_icons[region_id]:
 			_release_icon(icon)
@@ -180,7 +186,6 @@ func _group_units(units_array: Array) -> Dictionary:
 
 
 func _acquire_icon() -> UnitIcon:
-	print("DEBUG: acquiring icon, unit_icon_scene =", unit_icon_scene)
 	while not _icon_pool.is_empty():
 		var pooled: UnitIcon = _icon_pool.pop_back()
 		if is_instance_valid(pooled):
@@ -189,11 +194,9 @@ func _acquire_icon() -> UnitIcon:
 	if unit_icon_scene == null:
 		_ensure_unit_icon_scene()
 	if unit_icon_scene == null:
-		push_error("DEBUG: unit_icon_scene is NULL inside _acquire_icon()")
+		push_error("UnitVisualizer: unit_icon_scene is NULL inside _acquire_icon()")
 		return null
-	var icon: UnitIcon = unit_icon_scene.instantiate() as UnitIcon
-	print("DEBUG: instantiated icon =", icon)
-	return icon
+	return unit_icon_scene.instantiate() as UnitIcon
 
 
 func _release_icon(icon: UnitIcon) -> void:
@@ -207,102 +210,22 @@ func _release_icon(icon: UnitIcon) -> void:
 
 
 func _connect_drag_signals(icon: UnitIcon) -> void:
-	if not icon.drag_started.is_connected(_on_icon_drag_started):
-		icon.drag_started.connect(_on_icon_drag_started)
-	if not icon.drag_updated.is_connected(_on_icon_drag_updated):
-		icon.drag_updated.connect(_on_icon_drag_updated)
-	if not icon.drag_ended.is_connected(_on_icon_drag_ended):
-		icon.drag_ended.connect(_on_icon_drag_ended)
-	if not icon.drag_cancelled.is_connected(_on_icon_drag_cancelled):
-		icon.drag_cancelled.connect(_on_icon_drag_cancelled)
+	if _drag_controller:
+		_drag_controller.bind_map_icon(icon)
 
 
 func _disconnect_drag_signals(icon: UnitIcon) -> void:
-	if icon.drag_started.is_connected(_on_icon_drag_started):
-		icon.drag_started.disconnect(_on_icon_drag_started)
-	if icon.drag_updated.is_connected(_on_icon_drag_updated):
-		icon.drag_updated.disconnect(_on_icon_drag_updated)
-	if icon.drag_ended.is_connected(_on_icon_drag_ended):
-		icon.drag_ended.disconnect(_on_icon_drag_ended)
-	if icon.drag_cancelled.is_connected(_on_icon_drag_cancelled):
-		icon.drag_cancelled.disconnect(_on_icon_drag_cancelled)
+	if _drag_controller:
+		_drag_controller.unbind_map_icon(icon)
 
 
-func _movement_phase_active() -> bool:
-	return true  # TEMPORARY: allow drag in all phases for debugging
-
-
-func _on_icon_drag_started(icon: UnitIcon) -> void:
-	if not _movement_phase_active():
-		icon.set_selected(false)
-		return
-	_drag_icon = icon
-	_drag_hover_region = ""
-	_movement_arrow.visible = true
-	if _map_root and _map_root.has_method("highlight_movement_targets"):
-		_map_root.call("highlight_movement_targets", icon.source_region_id, _adjacency, "")
-
-
-func _on_icon_drag_updated(icon: UnitIcon, global_pos: Vector2) -> void:
-	if _drag_icon != icon:
-		return
-	var start_local := to_local(icon.global_position)
-	var end_local := to_local(global_pos)
-	_movement_arrow.points = PackedVector2Array([start_local, end_local])
-	var hover := _region_at_global(global_pos)
-	if hover != _drag_hover_region:
-		_drag_hover_region = hover
-		if _map_root and _map_root.has_method("highlight_movement_targets"):
-			_map_root.call("highlight_movement_targets", icon.source_region_id, _adjacency, hover)
-
-
-func _on_icon_drag_ended(icon: UnitIcon, global_pos: Vector2) -> void:
-	if _drag_icon != icon:
-		return
-	var to_region: String = _region_at_global(global_pos)
-	var from_region: String = icon.source_region_id
-	_finish_drag()
-	if to_region.is_empty() or to_region == from_region:
-		return
-	var neighbors: Array = _adjacency.get(from_region, [])
-	if to_region not in neighbors:
-		return
-	movement_drop_requested.emit(from_region, to_region, icon.unit_type_id, 1)
-
-
-func _on_icon_drag_cancelled(icon: UnitIcon) -> void:
-	if _drag_icon == icon:
-		_finish_drag()
-
-
-func _finish_drag() -> void:
-	_drag_icon = null
-	_drag_hover_region = ""
-	_movement_arrow.visible = false
-	_movement_arrow.points = PackedVector2Array()
-	if _map_root and _map_root.has_method("clear_movement_highlights"):
-		_map_root.call("clear_movement_highlights", _last_snapshot)
-
-
-func _cancel_active_drag() -> void:
-	if _drag_icon and is_instance_valid(_drag_icon):
-		_drag_icon.set_selected(false)
-	_finish_drag()
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if _drag_icon == null:
-		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_drag_icon.cancel_drag()
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-		_drag_icon.cancel_drag()
-
-
-func _region_at_global(global_pos: Vector2) -> String:
-	if _map_root and _map_root.has_method("_region_id_at_position"):
-		return str(_map_root.call("_region_id_at_position", global_pos))
-	return ""
+func _on_controller_movement_drop(
+	from_region_id: String,
+	to_region_id: String,
+	unit_type_id: String,
+	count: int
+) -> void:
+	movement_drop_requested.emit(from_region_id, to_region_id, unit_type_id, count)
 
 
 func _region_owner_faction(meta: RegionMetadata) -> String:

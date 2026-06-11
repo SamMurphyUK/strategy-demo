@@ -201,11 +201,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func cancel_drag() -> void:
 	if not _dragging:
 		return
+	clear_drag_state()
+	drag_cancelled.emit(self)
 
+
+func clear_drag_state() -> void:
 	_dragging = false
 	set_process_unhandled_input(false)
 	set_selected(false)
-	drag_cancelled.emit(self)
 
 
 func _cancel_drag() -> void:
