@@ -60,8 +60,6 @@ func _ensure_unit_icon_scene() -> void:
 
 
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
-	if debug_logging:
-		print("[VIS] load_unit_texture:", unit_type_id, "|", faction)
 	return UnitTextureCache.get_texture(unit_type_id, faction)
 
 

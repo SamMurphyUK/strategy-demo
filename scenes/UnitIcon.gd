@@ -12,8 +12,7 @@ signal drag_cancelled(unit_icon: UnitIcon)
 @export var selection_outline: Line2D
 @export var drag_area: Area2D
 
-const ICON_DISPLAY_SCALE := Vector2(0.18, 0.18)
-const HITBOX_SIZE := Vector2(48, 48)
+const UNIT_ICON_SIZE := 48
 
 var unit_type_id: String = ""
 var faction_id: String = ""
@@ -33,6 +32,9 @@ func _ready() -> void:
 		_apply_display_scale()
 	_update_count_label()
 	_update_selection_outline()
+
+	if icon_sprite:
+		icon_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 	if drag_area:
 		drag_area.input_pickable = true
@@ -128,6 +130,9 @@ func _apply_texture() -> void:
 
 	if tex:
 		icon_sprite.texture = tex
+		icon_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		if not is_drag_preview:
+			_apply_display_scale()
 	else:
 		push_warning("UnitIcon: missing texture for %s/%s" % [faction_id, unit_type_id])
 
@@ -146,13 +151,17 @@ func _apply_faction_tint() -> void:
 
 
 func _apply_display_scale() -> void:
-	scale = ICON_DISPLAY_SCALE
-
-	# Resize DragArea hitbox to match scaled icon
-	if drag_area:
-		var shape := drag_area.get_node_or_null("CollisionShape2D")
-		if shape and shape.shape is RectangleShape2D:
-			shape.shape.size = HITBOX_SIZE / ICON_DISPLAY_SCALE
+	if is_drag_preview:
+		return
+	var tex := icon_sprite.texture if icon_sprite else null
+	if tex:
+		var w := float(tex.get_width())
+		if w > 0.0:
+			scale = Vector2(UNIT_ICON_SIZE / w, UNIT_ICON_SIZE / w)
+			if drag_area:
+				var shape := drag_area.get_node_or_null("CollisionShape2D")
+				if shape and shape.shape is RectangleShape2D:
+					shape.shape.size = Vector2(w, w)
 
 
 func _update_count_label() -> void:

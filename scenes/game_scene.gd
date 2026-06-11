@@ -42,21 +42,12 @@ const CATALOG_UNITS := ["infantry", "artillery", "tank", "transport", "battleshi
 const DraggableStagedIconScript := preload("res://scripts/draggable_staged_icon.gd")
 
 func _ready() -> void:
-	print("LeftUIRoot size =", $"01/LeftUIRoot".size)
-	print("LeftUIRoot pos =", $"01/LeftUIRoot".global_position)
-	print("LeftUIRoot visible =", $"01/LeftUIRoot".visible)
-	print("LeftVBox size =", $"01/LeftUIRoot/LeftVBox".size)
-
-
-
 	_autobind_nodes()
 	_setup_faction_selector()
 	_connect_ui()
 	session = GameSessionFactory.create(GameSessionFactory.Mode.STUB)
 	if session == null:
 		push_error("GameScene: Failed to create session")
-
-	UnitTextureCache.debug_print_all_unit_textures()
 
 	_ensure_unit_visualizer_scene()
 	_wire_drag_controller()

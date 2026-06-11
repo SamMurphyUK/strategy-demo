@@ -386,28 +386,15 @@ func _finalize_preview(icon: UnitIcon) -> void:
 
 
 func _apply_preview_scale(icon: UnitIcon) -> void:
-	var tex_size := _texture_pixel_size(icon)
-	var target_px := UnitIcon.HITBOX_SIZE.x
-	if tex_size.x > 0.0:
-		var s := target_px / tex_size.x
-		icon.scale = Vector2(s, s)
-	else:
-		icon.scale = UnitIcon.ICON_DISPLAY_SCALE
-
-
-func _texture_pixel_size(icon: UnitIcon) -> Vector2:
-	if icon.icon_sprite and icon.icon_sprite.texture:
-		return icon.icon_sprite.texture.get_size()
-	return Vector2.ZERO
+	var tex := icon.icon_sprite.texture if icon.icon_sprite else null
+	if tex:
+		var w := float(tex.get_width())
+		if w > 0.0:
+			icon.scale = Vector2(UnitIcon.UNIT_ICON_SIZE / w, UnitIcon.UNIT_ICON_SIZE / w)
 
 
 func _preview_visual_half() -> Vector2:
-	if _preview_icon == null:
-		return Vector2.ZERO
-	var tex_size := _texture_pixel_size(_preview_icon)
-	if tex_size == Vector2.ZERO:
-		return UnitIcon.HITBOX_SIZE * 0.5
-	return tex_size * _preview_icon.scale * 0.5
+	return Vector2(UnitIcon.UNIT_ICON_SIZE, UnitIcon.UNIT_ICON_SIZE) * 0.5
 
 
 func _clear_preview() -> void:

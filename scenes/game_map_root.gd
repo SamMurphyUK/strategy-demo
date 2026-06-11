@@ -55,6 +55,7 @@ func _apply_base_map(data: Dictionary) -> void:
 	base_map.position = Vector2.ZERO
 	base_map.scale = Vector2.ONE
 	base_map.centered = true
+	base_map.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var tex_path := str(data.get("base_map", ""))
 	if tex_path != "" and ResourceLoader.exists(tex_path):
 		base_map.texture = load(tex_path)
@@ -362,19 +363,19 @@ func show_region_stack(region_id: String, session_snapshot: Dictionary, stack_co
 func _owner_color(faction_name: String) -> Color:
 	match faction_name.to_lower():
 		"allies":
-			return Color(0.5, 0.85, 0.5, 0.35)
+			return Color(0.5, 0.85, 0.5, 0.5)
 		"axis":
-			return Color(0.6, 0.6, 0.6, 0.35)
+			return Color(0.6, 0.6, 0.6, 0.5)
 		"neutral":
-			return Color(0.5, 0.5, 0.5, 0.25)
+			return Color(0.5, 0.5, 0.5, 0.35)
 		_:
 			match faction_name:
 				"Allies":
-					return Color(0.5, 0.85, 0.5, 0.35)
+					return Color(0.5, 0.85, 0.5, 0.5)
 				"Axis":
-					return Color(0.6, 0.6, 0.6, 0.35)
+					return Color(0.6, 0.6, 0.6, 0.5)
 				_:
-					return Color(0.5, 0.5, 0.5, 0.25)
+					return Color(0.5, 0.5, 0.5, 0.35)
 
 func _load_faction_colors(raw_colors: Dictionary) -> void:
 	for faction_name in raw_colors.keys():

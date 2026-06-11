@@ -65,7 +65,6 @@ static func get_texture(unit_type_id: String, faction_id: String) -> Texture2D:
 	var unit := str(normalized["unit_type_id"])
 	var faction := str(normalized["faction_id"])
 	if unit.is_empty():
-		print("[TEX] Missing: empty unit_type_id (raw:", unit_type_id, faction_id, ")")
 		return null
 
 	var folder := _folder_for_faction(faction)
@@ -75,7 +74,6 @@ static func get_texture(unit_type_id: String, faction_id: String) -> Texture2D:
 
 	var path := "%s%s/%s.png" % [TEXTURE_ROOT, folder, unit]
 	if ResourceLoader.exists(path):
-		print("[TEX] Loading:", path, "(unit:", unit, "faction:", faction, ")")
 		var tex: Texture2D = load(path)
 		if tex != null:
 			_cache[key] = tex
@@ -83,13 +81,11 @@ static func get_texture(unit_type_id: String, faction_id: String) -> Texture2D:
 
 	var fallback := "%sneutral/%s.png" % [TEXTURE_ROOT, unit]
 	if ResourceLoader.exists(fallback):
-		print("[TEX] Fallback:", fallback, "(unit:", unit, "faction:", faction, ")")
 		var fallback_tex: Texture2D = load(fallback)
 		if fallback_tex != null:
 			_cache[key] = fallback_tex
 		return fallback_tex
 
-	print("[TEX] Missing:", faction, unit, "->", path)
 	return null
 
 
@@ -98,13 +94,8 @@ static func clear_cache() -> void:
 
 
 static func debug_print_all_unit_textures() -> void:
-	print("[TEX] === Unit texture startup audit ===")
 	for faction_id in DEBUG_FACTIONS:
 		for unit_type in DEBUG_UNIT_TYPES:
 			var path := build_path(unit_type, faction_id)
-			var exists := ResourceLoader.exists(path)
-			var absolute := ProjectSettings.globalize_path(path) if exists else "(missing)"
-			print("[TEX] startup:", path, "exists:", exists, "absolute:", absolute)
-			if exists:
+			if ResourceLoader.exists(path):
 				get_texture(unit_type, faction_id)
-	print("[TEX] === End unit texture audit ===")
