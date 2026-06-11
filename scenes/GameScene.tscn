@@ -4,7 +4,7 @@
 [ext_resource type="Script" uid="uid://b5d3xqv80d7ux" path="res://scenes/game_map_root.gd" id="2_map"]
 [ext_resource type="Texture2D" uid="uid://bdoi6lkrtx3f5" path="res://texture/test.jpg" id="3_cxv17"]
 [ext_resource type="Script" uid="uid://ux0km6bjtopn" path="res://scripts/unit_visualizer.gd" id="4_7s5hy"]
-[ext_resource type="PackedScene" uid="uid://cftbign7fj81u" path="res://scenes/UnitIcon.tscn" id="5_7s5hy"]
+[ext_resource type="PackedScene" uid="uid://uniticon123" path="res://scenes/ui/UnitIcon.tscn" id="5_xs4ih"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -31,10 +31,14 @@ texture = ExtResource("3_cxv17")
 
 [node name="UnitVisualizer" type="Node2D" parent="layer = 0/MapRoot/UnitLayer" unique_id=1617422682]
 script = ExtResource("4_7s5hy")
+unit_icon_scene = ExtResource("5_xs4ih")
 debug_logging = true
 
+<<<<<<< HEAD
 [node name="UnitIcon" parent="layer = 0/MapRoot/UnitLayer/UnitVisualizer" unique_id=931535465 instance=ExtResource("5_7s5hy")]
 
+=======
+>>>>>>> 9ac616c (Fix null unit_icon_scene on UnitVisualizer at runtime)
 [node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=195472403]
 visible = false
 

@@ -26,6 +26,15 @@ var _drag_hover_region: String = ""
 
 
 func _ready() -> void:
+	print("DEBUG: unit_icon_scene =", unit_icon_scene)
+	if unit_icon_scene:
+		print("DEBUG: unit_icon_scene path =", unit_icon_scene.resource_path)
+	else:
+		print("DEBUG: unit_icon_scene is NULL")
+	_ensure_unit_icon_scene()
+	if unit_icon_scene:
+		print("DEBUG: after ensure, path =", unit_icon_scene.resource_path)
+		print("DEBUG: instantiate callable =", unit_icon_scene.has_method("instantiate"))
 	_movement_arrow = Line2D.new()
 	_movement_arrow.width = 3.0
 	_movement_arrow.default_color = Color(1, 0.9, 0.2, 0.9)
@@ -33,6 +42,21 @@ func _ready() -> void:
 	_movement_arrow.z_index = UnitLayout.get_z_order("movement_arrow")
 	add_child(_movement_arrow)
 	set_process_unhandled_input(true)
+
+
+func _ensure_unit_icon_scene() -> void:
+	if unit_icon_scene != null:
+		return
+	var candidates := [
+		"res://scenes/ui/UnitIcon.tscn",
+		"res://scenes/UnitIcon.tscn",
+	]
+	for path in candidates:
+		if ResourceLoader.exists(path):
+			unit_icon_scene = load(path)
+			print("DEBUG: loaded unit_icon_scene from", path)
+			return
+	push_error("DEBUG: failed to load unit_icon_scene from any candidate path")
 
 
 func _load_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
@@ -156,12 +180,19 @@ func _group_units(units_array: Array) -> Dictionary:
 
 
 func _acquire_icon() -> UnitIcon:
+	print("DEBUG: acquiring icon, unit_icon_scene =", unit_icon_scene)
 	while not _icon_pool.is_empty():
 		var pooled: UnitIcon = _icon_pool.pop_back()
 		if is_instance_valid(pooled):
 			pooled.reset_for_pool()
 			return pooled
+	if unit_icon_scene == null:
+		_ensure_unit_icon_scene()
+	if unit_icon_scene == null:
+		push_error("DEBUG: unit_icon_scene is NULL inside _acquire_icon()")
+		return null
 	var icon: UnitIcon = unit_icon_scene.instantiate() as UnitIcon
+	print("DEBUG: instantiated icon =", icon)
 	return icon
 
 

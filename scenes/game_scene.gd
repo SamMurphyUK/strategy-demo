@@ -56,18 +56,25 @@ func _ready() -> void:
 
 	UnitTextureCache.debug_print_all_unit_textures()
 
+	_ensure_unit_visualizer_scene()
 	_refresh_all()
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
-	if unit_visualizer and unit_visualizer.get("unit_icon_scene") == null:
-		var preferred := "res://scenes/UnitIcon.tscn"
-		var fallback := "res://scenes/ui/UnitIcon.tscn"
-		if ResourceLoader.exists(preferred):
-			unit_visualizer.unit_icon_scene = load(preferred)
-		elif ResourceLoader.exists(fallback):
-			unit_visualizer.unit_icon_scene = load(fallback)
 	if unit_visualizer and unit_visualizer.has_signal("movement_drop_requested"):
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
+
+func _ensure_unit_visualizer_scene() -> void:
+	if unit_visualizer == null:
+		return
+	if unit_visualizer.get("unit_icon_scene") != null:
+		return
+	var preferred := "res://scenes/ui/UnitIcon.tscn"
+	var fallback := "res://scenes/UnitIcon.tscn"
+	if ResourceLoader.exists(preferred):
+		unit_visualizer.unit_icon_scene = load(preferred)
+	elif ResourceLoader.exists(fallback):
+		unit_visualizer.unit_icon_scene = load(fallback)
+
 
 func _autobind_nodes() -> void:
 	map_root = get_node_or_null("layer = 0/MapRoot")
