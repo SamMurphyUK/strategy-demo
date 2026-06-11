@@ -27,10 +27,3 @@ size = Vector2(32, 32)
 position = Vector2(-16, -16)
 mouse_filter = 2
 
-[node name="DragArea" type="Area2D" parent="."]
-input_pickable = true
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="DragArea"]
-shape = CircleShape2D {
-    radius = 24
-}

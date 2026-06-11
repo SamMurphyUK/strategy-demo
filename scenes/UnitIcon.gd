@@ -28,9 +28,11 @@ func _ready() -> void:
 	_apply_display_scale()
 	_update_count_label()
 	_update_selection_outline()
+
 	if drag_area:
 		drag_area.input_pickable = true
-		drag_area.input_event.connect(_on_drag_area_input)
+		if not drag_area.input_event.is_connected(_on_drag_area_input):
+			drag_area.input_event.connect(_on_drag_area_input)
 
 
 func _autobind() -> void:
@@ -38,12 +40,16 @@ func _autobind() -> void:
 		icon_sprite = get_node_or_null("IconSprite") as Sprite2D
 	if icon_sprite == null:
 		icon_sprite = get_node_or_null("Sprite") as Sprite2D
+
 	if count_label == null:
 		count_label = get_node_or_null("CountLabel") as Label
+
 	if faction_tint == null:
 		faction_tint = get_node_or_null("FactionTint") as ColorRect
+
 	if selection_outline == null:
 		selection_outline = get_node_or_null("SelectionOutline") as Line2D
+
 	if drag_area == null:
 		drag_area = get_node_or_null("DragArea") as Area2D
 
@@ -58,31 +64,33 @@ func reset_for_pool() -> void:
 	visible = true
 	modulate = Color.WHITE
 	set_selected(false)
+
 	if icon_sprite:
 		icon_sprite.texture = null
 		icon_sprite.modulate = Color.WHITE
+
 	if faction_tint:
 		faction_tint.visible = true
 
 
 func configure(p_unit_type_id: String, p_faction_id: String, p_count: int = 1) -> void:
-	var parsed := UnitTextureCache.normalize_unit_type_and_faction(p_unit_type_id, p_faction_id)
-	unit_type_id = str(parsed["unit_type_id"])
-	faction_id = str(parsed["faction_id"])
+	unit_type_id = p_unit_type_id.to_lower()
+	faction_id = p_faction_id.to_lower()
 	stack_count = max(1, p_count)
+
 	_update_count_label()
 	_apply_texture()
 	_apply_faction_tint()
 
 
 func set_unit_type(type: String) -> void:
-	unit_type_id = str(UnitTextureCache.normalize_unit_type_and_faction(type, faction_id)["unit_type_id"])
+	unit_type_id = type.to_lower()
 	if not faction_id.is_empty():
 		_apply_texture()
 
 
 func set_faction(faction: String) -> void:
-	faction_id = UnitTextureCache.normalize_faction_id(faction)
+	faction_id = faction.to_lower()
 	if not unit_type_id.is_empty():
 		_apply_texture()
 	_apply_faction_tint()
@@ -109,8 +117,10 @@ func get_z_layer() -> int:
 func _apply_texture() -> void:
 	if icon_sprite == null or unit_type_id.is_empty():
 		return
+
 	print("[ICON] Applying texture for:", unit_type_id, "|", faction_id)
 	var tex := UnitTextureCache.get_texture(unit_type_id, faction_id)
+
 	if tex:
 		icon_sprite.texture = tex
 	else:
@@ -120,6 +130,7 @@ func _apply_texture() -> void:
 func _apply_faction_tint() -> void:
 	if faction_tint == null:
 		return
+
 	match faction_id:
 		"allies", "american", "us":
 			faction_tint.color = Color(0.4, 0.85, 0.4, 0.22)
@@ -131,8 +142,12 @@ func _apply_faction_tint() -> void:
 
 func _apply_display_scale() -> void:
 	scale = ICON_DISPLAY_SCALE
-	if icon_sprite:
-		icon_sprite.scale = Vector2.ONE
+
+	# Resize DragArea hitbox to match scaled icon
+	if drag_area:
+		var shape := drag_area.get_node_or_null("CollisionShape2D")
+		if shape and shape.shape is RectangleShape2D:
+			shape.shape.size = HITBOX_SIZE / ICON_DISPLAY_SCALE
 
 
 func _update_count_label() -> void:
@@ -145,7 +160,9 @@ func _update_count_label() -> void:
 func _update_selection_outline() -> void:
 	if selection_outline == null:
 		return
+
 	selection_outline.visible = _selected
+
 	if _selected:
 		selection_outline.default_color = Color(1, 1, 0.2, 0.95)
 	else:
@@ -164,6 +181,7 @@ func _on_drag_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) ->
 			set_process_unhandled_input(false)
 			set_selected(false)
 			drag_ended.emit(self, get_global_mouse_position())
+
 	elif event is InputEventMouseMotion and _dragging:
 		drag_updated.emit(self, get_global_mouse_position())
 
@@ -171,9 +189,11 @@ func _on_drag_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) ->
 func _unhandled_input(event: InputEvent) -> void:
 	if not _dragging:
 		return
+
 	if event is InputEventMouseButton and not event.pressed:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			_cancel_drag()
+
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_cancel_drag()
 
@@ -181,6 +201,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func cancel_drag() -> void:
 	if not _dragging:
 		return
+
 	_dragging = false
 	set_process_unhandled_input(false)
 	set_selected(false)
