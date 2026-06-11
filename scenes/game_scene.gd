@@ -419,21 +419,17 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		var label := Label.new()
 		label.text = "%s x%d" % [unit_type_id.capitalize(), count]
 		row.add_child(label)
-		var icon: TextureRect = DraggableStagedIconScript.new()
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.custom_minimum_size = Vector2(48, 48)
+		var icon: DraggableStagedIcon = DraggableStagedIconScript.new()
 		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
 		icon.drag_data = {
 			"unit_type_id": unit_type_id,
 			"count": 1,
+			"faction_id": _selected_faction_id(),
 		}
-		icon.dropped_on_map.connect(_on_staged_drag_drop)
+		if drag_controller and drag_controller.has_method("bind_staged_icon"):
+			drag_controller.bind_staged_icon(icon)
 		row.add_child(icon)
 		staged_units_list.add_child(row)
-
-func _on_staged_drag_drop(data: Dictionary, global_position: Vector2) -> void:
-	_on_mobilize_drag_drop(data, global_position)
-
 
 func _on_mobilize_drag_drop(data: Dictionary, global_position: Vector2) -> void:
 	if session == null or map_root == null:

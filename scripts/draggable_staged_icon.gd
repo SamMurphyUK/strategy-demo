@@ -1,18 +1,67 @@
 extends TextureRect
 class_name DraggableStagedIcon
 
-signal dropped_on_map(data: Dictionary, global_position: Vector2)
+signal drag_started(icon: DraggableStagedIcon)
+signal drag_updated(icon: DraggableStagedIcon, global_position: Vector2)
+signal drag_ended(icon: DraggableStagedIcon, global_position: Vector2)
+signal drag_cancelled(icon: DraggableStagedIcon)
 
 var drag_data: Dictionary = {}
 
-func _get_drag_data(_at_position: Vector2) -> Variant:
-	var preview := TextureRect.new()
-	preview.texture = texture
-	preview.custom_minimum_size = Vector2(24, 24)
-	set_drag_preview(preview)
-	return drag_data
+var _dragging: bool = false
+
+
+func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	custom_minimum_size = Vector2(48, 48)
+	size = Vector2(48, 48)
+	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+
+func get_payload() -> Dictionary:
+	return drag_data.duplicate(true)
+
+
+func get_drag_start_global() -> Vector2:
+	return get_global_rect().get_center()
+
+
+func clear_drag_state() -> void:
+	_dragging = false
+	set_process_unhandled_input(false)
+
 
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		if not drag_data.is_empty():
-			dropped_on_map.emit(drag_data, get_global_mouse_position())
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_dragging = true
+			set_process_unhandled_input(true)
+			drag_started.emit(self)
+		elif _dragging:
+			_finish_drag(event.global_position)
+	elif event is InputEventMouseMotion and _dragging:
+		drag_updated.emit(self, event.global_position)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not _dragging:
+		return
+	if event is InputEventMouseMotion:
+		drag_updated.emit(self, event.global_position)
+	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_finish_drag(event.global_position)
+	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_cancel_drag()
+
+
+func _finish_drag(global_pos: Vector2) -> void:
+	clear_drag_state()
+	drag_ended.emit(self, global_pos)
+
+
+func _cancel_drag() -> void:
+	clear_drag_state()
+	drag_cancelled.emit(self)

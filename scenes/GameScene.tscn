@@ -134,6 +134,7 @@ text = "Units: —"
 [node name="MobilizePanel" type="VBoxContainer" parent="01/LeftUIRoot/LeftVBox" unique_id=1294189145]
 visible = false
 layout_mode = 2
+size_flags_vertical = 0
 
 [node name="MobilizeHeader" type="Label" parent="01/LeftUIRoot/LeftVBox/MobilizePanel" unique_id=212863623]
 layout_mode = 2
@@ -141,6 +142,7 @@ text = "Mobilize Staged Units (drag to map)"
 
 [node name="StagedUnitsList" type="VBoxContainer" parent="01/LeftUIRoot/LeftVBox/MobilizePanel" unique_id=717317706]
 layout_mode = 2
+size_flags_vertical = 0
 
 [node name="RegionStack" type="PanelContainer" parent="01/LeftUIRoot/LeftVBox" unique_id=992434444]
 custom_minimum_size = Vector2(0, 90)

@@ -24,9 +24,11 @@ var _adjacency: Dictionary = {}
 var _last_snapshot: Dictionary = {}
 
 var _active_icon: UnitIcon = null
+var _active_staged_icon: DraggableStagedIcon = null
 var _preview_icon: UnitIcon = null
 var _drag_source: DragSource = DragSource.MAP_ICON
 var _drag_payload: Dictionary = {}
+var _staged_icon_modulate: Color = Color.WHITE
 
 var _original_parent: Node = null
 var _original_position: Vector2 = Vector2.ZERO
@@ -92,9 +94,31 @@ func unbind_map_icon(icon: UnitIcon) -> void:
 
 
 func start_mobilize_drag(payload: Dictionary, screen_global: Vector2) -> void:
-	if not _mobilize_phase_active():
+	if _drag_active or not _mobilize_phase_active():
 		return
-	_begin_ui_drag(DragSource.MOBILIZE_UI, payload, screen_global)
+	_begin_mobilize_drag(payload, screen_global)
+
+
+func bind_staged_icon(icon: DraggableStagedIcon) -> void:
+	if not icon.drag_started.is_connected(_on_staged_icon_drag_started):
+		icon.drag_started.connect(_on_staged_icon_drag_started)
+	if not icon.drag_updated.is_connected(_on_staged_icon_drag_updated):
+		icon.drag_updated.connect(_on_staged_icon_drag_updated)
+	if not icon.drag_ended.is_connected(_on_staged_icon_drag_ended):
+		icon.drag_ended.connect(_on_staged_icon_drag_ended)
+	if not icon.drag_cancelled.is_connected(_on_staged_icon_drag_cancelled):
+		icon.drag_cancelled.connect(_on_staged_icon_drag_cancelled)
+
+
+func unbind_staged_icon(icon: DraggableStagedIcon) -> void:
+	if icon.drag_started.is_connected(_on_staged_icon_drag_started):
+		icon.drag_started.disconnect(_on_staged_icon_drag_started)
+	if icon.drag_updated.is_connected(_on_staged_icon_drag_updated):
+		icon.drag_updated.disconnect(_on_staged_icon_drag_updated)
+	if icon.drag_ended.is_connected(_on_staged_icon_drag_ended):
+		icon.drag_ended.disconnect(_on_staged_icon_drag_ended)
+	if icon.drag_cancelled.is_connected(_on_staged_icon_drag_cancelled):
+		icon.drag_cancelled.disconnect(_on_staged_icon_drag_cancelled)
 
 
 func start_combat_drag(payload: Dictionary, screen_global: Vector2) -> void:
@@ -151,6 +175,45 @@ func _on_map_icon_drag_cancelled(icon: UnitIcon) -> void:
 		_cancel_drag()
 
 
+func _on_staged_icon_drag_started(icon: DraggableStagedIcon) -> void:
+	if _drag_active:
+		return
+	if not _mobilize_phase_active():
+		icon.clear_drag_state()
+		return
+	var payload := icon.get_payload()
+	if payload.is_empty():
+		icon.clear_drag_state()
+		return
+	_active_staged_icon = icon
+	_staged_icon_modulate = icon.modulate
+	icon.modulate = Color(icon.modulate.r, icon.modulate.g, icon.modulate.b, 0.35)
+	_begin_mobilize_drag(payload, icon.get_drag_start_global())
+
+
+func _on_staged_icon_drag_updated(icon: DraggableStagedIcon, screen_global: Vector2) -> void:
+	if not _drag_active or _active_staged_icon != icon:
+		return
+	_update_drag(screen_global)
+
+
+func _on_staged_icon_drag_ended(icon: DraggableStagedIcon, screen_global: Vector2) -> void:
+	if not _drag_active or _active_staged_icon != icon:
+		return
+	_end_drag(screen_global)
+
+
+func _on_staged_icon_drag_cancelled(icon: DraggableStagedIcon) -> void:
+	if _active_staged_icon == icon:
+		_cancel_drag()
+
+
+func _begin_mobilize_drag(payload: Dictionary, screen_global: Vector2) -> void:
+	_begin_ui_drag(DragSource.MOBILIZE_UI, payload, screen_global)
+	_show_movement_arrow(screen_global, screen_global)
+	_highlight_mobilize_hover(screen_global)
+
+
 func _begin_map_drag(icon: UnitIcon, screen_global: Vector2) -> void:
 	_drag_source = DragSource.MAP_ICON
 	_active_icon = icon
@@ -180,12 +243,19 @@ func _begin_ui_drag(source: DragSource, payload: Dictionary, screen_global: Vect
 
 func _update_drag(screen_global: Vector2) -> void:
 	_position_preview(screen_global)
-	if _drag_source == DragSource.MAP_ICON and _active_icon:
-		_update_movement_arrow(_drag_start_map_global, screen_global)
-		_highlight_hover(screen_global, _active_icon.source_region_id)
+	match _drag_source:
+		DragSource.MAP_ICON:
+			if _active_icon:
+				_update_movement_arrow(_drag_start_map_global, screen_global)
+				_highlight_hover(screen_global, _active_icon.source_region_id)
+		DragSource.MOBILIZE_UI:
+			_update_movement_arrow(_drag_start_map_global, screen_global)
+			_highlight_mobilize_hover(screen_global)
 
 
 func _end_drag(screen_global: Vector2) -> void:
+	if not _drag_active:
+		return
 	var from_region := ""
 	if _active_icon:
 		from_region = _active_icon.source_region_id
@@ -204,6 +274,8 @@ func _end_drag(screen_global: Vector2) -> void:
 func _cancel_drag() -> void:
 	if _active_icon and is_instance_valid(_active_icon):
 		_active_icon.clear_drag_state()
+	if _active_staged_icon and is_instance_valid(_active_staged_icon):
+		_active_staged_icon.clear_drag_state()
 	_restore_source_icon()
 	_cleanup_drag()
 	drag_cancelled.emit()
@@ -226,7 +298,9 @@ func _cleanup_drag() -> void:
 	_clear_preview()
 	_hide_movement_arrow()
 	_clear_highlights()
+	_restore_staged_icon()
 	_active_icon = null
+	_active_staged_icon = null
 	_drag_payload.clear()
 	_hover_region = ""
 	_drag_active = false
@@ -253,6 +327,12 @@ func _restore_source_icon() -> void:
 			_original_parent.add_child(_active_icon)
 		_active_icon.position = _original_position
 		_active_icon.z_index = _original_z_index
+
+
+func _restore_staged_icon() -> void:
+	if _active_staged_icon == null or not is_instance_valid(_active_staged_icon):
+		return
+	_active_staged_icon.modulate = _staged_icon_modulate
 
 
 func _spawn_preview_from_icon(icon: UnitIcon) -> void:
@@ -385,8 +465,26 @@ func _highlight_hover(screen_global: Vector2, from_region: String) -> void:
 
 
 func _clear_highlights() -> void:
-	if _map_root and _map_root.has_method("clear_movement_highlights"):
+	if _map_root == null:
+		return
+	if _drag_source == DragSource.MOBILIZE_UI and _map_root.has_method("clear_mobilize_highlights"):
+		_map_root.call("clear_mobilize_highlights", _last_snapshot)
+	elif _map_root.has_method("clear_movement_highlights"):
 		_map_root.call("clear_movement_highlights", _last_snapshot)
+
+
+func _highlight_mobilize_hover(screen_global: Vector2) -> void:
+	var hover := region_at_screen_global(screen_global)
+	if hover == _hover_region:
+		return
+	_hover_region = hover
+	if _map_root and _map_root.has_method("highlight_mobilize_targets"):
+		_map_root.call(
+			"highlight_mobilize_targets",
+			_payload_faction(_drag_payload),
+			hover,
+			_last_snapshot
+		)
 
 
 func _payload_faction(payload: Dictionary) -> String:
@@ -396,7 +494,12 @@ func _payload_faction(payload: Dictionary) -> String:
 func _unhandled_input(event: InputEvent) -> void:
 	if not _drag_active:
 		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	if event is InputEventMouseMotion:
+		_update_drag(event.global_position)
+	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if _drag_source != DragSource.MAP_ICON:
+			_end_drag(event.global_position)
+	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_cancel_drag()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		_cancel_drag()

@@ -221,6 +221,52 @@ func clear_movement_highlights(snapshot: Dictionary) -> void:
 	update_region_colors(snapshot)
 
 
+func highlight_mobilize_targets(
+	faction_id: String,
+	hover_region_id: String = "",
+	snapshot: Dictionary = {}
+) -> void:
+	var valid := _mobilize_target_regions(faction_id, snapshot)
+	for region_id in regions.keys():
+		var region_node: Node2D = regions[region_id]
+		var poly: Polygon2D = region_node.get_node_or_null("Polygon2D") as Polygon2D
+		if poly == null:
+			continue
+		var owner := _region_owner_id(region_node)
+		var base := _owner_color(owner)
+		if region_id in valid:
+			poly.color = Color(base.r, base.g, base.b, 0.62) if region_id == hover_region_id else Color(base.r, base.g, base.b, 0.45)
+		else:
+			poly.color = Color(base.r * 0.55, base.g * 0.55, base.b * 0.55, 0.18)
+
+
+func clear_mobilize_highlights(snapshot: Dictionary) -> void:
+	update_region_colors(snapshot)
+
+
+func _mobilize_target_regions(faction_id: String, snapshot: Dictionary) -> Array:
+	var valid: Array = []
+	var faction := faction_id.to_lower()
+	for region_id in regions.keys():
+		var region_node: Node2D = regions[region_id]
+		var owner := _region_owner_id(region_node).to_lower()
+		if owner != faction:
+			continue
+		if _region_has_factory(region_node, region_id, snapshot):
+			valid.append(region_id)
+	return valid
+
+
+func _region_has_factory(region_node: Node2D, region_id: String, snapshot: Dictionary) -> bool:
+	var meta := region_node.get_node_or_null("RegionMetadata")
+	if meta and "has_factory" in meta:
+		return bool(meta.has_factory)
+	for region_entry in snapshot.get("regions", []):
+		if str(region_entry.get("region_id", "")) == region_id:
+			return bool(region_entry.get("has_factory", false))
+	return false
+
+
 func _region_owner_id(region_node: Node2D) -> String:
 	var meta := region_node.get_node_or_null("RegionMetadata")
 	if meta:
