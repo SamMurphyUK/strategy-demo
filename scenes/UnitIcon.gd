@@ -19,13 +19,18 @@ var unit_type_id: String = ""
 var faction_id: String = ""
 var stack_count: int = 1
 var source_region_id: String = ""
+var is_drag_preview: bool = false
 var _selected: bool = false
 var _dragging: bool = false
 
 
 func _ready() -> void:
 	_autobind()
-	_apply_display_scale()
+	if not unit_type_id.is_empty():
+		_apply_texture()
+		_apply_faction_tint()
+	if not is_drag_preview:
+		_apply_display_scale()
 	_update_count_label()
 	_update_selection_outline()
 
@@ -74,6 +79,7 @@ func reset_for_pool() -> void:
 
 
 func configure(p_unit_type_id: String, p_faction_id: String, p_count: int = 1) -> void:
+	_autobind()
 	unit_type_id = p_unit_type_id.to_lower()
 	faction_id = p_faction_id.to_lower()
 	stack_count = max(1, p_count)
@@ -118,7 +124,6 @@ func _apply_texture() -> void:
 	if icon_sprite == null or unit_type_id.is_empty():
 		return
 
-	print("[ICON] Applying texture for:", unit_type_id, "|", faction_id)
 	var tex := UnitTextureCache.get_texture(unit_type_id, faction_id)
 
 	if tex:

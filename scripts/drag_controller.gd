@@ -12,7 +12,7 @@ signal drag_cancelled()
 
 enum DragSource { MAP_ICON, MOBILIZE_UI, COMBAT_UI }
 
-@export var drag_icon_container: Control
+@export var drag_icon_root: Node2D
 
 var _unit_visualizer: Node2D = null
 var _map_root: Node2D = null
@@ -40,10 +40,11 @@ var _drag_active: bool = false
 func _ready() -> void:
 	layer = 10
 	follow_viewport_enabled = true
-	if drag_icon_container == null:
-		drag_icon_container = get_node_or_null("DragIconContainer") as Control
-	if drag_icon_container:
-		drag_icon_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if drag_icon_root == null:
+		drag_icon_root = get_node_or_null("DragIconRoot") as Node2D
+	# Legacy scene path alias.
+	if drag_icon_root == null:
+		drag_icon_root = get_node_or_null("DragIconContainer") as Node2D
 
 
 func configure(
@@ -260,7 +261,7 @@ func _spawn_preview_from_icon(icon: UnitIcon) -> void:
 		return
 	_preview_icon.configure(icon.unit_type_id, icon.faction_id, icon.stack_count)
 	_preview_icon.source_region_id = icon.source_region_id
-	_add_preview_to_container()
+	_add_preview_to_root()
 
 
 func _spawn_preview_from_payload(payload: Dictionary) -> void:
@@ -270,7 +271,7 @@ func _spawn_preview_from_payload(payload: Dictionary) -> void:
 	var unit_type := str(payload.get("unit_type_id", ""))
 	var faction := str(payload.get("faction_id", _payload_faction(payload)))
 	_preview_icon.configure(unit_type, faction, int(payload.get("count", 1)))
-	_add_preview_to_container()
+	_add_preview_to_root()
 
 
 func _instantiate_preview() -> UnitIcon:
@@ -283,18 +284,50 @@ func _instantiate_preview() -> UnitIcon:
 	var icon := scene.instantiate() as UnitIcon
 	if icon == null:
 		push_error("DragController: failed to instantiate UnitIcon preview")
+		return null
+	icon.is_drag_preview = true
 	return icon
 
 
-func _add_preview_to_container() -> void:
-	if _preview_icon == null or drag_icon_container == null:
+func _add_preview_to_root() -> void:
+	if _preview_icon == null or drag_icon_root == null:
 		return
-	drag_icon_container.add_child(_preview_icon)
-	_preview_icon.scale = UnitIcon.ICON_DISPLAY_SCALE
-	_preview_icon.visible = true
-	_preview_icon.set_selected(true)
-	if _preview_icon.drag_area:
-		_preview_icon.drag_area.input_pickable = false
+	_preview_icon.is_drag_preview = true
+	drag_icon_root.add_child(_preview_icon)
+	_finalize_preview(_preview_icon)
+
+
+func _finalize_preview(icon: UnitIcon) -> void:
+	_apply_preview_scale(icon)
+	icon.visible = true
+	icon.set_selected(true)
+	if icon.drag_area:
+		icon.drag_area.input_pickable = false
+
+
+func _apply_preview_scale(icon: UnitIcon) -> void:
+	var tex_size := _texture_pixel_size(icon)
+	var target_px := UnitIcon.HITBOX_SIZE.x
+	if tex_size.x > 0.0:
+		var s := target_px / tex_size.x
+		icon.scale = Vector2(s, s)
+	else:
+		icon.scale = UnitIcon.ICON_DISPLAY_SCALE
+
+
+func _texture_pixel_size(icon: UnitIcon) -> Vector2:
+	if icon.icon_sprite and icon.icon_sprite.texture:
+		return icon.icon_sprite.texture.get_size()
+	return Vector2.ZERO
+
+
+func _preview_visual_half() -> Vector2:
+	if _preview_icon == null:
+		return Vector2.ZERO
+	var tex_size := _texture_pixel_size(_preview_icon)
+	if tex_size == Vector2.ZERO:
+		return UnitIcon.HITBOX_SIZE * 0.5
+	return tex_size * _preview_icon.scale * 0.5
 
 
 func _clear_preview() -> void:
@@ -304,9 +337,9 @@ func _clear_preview() -> void:
 
 
 func _position_preview(screen_global: Vector2) -> void:
-	if _preview_icon == null or drag_icon_container == null:
+	if _preview_icon == null:
 		return
-	_preview_icon.position = drag_icon_container.get_global_transform_with_canvas().affine_inverse() * screen_global
+	_preview_icon.global_position = screen_global - _preview_visual_half()
 
 
 func screen_to_map_global(screen_global: Vector2) -> Vector2:
