@@ -43,7 +43,8 @@ func _print_scene_tree(game: Node) -> void:
 	print("\n--- SCENE TREE (mobilization) ---")
 	for path in [
 		"02/RightUIRoot",
-		"01/LeftUIRoot/LeftVBox/MobilizePanel",
+		"MobilizeLayer",
+		"MobilizeLayer/MobilizePanel",
 		"DragLayer",
 		"DragLayer/DragIconRoot",
 		"layer = 0/MapRoot/UnitLayer/UnitVisualizer",
@@ -85,7 +86,10 @@ func _simulate_mobilize_drag(game, controller, drag_root, mobilize_panel, left_u
 		return
 	controller.configure(visualizer, map_root, visualizer._movement_arrow, visualizer.unit_icon_scene)
 	controller.set_context("mobilize", {}, game.session.get_state() if game.session else {})
-	if mobilize_panel:
+	var mobilize_layer := game.find_child("MobilizeLayer", true, false) as CanvasLayer
+	if mobilize_layer:
+		mobilize_layer.visible = true
+	elif mobilize_panel:
 		mobilize_panel.visible = true
 	await process_frame
 	var staged: DraggableStagedIcon = null

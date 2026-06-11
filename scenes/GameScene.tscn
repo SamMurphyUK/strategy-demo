@@ -37,6 +37,44 @@ debug_logging = true
 
 [node name="DragLayer" parent="." instance=ExtResource("6_drag")]
 
+[node name="MobilizeLayer" type="CanvasLayer" parent="." unique_id=1982736401]
+visible = false
+layer = 5
+
+[node name="MobilizePanel" type="PanelContainer" parent="MobilizeLayer" unique_id=1294189145]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -240.0
+offset_top = -180.0
+offset_right = 240.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="MobilizeMargin" type="MarginContainer" parent="MobilizeLayer/MobilizePanel" unique_id=1982736402]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="MobilizeVBox" type="VBoxContainer" parent="MobilizeLayer/MobilizePanel/MobilizeMargin" unique_id=1982736403]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="MobilizeHeader" type="Label" parent="MobilizeLayer/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=212863623]
+layout_mode = 2
+text = "Mobilize Staged Units (drag to map)"
+horizontal_alignment = 1
+
+[node name="StagedUnitsList" type="VBoxContainer" parent="MobilizeLayer/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=717317706]
+layout_mode = 2
+size_flags_vertical = 0
+
 [node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=195472403]
 visible = false
 
@@ -130,19 +168,6 @@ text = "Owner: —"
 [node name="UnitCountLabel" type="Label" parent="01/LeftUIRoot/LeftVBox/RegionInfo" unique_id=1015856661]
 layout_mode = 2
 text = "Units: —"
-
-[node name="MobilizePanel" type="VBoxContainer" parent="01/LeftUIRoot/LeftVBox" unique_id=1294189145]
-visible = false
-layout_mode = 2
-size_flags_vertical = 0
-
-[node name="MobilizeHeader" type="Label" parent="01/LeftUIRoot/LeftVBox/MobilizePanel" unique_id=212863623]
-layout_mode = 2
-text = "Mobilize Staged Units (drag to map)"
-
-[node name="StagedUnitsList" type="VBoxContainer" parent="01/LeftUIRoot/LeftVBox/MobilizePanel" unique_id=717317706]
-layout_mode = 2
-size_flags_vertical = 0
 
 [node name="RegionStack" type="PanelContainer" parent="01/LeftUIRoot/LeftVBox" unique_id=992434444]
 custom_minimum_size = Vector2(0, 90)

@@ -24,6 +24,7 @@ var region_name_label: Label = null
 var region_owner_label: Label = null
 var region_unitcount_label: Label = null
 var purchase_panel: Control = null
+var mobilize_layer: CanvasLayer = null
 var mobilize_panel: Control = null
 var staged_units_list: VBoxContainer = null
 var region_stack: Control = null
@@ -137,8 +138,11 @@ func _autobind_nodes() -> void:
 	region_owner_label = left_ui.find_child("OwnerLabel", true, false)
 	region_unitcount_label = left_ui.find_child("UnitCountLabel", true, false)
 	purchase_panel = right_ui.find_child("PurchasePanel", true, false)
-	mobilize_panel = left_ui.find_child("MobilizePanel", true, false)
-	staged_units_list = left_ui.find_child("StagedUnitsList", true, false)
+	mobilize_layer = find_child("MobilizeLayer", true, false) as CanvasLayer
+	mobilize_panel = mobilize_layer.find_child("MobilizePanel", true, false) if mobilize_layer else null
+	if mobilize_panel == null:
+		mobilize_panel = find_child("MobilizePanel", true, false)
+	staged_units_list = mobilize_panel.find_child("StagedUnitsList", true, false) if mobilize_panel else null
 	region_stack = left_ui.find_child("RegionStack", true, false)
 	region_stack_list = left_ui.find_child("RegionStackList", true, false)
 	right_ui_root = right_ui
@@ -314,7 +318,9 @@ func on_state_updated(new_state: Dictionary) -> void:
 	_update_phase_ui(phase)
 	if purchase_panel:
 		purchase_panel.visible = phase == "purchase"
-	if mobilize_panel:
+	if mobilize_layer:
+		mobilize_layer.visible = phase == "mobilize"
+	elif mobilize_panel:
 		mobilize_panel.visible = phase == "mobilize"
 	# Legacy nodes still remain outside PurchasePanel in this scene; hide them phase-wise as well.
 	var purchase_visible := phase == "purchase"
@@ -408,6 +414,9 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 	if staged_units_list == null:
 		return
 	for child in staged_units_list.get_children():
+		for sub in child.get_children():
+			if sub is DraggableStagedIcon and drag_controller and drag_controller.has_method("unbind_staged_icon"):
+				drag_controller.unbind_staged_icon(sub)
 		child.queue_free()
 	var faction_pending: Array = snapshot.get("pending_purchases", {}).get(_selected_faction_id(), [])
 	for line in faction_pending:
