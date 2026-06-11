@@ -46,7 +46,7 @@ static func build_map_data(map_json: Dictionary) -> Dictionary:
 			"ipc_value": int(meta.get("ipc", 0)),
 			"owner_faction_id": owner,
 			"is_capital": bool(meta.get("victory", false)),
-			"has_factory": bool(meta.get("factory", false)) or owner in PLAYABLE_FACTIONS,
+			"has_factory": bool(meta.get("factory", false)),
 		})
 	return {
 		"schema_version": "0.5",

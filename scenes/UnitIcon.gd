@@ -68,8 +68,10 @@ func reset_for_pool() -> void:
 	source_region_id = ""
 	_selected = false
 	_dragging = false
+	is_drag_preview = false
 	visible = true
 	modulate = Color.WHITE
+	scale = Vector2.ONE
 	set_selected(false)
 
 	if icon_sprite:
@@ -89,6 +91,7 @@ func configure(p_unit_type_id: String, p_faction_id: String, p_count: int = 1) -
 	_update_count_label()
 	_apply_texture()
 	_apply_faction_tint()
+	_apply_icon_role()
 
 
 func set_unit_type(type: String) -> void:
@@ -141,6 +144,11 @@ func _apply_faction_tint() -> void:
 	if faction_tint == null:
 		return
 
+	if unit_type_id == "factory":
+		faction_tint.visible = false
+		return
+
+	faction_tint.visible = true
 	match faction_id:
 		"allies", "american", "us":
 			faction_tint.color = Color(0.4, 0.85, 0.4, 0.22)
@@ -148,6 +156,14 @@ func _apply_faction_tint() -> void:
 			faction_tint.color = Color(0.75, 0.75, 0.75, 0.22)
 		_:
 			faction_tint.color = Color(1, 1, 1, 0.12)
+
+
+func _apply_icon_role() -> void:
+	var is_factory := unit_type_id == "factory"
+	if count_label:
+		count_label.visible = not is_factory and stack_count > 1
+	if drag_area:
+		drag_area.input_pickable = not is_factory and not is_drag_preview
 
 
 func _apply_display_scale() -> void:
@@ -166,6 +182,9 @@ func _apply_display_scale() -> void:
 
 func _update_count_label() -> void:
 	if count_label == null:
+		return
+	if unit_type_id == "factory":
+		count_label.visible = false
 		return
 	count_label.visible = stack_count > 1
 	count_label.text = str(stack_count)

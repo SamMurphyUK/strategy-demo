@@ -155,7 +155,8 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 	if meta.has_factory:
 		var factory_icon := _acquire_icon()
 		factory_icon.source_region_id = region_id
-		factory_icon.configure("factory", _region_owner_faction(meta), 1)
+		var owner_faction := _owner_faction_for_region(region_id, meta)
+		factory_icon.configure("factory", owner_faction, 1)
 		factory_icon.position = local_anchor + UnitLayout.FACTORY_OFFSET
 		factory_icon.z_index = UnitLayout.get_z_order("factory")
 		factory_icon.visible = true
@@ -228,6 +229,18 @@ func _on_controller_movement_drop(
 
 func _region_owner_faction(meta: RegionMetadata) -> String:
 	return UnitTextureCache.normalize_faction_id(str(meta.faction))
+
+
+func _owner_faction_for_region(region_id: String, meta: RegionMetadata) -> String:
+	for region_entry in _last_snapshot.get("regions", []):
+		if typeof(region_entry) != TYPE_DICTIONARY:
+			continue
+		if str(region_entry.get("region_id", "")) == region_id:
+			var owner := str(region_entry.get("owner_faction_id", ""))
+			if not owner.is_empty():
+				return UnitTextureCache.normalize_faction_id(owner)
+			break
+	return _region_owner_faction(meta)
 
 
 func _find_region_node(region_id: String, map_root: Node2D) -> Node2D:
