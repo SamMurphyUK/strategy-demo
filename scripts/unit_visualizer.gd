@@ -26,8 +26,6 @@ var _drag_hover_region: String = ""
 
 
 func _ready() -> void:
-	if unit_icon_scene == null and ResourceLoader.exists("res://scenes/UnitIcon.tscn"):
-		unit_icon_scene = load("res://scenes/UnitIcon.tscn")
 	_movement_arrow = Line2D.new()
 	_movement_arrow.width = 3.0
 	_movement_arrow.default_color = Color(1, 0.9, 0.2, 0.9)
