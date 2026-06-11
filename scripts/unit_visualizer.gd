@@ -48,8 +48,8 @@ func _ensure_unit_icon_scene() -> void:
 	if unit_icon_scene != null:
 		return
 	var candidates := [
-		"res://scenes/ui/UnitIcon.tscn",
 		"res://scenes/UnitIcon.tscn",
+		"res://scenes/ui/UnitIcon.tscn",
 	]
 	for path in candidates:
 		if ResourceLoader.exists(path):
@@ -229,7 +229,7 @@ func _disconnect_drag_signals(icon: UnitIcon) -> void:
 
 
 func _movement_phase_active() -> bool:
-	return _current_phase in ["combat_move", "noncombat_move"]
+	return true  # TEMPORARY: allow drag in all phases for debugging
 
 
 func _on_icon_drag_started(icon: UnitIcon) -> void:

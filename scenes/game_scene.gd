@@ -68,8 +68,8 @@ func _ensure_unit_visualizer_scene() -> void:
 		return
 	if unit_visualizer.get("unit_icon_scene") != null:
 		return
-	var preferred := "res://scenes/ui/UnitIcon.tscn"
-	var fallback := "res://scenes/UnitIcon.tscn"
+	var preferred := "res://scenes/UnitIcon.tscn"
+	var fallback := "res://scenes/ui/UnitIcon.tscn"
 	if ResourceLoader.exists(preferred):
 		unit_visualizer.unit_icon_scene = load(preferred)
 	elif ResourceLoader.exists(fallback):

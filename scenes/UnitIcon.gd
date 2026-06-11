@@ -180,10 +180,10 @@ func _on_drag_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) ->
 			_dragging = false
 			set_process_unhandled_input(false)
 			set_selected(false)
-			drag_ended.emit(self, get_global_mouse_position())
+			drag_ended.emit(self, event.global_position)
 
 	elif event is InputEventMouseMotion and _dragging:
-		drag_updated.emit(self, get_global_mouse_position())
+		drag_updated.emit(self, event.global_position)
 
 
 func _unhandled_input(event: InputEvent) -> void:

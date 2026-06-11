@@ -4,7 +4,7 @@
 [ext_resource type="Script" uid="uid://b5d3xqv80d7ux" path="res://scenes/game_map_root.gd" id="2_map"]
 [ext_resource type="Texture2D" uid="uid://bdoi6lkrtx3f5" path="res://texture/test.jpg" id="3_cxv17"]
 [ext_resource type="Script" uid="uid://ux0km6bjtopn" path="res://scripts/unit_visualizer.gd" id="4_7s5hy"]
-[ext_resource type="PackedScene" uid="uid://uniticon123" path="res://scenes/ui/UnitIcon.tscn" id="5_xs4ih"]
+[ext_resource type="PackedScene" uid="uid://cftbign7fj81u" path="res://scenes/UnitIcon.tscn" id="5_xs4ih"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
