@@ -34,11 +34,6 @@ script = ExtResource("4_7s5hy")
 unit_icon_scene = ExtResource("5_xs4ih")
 debug_logging = true
 
-<<<<<<< HEAD
-[node name="UnitIcon" parent="layer = 0/MapRoot/UnitLayer/UnitVisualizer" unique_id=931535465 instance=ExtResource("5_7s5hy")]
-
-=======
->>>>>>> 9ac616c (Fix null unit_icon_scene on UnitVisualizer at runtime)
 [node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=195472403]
 visible = false
 
