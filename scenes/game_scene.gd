@@ -32,6 +32,12 @@ var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
 var drag_controller = null  # DragController
 var right_ui_root: Control = null
+var _map_camera: Camera2D = null
+var _target_zoom := Vector2.ONE
+
+const MIN_ZOOM := 0.4
+const MAX_ZOOM := 2.5
+const ZOOM_SMOOTH_SPEED := 12.0
 
 var session = null
 var _command_counter: int = 0
@@ -58,6 +64,57 @@ func _ready() -> void:
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
 	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
 		drag_controller.mobilize_drop_requested.connect(_on_mobilize_drag_drop)
+	set_process(true)
+	if _map_camera:
+		_target_zoom = _map_camera.zoom
+	_sync_zoom_to_subsystems()
+
+
+func _process(delta: float) -> void:
+	if _map_camera == null:
+		return
+	var speed := 900.0 * delta
+	var move := Vector2.ZERO
+	if Input.is_action_pressed("ui_left"):
+		move.x -= 1.0
+	if Input.is_action_pressed("ui_right"):
+		move.x += 1.0
+	if Input.is_action_pressed("ui_up"):
+		move.y -= 1.0
+	if Input.is_action_pressed("ui_down"):
+		move.y += 1.0
+	if move != Vector2.ZERO:
+		_map_camera.position += move.normalized() * speed
+	if not _map_camera.zoom.is_equal_approx(_target_zoom):
+		_map_camera.zoom = _map_camera.zoom.lerp(_target_zoom, minf(1.0, delta * ZOOM_SMOOTH_SPEED))
+		_sync_zoom_to_subsystems()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_apply_zoom(0.9)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_apply_zoom(1.1)
+
+
+func _apply_zoom(factor: float) -> void:
+	if _map_camera == null:
+		return
+	var new_zoom := _target_zoom * factor
+	new_zoom.x = clampf(new_zoom.x, MIN_ZOOM, MAX_ZOOM)
+	new_zoom.y = clampf(new_zoom.y, MIN_ZOOM, MAX_ZOOM)
+	_target_zoom = new_zoom
+
+
+func _sync_zoom_to_subsystems() -> void:
+	if _map_camera == null:
+		return
+	var zoom := _map_camera.zoom.x
+	if unit_visualizer and unit_visualizer.has_method("apply_zoom_scale"):
+		unit_visualizer.call("apply_zoom_scale", zoom)
+	if drag_controller and drag_controller.has_method("apply_zoom_scale"):
+		drag_controller.call("apply_zoom_scale", zoom)
 
 func _wire_drag_controller() -> void:
 	drag_controller = find_child("DragLayer", true, false)
@@ -82,6 +139,7 @@ func _ensure_unit_visualizer_scene() -> void:
 
 
 func _autobind_nodes() -> void:
+	_map_camera = get_node_or_null("layer = 0/Camera2D") as Camera2D
 	map_root = get_node_or_null("layer = 0/MapRoot")
 	if map_root == null:
 		map_root = find_child("MapRoot", true, false)

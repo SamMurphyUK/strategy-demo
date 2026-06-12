@@ -125,6 +125,15 @@ func get_z_layer() -> int:
 	return UnitLayout.get_z_order(unit_type_id)
 
 
+func get_texture_base_scale() -> float:
+	if icon_sprite == null or icon_sprite.texture == null:
+		return 1.0
+	var w := float(icon_sprite.texture.get_width())
+	if w <= 0.0:
+		return 1.0
+	return UnitIcon.UNIT_ICON_SIZE / w
+
+
 func _apply_texture() -> void:
 	if icon_sprite == null or unit_type_id.is_empty():
 		return

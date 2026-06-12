@@ -22,6 +22,7 @@ var _factory_icons: Dictionary = {}
 var _icon_pool: Array = []
 var _movement_arrow: Line2D = null
 var _drag_controller = null  # DragController
+var _current_zoom := 1.0
 
 
 func _ready() -> void:
@@ -93,6 +94,23 @@ func refresh_all() -> void:
 		var region_id := str(region_entry.get("region_id", ""))
 		var grouped := _group_units(region_entry.get("units", []))
 		update_region_units(region_id, grouped)
+	apply_zoom_scale(_current_zoom)
+
+
+func apply_zoom_scale(zoom: float) -> void:
+	_current_zoom = maxf(zoom, 0.001)
+	for region_id in _region_icons.keys():
+		for icon in _region_icons[region_id]:
+			_apply_icon_zoom_scale(icon)
+	for region_id in _factory_icons.keys():
+		_apply_icon_zoom_scale(_factory_icons[region_id])
+
+
+func _apply_icon_zoom_scale(icon: UnitIcon) -> void:
+	if icon == null or not is_instance_valid(icon):
+		return
+	var base_scale := icon.get_texture_base_scale()
+	icon.scale = Vector2(base_scale / _current_zoom, base_scale / _current_zoom)
 
 
 func clear_all_units() -> void:
@@ -147,6 +165,7 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		icon.visible = true
 		_connect_drag_signals(icon)
 		add_child(icon)
+		_apply_icon_zoom_scale(icon)
 		icons_for_region.append(icon)
 		slot_idx += 1
 
@@ -161,6 +180,7 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		factory_icon.z_index = UnitLayout.get_z_order("factory")
 		factory_icon.visible = true
 		add_child(factory_icon)
+		_apply_icon_zoom_scale(factory_icon)
 		_factory_icons[region_id] = factory_icon
 
 

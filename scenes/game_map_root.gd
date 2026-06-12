@@ -310,6 +310,10 @@ func _polygon_centroid_from_raw(points_raw: Array) -> Vector2:
 func _region_id_at_position(global_pos: Vector2) -> String:
 	return _find_region_at_point(global_pos)
 
+
+func _region_id_at_map_position(map_pos: Vector2) -> String:
+	return _find_region_at_point(to_global(map_pos))
+
 func _can_drop_at_region(region_id: String, drag_data: Dictionary) -> bool:
 	return not region_id.is_empty() and not str(drag_data.get("unit_type_id", "")).is_empty()
 
@@ -320,7 +324,7 @@ func drop_staged_unit(
 	command_id: String,
 	player_id: String
 ) -> Dictionary:
-	var region_id := _region_id_at_position(global_pos)
+	var region_id := _region_id_at_map_position(global_pos)
 	if not _can_drop_at_region(region_id, drag_data):
 		return {"result_type": "error", "error": {"code": "DROP_INVALID", "message": "Invalid drop target"}, "events": []}
 	return session.apply_command({

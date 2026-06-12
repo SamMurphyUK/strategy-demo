@@ -19,6 +19,18 @@ script = ExtResource("1_scene")
 
 [node name="layer = 0" type="CanvasLayer" parent="." unique_id=1508508737]
 
+[node name="Camera2D" type="Camera2D" parent="layer = 0" unique_id=2103847291]
+enabled = true
+position = Vector2(960, 540)
+zoom = Vector2(1, 1)
+position_smoothing_enabled = false
+drag_horizontal_enabled = false
+drag_vertical_enabled = false
+drag_left_margin = 0.0
+drag_top_margin = 0.0
+drag_right_margin = 0.0
+drag_bottom_margin = 0.0
+
 [node name="MapRoot" type="Node2D" parent="layer = 0" unique_id=206317708]
 script = ExtResource("2_map")
 
@@ -40,6 +52,7 @@ debug_logging = true
 [node name="MobilizeLayer" type="CanvasLayer" parent="." unique_id=1982736401]
 visible = false
 layer = 5
+follow_viewport_enabled = false
 
 [node name="MobilizePanel" type="PanelContainer" parent="MobilizeLayer" unique_id=1294189145]
 layout_mode = 1
@@ -106,6 +119,7 @@ text = "Combat Phase (placeholder)"
 horizontal_alignment = 1
 
 [node name="01" type="CanvasLayer" parent="." unique_id=1255178115]
+follow_viewport_enabled = false
 
 [node name="LeftUIRoot" type="Control" parent="01" unique_id=1612887545]
 layout_mode = 3
@@ -194,6 +208,7 @@ bbcode_enabled = true
 scroll_following = true
 
 [node name="02" type="CanvasLayer" parent="." unique_id=1056241463]
+follow_viewport_enabled = false
 
 [node name="RightUIRoot" type="Control" parent="02" unique_id=124911552]
 visible = false

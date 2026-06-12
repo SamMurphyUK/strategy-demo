@@ -71,6 +71,12 @@ func set_context(
 	_last_snapshot = snapshot
 
 
+func apply_zoom_scale(zoom: float) -> void:
+	_current_zoom = maxf(zoom, 0.001)
+	if _preview_icon:
+		_apply_preview_scale(_preview_icon)
+
+
 func bind_map_icon(icon: UnitIcon) -> void:
 	if not icon.drag_started.is_connected(_on_map_icon_drag_started):
 		icon.drag_started.connect(_on_map_icon_drag_started)
@@ -264,7 +270,7 @@ func _end_drag(screen_global: Vector2) -> void:
 		DragSource.MAP_ICON:
 			_finish_map_drop(from_region, screen_global)
 		DragSource.MOBILIZE_UI:
-			mobilize_drop_requested.emit(_drag_payload, screen_global)
+			mobilize_drop_requested.emit(_drag_payload, screen_to_map_global(screen_global))
 		DragSource.COMBAT_UI:
 			push_warning("DragController: combat UI drop not wired yet")
 
@@ -386,14 +392,18 @@ func _finalize_preview(icon: UnitIcon) -> void:
 
 
 func _apply_preview_scale(icon: UnitIcon) -> void:
-	var tex := icon.icon_sprite.texture if icon.icon_sprite else null
-	if tex:
-		var w := float(tex.get_width())
-		if w > 0.0:
-			icon.scale = Vector2(UnitIcon.UNIT_ICON_SIZE / w, UnitIcon.UNIT_ICON_SIZE / w)
+	var base_scale := icon.get_texture_base_scale()
+	if base_scale > 0.0:
+		# Screen-space preview matches zoom-compensated map icons on screen.
+		icon.scale = Vector2(base_scale, base_scale)
 
 
 func _preview_visual_half() -> Vector2:
+	if _preview_icon == null:
+		return Vector2.ZERO
+	var tex := _preview_icon.icon_sprite.texture if _preview_icon.icon_sprite else null
+	if tex:
+		return tex.get_size() * _preview_icon.scale * 0.5
 	return Vector2(UnitIcon.UNIT_ICON_SIZE, UnitIcon.UNIT_ICON_SIZE) * 0.5
 
 
@@ -416,8 +426,13 @@ func screen_to_map_global(screen_global: Vector2) -> Vector2:
 
 
 func region_at_screen_global(screen_global: Vector2) -> String:
-	if _map_root and _map_root.has_method("_region_id_at_position"):
-		return str(_map_root.call("_region_id_at_position", screen_global))
+	if _map_root == null:
+		return ""
+	var map_pos := screen_to_map_global(screen_global)
+	if _map_root.has_method("_region_id_at_map_position"):
+		return str(_map_root.call("_region_id_at_map_position", map_pos))
+	if _map_root.has_method("_region_id_at_position"):
+		return str(_map_root.call("_region_id_at_position", _map_root.to_global(map_pos)))
 	return ""
 
 
@@ -431,9 +446,16 @@ func _show_movement_arrow(map_start: Vector2, screen_end: Vector2) -> void:
 func _update_movement_arrow(map_start: Vector2, screen_end: Vector2) -> void:
 	if _movement_arrow == null or _unit_visualizer == null:
 		return
+	var end_global := _map_global_from_screen(screen_end)
 	var start_local := _unit_visualizer.to_local(map_start)
-	var end_local := _unit_visualizer.to_local(screen_end)
+	var end_local := _unit_visualizer.to_local(end_global)
 	_movement_arrow.points = PackedVector2Array([start_local, end_local])
+
+
+func _map_global_from_screen(screen_global: Vector2) -> Vector2:
+	if _map_root == null:
+		return screen_global
+	return _map_root.to_global(screen_to_map_global(screen_global))
 
 
 func _hide_movement_arrow() -> void:
