@@ -25,8 +25,10 @@ var region_owner_label: Label = null
 var region_unitcount_label: Label = null
 var purchase_panel: Control = null
 var mobilize_layer: CanvasLayer = null
+var mobilize_panel_root: Control = null
 var mobilize_panel: Control = null
 var staged_units_list: VBoxContainer = null
+var _current_ui_phase: String = ""
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
@@ -188,9 +190,10 @@ func _autobind_nodes() -> void:
 	region_unitcount_label = left_ui.find_child("UnitCountLabel", true, false)
 	purchase_panel = right_ui.find_child("PurchasePanel", true, false)
 	mobilize_layer = find_child("MobilizeLayer", true, false) as CanvasLayer
-	mobilize_panel = mobilize_layer.find_child("MobilizePanel", true, false) if mobilize_layer else null
-	if mobilize_panel == null:
-		mobilize_panel = find_child("MobilizePanel", true, false)
+	mobilize_panel_root = mobilize_layer.get_node_or_null("MobilizePanelRoot") as Control if mobilize_layer else null
+	mobilize_panel = mobilize_panel_root.find_child("MobilizePanel", true, false) if mobilize_panel_root else null
+	if mobilize_panel == null and mobilize_layer:
+		mobilize_panel = mobilize_layer.find_child("MobilizePanel", true, false)
 	staged_units_list = mobilize_panel.find_child("StagedUnitsList", true, false) if mobilize_panel else null
 	region_stack = left_ui.find_child("RegionStack", true, false)
 	region_stack_list = left_ui.find_child("RegionStackList", true, false)
@@ -360,17 +363,39 @@ func _update_phase_ui(phase: String) -> void:
 	if right_ui_root:
 		right_ui_root.visible = phase == "purchase"
 
+
+func _enter_mobilize_phase() -> void:
+	if mobilize_layer:
+		mobilize_layer.visible = true
+	if mobilize_panel_root:
+		mobilize_panel_root.visible = true
+	if right_ui_root:
+		right_ui_root.visible = false
+
+
+func _exit_mobilize_phase() -> void:
+	if mobilize_layer:
+		mobilize_layer.visible = false
+	if mobilize_panel_root:
+		mobilize_panel_root.visible = false
+	if drag_controller and drag_controller.has_method("cancel_active_drag"):
+		drag_controller.cancel_active_drag()
+	if map_root and map_root.has_method("clear_mobilize_highlights") and session:
+		map_root.call("clear_mobilize_highlights", session.get_state())
+
+
 func on_state_updated(new_state: Dictionary) -> void:
 	var phase := str(new_state.get("current_phase", ""))
 	if phase.is_empty():
 		phase = str(new_state.get("turn_info", {}).get("current_phase", ""))
+	if phase == "mobilize" and _current_ui_phase != "mobilize":
+		_enter_mobilize_phase()
+	elif _current_ui_phase == "mobilize" and phase != "mobilize":
+		_exit_mobilize_phase()
+	_current_ui_phase = phase
 	_update_phase_ui(phase)
 	if purchase_panel:
 		purchase_panel.visible = phase == "purchase"
-	if mobilize_layer:
-		mobilize_layer.visible = phase == "mobilize"
-	elif mobilize_panel:
-		mobilize_panel.visible = phase == "mobilize"
 	# Legacy nodes still remain outside PurchasePanel in this scene; hide them phase-wise as well.
 	var purchase_visible := phase == "purchase"
 	if ipc_allies_label:

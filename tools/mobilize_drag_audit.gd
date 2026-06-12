@@ -44,7 +44,8 @@ func _print_scene_tree(game: Node) -> void:
 	for path in [
 		"02/RightUIRoot",
 		"MobilizeLayer",
-		"MobilizeLayer/MobilizePanel",
+		"MobilizeLayer/MobilizePanelRoot",
+		"MobilizeLayer/MobilizePanelRoot/MobilizePanel",
 		"DragLayer",
 		"DragLayer/DragIconRoot",
 		"layer = 0/MapRoot/UnitLayer/UnitVisualizer",

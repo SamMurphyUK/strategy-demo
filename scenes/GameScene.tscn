@@ -51,40 +51,51 @@ debug_logging = true
 
 [node name="MobilizeLayer" type="CanvasLayer" parent="." unique_id=1982736401]
 visible = false
-layer = 5
+layer = 20
 follow_viewport_enabled = false
 
-[node name="MobilizePanel" type="PanelContainer" parent="MobilizeLayer" unique_id=1294189145]
+[node name="MobilizePanelRoot" type="Control" parent="MobilizeLayer" unique_id=1982736404]
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -240.0
+offset_left = -300.0
 offset_top = -180.0
-offset_right = 240.0
-offset_bottom = -20.0
+offset_right = 300.0
+offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
+mouse_filter = 1
 
-[node name="MobilizeMargin" type="MarginContainer" parent="MobilizeLayer/MobilizePanel" unique_id=1982736402]
+[node name="MobilizePanel" type="PanelContainer" parent="MobilizeLayer/MobilizePanelRoot" unique_id=1294189145]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+
+[node name="MobilizeMargin" type="MarginContainer" parent="MobilizeLayer/MobilizePanelRoot/MobilizePanel" unique_id=1982736402]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 10
 
-[node name="MobilizeVBox" type="VBoxContainer" parent="MobilizeLayer/MobilizePanel/MobilizeMargin" unique_id=1982736403]
+[node name="MobilizeVBox" type="VBoxContainer" parent="MobilizeLayer/MobilizePanelRoot/MobilizePanel/MobilizeMargin" unique_id=1982736403]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="MobilizeHeader" type="Label" parent="MobilizeLayer/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=212863623]
+[node name="MobilizeHeader" type="Label" parent="MobilizeLayer/MobilizePanelRoot/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=212863623]
 layout_mode = 2
 text = "Mobilize Staged Units (drag to map)"
 horizontal_alignment = 1
 
-[node name="StagedUnitsList" type="VBoxContainer" parent="MobilizeLayer/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=717317706]
+[node name="StagedUnitsList" type="VBoxContainer" parent="MobilizeLayer/MobilizePanelRoot/MobilizePanel/MobilizeMargin/MobilizeVBox" unique_id=717317706]
 layout_mode = 2
 size_flags_vertical = 0
 

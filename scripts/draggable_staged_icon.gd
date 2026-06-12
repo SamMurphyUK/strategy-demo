@@ -20,8 +20,6 @@ func _ready() -> void:
 	size = Vector2(UnitIcon.UNIT_ICON_SIZE, UnitIcon.UNIT_ICON_SIZE)
 	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 
 func get_payload() -> Dictionary:
