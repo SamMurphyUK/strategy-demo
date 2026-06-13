@@ -1,13 +1,13 @@
 extends CanvasLayer
 class_name DebugInspector
 
-var _session: Node = null
+var game_state: Node = null
 var drag_controller: Node = null
 var map_root: Node = null
 
 
 func configure(gs: Node, drag_ref: Node, map_ref: Node) -> void:
-	_session = gs
+	game_state = gs
 	drag_controller = drag_ref
 	map_root = map_ref
 
@@ -17,19 +17,21 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not is_visible_in_tree():
+	if not visible:
 		return
 
-	var staged: Variant = []
+	var staged: Array = []
 	var adjacency: Dictionary = {}
-	if _session:
-		if _session.has_method("get_staged_units"):
-			staged = _session.call("get_staged_units")
-		elif _session.has_method("get_state"):
-			var snapshot: Dictionary = _session.call("get_state")
+	if game_state:
+		if game_state.has_method("get_staged_units"):
+			staged = game_state.get_staged_units()
+		elif game_state.has_method("get_state"):
+			var snapshot: Dictionary = game_state.get_state()
 			staged = snapshot.get("pending_purchases", {})
-		if "state" in _session and _session.state != null and "adjacency" in _session.state:
-			adjacency = _session.state.adjacency
+		if "adjacency" in game_state:
+			adjacency = game_state.adjacency
+		elif "state" in game_state and game_state.state != null and "adjacency" in game_state.state:
+			adjacency = game_state.state.adjacency
 
 	var payload: Dictionary = {}
 	if drag_controller and "_drag_payload" in drag_controller:

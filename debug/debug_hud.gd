@@ -17,10 +17,10 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not is_visible_in_tree() or game_scene == null:
+	if not visible or game_scene == null:
 		return
 
-	var cam := game_scene.get_node_or_null("layer = 0/Camera2D") as Camera2D
+	var cam: Camera2D = game_scene.find_child("Camera2D", true, false) as Camera2D
 	var zoom := cam.zoom if cam else Vector2.ONE
 	var cam_pos := cam.position if cam else Vector2.ZERO
 
@@ -31,9 +31,7 @@ func _process(_delta: float) -> void:
 		if map_root.has_method("_region_id_at_map_position"):
 			hover_region = str(map_root.call("_region_id_at_map_position", map_pos))
 
-	var drag_active := false
-	if drag_controller and drag_controller.has_method("is_drag_active"):
-		drag_active = drag_controller.call("is_drag_active")
+	var drag_active := drag_controller.call("is_drag_active") if drag_controller else false
 
 	var label: Label = $DebugHUD/HUDLabel
 	label.text = (
