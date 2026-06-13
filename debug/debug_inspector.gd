@@ -37,10 +37,19 @@ func _process(_delta: float) -> void:
 	if drag_controller and "_drag_payload" in drag_controller:
 		payload = drag_controller._drag_payload
 
+	var turn_info: Variant = {}
+	var pending: Variant = {}
+	if game_state and game_state.has_method("get_state"):
+		var snapshot: Dictionary = game_state.get_state()
+		turn_info = snapshot.get("turn_info", {})
+		pending = snapshot.get("pending_purchases", {})
+
 	var label: Label = $DebugInspector/InspectorLabel
 	label.text = (
 		"[INSPECTOR]\n"
 		+ "Staged Units: " + str(staged) + "\n"
 		+ "Adjacency: " + str(adjacency) + "\n"
+		+ "Pending Purchases: " + str(pending) + "\n"
+		+ "Turn Info: " + str(turn_info) + "\n"
 		+ "Drag Payload: " + str(payload) + "\n"
 	)
