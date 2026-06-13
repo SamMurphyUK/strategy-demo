@@ -37,6 +37,7 @@ var _original_visible: bool = true
 var _drag_start_map_global: Vector2 = Vector2.ZERO
 var _hover_region: String = ""
 var _drag_active: bool = false
+var _current_zoom: float = 1.0
 
 
 func _ready() -> void:
