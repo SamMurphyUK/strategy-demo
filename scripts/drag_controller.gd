@@ -183,13 +183,16 @@ func _on_map_icon_drag_cancelled(icon: UnitIcon) -> void:
 
 
 func _on_staged_icon_drag_started(icon: DraggableStagedIcon) -> void:
+	print("[DRAG] Staged drag started:", icon)
 	if _drag_active:
 		return
 	if not _mobilize_phase_active():
 		icon.clear_drag_state()
 		return
 	var payload := icon.get_payload()
+	print("[DRAG] Payload:", payload)
 	if payload.is_empty():
+		print("[DRAG] ERROR: Payload empty")
 		icon.clear_drag_state()
 		return
 	_active_staged_icon = icon
@@ -395,8 +398,7 @@ func _finalize_preview(icon: UnitIcon) -> void:
 func _apply_preview_scale(icon: UnitIcon) -> void:
 	var base_scale := icon.get_texture_base_scale()
 	if base_scale > 0.0:
-		# Screen-space preview matches zoom-compensated map icons on screen.
-		icon.scale = Vector2(base_scale, base_scale)
+		icon.scale = Vector2(base_scale / _current_zoom, base_scale / _current_zoom)
 
 
 func _preview_visual_half() -> Vector2:
@@ -484,7 +486,9 @@ func _clear_highlights() -> void:
 
 
 func _highlight_mobilize_hover(screen_global: Vector2) -> void:
+	print("[DRAG] Mobilize hover at screen:", screen_global)
 	var hover := region_at_screen_global(screen_global)
+	print("[DRAG] Hover region:", hover)
 	if hover == _hover_region:
 		return
 	_hover_region = hover

@@ -70,11 +70,32 @@ func _ready() -> void:
 	if _map_camera:
 		_target_zoom = _map_camera.zoom
 	_sync_zoom_to_subsystems()
+	if debug:
+		_debug_print_ready_state()
+
+
+func _debug_print_ready_state() -> void:
+	print("[READY] Camera2D enabled:", _map_camera.enabled if _map_camera else "MISSING")
+	print("[READY] Camera2D is_current:", _map_camera.is_current() if _map_camera else false)
+	print("[READY] MapRoot type:", map_root)
+	print("[READY] MapRoot parent:", map_root.get_parent() if map_root else "MISSING")
+	if map_root:
+		print("[READY] MapRoot global transform:", map_root.get_global_transform())
+	print("[READY] UnitVisualizer:", unit_visualizer)
+	print("[READY] DragController:", drag_controller)
+	print("[READY] StagedUnitsList:", staged_units_list)
 
 
 func _process(delta: float) -> void:
 	if _map_camera == null:
 		return
+	if debug:
+		print("[PROCESS] delta:", delta)
+		var left := Input.is_action_pressed("ui_left")
+		var right := Input.is_action_pressed("ui_right")
+		var up := Input.is_action_pressed("ui_up")
+		var down := Input.is_action_pressed("ui_down")
+		print("[WASD] L:", left, " R:", right, " U:", up, " D:", down)
 	var speed := 900.0 * delta
 	var move := Vector2.ZERO
 	if Input.is_action_pressed("ui_left"):
@@ -86,10 +107,14 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("ui_down"):
 		move.y += 1.0
 	if move != Vector2.ZERO:
+		if debug:
+			print("[WASD] Moving camera by:", move.normalized() * speed)
 		_map_camera.position += move.normalized() * speed
 	if not _map_camera.zoom.is_equal_approx(_target_zoom):
 		_map_camera.zoom = _map_camera.zoom.lerp(_target_zoom, minf(1.0, delta * ZOOM_SMOOTH_SPEED))
 		_sync_zoom_to_subsystems()
+	if debug:
+		print("[CAMERA] pos:", _map_camera.position, " zoom:", _map_camera.zoom, " target:", _target_zoom)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -103,10 +128,17 @@ func _unhandled_input(event: InputEvent) -> void:
 func _apply_zoom(factor: float) -> void:
 	if _map_camera == null:
 		return
+	var old_zoom := _target_zoom
 	var new_zoom := _target_zoom * factor
+	if debug:
+		print("[ZOOM] old_zoom:", old_zoom, " factor:", factor, " new_zoom:", new_zoom)
 	new_zoom.x = clampf(new_zoom.x, MIN_ZOOM, MAX_ZOOM)
 	new_zoom.y = clampf(new_zoom.y, MIN_ZOOM, MAX_ZOOM)
 	_target_zoom = new_zoom
+	if debug:
+		print("[ZOOM] Camera2D enabled:", _map_camera.enabled)
+		print("[ZOOM] Camera2D is_current:", _map_camera.is_current())
+		print("[ZOOM] Camera2D.global_transform:", _map_camera.get_global_transform())
 
 
 func _sync_zoom_to_subsystems() -> void:
@@ -114,9 +146,17 @@ func _sync_zoom_to_subsystems() -> void:
 		return
 	var zoom := _map_camera.zoom.x
 	if unit_visualizer and unit_visualizer.has_method("apply_zoom_scale"):
+		if debug:
+			print("[ZOOM] Applying zoom to UnitVisualizer:", zoom)
 		unit_visualizer.call("apply_zoom_scale", zoom)
+	elif debug:
+		print("[ZOOM] ERROR: UnitVisualizer not found")
 	if drag_controller and drag_controller.has_method("apply_zoom_scale"):
+		if debug:
+			print("[ZOOM] Applying zoom to DragController:", zoom)
 		drag_controller.call("apply_zoom_scale", zoom)
+	elif debug:
+		print("[ZOOM] ERROR: DragController not found")
 
 func _wire_drag_controller() -> void:
 	drag_controller = find_child("DragLayer", true, false)
@@ -365,12 +405,21 @@ func _update_phase_ui(phase: String) -> void:
 
 
 func _enter_mobilize_phase() -> void:
+	if debug:
+		print("[MOBILIZE] Entering mobilize phase")
+		var snapshot: Dictionary = session.get_state() if session else {}
+		print("[MOBILIZE] Snapshot pending_purchases:", snapshot.get("pending_purchases", {}))
+		print("[MOBILIZE] Selected faction:", _selected_faction_id())
+		print("[MOBILIZE] StagedUnitsList:", staged_units_list)
+		print("[MOBILIZE] MobilizePanelRoot:", mobilize_panel_root)
 	if mobilize_layer:
 		mobilize_layer.visible = true
 	if mobilize_panel_root:
 		mobilize_panel_root.visible = true
 	if right_ui_root:
 		right_ui_root.visible = false
+	if debug and mobilize_panel_root:
+		print("[MOBILIZE] MobilizePanelRoot children:", mobilize_panel_root.get_children())
 
 
 func _exit_mobilize_phase() -> void:
@@ -486,6 +535,8 @@ func _refresh_purchase_panels(snapshot: Dictionary) -> void:
 
 func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 	if staged_units_list == null:
+		if debug:
+			print("[MOBILIZE] ERROR: staged_units_list is null")
 		return
 	for child in staged_units_list.get_children():
 		for sub in child.get_children():
@@ -493,26 +544,38 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 				drag_controller.unbind_staged_icon(sub)
 		child.queue_free()
 	var faction_pending: Array = snapshot.get("pending_purchases", {}).get(_selected_faction_id(), [])
+	if debug:
+		print("[MOBILIZE] Refresh staged list faction:", _selected_faction_id(), " pending:", faction_pending)
 	for line in faction_pending:
 		var unit_type_id := str(line.get("unit_type_id", ""))
 		var count := int(line.get("count", 0))
 		if count <= 0:
 			continue
+		var payload := {
+			"unit_type_id": unit_type_id,
+			"count": 1,
+			"faction_id": _selected_faction_id(),
+		}
+		if debug:
+			print("[MOBILIZE] Spawning staged icon with payload:", payload)
 		var row := HBoxContainer.new()
 		var label := Label.new()
 		label.text = "%s x%d" % [unit_type_id.capitalize(), count]
 		row.add_child(label)
 		var icon: DraggableStagedIcon = DraggableStagedIconScript.new()
+		if debug:
+			print("[MOBILIZE] Instantiated staged icon:", icon)
 		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
-		icon.drag_data = {
-			"unit_type_id": unit_type_id,
-			"count": 1,
-			"faction_id": _selected_faction_id(),
-		}
+		icon.drag_data = payload
 		if drag_controller and drag_controller.has_method("bind_staged_icon"):
 			drag_controller.bind_staged_icon(icon)
+			if debug:
+				print("[MOBILIZE] bind_staged_icon called for:", icon)
 		row.add_child(icon)
 		staged_units_list.add_child(row)
+		if debug:
+			print("[MOBILIZE] Icon parent after add:", icon.get_parent())
+			print("[MOBILIZE] StagedUnitsList child count:", staged_units_list.get_child_count())
 
 func _on_mobilize_drag_drop(data: Dictionary, global_position: Vector2) -> void:
 	if session == null or map_root == null:
