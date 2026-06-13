@@ -20,9 +20,10 @@ func _input(event: InputEvent) -> void:
 
 
 func _apply_visibility() -> void:
-	if debug_root:
-		debug_root.visible = debug_visible
 	if debug_root == null:
 		return
+
 	for child in debug_root.get_children():
+		if child is CanvasItem:
+			child.visible = debug_visible
 		child.set_process(debug_visible)
