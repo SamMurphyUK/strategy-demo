@@ -1,12 +1,12 @@
 extends CanvasLayer
 class_name DebugHUD
 
-var game_scene: Node = null
+var game_scene: Variant = null
 var drag_controller: Node = null
 var map_root: Node = null
 
 
-func configure(game_scene_ref: Node, drag_ref: Node, map_ref: Node) -> void:
+func configure(game_scene_ref: Variant, drag_ref: Node, map_ref: Node) -> void:
 	game_scene = game_scene_ref
 	drag_controller = drag_ref
 	map_root = map_ref

@@ -1,12 +1,12 @@
 extends CanvasLayer
 class_name DebugInspector
 
-var game_state: Node = null
+var game_state: Variant = null
 var drag_controller: Node = null
 var map_root: Node = null
 
 
-func configure(gs: Node, drag_ref: Node, map_ref: Node) -> void:
+func configure(gs: Variant, drag_ref: Node, map_ref: Node) -> void:
 	game_state = gs
 	drag_controller = drag_ref
 	map_root = map_ref
