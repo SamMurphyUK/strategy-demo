@@ -8,6 +8,10 @@ signal drag_cancelled(icon: DraggableStagedIcon)
 
 var drag_data: Dictionary = {}
 
+
+func configure(data: Dictionary) -> void:
+	drag_data = data.duplicate(true)
+
 var _dragging: bool = false
 
 
@@ -41,6 +45,7 @@ func _gui_input(event: InputEvent) -> void:
 			_dragging = true
 			set_process_unhandled_input(true)
 			drag_started.emit(self)
+			accept_event()
 		elif _dragging:
 			_finish_drag(event.global_position)
 	elif event is InputEventMouseMotion and _dragging:

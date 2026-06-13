@@ -324,16 +324,27 @@ func drop_staged_unit(
 	command_id: String,
 	player_id: String
 ) -> Dictionary:
-	var region_id := _region_id_at_map_position(global_pos)
-	if not _can_drop_at_region(region_id, drag_data):
+	var target_region := _region_id_at_map_position(global_pos)
+	if not _can_drop_at_region(target_region, drag_data):
 		return {"result_type": "error", "error": {"code": "DROP_INVALID", "message": "Invalid drop target"}, "events": []}
+
+	var from_region := str(drag_data.get("source_region", ""))
+	if from_region != "" and session != null and session.state != null:
+		var adjacency: Dictionary = session.state.adjacency
+		if adjacency.has(from_region) and target_region not in adjacency[from_region]:
+			return {
+				"result_type": "error",
+				"error": {"code": "DROP_NOT_ADJACENT", "message": "Target region is not adjacent"},
+				"events": [],
+			}
+
 	return session.apply_command({
 		"command_id": command_id,
 		"player_id": player_id,
 		"type": "place_units",
 		"payload": {
 			"placements": [{
-				"region_id": region_id,
+				"region_id": target_region,
 				"units": [{
 					"unit_type_id": str(drag_data.get("unit_type_id", "")),
 					"count": int(drag_data.get("count", 1)),
@@ -341,6 +352,10 @@ func drop_staged_unit(
 			}],
 		},
 	})
+
+
+func apply_zoom_scale(zoom: float) -> void:
+	scale = Vector2(zoom, zoom)
 
 func show_region_stack(region_id: String, session_snapshot: Dictionary, stack_container: VBoxContainer) -> void:
 	if stack_container == null:

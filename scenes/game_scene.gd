@@ -69,6 +69,9 @@ func _ready() -> void:
 	set_process(true)
 	if _map_camera:
 		_target_zoom = _map_camera.zoom
+		_map_camera.zoom = Vector2.ONE
+	if map_root:
+		map_root.scale = _target_zoom
 	_sync_zoom_to_subsystems()
 	if debug:
 		_debug_print_ready_state()
@@ -112,10 +115,23 @@ func _process(delta: float) -> void:
 		move.y -= 1.0
 	if Input.is_action_pressed("ui_down"):
 		move.y += 1.0
+	if Input.is_action_pressed("move_left"):
+		move.x -= 1.0
+	if Input.is_action_pressed("move_right"):
+		move.x += 1.0
+	if Input.is_action_pressed("move_up"):
+		move.y -= 1.0
+	if Input.is_action_pressed("move_down"):
+		move.y += 1.0
 	if move != Vector2.ZERO:
 		_map_camera.position += move.normalized() * speed
-	if not _map_camera.zoom.is_equal_approx(_target_zoom):
-		_map_camera.zoom = _map_camera.zoom.lerp(_target_zoom, minf(1.0, delta * ZOOM_SMOOTH_SPEED))
+	if _map_camera.zoom != Vector2.ONE:
+		_map_camera.zoom = Vector2.ONE
+	var current_map_zoom: float = map_root.scale.x if map_root else 1.0
+	if not is_equal_approx(current_map_zoom, _target_zoom.x):
+		var next_zoom: float = lerpf(current_map_zoom, _target_zoom.x, minf(1.0, delta * ZOOM_SMOOTH_SPEED))
+		if map_root:
+			map_root.scale = Vector2(next_zoom, next_zoom)
 		_sync_zoom_to_subsystems()
 
 
@@ -139,9 +155,11 @@ func _apply_zoom(factor: float) -> void:
 func _sync_zoom_to_subsystems() -> void:
 	if _map_camera == null:
 		return
-	var zoom := _map_camera.zoom.x
+	var zoom: float = map_root.scale.x if map_root else _target_zoom.x
 	if unit_visualizer and unit_visualizer.has_method("apply_zoom_scale"):
 		unit_visualizer.call("apply_zoom_scale", zoom)
+	if map_root and map_root.has_method("apply_zoom_scale"):
+		map_root.call("apply_zoom_scale", zoom)
 	if drag_controller and drag_controller.has_method("apply_zoom_scale"):
 		drag_controller.call("apply_zoom_scale", zoom)
 
@@ -553,7 +571,7 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		if debug:
 			print("[MOBILIZE] Instantiated staged icon:", icon)
 		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
-		icon.drag_data = payload
+		icon.configure(payload)
 		if drag_controller and drag_controller.has_method("bind_staged_icon"):
 			drag_controller.bind_staged_icon(icon)
 			if debug:

@@ -198,7 +198,7 @@ func _on_staged_icon_drag_started(icon: DraggableStagedIcon) -> void:
 	_active_staged_icon = icon
 	_staged_icon_modulate = icon.modulate
 	icon.modulate = Color(icon.modulate.r, icon.modulate.g, icon.modulate.b, 0.35)
-	_begin_mobilize_drag(payload, icon.get_drag_start_global())
+	_begin_mobilize_drag(payload.duplicate(true), icon.get_drag_start_global())
 
 
 func _on_staged_icon_drag_updated(icon: DraggableStagedIcon, screen_global: Vector2) -> void:
@@ -251,30 +251,32 @@ func _begin_ui_drag(source: DragSource, payload: Dictionary, screen_global: Vect
 	set_process_unhandled_input(true)
 
 
-func _update_drag(screen_global: Vector2) -> void:
-	_position_preview(screen_global)
+func _update_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
+	var screen_pos := get_viewport().get_mouse_position()
+	_position_preview(screen_pos)
 	match _drag_source:
 		DragSource.MAP_ICON:
 			if _active_icon:
-				_update_movement_arrow(_drag_start_map_global, screen_global)
-				_highlight_hover(screen_global, _active_icon.source_region_id)
+				_update_movement_arrow(_drag_start_map_global, screen_pos)
+				_highlight_hover(screen_pos, _active_icon.source_region_id)
 		DragSource.MOBILIZE_UI:
-			_update_movement_arrow(_drag_start_map_global, screen_global)
-			_highlight_mobilize_hover(screen_global)
+			_update_movement_arrow(_drag_start_map_global, screen_pos)
+			_highlight_mobilize_hover(screen_pos)
 
 
-func _end_drag(screen_global: Vector2) -> void:
+func _end_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
 	if not _drag_active:
 		return
+	var screen_pos := get_viewport().get_mouse_position()
 	var from_region := ""
 	if _active_icon:
 		from_region = _active_icon.source_region_id
 
 	match _drag_source:
 		DragSource.MAP_ICON:
-			_finish_map_drop(from_region, screen_global)
+			_finish_map_drop(from_region, screen_pos)
 		DragSource.MOBILIZE_UI:
-			mobilize_drop_requested.emit(_drag_payload, screen_to_map_global(screen_global))
+			mobilize_drop_requested.emit(_drag_payload.duplicate(true), screen_to_map_global(screen_pos))
 		DragSource.COMBAT_UI:
 			push_warning("DragController: combat UI drop not wired yet")
 
@@ -508,10 +510,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not _drag_active:
 		return
 	if event is InputEventMouseMotion:
-		_update_drag(event.global_position)
+		_update_drag()
 	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _drag_source != DragSource.MAP_ICON:
-			_end_drag(event.global_position)
+		_end_drag(event.position)
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_cancel_drag()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
