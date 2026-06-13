@@ -26,12 +26,12 @@ func _process(_delta: float) -> void:
 
 	var hover_region := ""
 	if drag_controller and map_root and drag_controller.has_method("screen_to_map_global"):
-		var mouse := game_scene.get_viewport().get_mouse_position()
-		var map_pos := drag_controller.call("screen_to_map_global", mouse)
+		var mouse = game_scene.get_viewport().get_mouse_position()
+		var map_pos = drag_controller.call("screen_to_map_global", mouse)
 		if map_root.has_method("_region_id_at_map_position"):
 			hover_region = str(map_root.call("_region_id_at_map_position", map_pos))
 
-	var drag_active := drag_controller.call("is_drag_active") if drag_controller else false
+	var drag_active = drag_controller.call("is_drag_active") if drag_controller else false
 
 	var label: Label = $DebugHUD/HUDLabel
 	label.text = (
