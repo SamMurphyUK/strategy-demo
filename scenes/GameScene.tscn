@@ -6,6 +6,10 @@
 [ext_resource type="Script" uid="uid://ux0km6bjtopn" path="res://scripts/unit_visualizer.gd" id="4_7s5hy"]
 [ext_resource type="PackedScene" uid="uid://cftbign7fj81u" path="res://scenes/UnitIcon.tscn" id="5_xs4ih"]
 [ext_resource type="PackedScene" path="res://scenes/DragLayer.tscn" id="6_drag"]
+[ext_resource type="Script" path="res://debug/debug_manager.gd" id="7_dbgmgr"]
+[ext_resource type="Script" path="res://debug/debug_snapshot.gd" id="8_dbgsnap"]
+[ext_resource type="PackedScene" path="res://debug/DebugHUD.tscn" id="9_dbghud"]
+[ext_resource type="PackedScene" path="res://debug/DebugInspector.tscn" id="10_dbginsp"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -283,3 +287,14 @@ text = "Confirm Purchase"
 [node name="CancelPurchaseButton" type="Button" parent="02/RightUIRoot/RightVBox/PurchaseButtons" unique_id=1020928055]
 layout_mode = 2
 text = "Cancel Pending"
+
+[node name="DebugRoot" type="Node" parent="."]
+visible = false
+script = ExtResource("7_dbgmgr")
+
+[node name="DebugHUD" parent="DebugRoot" instance=ExtResource("9_dbghud")]
+
+[node name="DebugInspector" parent="DebugRoot" instance=ExtResource("10_dbginsp")]
+
+[node name="DebugSnapshot" type="Node" parent="DebugRoot"]
+script = ExtResource("8_dbgsnap")

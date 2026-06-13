@@ -72,6 +72,7 @@ func _ready() -> void:
 	_sync_zoom_to_subsystems()
 	if debug:
 		_debug_print_ready_state()
+	_wire_debug_system()
 
 
 func _debug_print_ready_state() -> void:
@@ -84,6 +85,18 @@ func _debug_print_ready_state() -> void:
 	print("[READY] UnitVisualizer:", unit_visualizer)
 	print("[READY] DragController:", drag_controller)
 	print("[READY] StagedUnitsList:", staged_units_list)
+
+
+func _wire_debug_system() -> void:
+	var debug_root_node := get_node_or_null("DebugRoot")
+	if debug_root_node == null:
+		return
+	var hud := debug_root_node.get_node_or_null("DebugHUD")
+	var inspector := debug_root_node.get_node_or_null("DebugInspector")
+	if hud and hud.has_method("configure"):
+		hud.configure(self, drag_controller, map_root)
+	if inspector and inspector.has_method("configure"):
+		inspector.configure(session, drag_controller, map_root)
 
 
 func _process(delta: float) -> void:

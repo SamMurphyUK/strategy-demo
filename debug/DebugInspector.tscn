@@ -1,0 +1,31 @@
+[gd_scene load_steps=2 format=3 uid="uid://debuinsp001"]
+
+[ext_resource type="Script" path="res://debug/debug_inspector.gd" id="1_insp"]
+
+[node name="DebugInspectorLayer" type="CanvasLayer"]
+layer = 51
+follow_viewport_enabled = false
+script = ExtResource("1_insp")
+
+[node name="DebugInspector" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="InspectorLabel" type="Label" parent="DebugInspector"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -360.0
+offset_top = 8.0
+offset_right = -20.0
+offset_bottom = 208.0
+grow_horizontal = 0
+custom_minimum_size = Vector2(340, 200)
+text = "[INSPECTOR]"
+autowrap_mode = 3
