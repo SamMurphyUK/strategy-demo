@@ -486,11 +486,10 @@ func _clear_highlights() -> void:
 
 
 func _highlight_mobilize_hover(screen_global: Vector2) -> void:
-	print("[DRAG] Mobilize hover at screen:", screen_global)
 	var hover := region_at_screen_global(screen_global)
-	print("[DRAG] Hover region:", hover)
 	if hover == _hover_region:
 		return
+	print("[DRAG] Hover region changed:", hover, " at screen:", screen_global)
 	_hover_region = hover
 	if _map_root and _map_root.has_method("highlight_mobilize_targets"):
 		_map_root.call(

@@ -89,13 +89,6 @@ func _debug_print_ready_state() -> void:
 func _process(delta: float) -> void:
 	if _map_camera == null:
 		return
-	if debug:
-		print("[PROCESS] delta:", delta)
-		var left := Input.is_action_pressed("ui_left")
-		var right := Input.is_action_pressed("ui_right")
-		var up := Input.is_action_pressed("ui_up")
-		var down := Input.is_action_pressed("ui_down")
-		print("[WASD] L:", left, " R:", right, " U:", up, " D:", down)
 	var speed := 900.0 * delta
 	var move := Vector2.ZERO
 	if Input.is_action_pressed("ui_left"):
@@ -107,14 +100,10 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("ui_down"):
 		move.y += 1.0
 	if move != Vector2.ZERO:
-		if debug:
-			print("[WASD] Moving camera by:", move.normalized() * speed)
 		_map_camera.position += move.normalized() * speed
 	if not _map_camera.zoom.is_equal_approx(_target_zoom):
 		_map_camera.zoom = _map_camera.zoom.lerp(_target_zoom, minf(1.0, delta * ZOOM_SMOOTH_SPEED))
 		_sync_zoom_to_subsystems()
-	if debug:
-		print("[CAMERA] pos:", _map_camera.position, " zoom:", _map_camera.zoom, " target:", _target_zoom)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -128,17 +117,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func _apply_zoom(factor: float) -> void:
 	if _map_camera == null:
 		return
-	var old_zoom := _target_zoom
 	var new_zoom := _target_zoom * factor
-	if debug:
-		print("[ZOOM] old_zoom:", old_zoom, " factor:", factor, " new_zoom:", new_zoom)
 	new_zoom.x = clampf(new_zoom.x, MIN_ZOOM, MAX_ZOOM)
 	new_zoom.y = clampf(new_zoom.y, MIN_ZOOM, MAX_ZOOM)
 	_target_zoom = new_zoom
-	if debug:
-		print("[ZOOM] Camera2D enabled:", _map_camera.enabled)
-		print("[ZOOM] Camera2D is_current:", _map_camera.is_current())
-		print("[ZOOM] Camera2D.global_transform:", _map_camera.get_global_transform())
 
 
 func _sync_zoom_to_subsystems() -> void:
@@ -146,17 +128,9 @@ func _sync_zoom_to_subsystems() -> void:
 		return
 	var zoom := _map_camera.zoom.x
 	if unit_visualizer and unit_visualizer.has_method("apply_zoom_scale"):
-		if debug:
-			print("[ZOOM] Applying zoom to UnitVisualizer:", zoom)
 		unit_visualizer.call("apply_zoom_scale", zoom)
-	elif debug:
-		print("[ZOOM] ERROR: UnitVisualizer not found")
 	if drag_controller and drag_controller.has_method("apply_zoom_scale"):
-		if debug:
-			print("[ZOOM] Applying zoom to DragController:", zoom)
 		drag_controller.call("apply_zoom_scale", zoom)
-	elif debug:
-		print("[ZOOM] ERROR: DragController not found")
 
 func _wire_drag_controller() -> void:
 	drag_controller = find_child("DragLayer", true, false)
