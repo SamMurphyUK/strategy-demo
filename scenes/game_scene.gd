@@ -256,7 +256,7 @@ func _autobind_nodes() -> void:
 	battle_overlay = find_child("BattleOverlay", true, false)
 	inspector_layer = find_child("InspectorLayer", true, false) as CanvasLayer
 	if inspector_layer:
-		region_inspector_panel = inspector_layer.get_node_or_null("InspectorPanelRoot/RegionInspectorPanel") as RegionInspectorPanel
+		region_inspector_panel = inspector_layer.get_node_or_null("RegionInspectorPanel") as RegionInspectorPanel
 
 func _setup_faction_selector() -> void:
 	if faction_selector == null:

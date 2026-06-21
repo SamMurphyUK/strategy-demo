@@ -15,22 +15,8 @@ corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
 [node name="RegionInspectorPanel" type="Control"]
+custom_minimum_size = Vector2(360, 44)
 layout_mode = 3
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -220.0
-offset_top = -180.0
-offset_right = 220.0
-grow_horizontal = 2
-grow_vertical = 0
-mouse_filter = 2
-script = ExtResource("1")
-
-[node name="CollapsedBar" type="HBoxContainer" parent="."]
-layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
@@ -39,18 +25,42 @@ anchor_bottom = 1.0
 offset_left = -180.0
 offset_top = -44.0
 offset_right = 180.0
+offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("1")
+
+[node name="CollapsedPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="CollapsedMargin" type="MarginContainer" parent="CollapsedPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
+
+[node name="CollapsedBar" type="HBoxContainer" parent="CollapsedPanel/CollapsedMargin"]
+layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="TitleLabel" type="Label" parent="CollapsedBar"]
+[node name="TitleLabel" type="Label" parent="CollapsedPanel/CollapsedMargin/CollapsedBar"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.95, 0.95, 0.98, 1)
 text = "—"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="ExpandButton" type="Button" parent="CollapsedBar"]
+[node name="ExpandButton" type="Button" parent="CollapsedPanel/CollapsedMargin/CollapsedBar"]
 layout_mode = 2
 text = "▼"
 flat = true
@@ -58,16 +68,12 @@ flat = true
 [node name="ExpandedPanel" type="PanelContainer" parent="."]
 visible = false
 layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
+anchors_preset = 15
+anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -220.0
-offset_top = -160.0
-offset_right = 220.0
 grow_horizontal = 2
-grow_vertical = 0
+grow_vertical = 2
+mouse_filter = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
 [node name="ExpandedMargin" type="MarginContainer" parent="ExpandedPanel"]
@@ -83,6 +89,7 @@ theme_override_constants/separation = 8
 
 [node name="ExpandedTitle" type="Label" parent="ExpandedPanel/ExpandedMargin/ExpandedVBox"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.95, 0.98, 1)
 text = "—"
 horizontal_alignment = 1
 

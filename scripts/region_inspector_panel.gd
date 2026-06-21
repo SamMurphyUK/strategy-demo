@@ -6,10 +6,13 @@ signal expand_toggled(expanded: bool)
 enum ViewMode { REGION, COMBAT }
 
 const InspectorUnitChipScript := preload("res://scripts/inspector_unit_chip.gd")
+const COLLAPSED_HEIGHT := 44.0
+const EXPANDED_HEIGHT := 176.0
 
-@onready var collapsed_bar: HBoxContainer = $CollapsedBar
-@onready var title_label: Label = $CollapsedBar/TitleLabel
-@onready var expand_button: Button = $CollapsedBar/ExpandButton
+@onready var collapsed_panel: PanelContainer = $CollapsedPanel
+@onready var collapsed_bar: HBoxContainer = $CollapsedPanel/CollapsedMargin/CollapsedBar
+@onready var title_label: Label = $CollapsedPanel/CollapsedMargin/CollapsedBar/TitleLabel
+@onready var expand_button: Button = $CollapsedPanel/CollapsedMargin/CollapsedBar/ExpandButton
 @onready var expanded_panel: PanelContainer = $ExpandedPanel
 @onready var expanded_title: Label = $ExpandedPanel/ExpandedMargin/ExpandedVBox/ExpandedTitle
 @onready var units_scroll: ScrollContainer = $ExpandedPanel/ExpandedMargin/ExpandedVBox/UnitsScroll
@@ -29,8 +32,8 @@ var _scroll_drag_start_value: float = 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if collapsed_bar:
-		collapsed_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	if collapsed_panel:
+		collapsed_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	if expanded_panel:
 		expanded_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	if expand_button:
@@ -39,6 +42,7 @@ func _ready() -> void:
 		collapse_button.pressed.connect(_on_collapse_pressed)
 	if scroll_tab:
 		scroll_tab.gui_input.connect(_on_scroll_tab_gui_input)
+	_apply_panel_height(false)
 	_set_expanded(false)
 	visible = false
 
@@ -165,8 +169,9 @@ func _on_collapse_pressed() -> void:
 
 func _set_expanded(expanded: bool) -> void:
 	_expanded = expanded
-	if collapsed_bar:
-		collapsed_bar.visible = not expanded
+	_apply_panel_height(expanded)
+	if collapsed_panel:
+		collapsed_panel.visible = not expanded
 	if expanded_panel:
 		expanded_panel.visible = expanded
 	if expand_button:
@@ -174,6 +179,12 @@ func _set_expanded(expanded: bool) -> void:
 	expand_toggled.emit(expanded)
 	if expanded:
 		call_deferred("_update_scroll_tab_visibility")
+
+
+func _apply_panel_height(expanded: bool) -> void:
+	var height := EXPANDED_HEIGHT if expanded else COLLAPSED_HEIGHT
+	custom_minimum_size.y = height
+	offset_top = -height
 
 
 func _on_scroll_tab_gui_input(event: InputEvent) -> void:
