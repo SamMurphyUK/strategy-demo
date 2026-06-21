@@ -52,6 +52,19 @@ func is_region_owned_by(region_id: String, faction_id: String) -> bool:
 	var region: Region = regions.get(region_id)
 	return region != null and region.owner_faction_id == faction_id
 
+
+func is_region_hostile_to(region_id: String, faction_id: String) -> bool:
+	var region: Region = regions.get(region_id)
+	if region == null:
+		return true
+	var owner := str(region.owner_faction_id)
+	if owner != "" and owner != faction_id:
+		return true
+	for entry in get_units_in_region(region_id):
+		if str(entry.get("faction_id", "")) != faction_id:
+			return true
+	return false
+
 # ---------------------------------------------------------
 # IPC + ECONOMY
 # ---------------------------------------------------------

@@ -17,9 +17,9 @@ func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) 
 		return preview
 
 	var unit_type_id: String = String(unit.get("unit_type_id", ""))
-	var range: int = ruleset.get_unit_move_range(unit_type_id)
+	var move_range: int = ruleset.get_unit_move_range(unit_type_id, state)
 
-	var reachable: Array = _flood_fill(start, range, state)
+	var reachable: Array = _flood_fill(start, move_range, state)
 
 	for region_value in reachable:
 		var region: String = String(region_value)
@@ -29,6 +29,74 @@ func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) 
 			preview.illegal_regions[region] = "ILLEGAL_DESTINATION"
 
 	return preview
+
+
+func get_legal_destinations_for_stack(
+	from_region: String,
+	unit_type_id: String,
+	faction_id: String,
+	state: GameState,
+	ruleset: Ruleset
+) -> Array[String]:
+	var legal: Array[String] = []
+	if from_region.is_empty() or unit_type_id.is_empty():
+		return legal
+	var move_range := ruleset.get_unit_move_range(unit_type_id, state)
+	if move_range <= 0:
+		move_range = 1
+	for dest_value in _flood_fill(from_region, move_range, state):
+		var dest := str(dest_value)
+		if ruleset.can_unit_enter_region(unit_type_id, dest, state, state.current_phase):
+			legal.append(dest)
+	return legal
+
+
+func validate_stack_move(
+	from_region: String,
+	to_region: String,
+	unit_type_id: String,
+	faction_id: String,
+	count: int,
+	state: GameState,
+	ruleset: Ruleset
+) -> VT.ValidationResult:
+	var result := VT.ValidationResult.new()
+
+	if from_region.is_empty() or to_region.is_empty():
+		result.errors.append(_move_error("MOVE_INVALID", "Missing from/to region"))
+	elif from_region == to_region:
+		result.errors.append(_move_error("MOVE_INVALID", "Cannot move to the same region"))
+	elif not state.is_adjacent(from_region, to_region) and to_region not in _flood_fill(
+		from_region, ruleset.get_unit_move_range(unit_type_id, state), state
+	):
+		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
+	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
+		result.errors.append(_move_error("MOVE_ILLEGAL_DESTINATION", "Unit cannot enter %s" % to_region))
+	elif _available_stack_count(from_region, faction_id, unit_type_id, state) < count:
+		result.errors.append(_move_error("MOVE_INSUFFICIENT_UNITS", "Not enough %s in %s" % [unit_type_id, from_region]))
+
+	result.ok = result.errors.is_empty()
+	return result
+
+
+func _available_stack_count(
+	region_id: String,
+	faction_id: String,
+	unit_type_id: String,
+	state: GameState
+) -> int:
+	var total := 0
+	for entry in state.get_faction_units_in_region(region_id, faction_id):
+		if str(entry.get("unit_type_id", "")) == unit_type_id and not entry.has("instance_id"):
+			total += int(entry.get("count", 0))
+	return total
+
+
+func _move_error(code: String, message: String) -> VT.MoveError:
+	var err := VT.MoveError.new()
+	err.code = code
+	err.message = message
+	return err
 
 
 func validate_combat_movement_batch(batch, state: GameState, ruleset: Ruleset):

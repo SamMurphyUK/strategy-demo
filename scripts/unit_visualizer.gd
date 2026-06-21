@@ -46,6 +46,11 @@ func set_drag_controller(controller) -> void:
 		_drag_controller.movement_drop_requested.connect(_on_controller_movement_drop)
 
 
+func set_session(session) -> void:
+	if _drag_controller and _drag_controller.has_method("set_session"):
+		_drag_controller.set_session(session)
+
+
 func _ensure_unit_icon_scene() -> void:
 	if unit_icon_scene != null:
 		return

@@ -42,7 +42,7 @@ static func build_map_data(map_json: Dictionary) -> Dictionary:
 		regions.append({
 			"id": region_id,
 			"name": region_id,
-			"type": "land",
+			"type": _region_type_from_metadata(meta, region_id),
 			"ipc_value": int(meta.get("ipc", 0)),
 			"owner_faction_id": owner,
 			"is_capital": bool(meta.get("victory", false)),
@@ -130,6 +130,15 @@ static func _owner_from_metadata_faction(faction_name: String) -> String:
 	if faction_name.is_empty() or faction_name == "Neutral":
 		return ""
 	return faction_id_from_display(faction_name)
+
+
+static func _region_type_from_metadata(meta: Dictionary, region_id: String) -> String:
+	var raw_type := str(meta.get("type", "")).to_lower()
+	if raw_type in ["land", "sea"]:
+		return raw_type
+	if region_id.to_lower().begins_with("sea zone"):
+		return "sea"
+	return "land"
 
 
 static func _polygon_centroid(polygon_points: Array) -> Vector2:

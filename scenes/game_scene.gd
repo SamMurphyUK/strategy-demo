@@ -170,6 +170,8 @@ func _wire_drag_controller() -> void:
 		return
 	if unit_visualizer and unit_visualizer.has_method("set_drag_controller"):
 		unit_visualizer.call("set_drag_controller", drag_controller)
+	if session and unit_visualizer and unit_visualizer.has_method("set_session"):
+		unit_visualizer.call("set_session", session)
 
 
 func _ensure_unit_visualizer_scene() -> void:
