@@ -14,7 +14,7 @@ func process_placement(command: Command) -> Array:
 	for p in placements:
 		for u in p.units:
 			_add_to_region(p.region_id, faction, u)
-	state.pending_purchases[faction] = []
+			_consume_pending(faction, u)
 	return [
 		GameEvent.create(
 			GameEvent.Type.UNITS_PLACED,
@@ -22,6 +22,27 @@ func process_placement(command: Command) -> Array:
 			_next_seq()
 		)
 	]
+
+
+func _consume_pending(faction: String, unit_entry: Dictionary) -> void:
+	var utid := str(unit_entry.get("unit_type_id", ""))
+	var to_consume := int(unit_entry.get("count", 1))
+	if to_consume <= 0 or utid.is_empty():
+		return
+	var pending: Array = state.pending_purchases.get(faction, [])
+	if pending.is_empty():
+		return
+	var remaining: Array = []
+	for line in pending:
+		var line_utid := str(line.get("unit_type_id", ""))
+		var line_count := int(line.get("count", 0))
+		if line_utid == utid and to_consume > 0:
+			var used := mini(line_count, to_consume)
+			line_count -= used
+			to_consume -= used
+		if line_count > 0:
+			remaining.append({"unit_type_id": line_utid, "count": line_count})
+	state.pending_purchases[faction] = remaining
 
 func check_forfeited(faction: String) -> Array:
 	var pending: Array = state.pending_purchases.get(faction, [])

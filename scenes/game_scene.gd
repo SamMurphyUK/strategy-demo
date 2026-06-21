@@ -373,7 +373,7 @@ func _apply_command(type_name: String, payload: Dictionary) -> void:
 		return
 	var result: Dictionary = session.apply_command({
 		"command_id": _next_command_id(),
-		"player_id": _selected_faction_id(),
+		"player_id": _command_player_id(),
 		"type": type_name,
 		"payload": payload,
 	})
@@ -389,6 +389,7 @@ func _refresh_all() -> void:
 	if session == null:
 		return
 	var snapshot: Dictionary = session.get_state()
+	_sync_faction_selector(snapshot)
 	_update_state_label(snapshot)
 	on_state_updated(snapshot)
 	_refresh_purchase_panels(snapshot)
@@ -550,18 +551,19 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 			if sub is DraggableStagedIcon and drag_controller and drag_controller.has_method("unbind_staged_icon"):
 				drag_controller.unbind_staged_icon(sub)
 		child.queue_free()
-	var faction_pending: Array = snapshot.get("pending_purchases", {}).get(_selected_faction_id(), [])
+	var faction_pending: Array = snapshot.get("pending_purchases", {}).get(_active_faction_id(snapshot), [])
 	if debug:
-		print("[MOBILIZE] Refresh staged list faction:", _selected_faction_id(), " pending:", faction_pending)
+		print("[MOBILIZE] Refresh staged list faction:", _active_faction_id(snapshot), " pending:", faction_pending)
 	for line in faction_pending:
 		var unit_type_id := str(line.get("unit_type_id", ""))
 		var count := int(line.get("count", 0))
 		if count <= 0:
 			continue
+		var active_faction := _active_faction_id(snapshot)
 		var payload := {
 			"unit_type_id": unit_type_id,
 			"count": 1,
-			"faction_id": _selected_faction_id(),
+			"faction_id": active_faction,
 		}
 		if debug:
 			print("[MOBILIZE] Spawning staged icon with payload:", payload)
@@ -572,7 +574,7 @@ func _refresh_mobilize_staged_list(snapshot: Dictionary) -> void:
 		var icon: DraggableStagedIcon = DraggableStagedIconScript.new()
 		if debug:
 			print("[MOBILIZE] Instantiated staged icon:", icon)
-		icon.texture = _get_unit_texture(unit_type_id, _selected_faction_id())
+		icon.texture = _get_unit_texture(unit_type_id, active_faction)
 		icon.configure(payload)
 		if drag_controller and drag_controller.has_method("bind_staged_icon"):
 			drag_controller.bind_staged_icon(icon)
@@ -589,7 +591,14 @@ func _on_mobilize_drag_drop(data: Dictionary, global_position: Vector2) -> void:
 		return
 	if not map_root.has_method("drop_staged_unit"):
 		return
-	var result: Dictionary = map_root.call("drop_staged_unit", global_position, data, session, _next_command_id(), _selected_faction_id())
+	var result: Dictionary = map_root.call(
+		"drop_staged_unit",
+		global_position,
+		data,
+		session,
+		_next_command_id(),
+		_command_player_id()
+	)
 	if str(result.get("result_type", "")) == "ok":
 		for event_dict in result.get("events", []):
 			_log_event(event_dict)
@@ -662,6 +671,29 @@ func _selected_faction_id() -> String:
 	if faction_selector == null:
 		return "allies"
 	return faction_selector.get_item_text(faction_selector.selected).to_lower()
+
+func _command_player_id() -> String:
+	if session != null and session.state:
+		var active := str(session.state.current_faction_id)
+		if not active.is_empty():
+			return active
+	return _selected_faction_id()
+
+func _active_faction_id(snapshot: Dictionary) -> String:
+	var active := str(snapshot.get("turn_info", {}).get("current_faction_id", ""))
+	if not active.is_empty():
+		return active
+	return _selected_faction_id()
+
+func _sync_faction_selector(snapshot: Dictionary) -> void:
+	if faction_selector == null:
+		return
+	var active := _active_faction_id(snapshot)
+	for i in faction_selector.item_count:
+		if faction_selector.get_item_text(i).to_lower() == active:
+			if faction_selector.selected != i:
+				faction_selector.select(i)
+			return
 
 func _selected_faction_display() -> String:
 	if faction_selector == null:
