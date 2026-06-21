@@ -221,6 +221,10 @@ func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
 			"events": [],
 		}
 
+	var events: Array = []
+	if state.current_phase == "collect_income":
+		events.append_array(_sync_seq(economy.collect_income(current)))
+
 	var next_idx: int = (idx + 1) % factions.size()
 	var next_faction: String = factions[next_idx]
 
@@ -232,14 +236,14 @@ func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
 	state.current_phase = "purchase"
 	state.clear_movement_phase_tracking()
 
-	var recorded := _record_events([
-		create_event("turn_ended", {
-			"faction_id": current,
-			"next_faction_id": next_faction,
-			"new_turn_number": state.turn_number,
-			"new_round": state.game_round,
-		}, command_id),
-	], command_id)
+	events.append(create_event("turn_ended", {
+		"faction_id": current,
+		"next_faction_id": next_faction,
+		"new_turn_number": state.turn_number,
+		"new_round": state.game_round,
+	}, command_id))
+
+	var recorded := _record_events(events, command_id)
 	return {"result_type": "ok", "events": recorded}
 
 
