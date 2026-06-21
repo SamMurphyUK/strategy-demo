@@ -362,27 +362,54 @@ func drop_staged_unit(
 func apply_zoom_scale(zoom: float) -> void:
 	scale = Vector2(zoom, zoom)
 
-func show_region_stack(region_id: String, session_snapshot: Dictionary, stack_container: VBoxContainer) -> void:
+func show_region_stack(
+	region_id: String,
+	session_snapshot: Dictionary,
+	stack_container: VBoxContainer,
+	live_state: GameState = null
+) -> void:
 	if stack_container == null:
 		return
 	for child in stack_container.get_children():
 		child.queue_free()
-	for region_entry in session_snapshot.get("regions", []):
+	if region_id.is_empty():
+		return
+	var viewer := str(session_snapshot.get("turn_info", {}).get("current_faction_id", "allies"))
+	var entries: Array = []
+	if live_state:
+		entries = RegionUnitDisplay.entries_for_region_inspector(live_state, region_id, viewer)
+	else:
+		entries = _entries_from_snapshot_region(region_id, session_snapshot, viewer)
+	for entry in entries:
+		var row := Label.new()
+		row.text = "%s x%d" % [str(entry.get("unit_type_id", "")), int(entry.get("count", 0))]
+		stack_container.add_child(row)
+
+
+func _entries_from_snapshot_region(region_id: String, snapshot: Dictionary, viewer: String) -> Array:
+	for region_entry in snapshot.get("regions", []):
 		if str(region_entry.get("region_id", "")) != region_id:
 			continue
-		var by_faction := {}
-		for u in region_entry.get("units", []):
-			var faction := str(u.get("faction_id", "neutral")).to_lower()
-			if not by_faction.has(faction):
-				by_faction[faction] = {}
-			var unit_type := str(u.get("unit_type_id", ""))
-			by_faction[faction][unit_type] = int(by_faction[faction].get(unit_type, 0)) + int(u.get("count", 0))
-		for faction in by_faction.keys():
-			for unit_type in by_faction[faction].keys():
-				var row := Label.new()
-				row.text = "%s: %s x%d" % [faction.capitalize(), unit_type, int(by_faction[faction][unit_type])]
-				stack_container.add_child(row)
-		return
+		var owner := str(region_entry.get("owner_faction_id", ""))
+		var units: Array = region_entry.get("units", [])
+		if owner == viewer:
+			return RegionUnitDisplay.build_display_entries(
+				_filter_units_by_faction(units, viewer)
+			)
+		return RegionUnitDisplay.build_display_entries(
+			_filter_units_by_faction(units, owner if not owner.is_empty() else viewer)
+		)
+	return []
+
+
+func _filter_units_by_faction(units: Array, faction: String) -> Array:
+	var result: Array = []
+	for u in units:
+		if typeof(u) != TYPE_DICTIONARY:
+			continue
+		if str(u.get("faction_id", "")) == faction:
+			result.append(u)
+	return result
 
 func _owner_color(faction_name: String) -> Color:
 	match faction_name.to_lower():

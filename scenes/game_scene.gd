@@ -32,6 +32,8 @@ var _current_ui_phase: String = ""
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
+var inspector_layer: CanvasLayer = null
+var region_inspector_panel: RegionInspectorPanel = null
 var drag_controller = null  # DragController
 var right_ui_root: Control = null
 var _map_camera: Camera2D = null
@@ -60,10 +62,14 @@ func _ready() -> void:
 	_ensure_unit_visualizer_scene()
 	_wire_drag_controller()
 	_refresh_all()
+	if region_inspector_panel:
+		region_inspector_panel.configure(session)
 	if map_root and map_root.has_signal("region_selected"):
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
 	if unit_visualizer and unit_visualizer.has_signal("movement_drop_requested"):
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
+	if unit_visualizer and unit_visualizer.has_signal("combat_marker_clicked"):
+		unit_visualizer.combat_marker_clicked.connect(_on_combat_marker_clicked)
 	if drag_controller and drag_controller.has_signal("load_transport_requested"):
 		drag_controller.load_transport_requested.connect(_on_load_transport_drop)
 	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
@@ -248,6 +254,9 @@ func _autobind_nodes() -> void:
 	region_stack_list = left_ui.find_child("RegionStackList", true, false)
 	right_ui_root = right_ui
 	battle_overlay = find_child("BattleOverlay", true, false)
+	inspector_layer = find_child("InspectorLayer", true, false) as CanvasLayer
+	if inspector_layer:
+		region_inspector_panel = inspector_layer.get_node_or_null("InspectorPanelRoot/RegionInspectorPanel") as RegionInspectorPanel
 
 func _setup_faction_selector() -> void:
 	if faction_selector == null:
@@ -408,6 +417,7 @@ func _refresh_all() -> void:
 		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root, adjacency, phase, faction)
 	if battle_overlay:
 		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
+	_refresh_region_inspector(snapshot)
 
 func _update_phase_ui(phase: String) -> void:
 	if right_ui_root:
@@ -471,6 +481,21 @@ func on_state_updated(new_state: Dictionary) -> void:
 		purchase_confirm_button.visible = purchase_visible
 	if cancel_purchase_button:
 		cancel_purchase_button.visible = purchase_visible
+
+func _refresh_region_inspector(_snapshot: Dictionary) -> void:
+	if region_inspector_panel == null:
+		return
+	region_inspector_panel.set_viewer_faction(_command_player_id())
+	var region_id := _selected_region_id()
+	if region_id.is_empty():
+		region_inspector_panel.clear_selection()
+		return
+	if region_inspector_panel.get_view_mode() == RegionInspectorPanel.ViewMode.COMBAT:
+		region_inspector_panel.show_combat_info(region_id)
+	else:
+		region_inspector_panel.show_region(region_id)
+	region_inspector_panel.refresh()
+
 
 func _refresh_region_info(selected_region_id: String) -> void:
 	if region_name_label == null or session == null:
@@ -613,8 +638,9 @@ func _on_mobilize_drag_drop(data: Dictionary, global_position: Vector2) -> void:
 func _refresh_region_stack(selected_region_id: String, snapshot: Dictionary) -> void:
 	if region_stack_list == null:
 		return
+	var live_state: GameState = session.state if session else null
 	if map_root and map_root.has_method("show_region_stack"):
-		map_root.call("show_region_stack", selected_region_id, snapshot, region_stack_list)
+		map_root.call("show_region_stack", selected_region_id, snapshot, region_stack_list, live_state)
 		return
 	for child in region_stack_list.get_children():
 		child.queue_free()
@@ -756,9 +782,20 @@ func _on_load_transport_drop(
 
 
 func _on_region_selected(region_id: String) -> void:
+	if region_inspector_panel:
+		region_inspector_panel.set_region_view(region_id)
 	_refresh_region_info(region_id)
 	_refresh_region_stack(region_id, session.get_state() if session else {})
+	_refresh_region_inspector(session.get_state() if session else {})
 	_log_system("Selected region: %s" % region_id)
+
+
+func _on_combat_marker_clicked(region_id: String) -> void:
+	if map_root and map_root.has_method("select_region"):
+		map_root.call("select_region", region_id)
+	if region_inspector_panel:
+		region_inspector_panel.show_combat_info(region_id)
+	_log_system("Combat pool selected: %s" % region_id)
 
 func _get_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
 	if unit_visualizer and unit_visualizer.has_method("_load_unit_texture"):

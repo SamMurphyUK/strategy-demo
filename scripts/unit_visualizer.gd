@@ -8,6 +8,7 @@ signal movement_drop_requested(
 	count: int,
 	instance_id: String
 )
+signal combat_marker_clicked(region_id: String)
 
 @export var unit_icon_scene: PackedScene = null
 @export var debug_logging: bool = false
@@ -20,10 +21,13 @@ var _last_snapshot: Dictionary = {}
 
 var _region_icons: Dictionary = {}
 var _factory_icons: Dictionary = {}
+var _combat_markers: Dictionary = {}
 var _icon_pool: Array = []
 var _movement_arrow: Line2D = null
 var _drag_controller = null  # DragController
+var _session = null
 var _current_zoom := 1.0
+const CombatPoolMarkerScript := preload("res://scripts/combat_pool_marker.gd")
 
 
 func _ready() -> void:
@@ -48,6 +52,7 @@ func set_drag_controller(controller) -> void:
 
 
 func set_session(session) -> void:
+	_session = session
 	if _drag_controller and _drag_controller.has_method("set_session"):
 		_drag_controller.set_session(session)
 
@@ -98,8 +103,9 @@ func refresh_all() -> void:
 		if typeof(region_entry) != TYPE_DICTIONARY:
 			continue
 		var region_id := str(region_entry.get("region_id", ""))
-		var entries := _display_unit_entries(region_entry.get("units", []))
+		var entries := RegionUnitDisplay.build_display_entries(region_entry.get("units", []))
 		update_region_units(region_id, entries)
+	_refresh_combat_markers()
 	apply_zoom_scale(_current_zoom)
 
 
@@ -127,6 +133,7 @@ func clear_all_units() -> void:
 			_release_icon(icon)
 	for region_id in _factory_icons.keys():
 		_release_icon(_factory_icons[region_id])
+	_clear_combat_markers()
 	_region_icons.clear()
 	_factory_icons.clear()
 
@@ -198,41 +205,6 @@ func update_region_units(region_id: String, units: Array) -> void:
 		_factory_icons[region_id] = factory_icon
 
 
-func _display_unit_entries(units_array: Array) -> Array:
-	var entries: Array = []
-	var stacks := {}
-	for u in units_array:
-		if typeof(u) != TYPE_DICTIONARY:
-			continue
-		var parsed := UnitTextureCache.normalize_unit_type_and_faction(
-			str(u.get("unit_type_id", "")),
-			str(u.get("faction_id", ""))
-		)
-		var unit_type := str(parsed["unit_type_id"])
-		if unit_type.is_empty():
-			continue
-		var faction_id := str(parsed["faction_id"])
-		if u.has("instance_id"):
-			entries.append({
-				"unit_type_id": unit_type,
-				"faction_id": faction_id,
-				"count": int(u.get("count", 1)),
-				"instance_id": str(u.get("instance_id", "")),
-			})
-			continue
-		var stack_key := "%s|%s" % [unit_type, faction_id]
-		if not stacks.has(stack_key):
-			stacks[stack_key] = {
-				"unit_type_id": unit_type,
-				"faction_id": faction_id,
-				"count": 0,
-			}
-		stacks[stack_key]["count"] = int(stacks[stack_key]["count"]) + int(u.get("count", 0))
-	for stack_entry in stacks.values():
-		entries.append(stack_entry)
-	return entries
-
-
 func _display_entry_key(entry: Dictionary) -> String:
 	var base := "%s|%s" % [str(entry.get("unit_type_id", "")), str(entry.get("faction_id", ""))]
 	if entry.has("instance_id") and not str(entry.get("instance_id", "")).is_empty():
@@ -249,24 +221,49 @@ func _find_display_entry(entries: Array, key: String) -> Dictionary:
 	return {}
 
 
-func _group_units(units_array: Array) -> Dictionary:
-	var grouped := {}
-	for u in units_array:
-		if typeof(u) != TYPE_DICTIONARY:
+func _refresh_combat_markers() -> void:
+	_clear_combat_markers()
+	var state := _live_state()
+	if _map_root == null or state == null or _current_phase != "combat_move" or _current_faction.is_empty():
+		return
+	for region_id in RegionUnitDisplay.regions_with_combat_pools(state, _current_faction):
+		var count := RegionUnitDisplay.combat_pool_unit_count(state, region_id, _current_faction)
+		if count <= 0:
 			continue
-		var parsed := UnitTextureCache.normalize_unit_type_and_faction(
-			str(u.get("unit_type_id", "")),
-			str(u.get("faction_id", ""))
-		)
-		var unit_type := str(parsed["unit_type_id"])
-		if unit_type.is_empty():
+		var marker: CombatPoolMarker = CombatPoolMarkerScript.new()
+		marker.configure(region_id, count)
+		if not marker.clicked.is_connected(_on_combat_marker_clicked):
+			marker.clicked.connect(_on_combat_marker_clicked)
+		var region_node := _find_region_node(region_id, _map_root)
+		if region_node == null:
+			marker.queue_free()
 			continue
-		var faction_id := str(parsed["faction_id"])
-		var count := int(u.get("count", 0))
-		if not grouped.has(unit_type):
-			grouped[unit_type] = {"faction_id": faction_id, "count": 0}
-		grouped[unit_type]["count"] = int(grouped[unit_type]["count"]) + count
-	return grouped
+		var meta := region_node.get_node_or_null("RegionMetadata") as RegionMetadata
+		if meta == null:
+			marker.queue_free()
+			continue
+		var global_anchor := region_node.to_global(meta.unit_anchor)
+		marker.position = to_local(global_anchor) + Vector2(0, -UnitIcon.UNIT_ICON_SIZE * 0.75)
+		add_child(marker)
+		_combat_markers[region_id] = marker
+
+
+func _clear_combat_markers() -> void:
+	for region_id in _combat_markers.keys():
+		var marker = _combat_markers[region_id]
+		if is_instance_valid(marker):
+			marker.queue_free()
+	_combat_markers.clear()
+
+
+func _on_combat_marker_clicked(region_id: String) -> void:
+	combat_marker_clicked.emit(region_id)
+
+
+func _live_state() -> GameState:
+	if _session and _session.state:
+		return _session.state
+	return null
 
 
 func _acquire_icon() -> UnitIcon:

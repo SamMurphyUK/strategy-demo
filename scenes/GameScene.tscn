@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://b8ifybnvm1113" path="res://debug/debug_snapshot.gd" id="8_dbgsnap"]
 [ext_resource type="PackedScene" uid="uid://debuhud001" path="res://debug/DebugHUD.tscn" id="9_dbghud"]
 [ext_resource type="PackedScene" uid="uid://debuinsp001" path="res://debug/DebugInspector.tscn" id="10_dbginsp"]
+[ext_resource type="PackedScene" uid="uid://regioninspector001" path="res://scenes/RegionInspectorPanel.tscn" id="11_insp"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -125,6 +126,26 @@ grow_vertical = 2
 layout_mode = 2
 text = "Combat Phase (placeholder)"
 horizontal_alignment = 1
+
+[node name="InspectorLayer" type="CanvasLayer" parent="."]
+layer = 15
+
+[node name="InspectorPanelRoot" type="Control" parent="InspectorLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="RegionInspectorPanel" parent="InspectorLayer/InspectorPanelRoot" instance=ExtResource("11_insp")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
 [node name="01" type="CanvasLayer" parent="." unique_id=1255178115]
 
