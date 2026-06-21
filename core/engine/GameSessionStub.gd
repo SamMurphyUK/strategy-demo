@@ -469,15 +469,13 @@ func _validate_placement_command(cmd: Command) -> Dictionary:
 
 	for p in placements:
 		var region_id := str(p.get("region_id", ""))
-		if not state.is_region_owned_by(region_id, faction_id):
-			return _placement_error("Region not owned by faction: %s" % region_id)
-		var region: Region = state.regions.get(region_id)
-		if region == null or not region.has_factory:
-			return _placement_error("Region has no factory: %s" % region_id)
-
 		for u in p.get("units", []):
 			var unit_type_id := str(u.get("unit_type_id", ""))
 			var count := int(u.get("count", 1))
+			if not ruleset.can_mobilize_unit_at(unit_type_id, region_id, faction_id, state):
+				return _placement_error(
+					"Cannot mobilize %s at %s" % [unit_type_id, region_id]
+				)
 			if pending_counts.get(unit_type_id, 0) < count:
 				return _placement_error(
                     "Not enough pending %s (have %d, need %d)"
@@ -525,6 +523,10 @@ func _forfeit_pending_at_mobilize_end(faction_id: String) -> Array:
 			_seq
 		)
 	]
+
+
+func get_legal_mobilize_regions(faction_id: String, unit_type_id: String) -> Array:
+	return ruleset.get_legal_mobilize_regions(faction_id, unit_type_id, state)
 
 
 func get_legal_move_destinations(

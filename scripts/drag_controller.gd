@@ -40,6 +40,7 @@ var _drag_active: bool = false
 var _current_zoom: float = 1.0
 var _session = null
 var _legal_move_destinations: Array[String] = []
+var _legal_mobilize_destinations: Array[String] = []
 
 
 func _ready() -> void:
@@ -229,6 +230,7 @@ func _on_staged_icon_drag_cancelled(icon: DraggableStagedIcon) -> void:
 
 
 func _begin_mobilize_drag(payload: Dictionary, screen_global: Vector2) -> void:
+	_legal_mobilize_destinations = _compute_legal_mobilize_destinations(payload)
 	_begin_ui_drag(DragSource.MOBILIZE_UI, payload, screen_global)
 	_show_movement_arrow(screen_global, screen_global)
 	_highlight_mobilize_hover(screen_global)
@@ -325,6 +327,7 @@ func _cleanup_drag() -> void:
 	_drag_payload.clear()
 	_hover_region = ""
 	_legal_move_destinations.clear()
+	_legal_mobilize_destinations.clear()
 	_drag_active = false
 	set_process_unhandled_input(false)
 
@@ -510,6 +513,18 @@ func _adjacent_fallback(from_region: String) -> Array[String]:
 	return legal
 
 
+func _compute_legal_mobilize_destinations(payload: Dictionary) -> Array[String]:
+	if _session != null and _session.has_method("get_legal_mobilize_regions"):
+		var faction := str(
+			payload.get("faction_id", payload.get("player_id", _payload_faction(payload)))
+		)
+		return _session.get_legal_mobilize_regions(
+			faction,
+			str(payload.get("unit_type_id", ""))
+		)
+	return []
+
+
 func _highlight_mobilize_hover(screen_global: Vector2) -> void:
 	var hover := region_at_screen_global(screen_global)
 	if hover == _hover_region:
@@ -520,6 +535,7 @@ func _highlight_mobilize_hover(screen_global: Vector2) -> void:
 		_map_root.call(
 			"highlight_mobilize_targets",
 			_payload_faction(_drag_payload),
+			_legal_mobilize_destinations,
 			hover,
 			_last_snapshot
 		)

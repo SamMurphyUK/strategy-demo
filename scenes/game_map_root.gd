@@ -228,10 +228,11 @@ func clear_movement_highlights(snapshot: Dictionary) -> void:
 
 func highlight_mobilize_targets(
 	faction_id: String,
+	legal_region_ids: Array,
 	hover_region_id: String = "",
 	snapshot: Dictionary = {}
 ) -> void:
-	var valid := _mobilize_target_regions(faction_id, snapshot)
+	var valid: Array = legal_region_ids
 	for region_id in regions.keys():
 		var region_node: Node2D = regions[region_id]
 		var poly: Polygon2D = region_node.get_node_or_null("Polygon2D") as Polygon2D
