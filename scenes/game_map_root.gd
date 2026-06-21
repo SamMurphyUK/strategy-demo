@@ -201,8 +201,12 @@ func update_region_colors(snapshot: Dictionary) -> void:
 		if poly:
 			poly.color = _owner_color(owner)
 
-func highlight_movement_targets(from_region_id: String, adjacency: Dictionary, hover_region_id: String = "") -> void:
-	var valid: Array = adjacency.get(from_region_id, [])
+func highlight_movement_targets(
+	from_region_id: String,
+	legal_region_ids: Array,
+	hover_region_id: String = ""
+) -> void:
+	var valid: Array = legal_region_ids
 	for region_id in regions.keys():
 		var region_node: Node2D = regions[region_id]
 		var poly: Polygon2D = region_node.get_node_or_null("Polygon2D") as Polygon2D

@@ -38,6 +38,8 @@ var _drag_start_map_global: Vector2 = Vector2.ZERO
 var _hover_region: String = ""
 var _drag_active: bool = false
 var _current_zoom: float = 1.0
+var _session = null
+var _legal_move_destinations: Array[String] = []
 
 
 func _ready() -> void:
@@ -70,6 +72,10 @@ func set_context(
 	_current_phase = current_phase
 	_adjacency = adjacency
 	_last_snapshot = snapshot
+
+
+func set_session(session) -> void:
+	_session = session
 
 
 func apply_zoom_scale(zoom: float) -> void:
@@ -229,6 +235,7 @@ func _begin_map_drag(icon: UnitIcon, screen_global: Vector2) -> void:
 	_active_icon = icon
 	_drag_payload = {}
 	_drag_start_map_global = icon.global_position
+	_legal_move_destinations = _compute_legal_move_destinations(icon)
 	_store_original_transform(icon)
 	icon.visible = false
 	icon.set_selected(true)
@@ -296,8 +303,7 @@ func _finish_map_drop(from_region: String, screen_global: Vector2) -> void:
 	_restore_source_icon()
 	if from_region.is_empty() or to_region.is_empty() or to_region == from_region:
 		return
-	var neighbors: Array = _adjacency.get(from_region, [])
-	if to_region not in neighbors:
+	if to_region not in _legal_move_destinations:
 		return
 	if _active_icon == null:
 		return
@@ -313,6 +319,7 @@ func _cleanup_drag() -> void:
 	_active_staged_icon = null
 	_drag_payload.clear()
 	_hover_region = ""
+	_legal_move_destinations.clear()
 	_drag_active = false
 	set_process_unhandled_input(false)
 
@@ -473,7 +480,7 @@ func _highlight_hover(screen_global: Vector2, from_region: String) -> void:
 		return
 	_hover_region = hover
 	if _map_root and _map_root.has_method("highlight_movement_targets"):
-		_map_root.call("highlight_movement_targets", from_region, _adjacency, hover)
+		_map_root.call("highlight_movement_targets", from_region, _legal_move_destinations, hover)
 
 
 func _clear_highlights() -> void:
@@ -483,6 +490,26 @@ func _clear_highlights() -> void:
 		_map_root.call("clear_mobilize_highlights", _last_snapshot)
 	elif _map_root.has_method("clear_movement_highlights"):
 		_map_root.call("clear_movement_highlights", _last_snapshot)
+
+
+func _compute_legal_move_destinations(icon: UnitIcon) -> Array[String]:
+	if _session != null and _session.has_method("get_legal_move_destinations"):
+		var faction := str(
+			_last_snapshot.get("turn_info", {}).get("current_faction_id", icon.faction_id)
+		)
+		return _session.get_legal_move_destinations(
+			icon.source_region_id,
+			icon.unit_type_id,
+			faction
+		)
+	return _adjacent_fallback(icon.source_region_id)
+
+
+func _adjacent_fallback(from_region: String) -> Array[String]:
+	var legal: Array[String] = []
+	for neighbor in _adjacency.get(from_region, []):
+		legal.append(str(neighbor))
+	return legal
 
 
 func _highlight_mobilize_hover(screen_global: Vector2) -> void:
