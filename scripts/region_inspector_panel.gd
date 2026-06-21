@@ -28,7 +28,11 @@ var _scroll_drag_start_value: float = 0.0
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if collapsed_bar:
+		collapsed_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	if expanded_panel:
+		expanded_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	if expand_button:
 		expand_button.pressed.connect(_on_expand_pressed)
 	if collapse_button:

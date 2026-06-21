@@ -6,60 +6,45 @@ signal clicked(region_id: String)
 var region_id: String = ""
 var pool_count: int = 0
 
-var _badge: Panel
-var _badge_label: Label
-var _x_label: Label
 var _hit_area: Area2D
+var _icon_size: float = UnitIcon.UNIT_ICON_SIZE * 1.15
 
 
 func _ready() -> void:
 	z_index = UnitLayout.get_z_order("movement_arrow") + 1
-	_build_visual()
 	_build_hit_area()
 
 
 func configure(p_region_id: String, count: int) -> void:
 	region_id = p_region_id
 	pool_count = maxi(0, count)
-	if _badge_label:
-		_badge_label.text = str(pool_count)
 	visible = pool_count > 0
+	queue_redraw()
 
 
-func _build_visual() -> void:
-	var size := UnitIcon.UNIT_ICON_SIZE * 1.15
+func _draw() -> void:
+	if pool_count <= 0:
+		return
+	var half := _icon_size * 0.5
+	var font := ThemeDB.fallback_font
+	var font_size := int(_icon_size * 0.85)
+	var x_pos := Vector2(-half, -half * 1.3)
+	draw_string(font, x_pos, "X", HORIZONTAL_ALIGNMENT_CENTER, _icon_size, font_size, Color(0.95, 0.15, 0.15, 1.0))
 
-	_x_label = Label.new()
-	_x_label.text = "X"
-	_x_label.add_theme_color_override("font_color", Color(0.95, 0.15, 0.15, 1.0))
-	_x_label.add_theme_font_size_override("font_size", int(size * 0.85))
-	_x_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_x_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_x_label.position = Vector2(-size * 0.5, -size * 0.65)
-	_x_label.size = Vector2(size, size)
-	add_child(_x_label)
-
-	_badge = Panel.new()
-	var badge_size := 22.0
-	_badge.position = Vector2(size * 0.15, -size * 0.85)
-	_badge.custom_minimum_size = Vector2(badge_size, badge_size)
-	_badge.size = Vector2(badge_size, badge_size)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.2, 0.55, 0.95, 0.95)
-	style.corner_radius_top_left = 11
-	style.corner_radius_top_right = 11
-	style.corner_radius_bottom_right = 11
-	style.corner_radius_bottom_left = 11
-	_badge.add_theme_stylebox_override("panel", style)
-	add_child(_badge)
-
-	_badge_label = Label.new()
-	_badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_badge_label.add_theme_font_size_override("font_size", 12)
-	_badge_label.add_theme_color_override("font_color", Color.WHITE)
-	_badge_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_badge.add_child(_badge_label)
+	var badge_radius := 11.0
+	var badge_center := Vector2(half * 0.35, -half * 1.7)
+	draw_circle(badge_center, badge_radius, Color(0.2, 0.55, 0.95, 0.95))
+	var count_text := str(pool_count)
+	var count_size := font.get_string_size(count_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+	draw_string(
+		font,
+		badge_center - count_size * 0.5 + Vector2(0, count_size.y * 0.35),
+		count_text,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		12,
+		Color.WHITE
+	)
 
 
 func _build_hit_area() -> void:
@@ -78,4 +63,5 @@ func _build_hit_area() -> void:
 
 func _on_hit_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		get_viewport().set_input_as_handled()
 		clicked.emit(region_id)

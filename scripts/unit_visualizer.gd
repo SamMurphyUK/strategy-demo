@@ -94,8 +94,9 @@ func refresh_from_snapshot(
 
 
 func refresh_all() -> void:
-	if _drag_controller:
-		_drag_controller.cancel_active_drag()
+	if _drag_controller and _drag_controller.has_method("is_drag_active"):
+		if _drag_controller.is_drag_active():
+			_drag_controller.cancel_active_drag()
 	clear_all_units()
 	if _map_root == null or _last_snapshot.is_empty():
 		return
@@ -126,8 +127,9 @@ func _apply_icon_zoom_scale(icon: UnitIcon) -> void:
 
 
 func clear_all_units() -> void:
-	if _drag_controller:
-		_drag_controller.cancel_active_drag()
+	if _drag_controller and _drag_controller.has_method("is_drag_active"):
+		if _drag_controller.is_drag_active():
+			_drag_controller.cancel_active_drag()
 	for region_id in _region_icons.keys():
 		for icon in _region_icons[region_id]:
 			_release_icon(icon)
