@@ -22,6 +22,7 @@ var stack_count: int = 1
 var source_region_id: String = ""
 var is_drag_preview: bool = false
 var _selected: bool = false
+var _inspector_highlight: bool = false
 var _dragging: bool = false
 
 
@@ -75,6 +76,7 @@ func reset_for_pool() -> void:
 	stack_count = 1
 	source_region_id = ""
 	_selected = false
+	_inspector_highlight = false
 	_dragging = false
 	is_drag_preview = false
 	visible = true
@@ -126,6 +128,11 @@ func set_count(count: int) -> void:
 
 func set_selected(is_selected: bool) -> void:
 	_selected = is_selected
+	_update_selection_outline()
+
+
+func set_inspector_highlight(is_highlighted: bool) -> void:
+	_inspector_highlight = is_highlighted
 	_update_selection_outline()
 
 
@@ -223,11 +230,14 @@ func _update_selection_outline() -> void:
 	if selection_outline == null:
 		return
 
-	selection_outline.visible = _selected
-
-	if _selected:
+	if _inspector_highlight:
+		selection_outline.visible = true
+		selection_outline.default_color = Color(1.0, 1.0, 0.35, 0.5)
+	elif _selected:
+		selection_outline.visible = true
 		selection_outline.default_color = Color(1, 1, 0.2, 0.95)
 	else:
+		selection_outline.visible = false
 		selection_outline.default_color = Color(1, 1, 1, 0)
 
 

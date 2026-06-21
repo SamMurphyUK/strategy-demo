@@ -22,6 +22,7 @@ var _last_snapshot: Dictionary = {}
 var _region_icons: Dictionary = {}
 var _factory_icons: Dictionary = {}
 var _combat_markers: Dictionary = {}
+var _inspector_highlight_icon: UnitIcon = null
 var _icon_pool: Array = []
 var _movement_arrow: Line2D = null
 var _drag_controller = null  # DragController
@@ -97,6 +98,7 @@ func refresh_all() -> void:
 	if _drag_controller and _drag_controller.has_method("is_drag_active"):
 		if _drag_controller.is_drag_active():
 			_drag_controller.cancel_active_drag()
+	clear_inspector_highlight()
 	clear_all_units()
 	if _map_root == null or _last_snapshot.is_empty():
 		return
@@ -260,6 +262,43 @@ func _clear_combat_markers() -> void:
 
 func _on_combat_marker_clicked(region_id: String) -> void:
 	combat_marker_clicked.emit(region_id)
+
+
+func highlight_inspector_unit(entry: Dictionary) -> void:
+	clear_inspector_highlight()
+	var region_id := str(entry.get("region_id", ""))
+	if region_id.is_empty():
+		return
+	var icon := _find_map_icon(entry)
+	if icon == null:
+		return
+	icon.set_inspector_highlight(true)
+	_inspector_highlight_icon = icon
+
+
+func clear_inspector_highlight() -> void:
+	if _inspector_highlight_icon != null and is_instance_valid(_inspector_highlight_icon):
+		_inspector_highlight_icon.set_inspector_highlight(false)
+	_inspector_highlight_icon = null
+
+
+func _find_map_icon(entry: Dictionary) -> UnitIcon:
+	var region_id := str(entry.get("region_id", ""))
+	if not _region_icons.has(region_id):
+		return null
+	var instance_id := str(entry.get("instance_id", ""))
+	var unit_type_id := str(entry.get("unit_type_id", ""))
+	var faction_id := str(entry.get("faction_id", ""))
+	for icon in _region_icons[region_id]:
+		if icon == null or not is_instance_valid(icon):
+			continue
+		if not instance_id.is_empty():
+			if icon.instance_id == instance_id:
+				return icon
+			continue
+		if icon.unit_type_id == unit_type_id and icon.faction_id == faction_id:
+			return icon
+	return null
 
 
 func _live_state() -> GameState:

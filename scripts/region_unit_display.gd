@@ -133,3 +133,30 @@ static func _hostile_region_entries(
 			if str(u.get("faction_id", "")) != viewer_faction:
 				filtered_units.append(u)
 	return build_display_entries(filtered_units)
+
+
+static func is_container_unit(state: GameState, unit_type_id: String) -> bool:
+	if state == null or unit_type_id.is_empty():
+		return false
+	var unit: Unit = state.unit_types.get(unit_type_id)
+	return unit != null and unit.container is Dictionary and not unit.container.is_empty()
+
+
+static func cargo_summary_lines(state: GameState, instance_id: String) -> Array:
+	if state == null or instance_id.is_empty():
+		return ["Empty"]
+	var transport_data: Dictionary = state.transport_instances.get(instance_id, {})
+	var cargo: Array = transport_data.get("cargo", [])
+	if cargo.is_empty():
+		return ["Empty"]
+	var lines: Array = []
+	for entry in cargo:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var unit_type := str(entry.get("unit_type_id", ""))
+		var count := int(entry.get("count", 0))
+		if unit_type.is_empty() or count <= 0:
+			continue
+		lines.append("%s × %d" % [unit_type.capitalize(), count])
+	return lines if not lines.is_empty() else ["Empty"]
+

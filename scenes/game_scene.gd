@@ -70,6 +70,8 @@ func _ready() -> void:
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
 	if unit_visualizer and unit_visualizer.has_signal("combat_marker_clicked"):
 		unit_visualizer.combat_marker_clicked.connect(_on_combat_marker_clicked)
+	if region_inspector_panel and region_inspector_panel.has_signal("unit_chip_selected"):
+		region_inspector_panel.unit_chip_selected.connect(_on_inspector_unit_chip_selected)
 	if drag_controller and drag_controller.has_signal("load_transport_requested"):
 		drag_controller.load_transport_requested.connect(_on_load_transport_drop)
 	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
@@ -145,6 +147,9 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
+		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+			if unit_visualizer and unit_visualizer.has_method("clear_inspector_highlight"):
+				unit_visualizer.call("clear_inspector_highlight")
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_apply_zoom(0.9)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -796,6 +801,12 @@ func _on_combat_marker_clicked(region_id: String) -> void:
 	if region_inspector_panel:
 		region_inspector_panel.show_combat_info(region_id)
 	_log_system("Combat pool selected: %s" % region_id)
+
+
+func _on_inspector_unit_chip_selected(entry: Dictionary) -> void:
+	if unit_visualizer and unit_visualizer.has_method("highlight_inspector_unit"):
+		unit_visualizer.call("highlight_inspector_unit", entry)
+
 
 func _get_unit_texture(unit_type_id: String, faction: String) -> Texture2D:
 	if unit_visualizer and unit_visualizer.has_method("_load_unit_texture"):
