@@ -368,6 +368,7 @@ These are **allowed** in `scenes/` / `scripts/` but are **not** engine invariant
 - **Movement budget:** each stack unit may move once per movement window (`combat_move` + `noncombat_move`). Track arrivals in `GameState.units_arrived_this_phase`; reset when entering `combat_move` or leaving `noncombat_move`.
 - **Mobilize:** land units at owned factory regions; sea units in sea zones adjacent to a faction factory (not on the factory land region).
 - **Sea movement:** sea units traverse sea zones only (no land shortcuts); range from unit type (default 2 for ships).
+- **Transport load:** during `combat_move` / `noncombat_move`, unmoved land units in a region adjacent to a friendly transport's sea zone may load; cargo capacity follows unit container rules (2 slots: 2 infantry or 1 infantry + 1 artillery/tank). Loading counts as using that unit's move for the phase.
 
 ### Allow looseness (presentation)
 

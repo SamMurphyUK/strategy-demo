@@ -55,6 +55,65 @@ func get_legal_destinations_for_stack(
 	return legal
 
 
+func get_legal_destinations_for_instance(
+	instance_id: String,
+	faction_id: String,
+	state: GameState,
+	ruleset: Ruleset
+) -> Array[String]:
+	var legal: Array[String] = []
+	if instance_id.is_empty() or state.has_instance_moved(instance_id):
+		return legal
+	var from_region := _instance_region(instance_id, state)
+	if from_region.is_empty():
+		return legal
+	var unit_type_id := _instance_unit_type(instance_id, state)
+	if unit_type_id.is_empty():
+		return legal
+	var move_range := ruleset.get_unit_move_range(unit_type_id, state)
+	if move_range <= 0:
+		move_range = 1
+	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
+	for dest_value in _flood_fill(from_region, move_range, state, sea_only):
+		var dest := str(dest_value)
+		if ruleset.can_unit_enter_region(unit_type_id, dest, state, state.current_phase):
+			legal.append(dest)
+	return legal
+
+
+func validate_instance_move(
+	from_region: String,
+	to_region: String,
+	instance_id: String,
+	faction_id: String,
+	state: GameState,
+	ruleset: Ruleset
+) -> VT.ValidationResult:
+	var result := VT.ValidationResult.new()
+	var unit_type_id := _instance_unit_type(instance_id, state)
+	if unit_type_id.is_empty():
+		result.errors.append(_move_error("MOVE_INVALID", "Unknown ship instance"))
+	elif from_region.is_empty() or to_region.is_empty():
+		result.errors.append(_move_error("MOVE_INVALID", "Missing from/to region"))
+	elif from_region == to_region:
+		result.errors.append(_move_error("MOVE_INVALID", "Cannot move to the same region"))
+	elif state.has_instance_moved(instance_id):
+		result.errors.append(_move_error("MOVE_ALREADY_MOVED", "Ship already moved this phase"))
+	elif _instance_region(instance_id, state) != from_region:
+		result.errors.append(_move_error("MOVE_INVALID", "Ship is not in %s" % from_region))
+	elif not state.is_adjacent(from_region, to_region) and to_region not in _flood_fill(
+		from_region,
+		ruleset.get_unit_move_range(unit_type_id, state),
+		state,
+		ruleset.is_sea_unit(unit_type_id, state)
+	):
+		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
+	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
+		result.errors.append(_move_error("MOVE_ILLEGAL_DESTINATION", "Ship cannot enter %s" % to_region))
+	result.ok = result.errors.is_empty()
+	return result
+
+
 func validate_stack_move(
 	from_region: String,
 	to_region: String,
@@ -108,6 +167,14 @@ func _move_error(code: String, message: String) -> VT.MoveError:
 	err.code = code
 	err.message = message
 	return err
+
+
+func _instance_region(instance_id: String, state: GameState) -> String:
+	return str(state.transport_instances.get(instance_id, {}).get("region_id", ""))
+
+
+func _instance_unit_type(instance_id: String, state: GameState) -> String:
+	return str(state.transport_instances.get(instance_id, {}).get("unit_type_id", ""))
 
 
 func validate_combat_movement_batch(batch, state: GameState, ruleset: Ruleset):

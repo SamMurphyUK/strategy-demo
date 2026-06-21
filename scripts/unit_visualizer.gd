@@ -5,7 +5,8 @@ signal movement_drop_requested(
 	from_region_id: String,
 	to_region_id: String,
 	unit_type_id: String,
-	count: int
+	count: int,
+	instance_id: String
 )
 
 @export var unit_icon_scene: PackedScene = null
@@ -97,8 +98,8 @@ func refresh_all() -> void:
 		if typeof(region_entry) != TYPE_DICTIONARY:
 			continue
 		var region_id := str(region_entry.get("region_id", ""))
-		var grouped := _group_units(region_entry.get("units", []))
-		update_region_units(region_id, grouped)
+		var entries := _display_unit_entries(region_entry.get("units", []))
+		update_region_units(region_id, entries)
 	apply_zoom_scale(_current_zoom)
 
 
@@ -130,7 +131,7 @@ func clear_all_units() -> void:
 	_factory_icons.clear()
 
 
-func update_region_units(region_id: String, units: Dictionary) -> void:
+func update_region_units(region_id: String, units: Array) -> void:
 	if _map_root == null:
 		return
 	var region_node := _find_region_node(region_id, _map_root)
@@ -153,18 +154,26 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 	var global_anchor := region_node.to_global(anchor)
 	var local_anchor := to_local(global_anchor)
 
-	var unit_types: Array = UnitLayout.sort_unit_types(units.keys())
+	var unit_types: Array = []
+	for entry in units:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var key := _display_entry_key(entry)
+		if key not in unit_types:
+			unit_types.append(key)
+	unit_types.sort()
 	var layout_slots: Array[Vector2] = UnitLayout.layout_positions(unit_types.size())
 	layout_slots = UnitLayout.clamp_positions_to_bounds(layout_slots, anchor, bounds)
 
 	var icons_for_region: Array = []
 	var slot_idx := 0
-	for unit_type in unit_types:
-		var entry: Dictionary = units[unit_type]
+	for key in unit_types:
+		var entry: Dictionary = _find_display_entry(units, key)
 		var icon := _acquire_icon()
 		icon.source_region_id = region_id
 		var faction_id := str(entry.get("faction_id", entry.get("faction", "neutral")))
-		icon.configure(str(unit_type), faction_id, int(entry.get("count", 1)))
+		icon.configure(str(entry.get("unit_type_id", "")), faction_id, int(entry.get("count", 1)))
+		icon.set_instance_id(str(entry.get("instance_id", "")))
 		icon.position = local_anchor + layout_slots[slot_idx]
 		icon.z_index = icon.get_z_layer()
 		icon.visible = true
@@ -187,6 +196,57 @@ func update_region_units(region_id: String, units: Dictionary) -> void:
 		add_child(factory_icon)
 		_apply_icon_zoom_scale(factory_icon)
 		_factory_icons[region_id] = factory_icon
+
+
+func _display_unit_entries(units_array: Array) -> Array:
+	var entries: Array = []
+	var stacks := {}
+	for u in units_array:
+		if typeof(u) != TYPE_DICTIONARY:
+			continue
+		var parsed := UnitTextureCache.normalize_unit_type_and_faction(
+			str(u.get("unit_type_id", "")),
+			str(u.get("faction_id", ""))
+		)
+		var unit_type := str(parsed["unit_type_id"])
+		if unit_type.is_empty():
+			continue
+		var faction_id := str(parsed["faction_id"])
+		if u.has("instance_id"):
+			entries.append({
+				"unit_type_id": unit_type,
+				"faction_id": faction_id,
+				"count": int(u.get("count", 1)),
+				"instance_id": str(u.get("instance_id", "")),
+			})
+			continue
+		var stack_key := "%s|%s" % [unit_type, faction_id]
+		if not stacks.has(stack_key):
+			stacks[stack_key] = {
+				"unit_type_id": unit_type,
+				"faction_id": faction_id,
+				"count": 0,
+			}
+		stacks[stack_key]["count"] = int(stacks[stack_key]["count"]) + int(u.get("count", 0))
+	for stack_entry in stacks.values():
+		entries.append(stack_entry)
+	return entries
+
+
+func _display_entry_key(entry: Dictionary) -> String:
+	var base := "%s|%s" % [str(entry.get("unit_type_id", "")), str(entry.get("faction_id", ""))]
+	if entry.has("instance_id") and not str(entry.get("instance_id", "")).is_empty():
+		return "%s|%s" % [base, str(entry.get("instance_id", ""))]
+	return base
+
+
+func _find_display_entry(entries: Array, key: String) -> Dictionary:
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		if _display_entry_key(entry) == key:
+			return entry
+	return {}
 
 
 func _group_units(units_array: Array) -> Dictionary:
@@ -247,9 +307,10 @@ func _on_controller_movement_drop(
 	from_region_id: String,
 	to_region_id: String,
 	unit_type_id: String,
-	count: int
+	count: int,
+	instance_id: String
 ) -> void:
-	movement_drop_requested.emit(from_region_id, to_region_id, unit_type_id, count)
+	movement_drop_requested.emit(from_region_id, to_region_id, unit_type_id, count, instance_id)
 
 
 func _region_owner_faction(meta: RegionMetadata) -> String:

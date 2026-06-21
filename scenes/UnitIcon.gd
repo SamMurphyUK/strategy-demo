@@ -17,6 +17,7 @@ const UNIT_ICON_SIZE := 48
 
 var unit_type_id: String = ""
 var faction_id: String = ""
+var instance_id: String = ""
 var stack_count: int = 1
 var source_region_id: String = ""
 var is_drag_preview: bool = false
@@ -70,6 +71,7 @@ func _autobind() -> void:
 func reset_for_pool() -> void:
 	unit_type_id = ""
 	faction_id = ""
+	instance_id = ""
 	stack_count = 1
 	source_region_id = ""
 	_selected = false
@@ -86,6 +88,10 @@ func reset_for_pool() -> void:
 
 	if faction_tint:
 		faction_tint.visible = true
+
+
+func set_instance_id(id: String) -> void:
+	instance_id = id
 
 
 func configure(p_unit_type_id: String, p_faction_id: String, p_count: int = 1) -> void:

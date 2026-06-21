@@ -23,6 +23,12 @@ func process_load(command: Command) -> Array:
 	for u in units:
 		_remove_from_region(from_region, command.player_id, u)
 		_add_to_cargo(tid, u)
+		state.record_stack_embark(
+			command.player_id,
+			from_region,
+			str(u.get("unit_type_id", "")),
+			int(u.get("count", 1))
+		)
 	return [GameEvent.create(GameEvent.Type.TRANSPORT_LOADED, {"faction_id": command.player_id, "transport_instance_id": tid, "sea_zone_id": td.region_id, "from_region_id": from_region, "units": units}, _next_seq())]
 
 func process_unload(command: Command) -> Array:
@@ -50,7 +56,15 @@ func _transfer(from: String, to: String, faction: String, entry: Dictionary) -> 
 
 func _remove_from_region(rid: String, faction: String, entry: Dictionary) -> void:
 	var units: Array = state.region_units.get(rid, [])
-	var count: int = entry.count
+	if entry.has("instance_id"):
+		var iid := str(entry.get("instance_id", ""))
+		for i in range(units.size() - 1, -1, -1):
+			var u: Dictionary = units[i]
+			if str(u.get("instance_id", "")) == iid:
+				units.remove_at(i)
+				break
+		return
+	var count: int = int(entry.get("count", 1))
 	for i in range(units.size() - 1, -1, -1):
 		var u: Dictionary = units[i]
 		if u.faction_id == faction and u.unit_type_id == entry.unit_type_id and not u.has("instance_id"):
@@ -59,8 +73,20 @@ func _remove_from_region(rid: String, faction: String, entry: Dictionary) -> voi
 			if count <= 0: break
 
 func _add_to_region(rid: String, faction: String, entry: Dictionary) -> void:
-	if rid not in state.region_units: state.region_units[rid] = []
+	if rid not in state.region_units:
+		state.region_units[rid] = []
 	var units: Array = state.region_units[rid]
+	if entry.has("instance_id"):
+		var iid := str(entry.get("instance_id", ""))
+		units.append({
+			"faction_id": faction,
+			"unit_type_id": str(entry.get("unit_type_id", "")),
+			"instance_id": iid,
+			"count": int(entry.get("count", 1)),
+		})
+		if state.transport_instances.has(iid):
+			state.transport_instances[iid]["region_id"] = rid
+		return
 	for u in units:
 		if u.faction_id == faction and u.unit_type_id == entry.unit_type_id and not u.has("instance_id"):
 			u.count += entry.count; return

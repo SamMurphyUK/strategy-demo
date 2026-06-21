@@ -22,6 +22,7 @@ var game_over: bool = false
 var winner_faction_id: String = ""
 # Units that arrived in a region during the current movement window (combat + noncombat).
 var units_arrived_this_phase: Dictionary = {}
+var units_embarked_this_phase: Dictionary = {}
 # Container instances that already spent movement this window.
 var instances_moved_this_phase: Dictionary = {}
 
@@ -82,7 +83,20 @@ func movable_stack_count(faction_id: String, region_id: String, unit_type_id: St
 	var arrived := int(
 		units_arrived_this_phase.get(movement_stack_key(faction_id, region_id, unit_type_id), 0)
 	)
-	return maxi(0, total - arrived)
+	var embarked := int(
+		units_embarked_this_phase.get(movement_stack_key(faction_id, region_id, unit_type_id), 0)
+	)
+	return maxi(0, total - arrived - embarked)
+
+
+func record_stack_embark(
+	faction_id: String,
+	region_id: String,
+	unit_type_id: String,
+	count: int
+) -> void:
+	var key := movement_stack_key(faction_id, region_id, unit_type_id)
+	units_embarked_this_phase[key] = int(units_embarked_this_phase.get(key, 0)) + count
 
 
 func record_stack_arrival(
@@ -105,6 +119,7 @@ func record_instance_moved(instance_id: String) -> void:
 
 func clear_movement_phase_tracking() -> void:
 	units_arrived_this_phase.clear()
+	units_embarked_this_phase.clear()
 	instances_moved_this_phase.clear()
 
 # ---------------------------------------------------------
