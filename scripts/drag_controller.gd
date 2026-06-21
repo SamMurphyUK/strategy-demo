@@ -234,11 +234,8 @@ func _begin_map_drag(icon: UnitIcon) -> void:
 	_drag_payload = {}
 	_drag_start_map_global = icon.global_position
 	_store_original_transform(icon)
-	icon.visible = false
 	icon.set_selected(true)
-	_spawn_preview_from_icon(icon)
 	var screen_pos := _cursor_screen_position()
-	_position_preview(screen_pos)
 	_show_movement_arrow(_drag_start_map_global, screen_pos)
 	_highlight_hover(screen_pos, icon.source_region_id)
 	_drag_active = true
@@ -258,7 +255,8 @@ func _begin_ui_drag(source: DragSource, payload: Dictionary, screen_global: Vect
 
 func _update_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
 	var screen_pos := _cursor_screen_position()
-	_position_preview(screen_pos)
+	if _drag_source != DragSource.MAP_ICON:
+		_position_preview(screen_pos)
 	match _drag_source:
 		DragSource.MAP_ICON:
 			if _active_icon:
@@ -335,6 +333,7 @@ func _restore_source_icon() -> void:
 	if _active_icon == null or not is_instance_valid(_active_icon):
 		return
 	_active_icon.visible = _original_visible
+	_active_icon.clear_drag_state()
 	_active_icon.set_selected(false)
 	if _original_parent and is_instance_valid(_original_parent):
 		if _active_icon.get_parent() != _original_parent:
