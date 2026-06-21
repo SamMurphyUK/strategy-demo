@@ -162,7 +162,11 @@ func _on_map_icon_drag_started(icon: UnitIcon) -> void:
 	if not _movement_phase_active():
 		icon.clear_drag_state()
 		return
-	_begin_map_drag(icon, icon.global_position)
+	_begin_map_drag(icon)
+
+
+func _cursor_screen_position() -> Vector2:
+	return get_viewport().get_mouse_position()
 
 
 func _on_map_icon_drag_updated(icon: UnitIcon, screen_global: Vector2) -> void:
@@ -224,7 +228,7 @@ func _begin_mobilize_drag(payload: Dictionary, screen_global: Vector2) -> void:
 	_highlight_mobilize_hover(screen_global)
 
 
-func _begin_map_drag(icon: UnitIcon, screen_global: Vector2) -> void:
+func _begin_map_drag(icon: UnitIcon) -> void:
 	_drag_source = DragSource.MAP_ICON
 	_active_icon = icon
 	_drag_payload = {}
@@ -233,9 +237,10 @@ func _begin_map_drag(icon: UnitIcon, screen_global: Vector2) -> void:
 	icon.visible = false
 	icon.set_selected(true)
 	_spawn_preview_from_icon(icon)
-	_position_preview(screen_global)
-	_show_movement_arrow(_drag_start_map_global, screen_global)
-	_highlight_hover(screen_global, icon.source_region_id)
+	var screen_pos := _cursor_screen_position()
+	_position_preview(screen_pos)
+	_show_movement_arrow(_drag_start_map_global, screen_pos)
+	_highlight_hover(screen_pos, icon.source_region_id)
 	_drag_active = true
 	set_process_unhandled_input(true)
 
@@ -246,13 +251,13 @@ func _begin_ui_drag(source: DragSource, payload: Dictionary, screen_global: Vect
 	_drag_payload = payload.duplicate(true)
 	_drag_start_map_global = screen_global
 	_spawn_preview_from_payload(payload)
-	_position_preview(screen_global)
+	_position_preview(_cursor_screen_position())
 	_drag_active = true
 	set_process_unhandled_input(true)
 
 
 func _update_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
-	var screen_pos := get_viewport().get_mouse_position()
+	var screen_pos := _cursor_screen_position()
 	_position_preview(screen_pos)
 	match _drag_source:
 		DragSource.MAP_ICON:
@@ -267,7 +272,7 @@ func _update_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
 func _end_drag(_screen_global: Vector2 = Vector2.ZERO) -> void:
 	if not _drag_active:
 		return
-	var screen_pos := get_viewport().get_mouse_position()
+	var screen_pos := _cursor_screen_position()
 	var from_region := ""
 	if _active_icon:
 		from_region = _active_icon.source_region_id
@@ -403,25 +408,17 @@ func _apply_preview_scale(icon: UnitIcon) -> void:
 		icon.scale = Vector2(base_scale / _current_zoom, base_scale / _current_zoom)
 
 
-func _preview_visual_half() -> Vector2:
-	if _preview_icon == null:
-		return Vector2.ZERO
-	var tex := _preview_icon.icon_sprite.texture if _preview_icon.icon_sprite else null
-	if tex:
-		return tex.get_size() * _preview_icon.scale * 0.5
-	return Vector2(UnitIcon.UNIT_ICON_SIZE, UnitIcon.UNIT_ICON_SIZE) * 0.5
-
-
 func _clear_preview() -> void:
 	if _preview_icon and is_instance_valid(_preview_icon):
 		_preview_icon.queue_free()
 	_preview_icon = null
 
 
-func _position_preview(screen_global: Vector2) -> void:
+func _position_preview(screen_pos: Vector2) -> void:
 	if _preview_icon == null:
 		return
-	_preview_icon.global_position = screen_global - _preview_visual_half()
+	# Match movement-arrow drop projection: screen → map-global canvas position.
+	_preview_icon.global_position = _map_global_from_screen(screen_pos)
 
 
 func screen_to_map_global(screen_global: Vector2) -> Vector2:

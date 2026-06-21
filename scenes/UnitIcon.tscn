@@ -1,6 +1,16 @@
-[gd_scene load_steps=3 format=3 uid="uid://cftbign7fj81u"]
+[gd_scene load_steps=5 format=3 uid="uid://cftbign7fj81u"]
 
 [ext_resource type="Script" uid="uid://cnvpnckrgfbba" path="res://scenes/UnitIcon.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_count_badge"]
+bg_color = Color(1, 0.55, 0.1, 0.95)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="SystemFont" id="SystemFont_count_bold"]
+font_weight = 700
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hit"]
 size = Vector2(48, 48)
@@ -18,12 +28,27 @@ centered = true
 offset = Vector2(0, 0)
 region_enabled = false
 
-[node name="CountLabel" type="Label" parent="."]
-offset_left = -8.0
-offset_top = -22.0
+[node name="CountBadge" type="Panel" parent="."]
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 36.0
+offset_bottom = 36.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_count_badge")
+
+[node name="CountLabel" type="Label" parent="CountBadge"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_fonts/font = SubResource("SystemFont_count_bold")
+theme_override_font_sizes/font_size = 24
+text = "2"
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes/font_size = 16
 
 [node name="FactionTint" type="ColorRect" parent="."]
 position = Vector2(-16, -16)

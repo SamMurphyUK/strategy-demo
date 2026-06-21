@@ -8,6 +8,7 @@ signal drag_cancelled(unit_icon: UnitIcon)
 
 @export var icon_sprite: Sprite2D
 @export var count_label: Label
+@export var count_badge: Panel
 @export var faction_tint: ColorRect
 @export var selection_outline: Line2D
 @export var drag_area: Area2D
@@ -49,7 +50,12 @@ func _autobind() -> void:
 		icon_sprite = get_node_or_null("Sprite") as Sprite2D
 
 	if count_label == null:
+		count_label = get_node_or_null("CountBadge/CountLabel") as Label
+	if count_label == null:
 		count_label = get_node_or_null("CountLabel") as Label
+
+	if count_badge == null:
+		count_badge = get_node_or_null("CountBadge") as Panel
 
 	if faction_tint == null:
 		faction_tint = get_node_or_null("FactionTint") as ColorRect
@@ -169,8 +175,11 @@ func _apply_faction_tint() -> void:
 
 func _apply_icon_role() -> void:
 	var is_factory := unit_type_id == "factory"
+	var show_count := not is_factory and stack_count > 1
+	if count_badge:
+		count_badge.visible = show_count
 	if count_label:
-		count_label.visible = not is_factory and stack_count > 1
+		count_label.visible = show_count
 	if drag_area:
 		drag_area.input_pickable = not is_factory and not is_drag_preview
 
@@ -193,9 +202,14 @@ func _update_count_label() -> void:
 	if count_label == null:
 		return
 	if unit_type_id == "factory":
+		if count_badge:
+			count_badge.visible = false
 		count_label.visible = false
 		return
-	count_label.visible = stack_count > 1
+	var show_count := stack_count > 1
+	if count_badge:
+		count_badge.visible = show_count
+	count_label.visible = show_count
 	count_label.text = str(stack_count)
 
 
