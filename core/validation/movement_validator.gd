@@ -19,7 +19,8 @@ func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) 
 	var unit_type_id: String = String(unit.get("unit_type_id", ""))
 	var move_range: int = ruleset.get_unit_move_range(unit_type_id, state)
 
-	var reachable: Array = _flood_fill(start, move_range, state)
+	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
+	var reachable: Array = _flood_fill(start, move_range, state, sea_only)
 
 	for region_value in reachable:
 		var region: String = String(region_value)
@@ -46,7 +47,8 @@ func get_legal_destinations_for_stack(
 	var move_range := ruleset.get_unit_move_range(unit_type_id, state)
 	if move_range <= 0:
 		move_range = 1
-	for dest_value in _flood_fill(from_region, move_range, state):
+	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
+	for dest_value in _flood_fill(from_region, move_range, state, sea_only):
 		var dest := str(dest_value)
 		if ruleset.can_unit_enter_region(unit_type_id, dest, state, state.current_phase):
 			legal.append(dest)
@@ -69,7 +71,10 @@ func validate_stack_move(
 	elif from_region == to_region:
 		result.errors.append(_move_error("MOVE_INVALID", "Cannot move to the same region"))
 	elif not state.is_adjacent(from_region, to_region) and to_region not in _flood_fill(
-		from_region, ruleset.get_unit_move_range(unit_type_id, state), state
+		from_region,
+		ruleset.get_unit_move_range(unit_type_id, state),
+		state,
+		ruleset.is_sea_unit(unit_type_id, state)
 	):
 		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
 	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
@@ -139,7 +144,7 @@ func validate_non_combat_movement_batch(batch, state: GameState, ruleset: Rulese
 	return result
 
 
-func _flood_fill(start: String, range: int, state: GameState) -> Array:
+func _flood_fill(start: String, range: int, state: GameState, sea_only: bool = false) -> Array:
 	var visited: Dictionary = {}
 	var frontier: Array = [ { "region": start, "dist": 0 } ]
 	var result: Array = []
@@ -156,6 +161,10 @@ func _flood_fill(start: String, range: int, state: GameState) -> Array:
 		if visited.has(region):
 			continue
 
+		var region_obj: Region = state.regions.get(region)
+		if sea_only and region_obj != null and not region_obj.is_sea_region():
+			continue
+
 		visited[region] = true
 
 		if region != start:
@@ -164,6 +173,10 @@ func _flood_fill(start: String, range: int, state: GameState) -> Array:
 		var neighbors: Array = state.get_adjacent_regions(region)
 		for n_value in neighbors:
 			var n: String = String(n_value)
+			if sea_only:
+				var neighbor: Region = state.regions.get(n)
+				if neighbor == null or not neighbor.is_sea_region():
+					continue
 			frontier.append({ "region": n, "dist": dist + 1 })
 
 	return result

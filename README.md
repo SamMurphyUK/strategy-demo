@@ -366,6 +366,8 @@ These are **allowed** in `scenes/` / `scripts/` but are **not** engine invariant
 - RNG via `PCG` for determinism
 - Stack vs `instance_id` rules for transports
 - **Movement budget:** each stack unit may move once per movement window (`combat_move` + `noncombat_move`). Track arrivals in `GameState.units_arrived_this_phase`; reset when entering `combat_move` or leaving `noncombat_move`.
+- **Mobilize:** land units at owned factory regions; sea units in sea zones adjacent to a faction factory (not on the factory land region).
+- **Sea movement:** sea units traverse sea zones only (no land shortcuts); range from unit type (default 2 for ships).
 
 ### Allow looseness (presentation)
 

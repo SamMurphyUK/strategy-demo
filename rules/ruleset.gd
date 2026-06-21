@@ -73,6 +73,71 @@ func can_unit_enter_region(unit_type: String, region_id: String, state: GameStat
 func is_region_hostile_to(region_id: String, faction_id: String, state: GameState) -> bool:
 	return state.is_region_hostile_to(region_id, faction_id)
 
+func get_unit_category(unit_type: String, state: GameState) -> String:
+	var unit: Unit = state.unit_types.get(unit_type)
+	if unit == null:
+		return ""
+	return str(unit.category)
+
+func is_sea_unit(unit_type: String, state: GameState) -> bool:
+	return get_unit_category(unit_type, state) == "sea"
+
+func can_mobilize_unit_at(
+	unit_type: String,
+	region_id: String,
+	faction_id: String,
+	state: GameState
+) -> bool:
+	var region: Region = state.regions.get(region_id)
+	var unit: Unit = state.unit_types.get(unit_type)
+	if region == null or unit == null:
+		return false
+	if unit.category == "sea":
+		if not region.is_sea_region():
+			return false
+		return is_sea_zone_adjacent_to_faction_factory(region_id, faction_id, state)
+	if not region.is_land_region():
+		return false
+	if not region.has_factory:
+		return false
+	return region.owner_faction_id == faction_id
+
+func is_sea_zone_adjacent_to_faction_factory(
+	sea_zone_id: String,
+	faction_id: String,
+	state: GameState
+) -> bool:
+	var sea: Region = state.regions.get(sea_zone_id)
+	if sea == null or not sea.is_sea_region():
+		return false
+	for factory_id in state.regions.keys():
+		var factory: Region = state.regions[factory_id]
+		if factory.has_factory and factory.owner_faction_id == faction_id:
+			if state.is_adjacent(sea_zone_id, factory_id):
+				return true
+	return false
+
+func get_legal_mobilize_regions(
+	faction_id: String,
+	unit_type: String,
+	state: GameState
+) -> Array[String]:
+	var legal: Array[String] = []
+	if unit_type.is_empty() or faction_id.is_empty():
+		return legal
+	var unit: Unit = state.unit_types.get(unit_type)
+	if unit == null:
+		return legal
+	if unit.category == "sea":
+		for region_id in state.regions.keys():
+			if can_mobilize_unit_at(unit_type, region_id, faction_id, state):
+				legal.append(region_id)
+		return legal
+	for region_id in state.regions.keys():
+		if can_mobilize_unit_at(unit_type, region_id, faction_id, state):
+			legal.append(region_id)
+	return legal
+
 # ---------------------------------------------------------
 # RNG HOOKS (stubs)
 # ---------------------------------------------------------
