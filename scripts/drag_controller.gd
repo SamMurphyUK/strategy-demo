@@ -5,6 +5,14 @@ signal movement_drop_requested(
 	from_region_id: String,
 	to_region_id: String,
 	unit_type_id: String,
+	count: int,
+	instance_id: String
+)
+signal load_transport_requested(
+	from_region_id: String,
+	sea_region_id: String,
+	transport_instance_id: String,
+	unit_type_id: String,
 	count: int
 )
 signal mobilize_drop_requested(payload: Dictionary, map_global_position: Vector2)
@@ -40,6 +48,7 @@ var _drag_active: bool = false
 var _current_zoom: float = 1.0
 var _session = null
 var _legal_move_destinations: Array[String] = []
+var _legal_load_destinations: Array[String] = []
 var _legal_mobilize_destinations: Array[String] = []
 
 
@@ -310,11 +319,42 @@ func _finish_map_drop(from_region: String, screen_global: Vector2) -> void:
 	_restore_source_icon()
 	if from_region.is_empty() or to_region.is_empty() or to_region == from_region:
 		return
-	if to_region not in _legal_move_destinations:
-		return
 	if _active_icon == null:
 		return
-	movement_drop_requested.emit(from_region, to_region, _active_icon.unit_type_id, 1)
+	if _try_finish_load_drop(from_region, to_region):
+		return
+	if to_region not in _legal_move_destinations:
+		return
+	movement_drop_requested.emit(
+		from_region,
+		to_region,
+		_active_icon.unit_type_id,
+		1,
+		_active_icon.instance_id
+	)
+
+
+func _try_finish_load_drop(from_region: String, to_region: String) -> bool:
+	if _active_icon == null or not to_region in _legal_load_destinations:
+		return false
+	if _session == null or not _session.has_method("find_transport_for_load"):
+		return false
+	var faction := str(
+		_last_snapshot.get("turn_info", {}).get("current_faction_id", _active_icon.faction_id)
+	)
+	var transport_id: String = _session.find_transport_for_load(
+		from_region, to_region, _active_icon.unit_type_id, faction
+	)
+	if transport_id.is_empty():
+		return false
+	load_transport_requested.emit(
+		from_region,
+		to_region,
+		transport_id,
+		_active_icon.unit_type_id,
+		1
+	)
+	return true
 
 
 func _cleanup_drag() -> void:
@@ -327,6 +367,7 @@ func _cleanup_drag() -> void:
 	_drag_payload.clear()
 	_hover_region = ""
 	_legal_move_destinations.clear()
+	_legal_load_destinations.clear()
 	_legal_mobilize_destinations.clear()
 	_drag_active = false
 	set_process_unhandled_input(false)
@@ -481,7 +522,11 @@ func _highlight_hover(screen_global: Vector2, from_region: String) -> void:
 		return
 	_hover_region = hover
 	if _map_root and _map_root.has_method("highlight_movement_targets"):
-		_map_root.call("highlight_movement_targets", from_region, _legal_move_destinations, hover)
+		var combined: Array = _legal_move_destinations.duplicate()
+		for sea_id in _legal_load_destinations:
+			if sea_id not in combined:
+				combined.append(sea_id)
+		_map_root.call("highlight_movement_targets", from_region, combined, hover)
 
 
 func _clear_highlights() -> void:
@@ -494,16 +539,31 @@ func _clear_highlights() -> void:
 
 
 func _compute_legal_move_destinations(icon: UnitIcon) -> Array[String]:
-	if _session != null and _session.has_method("get_legal_move_destinations"):
-		var faction := str(
-			_last_snapshot.get("turn_info", {}).get("current_faction_id", icon.faction_id)
-		)
+	if _session == null:
+		return _adjacent_fallback(icon.source_region_id)
+	var faction := str(
+		_last_snapshot.get("turn_info", {}).get("current_faction_id", icon.faction_id)
+	)
+	if not icon.instance_id.is_empty() and _session.has_method("get_legal_move_destinations"):
 		return _session.get_legal_move_destinations(
 			icon.source_region_id,
 			icon.unit_type_id,
-			faction
+			faction,
+			icon.instance_id
 		)
-	return _adjacent_fallback(icon.source_region_id)
+	var legal: Array[String] = []
+	if _session.has_method("get_legal_move_destinations"):
+		for dest in _session.get_legal_move_destinations(
+			icon.source_region_id, icon.unit_type_id, faction
+		):
+			legal.append(str(dest))
+	if _session.has_method("get_legal_load_destinations"):
+		_legal_load_destinations = []
+		for dest in _session.get_legal_load_destinations(
+			icon.source_region_id, icon.unit_type_id, faction
+		):
+			_legal_load_destinations.append(str(dest))
+	return legal
 
 
 func _adjacent_fallback(from_region: String) -> Array[String]:

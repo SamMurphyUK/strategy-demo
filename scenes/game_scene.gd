@@ -64,6 +64,8 @@ func _ready() -> void:
 		map_root.connect("region_selected", Callable(self, "_on_region_selected"))
 	if unit_visualizer and unit_visualizer.has_signal("movement_drop_requested"):
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
+	if drag_controller and drag_controller.has_signal("load_transport_requested"):
+		drag_controller.load_transport_requested.connect(_on_load_transport_drop)
 	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
 		drag_controller.mobilize_drop_requested.connect(_on_mobilize_drag_drop)
 	set_process(true)
@@ -724,14 +726,32 @@ func _on_unit_movement_drop(
 	from_region_id: String,
 	to_region_id: String,
 	unit_type_id: String,
-	count: int
+	count: int,
+	instance_id: String
 ) -> void:
+	var unit_entry := {"unit_type_id": unit_type_id, "count": count}
+	if not instance_id.is_empty():
+		unit_entry["instance_id"] = instance_id
 	_apply_command("move_units", {
 		"moves": [{
 			"from_region_id": from_region_id,
 			"to_region_id": to_region_id,
-			"units": [{"unit_type_id": unit_type_id, "count": count}],
+			"units": [unit_entry],
 		}],
+	})
+
+
+func _on_load_transport_drop(
+	from_region_id: String,
+	sea_region_id: String,
+	transport_instance_id: String,
+	unit_type_id: String,
+	count: int
+) -> void:
+	_apply_command("load_transport", {
+		"transport_instance_id": transport_instance_id,
+		"from_region_id": from_region_id,
+		"units": [{"unit_type_id": unit_type_id, "count": count}],
 	})
 
 

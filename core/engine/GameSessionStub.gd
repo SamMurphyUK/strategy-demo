@@ -1,6 +1,8 @@
 extends RefCounted
 class_name GameSessionStub
 
+const TransportLoadValidator := preload("res://core/validation/transport_load_validator.gd")
+
 const UNIT_COSTS := {
 	"infantry": 3,
 	"artillery": 4,
@@ -176,6 +178,19 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 				events = _sync_seq(combat_move_result.get_events())
 			else:
 				events = _sync_seq(movement.process_move(cmd))
+
+		Command.Type.LOAD_TRANSPORT:
+			var load_error := _validate_load_command(cmd)
+			if load_error.has("result_type"):
+				return load_error
+			if state.current_phase == "combat_move":
+				var load_batch: CombatLoadTransportBatchResource = CombatLoadTransportBatchResource.from_command(cmd)
+				var load_result: CombatMovePhaseResultResource = (
+					combat_move_phase_controller.process_load(load_batch, movement, cmd)
+				)
+				events = _sync_seq(load_result.get_events())
+			else:
+				events = _sync_seq(movement.process_load(cmd))
 
 		Command.Type.END_PHASE:
 			var forfeit_events: Array = []
@@ -532,9 +547,14 @@ func get_legal_mobilize_regions(faction_id: String, unit_type_id: String) -> Arr
 func get_legal_move_destinations(
 	from_region: String,
 	unit_type_id: String,
-	faction_id: String
+	faction_id: String,
+	instance_id: String = ""
 ) -> Array:
 	var validator := MovementValidator.new()
+	if not instance_id.is_empty():
+		return validator.get_legal_destinations_for_instance(
+			instance_id, faction_id, state, ruleset
+		)
 	return validator.get_legal_destinations_for_stack(
 		from_region,
 		unit_type_id,
@@ -542,6 +562,25 @@ func get_legal_move_destinations(
 		state,
 		ruleset
 	)
+
+
+func find_transport_for_load(
+	from_region: String,
+	sea_region: String,
+	unit_type_id: String,
+	faction_id: String
+) -> String:
+	var validator: TransportLoadValidator = TransportLoadValidator.new()
+	return validator.find_transport_for_load(from_region, sea_region, unit_type_id, faction_id, state)
+
+
+func get_legal_load_destinations(
+	from_region: String,
+	unit_type_id: String,
+	faction_id: String
+) -> Array:
+	var validator: TransportLoadValidator = TransportLoadValidator.new()
+	return validator.get_legal_load_destinations(from_region, unit_type_id, faction_id, state)
 
 
 func _validate_move_command(cmd: Command) -> Dictionary:
@@ -556,18 +595,46 @@ func _validate_move_command(cmd: Command) -> Dictionary:
 		for unit_entry in move.get("units", []):
 			if typeof(unit_entry) != TYPE_DICTIONARY:
 				continue
-			var result := validator.validate_stack_move(
-				from_region,
-				to_region,
-				str(unit_entry.get("unit_type_id", "")),
-				cmd.player_id,
-				int(unit_entry.get("count", 1)),
-				state,
-				ruleset
-			)
+			var instance_id := str(unit_entry.get("instance_id", ""))
+			var result: Variant
+			if not instance_id.is_empty():
+				result = validator.validate_instance_move(
+					from_region, to_region, instance_id, cmd.player_id, state, ruleset
+				)
+			else:
+				result = validator.validate_stack_move(
+					from_region,
+					to_region,
+					str(unit_entry.get("unit_type_id", "")),
+					cmd.player_id,
+					int(unit_entry.get("count", 1)),
+					state,
+					ruleset
+				)
 			if not result.ok and not result.errors.is_empty():
 				return _move_error(str(result.errors[0].message), str(result.errors[0].code))
 	return {}
+
+
+func _validate_load_command(cmd: Command) -> Dictionary:
+	if state.current_phase not in ["combat_move", "noncombat_move"]:
+		return _load_error("Not in a movement phase")
+	var validator: TransportLoadValidator = TransportLoadValidator.new()
+	var transport_id := str(cmd.payload.get("transport_instance_id", ""))
+	var from_region := str(cmd.payload.get("from_region_id", ""))
+	var units: Array = cmd.payload.get("units", [])
+	var result: Variant = validator.validate_load(transport_id, from_region, units, cmd.player_id, state)
+	if not result.ok and not result.errors.is_empty():
+		return _load_error(str(result.errors[0].message), str(result.errors[0].code))
+	return {}
+
+
+func _load_error(message: String, code: String = "LOAD_INVALID") -> Dictionary:
+	return {
+		"result_type": "error",
+		"error": {"code": code, "message": message},
+		"events": [],
+	}
 
 
 func _move_error(message: String, code: String = "MOVE_INVALID") -> Dictionary:
