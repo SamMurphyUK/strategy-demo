@@ -94,6 +94,21 @@ func test_move_units_emits_event() -> void:
 	assert_eq(events[0].payload.faction_id, "red")
 
 
+func test_arrived_units_cannot_move_again_this_phase() -> void:
+	state.current_phase = "combat_move"
+	var cmd := Command.from_dict({
+		"command_id": "c1", "player_id": "red", "type": "move_units",
+		"payload": {"moves": [{
+			"from_region_id": "land_a",
+			"to_region_id": "land_b",
+			"units": [{"unit_type_id": "infantry", "count": 1}]
+		}]}
+	})
+	movement.process_move(cmd)
+	assert_eq(state.movable_stack_count("red", "land_b", "infantry"), 0)
+	assert_eq(state.movable_stack_count("red", "land_a", "infantry"), 4)
+
+
 func test_move_all_units_removes_stack() -> void:
 	var cmd := Command.from_dict({
 		"command_id": "c1", "player_id": "red", "type": "move_units",

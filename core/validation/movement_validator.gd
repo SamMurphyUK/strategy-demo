@@ -41,6 +41,8 @@ func get_legal_destinations_for_stack(
 	var legal: Array[String] = []
 	if from_region.is_empty() or unit_type_id.is_empty():
 		return legal
+	if state.movable_stack_count(faction_id, from_region, unit_type_id) <= 0:
+		return legal
 	var move_range := ruleset.get_unit_move_range(unit_type_id, state)
 	if move_range <= 0:
 		move_range = 1
@@ -72,6 +74,10 @@ func validate_stack_move(
 		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
 	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
 		result.errors.append(_move_error("MOVE_ILLEGAL_DESTINATION", "Unit cannot enter %s" % to_region))
+	elif state.movable_stack_count(faction_id, from_region, unit_type_id) < count:
+		result.errors.append(
+			_move_error("MOVE_ALREADY_MOVED", "Units already moved this phase from %s" % from_region)
+		)
 	elif _available_stack_count(from_region, faction_id, unit_type_id, state) < count:
 		result.errors.append(_move_error("MOVE_INSUFFICIENT_UNITS", "Not enough %s in %s" % [unit_type_id, from_region]))
 
