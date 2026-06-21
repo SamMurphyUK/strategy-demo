@@ -18,9 +18,11 @@ func start_game() -> Array:
 	return [GameEvent.create(GameEvent.Type.PHASE_CHANGED, {"faction_id": state.current_faction_id, "new_phase": state.current_phase}, _next_seq())]
 
 func advance_phase() -> Array:
+	var old_phase := state.current_phase
 	var idx := PHASES.find(state.current_phase)
 	if idx < PHASES.size() - 1:
 		state.current_phase = PHASES[idx + 1]
+		_sync_movement_tracking(old_phase, state.current_phase)
 		return [GameEvent.create(GameEvent.Type.PHASE_CHANGED, {"faction_id": state.current_faction_id, "new_phase": state.current_phase}, _next_seq())]
 	return []
 
@@ -33,9 +35,17 @@ func end_turn() -> Array:
 	state.turn_number += 1
 	if next_idx == 0: state.game_round += 1
 	state.current_phase = PHASES[0]
+	state.clear_movement_phase_tracking()
 	_record_factories()
 	events.append(GameEvent.create(GameEvent.Type.PHASE_CHANGED, {"faction_id": state.current_faction_id, "new_phase": state.current_phase}, _next_seq()))
 	return events
+
+
+func _sync_movement_tracking(old_phase: String, new_phase: String) -> void:
+	if old_phase == "purchase" and new_phase == "combat_move":
+		state.clear_movement_phase_tracking()
+	elif old_phase == "noncombat_move":
+		state.clear_movement_phase_tracking()
 
 func _record_factories() -> void:
 	var factories: Array = []

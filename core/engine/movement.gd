@@ -38,6 +38,15 @@ func process_unload(command: Command) -> Array:
 func _transfer(from: String, to: String, faction: String, entry: Dictionary) -> void:
 	_remove_from_region(from, faction, entry)
 	_add_to_region(to, faction, entry)
+	if entry.has("instance_id"):
+		state.record_instance_moved(str(entry.get("instance_id", "")))
+	else:
+		state.record_stack_arrival(
+			faction,
+			to,
+			str(entry.get("unit_type_id", "")),
+			int(entry.get("count", 1))
+		)
 
 func _remove_from_region(rid: String, faction: String, entry: Dictionary) -> void:
 	var units: Array = state.region_units.get(rid, [])

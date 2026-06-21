@@ -20,6 +20,10 @@ var next_instance_id: Dictionary = {}
 var transport_instances: Dictionary = {}
 var game_over: bool = false
 var winner_faction_id: String = ""
+# Units that arrived in a region during the current movement window (combat + noncombat).
+var units_arrived_this_phase: Dictionary = {}
+# Container instances that already spent movement this window.
+var instances_moved_this_phase: Dictionary = {}
 
 # ---------------------------------------------------------
 # REGION + ADJACENCY HELPERS
@@ -64,6 +68,44 @@ func is_region_hostile_to(region_id: String, faction_id: String) -> bool:
 		if str(entry.get("faction_id", "")) != faction_id:
 			return true
 	return false
+
+
+func movement_stack_key(faction_id: String, region_id: String, unit_type_id: String) -> String:
+	return "%s|%s|%s" % [faction_id, region_id, unit_type_id]
+
+
+func movable_stack_count(faction_id: String, region_id: String, unit_type_id: String) -> int:
+	var total := 0
+	for entry in get_faction_units_in_region(region_id, faction_id):
+		if str(entry.get("unit_type_id", "")) == unit_type_id and not entry.has("instance_id"):
+			total += int(entry.get("count", 0))
+	var arrived := int(
+		units_arrived_this_phase.get(movement_stack_key(faction_id, region_id, unit_type_id), 0)
+	)
+	return maxi(0, total - arrived)
+
+
+func record_stack_arrival(
+	faction_id: String,
+	region_id: String,
+	unit_type_id: String,
+	count: int
+) -> void:
+	var key := movement_stack_key(faction_id, region_id, unit_type_id)
+	units_arrived_this_phase[key] = int(units_arrived_this_phase.get(key, 0)) + count
+
+
+func has_instance_moved(instance_id: String) -> bool:
+	return bool(instances_moved_this_phase.get(instance_id, false))
+
+
+func record_instance_moved(instance_id: String) -> void:
+	instances_moved_this_phase[instance_id] = true
+
+
+func clear_movement_phase_tracking() -> void:
+	units_arrived_this_phase.clear()
+	instances_moved_this_phase.clear()
 
 # ---------------------------------------------------------
 # IPC + ECONOMY

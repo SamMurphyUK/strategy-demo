@@ -365,6 +365,7 @@ These are **allowed** in `scenes/` / `scripts/` but are **not** engine invariant
 - Phase gating in validators and session
 - RNG via `PCG` for determinism
 - Stack vs `instance_id` rules for transports
+- **Movement budget:** each stack unit may move once per movement window (`combat_move` + `noncombat_move`). Track arrivals in `GameState.units_arrived_this_phase`; reset when entering `combat_move` or leaving `noncombat_move`.
 
 ### Allow looseness (presentation)
 

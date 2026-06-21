@@ -230,6 +230,7 @@ func handle_end_turn(player_id: String, command_id: String) -> Dictionary:
 	state.turn_number += 1
 	state.current_faction_id = next_faction
 	state.current_phase = "purchase"
+	state.clear_movement_phase_tracking()
 
 	var recorded := _record_events([
 		create_event("turn_ended", {
@@ -559,14 +560,14 @@ func _validate_move_command(cmd: Command) -> Dictionary:
 				ruleset
 			)
 			if not result.ok and not result.errors.is_empty():
-				return _move_error(str(result.errors[0].message))
+				return _move_error(str(result.errors[0].message), str(result.errors[0].code))
 	return {}
 
 
-func _move_error(message: String) -> Dictionary:
+func _move_error(message: String, code: String = "MOVE_INVALID") -> Dictionary:
 	return {
 		"result_type": "error",
-		"error": {"code": "MOVE_INVALID", "message": message},
+		"error": {"code": code, "message": message},
 		"events": [],
 	}
 
