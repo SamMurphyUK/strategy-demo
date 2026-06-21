@@ -37,6 +37,32 @@ func test_place_consumes_pending_and_updates_region_units() -> void:
 	assert_eq(_infantry_count_in_region(demo_stub, region_id), count_before + 1)
 
 
+func test_place_one_of_many_leaves_remaining_pending() -> void:
+	demo_stub.apply_command({
+		"command_id": "cmd_purchase",
+		"player_id": "allies",
+		"type": "purchase_units",
+		"payload": {"purchases": [{"unit_type_id": "infantry", "count": 3}]},
+	})
+	_advance_to_mobilize(demo_stub)
+	var region_id := _first_allies_factory_region(demo_stub)
+	var res := demo_stub.apply_command({
+		"command_id": "cmd_place",
+		"player_id": "allies",
+		"type": "place_units",
+		"payload": {
+			"placements": [{
+				"region_id": region_id,
+				"units": [{"unit_type_id": "infantry", "count": 1}],
+			}],
+		},
+	})
+	assert_eq(res["result_type"], "ok")
+	var pending: Array = demo_stub.get_state()["pending_purchases"]["allies"]
+	assert_eq(pending.size(), 1)
+	assert_eq(int(pending[0].count), 2)
+
+
 func _advance_to_mobilize(s: GameSessionStub) -> void:
 	for i in 3:
 		s.apply_command({

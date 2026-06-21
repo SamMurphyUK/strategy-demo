@@ -75,6 +75,20 @@ func test_placement_clears_pending_purchases() -> void:
 	assert_eq(state.pending_purchases["red"].size(), 0, "Pending should be cleared")
 
 
+func test_placement_consumes_pending_incrementally() -> void:
+	state.pending_purchases["red"] = [{"unit_type_id": "infantry", "count": 3}]
+	var cmd := Command.from_dict({
+		"command_id": "c1", "player_id": "red", "type": "place_units",
+		"payload": {"placements": [{
+			"region_id": "factory_region",
+			"units": [{"unit_type_id": "infantry", "count": 1}]
+		}]}
+	})
+	placement.process_placement(cmd)
+	assert_eq(state.pending_purchases["red"].size(), 1)
+	assert_eq(int(state.pending_purchases["red"][0].count), 2)
+
+
 func test_placement_emits_event() -> void:
 	var cmd := Command.from_dict({
 		"command_id": "c1", "player_id": "red", "type": "place_units",
