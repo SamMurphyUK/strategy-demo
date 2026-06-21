@@ -29,6 +29,8 @@ var start_turn_phase_controller: StartTurnPhaseController
 var end_turn_phase_controller: EndTurnPhaseController
 var collect_income_phase_controller: CollectIncomePhaseController
 
+var ruleset: Ruleset = null
+
 var debug: bool = false
 
 var _events: Array = []
@@ -70,6 +72,7 @@ func _init_session(
 	_load_map(map_data)
 	_load_setup(setup_data)
 	state.rules = rules_data
+	ruleset = Ruleset.new()
 
 	validator = CommandValidator.new(state)
 	turn_engine = TurnEngine.new(state)
@@ -156,6 +159,9 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 			events = _sync_seq(placement_result.get_events())
 
 		Command.Type.MOVE_UNITS:
+			var move_error := _validate_move_command(cmd)
+			if move_error.has("result_type"):
+				return move_error
 			if state.current_phase == "noncombat_move":
 				var batch: NonCombatMoveBatchResource = NonCombatMoveBatchResource.from_command(cmd)
 				var move_result: NonCombatMovePhaseResultResource = (
@@ -514,6 +520,55 @@ func _forfeit_pending_at_mobilize_end(faction_id: String) -> Array:
 			_seq
 		)
 	]
+
+
+func get_legal_move_destinations(
+	from_region: String,
+	unit_type_id: String,
+	faction_id: String
+) -> Array:
+	var validator := MovementValidator.new()
+	return validator.get_legal_destinations_for_stack(
+		from_region,
+		unit_type_id,
+		faction_id,
+		state,
+		ruleset
+	)
+
+
+func _validate_move_command(cmd: Command) -> Dictionary:
+	if state.current_phase not in ["combat_move", "noncombat_move"]:
+		return _move_error("Not in a movement phase")
+	var validator := MovementValidator.new()
+	for move in cmd.payload.get("moves", []):
+		if typeof(move) != TYPE_DICTIONARY:
+			continue
+		var from_region := str(move.get("from_region_id", ""))
+		var to_region := str(move.get("to_region_id", ""))
+		for unit_entry in move.get("units", []):
+			if typeof(unit_entry) != TYPE_DICTIONARY:
+				continue
+			var result := validator.validate_stack_move(
+				from_region,
+				to_region,
+				str(unit_entry.get("unit_type_id", "")),
+				cmd.player_id,
+				int(unit_entry.get("count", 1)),
+				state,
+				ruleset
+			)
+			if not result.ok and not result.errors.is_empty():
+				return _move_error(str(result.errors[0].message))
+	return {}
+
+
+func _move_error(message: String) -> Dictionary:
+	return {
+		"result_type": "error",
+		"error": {"code": "MOVE_INVALID", "message": message},
+		"events": [],
+	}
 
 
 func _load_units(data: Dictionary) -> void:
