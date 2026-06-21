@@ -160,3 +160,46 @@ static func cargo_summary_lines(state: GameState, instance_id: String) -> Array:
 		lines.append("%s × %d" % [unit_type.capitalize(), count])
 	return lines if not lines.is_empty() else ["Empty"]
 
+
+static func is_strategic_bomber(state: GameState, unit_type_id: String) -> bool:
+	if state == null:
+		return false
+	var unit: Unit = state.unit_types.get(unit_type_id)
+	return unit != null and bool(unit.special.get("can_strategic_bomb_factory", false))
+
+
+static func regions_with_bomb_targets(state: GameState, attacker_faction: String) -> Array:
+	var result: Array = []
+	if state == null:
+		return result
+	for region_id in state.regions.keys():
+		if bomb_unit_count(state, str(region_id), attacker_faction) > 0:
+			result.append(str(region_id))
+	result.sort()
+	return result
+
+
+static func bomb_unit_count(state: GameState, region_id: String, attacker_faction: String) -> int:
+	if state == null or region_id.is_empty():
+		return 0
+	var region: Region = state.regions.get(region_id)
+	if region == null or not region.is_land_region() or not region.has_factory:
+		return 0
+	if not state.is_region_hostile_to(region_id, attacker_faction):
+		return 0
+	var total := 0
+	for entry in state.get_faction_units_in_region(region_id, attacker_faction):
+		if is_strategic_bomber(state, str(entry.get("unit_type_id", ""))):
+			total += int(entry.get("count", 0))
+	return total
+
+
+static func bomb_pool_entries(state: GameState, region_id: String, attacker_faction: String) -> Array:
+	if state == null or bomb_unit_count(state, region_id, attacker_faction) <= 0:
+		return []
+	var filtered: Array = []
+	for entry in state.get_faction_units_in_region(region_id, attacker_faction):
+		if is_strategic_bomber(state, str(entry.get("unit_type_id", ""))):
+			filtered.append(entry)
+	return build_display_entries(filtered)
+

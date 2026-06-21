@@ -22,7 +22,7 @@ func test_headless_scene_smoke_flow() -> void:
 	scene._on_spawn_infantry_pressed()
 	assert_eq(int(scene.ui_pending_purchases.get("infantry", 0)), 1)
 
-	for i in 3:
+	for i in 4:
 		scene._on_end_phase_pressed()
 	assert_eq(str(stub.state.current_phase), "mobilize")
 

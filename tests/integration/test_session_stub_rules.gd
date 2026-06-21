@@ -137,7 +137,7 @@ func _has_event_type(events: Array, type_name: String) -> bool:
 
 
 func _advance_to_mobilize(s: GameSessionStub) -> void:
-	for i in 3:
+	for i in 4:
 		s.apply_command({
 			"command_id": "adv_%d_%d" % [s.get_demo_seed(), i],
 			"player_id": "allies",

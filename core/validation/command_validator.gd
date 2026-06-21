@@ -4,7 +4,7 @@ extends RefCounted
 const PHASE_COMMANDS := {
 	"purchase": [Command.Type.PURCHASE_UNITS, Command.Type.END_PHASE],
 	"combat_move": [Command.Type.MOVE_UNITS, Command.Type.LOAD_TRANSPORT, Command.Type.DESIGNATE_AMPHIBIOUS, Command.Type.END_PHASE],
-	"combat": [],
+	"combat": [Command.Type.STRATEGIC_BOMB, Command.Type.END_PHASE],
 	"noncombat_move": [Command.Type.MOVE_UNITS, Command.Type.LOAD_TRANSPORT, Command.Type.UNLOAD_TRANSPORT, Command.Type.END_PHASE],
 	"mobilize": [Command.Type.PLACE_UNITS, Command.Type.END_PHASE],
 	"collect_income": [Command.Type.END_TURN]

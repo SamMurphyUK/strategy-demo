@@ -9,7 +9,8 @@ enum Type {
 	DESIGNATE_AMPHIBIOUS,
 	PLACE_UNITS,
 	END_PHASE,
-	END_TURN
+	END_TURN,
+	STRATEGIC_BOMB,
 }
 
 var command_id: String
@@ -54,6 +55,8 @@ static func _parse_type(type_string) -> Type:
 			return Type.END_PHASE
 		"end_turn":
 			return Type.END_TURN
+		"strategic_bomb":
+			return Type.STRATEGIC_BOMB
 		_:
 			print("DEBUG WARNING: Unknown command type: ", t)
 			return Type.END_PHASE

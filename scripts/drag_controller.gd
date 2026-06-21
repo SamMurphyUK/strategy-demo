@@ -94,6 +94,12 @@ func apply_zoom_scale(zoom: float) -> void:
 		_apply_preview_scale(_preview_icon)
 
 
+func compute_legal_destinations_for_icon(icon: UnitIcon) -> Array[String]:
+	if icon == null:
+		return []
+	return _compute_legal_move_destinations(icon)
+
+
 func bind_map_icon(icon: UnitIcon) -> void:
 	if not icon.drag_started.is_connected(_on_map_icon_drag_started):
 		icon.drag_started.connect(_on_map_icon_drag_started)

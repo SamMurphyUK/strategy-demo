@@ -32,12 +32,14 @@ var _current_ui_phase: String = ""
 var region_stack: Control = null
 var region_stack_list: VBoxContainer = null
 var battle_overlay: CanvasLayer = null
+var combat_choice_overlay = null
 var inspector_layer: CanvasLayer = null
 var region_inspector_panel: RegionInspectorPanel = null
 var drag_controller = null  # DragController
 var right_ui_root: Control = null
 var _map_camera: Camera2D = null
 var _target_zoom := Vector2.ONE
+var _range_preview_icon: UnitIcon = null
 
 const MIN_ZOOM := 0.4
 const MAX_ZOOM := 2.5
@@ -48,7 +50,12 @@ var _command_counter: int = 0
 var ui_pending_purchases: Dictionary = {}
 var debug: bool = true
 
-const CATALOG_UNITS := ["infantry", "artillery", "tank", "transport", "battleship"]
+const FULL_UNIT_CATALOG := [
+	"infantry", "artillery", "mech_infantry", "tank",
+	"fighter", "tactical_bomber", "strategic_bomber",
+	"submarine", "destroyer", "cruiser", "transport", "carrier", "battleship",
+]
+const CATALOG_UNITS := FULL_UNIT_CATALOG
 const DraggableStagedIconScript := preload("res://scripts/draggable_staged_icon.gd")
 
 func _ready() -> void:
@@ -70,12 +77,19 @@ func _ready() -> void:
 		unit_visualizer.movement_drop_requested.connect(_on_unit_movement_drop)
 	if unit_visualizer and unit_visualizer.has_signal("combat_marker_clicked"):
 		unit_visualizer.combat_marker_clicked.connect(_on_combat_marker_clicked)
+	if unit_visualizer and unit_visualizer.has_signal("bomb_marker_clicked"):
+		unit_visualizer.bomb_marker_clicked.connect(_on_bomb_marker_clicked)
+	if unit_visualizer and unit_visualizer.has_signal("unit_clicked"):
+		unit_visualizer.unit_clicked.connect(_on_unit_icon_clicked)
 	if region_inspector_panel and region_inspector_panel.has_signal("unit_chip_selected"):
 		region_inspector_panel.unit_chip_selected.connect(_on_inspector_unit_chip_selected)
 	if drag_controller and drag_controller.has_signal("load_transport_requested"):
 		drag_controller.load_transport_requested.connect(_on_load_transport_drop)
 	if drag_controller and drag_controller.has_signal("mobilize_drop_requested"):
 		drag_controller.mobilize_drop_requested.connect(_on_mobilize_drag_drop)
+	if combat_choice_overlay:
+		combat_choice_overlay.bomb_requested.connect(_on_combat_choice_bomb)
+		combat_choice_overlay.resolve_battles_requested.connect(_on_combat_choice_resolve)
 	set_process(true)
 	if _map_camera:
 		_target_zoom = _map_camera.zoom
@@ -150,6 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			if unit_visualizer and unit_visualizer.has_method("clear_inspector_highlight"):
 				unit_visualizer.call("clear_inspector_highlight")
+			_clear_movement_range_preview()
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_apply_zoom(0.9)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
@@ -259,6 +274,7 @@ func _autobind_nodes() -> void:
 	region_stack_list = left_ui.find_child("RegionStackList", true, false)
 	right_ui_root = right_ui
 	battle_overlay = find_child("BattleOverlay", true, false)
+	combat_choice_overlay = find_child("CombatChoiceOverlay", true, false)
 	inspector_layer = find_child("InspectorLayer", true, false) as CanvasLayer
 	if inspector_layer:
 		region_inspector_panel = inspector_layer.get_node_or_null("RegionInspectorPanel") as RegionInspectorPanel
@@ -421,7 +437,10 @@ func _refresh_all() -> void:
 		var adjacency: Dictionary = session.state.adjacency if session and session.state else {}
 		unit_visualizer.call("refresh_from_snapshot", snapshot, map_root, adjacency, phase, faction)
 	if battle_overlay:
-		battle_overlay.visible = str(snapshot.get("turn_info", {}).get("current_phase", "")) == "combat"
+		battle_overlay.visible = false
+	if combat_choice_overlay:
+		combat_choice_overlay.configure(session)
+		combat_choice_overlay.refresh()
 	_refresh_region_inspector(snapshot)
 
 func _update_phase_ui(phase: String) -> void:
@@ -801,6 +820,52 @@ func _on_combat_marker_clicked(region_id: String) -> void:
 	if region_inspector_panel:
 		region_inspector_panel.show_combat_info(region_id)
 	_log_system("Combat pool selected: %s" % region_id)
+
+
+func _on_bomb_marker_clicked(region_id: String) -> void:
+	if map_root and map_root.has_method("select_region"):
+		map_root.call("select_region", region_id)
+	if _current_phase() == "combat":
+		_apply_command("strategic_bomb", {"region_id": region_id})
+		return
+	_log_system("Bomb target selected: %s (resolve in combat phase)" % region_id)
+
+
+func _on_unit_icon_clicked(icon: UnitIcon) -> void:
+	if icon == null:
+		return
+	var phase := _current_phase()
+	if phase not in ["combat_move", "noncombat_move"]:
+		return
+	if icon.faction_id.to_lower() != _command_player_id().to_lower():
+		return
+	_range_preview_icon = icon
+	var legal: Array = []
+	if unit_visualizer and unit_visualizer.has_method("get_legal_destinations_for_icon"):
+		legal = unit_visualizer.call("get_legal_destinations_for_icon", icon)
+	if map_root and map_root.has_method("highlight_reachable_destinations") and session:
+		map_root.call(
+			"highlight_reachable_destinations",
+			icon.source_region_id,
+			legal,
+			session.get_state()
+		)
+	if map_root and map_root.has_method("select_region"):
+		map_root.call("select_region", icon.source_region_id)
+
+
+func _clear_movement_range_preview() -> void:
+	_range_preview_icon = null
+	if map_root and map_root.has_method("clear_reachable_highlights") and session:
+		map_root.call("clear_reachable_highlights", session.get_state())
+
+
+func _on_combat_choice_bomb(region_id: String) -> void:
+	_apply_command("strategic_bomb", {"region_id": region_id})
+
+
+func _on_combat_choice_resolve() -> void:
+	_apply_command("end_phase", {})
 
 
 func _on_inspector_unit_chip_selected(entry: Dictionary) -> void:

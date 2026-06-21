@@ -20,7 +20,7 @@ func get_legal_moves_for_unit(unit_id: int, state: GameState, ruleset: Ruleset) 
 	var move_range: int = ruleset.get_unit_move_range(unit_type_id, state)
 
 	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
-	var reachable: Array = _flood_fill(start, move_range, state, sea_only)
+	var reachable: Array = _flood_fill(start, move_range, state, sea_only, str(unit.get("faction_id", "")))
 
 	for region_value in reachable:
 		var region: String = String(region_value)
@@ -48,7 +48,7 @@ func get_legal_destinations_for_stack(
 	if move_range <= 0:
 		move_range = 1
 	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
-	for dest_value in _flood_fill(from_region, move_range, state, sea_only):
+	for dest_value in _flood_fill(from_region, move_range, state, sea_only, faction_id):
 		var dest := str(dest_value)
 		if ruleset.can_unit_enter_region(unit_type_id, dest, state, state.current_phase):
 			legal.append(dest)
@@ -74,7 +74,7 @@ func get_legal_destinations_for_instance(
 	if move_range <= 0:
 		move_range = 1
 	var sea_only := ruleset.is_sea_unit(unit_type_id, state)
-	for dest_value in _flood_fill(from_region, move_range, state, sea_only):
+	for dest_value in _flood_fill(from_region, move_range, state, sea_only, faction_id):
 		var dest := str(dest_value)
 		if ruleset.can_unit_enter_region(unit_type_id, dest, state, state.current_phase):
 			legal.append(dest)
@@ -105,7 +105,8 @@ func validate_instance_move(
 		from_region,
 		ruleset.get_unit_move_range(unit_type_id, state),
 		state,
-		ruleset.is_sea_unit(unit_type_id, state)
+		ruleset.is_sea_unit(unit_type_id, state),
+		faction_id
 	):
 		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
 	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
@@ -133,7 +134,8 @@ func validate_stack_move(
 		from_region,
 		ruleset.get_unit_move_range(unit_type_id, state),
 		state,
-		ruleset.is_sea_unit(unit_type_id, state)
+		ruleset.is_sea_unit(unit_type_id, state),
+		faction_id
 	):
 		result.errors.append(_move_error("MOVE_OUT_OF_RANGE", "Destination is out of movement range"))
 	elif not ruleset.can_unit_enter_region(unit_type_id, to_region, state, state.current_phase):
@@ -211,9 +213,22 @@ func validate_non_combat_movement_batch(batch, state: GameState, ruleset: Rulese
 	return result
 
 
-func _flood_fill(start: String, range: int, state: GameState, sea_only: bool = false) -> Array:
+func _region_has_enemy_units(region_id: String, faction_id: String, state: GameState) -> bool:
+	for entry in state.get_units_in_region(region_id):
+		if str(entry.get("faction_id", "")) != faction_id:
+			return int(entry.get("count", 0)) > 0
+	return false
+
+
+func _flood_fill(
+	start: String,
+	range: int,
+	state: GameState,
+	sea_only: bool = false,
+	faction_id: String = ""
+) -> Array:
 	var visited: Dictionary = {}
-	var frontier: Array = [ { "region": start, "dist": 0 } ]
+	var frontier: Array = [{"region": start, "dist": 0}]
 	var result: Array = []
 
 	while frontier.size() > 0:
@@ -237,6 +252,13 @@ func _flood_fill(start: String, range: int, state: GameState, sea_only: bool = f
 		if region != start:
 			result.append(region)
 
+		var can_continue := true
+		if not faction_id.is_empty() and _region_has_enemy_units(region, faction_id, state):
+			can_continue = false
+
+		if not can_continue:
+			continue
+
 		var neighbors: Array = state.get_adjacent_regions(region)
 		for n_value in neighbors:
 			var n: String = String(n_value)
@@ -244,6 +266,6 @@ func _flood_fill(start: String, range: int, state: GameState, sea_only: bool = f
 				var neighbor: Region = state.regions.get(n)
 				if neighbor == null or not neighbor.is_sea_region():
 					continue
-			frontier.append({ "region": n, "dist": dist + 1 })
+			frontier.append({"region": n, "dist": dist + 1})
 
 	return result

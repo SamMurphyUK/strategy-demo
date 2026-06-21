@@ -64,7 +64,7 @@ func test_place_one_of_many_leaves_remaining_pending() -> void:
 
 
 func _advance_to_mobilize(s: GameSessionStub) -> void:
-	for i in 3:
+	for i in 4:
 		s.apply_command({
 			"command_id": "adv_%d" % i,
 			"player_id": "allies",

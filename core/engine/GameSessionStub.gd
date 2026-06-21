@@ -75,6 +75,7 @@ func _init_session(
 	_load_setup(setup_data)
 	state.rules = rules_data
 	ruleset = Ruleset.new()
+	ruleset.sync_from_state(state)
 
 	validator = CommandValidator.new(state)
 	turn_engine = TurnEngine.new(state)
@@ -192,6 +193,12 @@ func _apply_game_command(cmd_dict: Dictionary) -> Dictionary:
 			else:
 				events = _sync_seq(movement.process_load(cmd))
 
+		Command.Type.STRATEGIC_BOMB:
+			var bomb_error := _validate_strategic_bomb(cmd)
+			if bomb_error.has("result_type"):
+				return bomb_error
+			events = _sync_seq(_process_strategic_bomb(cmd))
+
 		Command.Type.END_PHASE:
 			var forfeit_events: Array = []
 			if state.current_phase == "mobilize":
@@ -286,10 +293,10 @@ func get_state() -> Dictionary:
 
 
 func get_cost_table() -> Dictionary:
-	var table := UNIT_COSTS.duplicate()
+	var table := {}
 	for utid in state.unit_types.keys():
 		var ut: Unit = state.unit_types[utid]
-		if ut and not table.has(utid):
+		if ut:
 			table[utid] = ut.cost
 	return table
 
@@ -307,7 +314,7 @@ func get_legal_commands(player_id: String) -> Array:
 		"combat_move":
 			return ["move_units", "end_phase"]
 		"combat":
-			return []
+			return ["strategic_bomb", "end_phase"]
 		"noncombat_move":
 			return ["move_units", "end_phase"]
 		"mobilize":
@@ -645,6 +652,77 @@ func _move_error(message: String, code: String = "MOVE_INVALID") -> Dictionary:
 	}
 
 
+func get_pending_battles(faction_id: String) -> Array:
+	if combat == null:
+		return []
+	return combat._identify_battles(faction_id)
+
+
+func _validate_strategic_bomb(cmd: Command) -> Dictionary:
+	if state.current_phase != "combat":
+		return _bomb_error("Strategic bombing only in combat phase")
+	var region_id := str(cmd.payload.get("region_id", ""))
+	if region_id.is_empty():
+		return _bomb_error("Missing target region")
+	if ruleset == null:
+		ruleset = Ruleset.new()
+		ruleset.sync_from_state(state)
+	if not ruleset.is_valid_bomb_target(region_id, cmd.player_id, state):
+		return _bomb_error("Region is not a valid bombing target")
+	if RegionUnitDisplay.bomb_unit_count(state, region_id, cmd.player_id) <= 0:
+		return _bomb_error("No strategic bombers available at %s" % region_id)
+	return {}
+
+
+func _process_strategic_bomb(cmd: Command) -> Array:
+	var region_id := str(cmd.payload.get("region_id", ""))
+	var owner := state.get_region_owner(region_id)
+	var damage := (rng.next_int() % 6) + 1 if rng else 1
+	if owner != "":
+		state.modify_ipc(owner, -damage)
+	_remove_one_strategic_bomber(region_id, cmd.player_id)
+	_seq += 1
+	return [
+		GameEvent.create(
+			GameEvent.Type.INCOME_COLLECTED,
+			{
+				"faction_id": owner,
+				"amount": -damage,
+				"reason": "strategic_bomb",
+				"region_id": region_id,
+			},
+			_seq
+		),
+	]
+
+
+func _remove_one_strategic_bomber(region_id: String, faction_id: String) -> void:
+	var units: Array = state.region_units.get(region_id, [])
+	for i in range(units.size() - 1, -1, -1):
+		var entry: Dictionary = units[i]
+		if str(entry.get("faction_id", "")) != faction_id:
+			continue
+		if not RegionUnitDisplay.is_strategic_bomber(state, str(entry.get("unit_type_id", ""))):
+			continue
+		if entry.has("instance_id"):
+			units.remove_at(i)
+			return
+		var count := int(entry.get("count", 0))
+		if count <= 1:
+			units.remove_at(i)
+		else:
+			entry["count"] = count - 1
+		return
+
+
+func _bomb_error(message: String, code: String = "BOMB_INVALID") -> Dictionary:
+	return {
+		"result_type": "error",
+		"error": {"code": code, "message": message},
+		"events": [],
+	}
+
+
 func _load_units(data: Dictionary) -> void:
 	var list: Array = []
 	if data.has("units"):
@@ -695,12 +773,7 @@ func _load_setup(data: Dictionary) -> void:
 		var utid: String = entry.unit_type_id
 		var cnt: int = entry.count
 		var ut: Unit = state.unit_types.get(utid)
-		var is_container := (
-			ut != null
-			and ut.container != null
-			and ut.container is Dictionary
-			and not ut.container.is_empty()
-		)
+		var is_container := Unit.is_container_unit(ut)
 		if is_container:
 			for i in range(cnt):
 				var iid := state.generate_instance_id(utid, fid)

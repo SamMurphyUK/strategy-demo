@@ -49,15 +49,24 @@ func test_complete_peaceful_turn() -> void:
 	})
 	assert_eq(str(result.new_state.turn_info.current_phase), "combat_move")
 	
-	# End combat move (no moves)
+	# End combat move (no moves) -> combat phase
 	result = session.apply_command({
 		"command_id": "c3",
 		"player_id": "red",
 		"type": "end_phase",
 		"payload": {}
 	})
+	assert_eq(str(result.new_state.turn_info.current_phase), "combat")
+
+	# End combat (no battles) -> noncombat move
+	result = session.apply_command({
+		"command_id": "c3b",
+		"player_id": "red",
+		"type": "end_phase",
+		"payload": {}
+	})
 	assert_eq(str(result.new_state.turn_info.current_phase), "noncombat_move")
-	
+
 	# End noncombat move
 	result = session.apply_command({
 		"command_id": "c4",
@@ -122,14 +131,23 @@ func test_movement_into_combat() -> void:
 	})
 	assert_eq(str(result.result_type), "ok")
 	
-	# End combat move - this triggers battle
+	# End combat move -> combat phase (battles resolve on next end_phase)
 	result = session.apply_command({
 		"command_id": "c3",
 		"player_id": "red",
 		"type": "end_phase",
 		"payload": {}
 	})
-	
+	assert_eq(str(result.new_state.turn_info.current_phase), "combat")
+
+	# End combat - this triggers battle resolution
+	result = session.apply_command({
+		"command_id": "c3b",
+		"player_id": "red",
+		"type": "end_phase",
+		"payload": {}
+	})
+
 	# Should have battle events
 	var has_battle := false
 	for e in result.events:

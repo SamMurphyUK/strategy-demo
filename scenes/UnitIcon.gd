@@ -5,15 +5,19 @@ signal drag_started(unit_icon: UnitIcon)
 signal drag_updated(unit_icon: UnitIcon, global_position: Vector2)
 signal drag_ended(unit_icon: UnitIcon, global_position: Vector2)
 signal drag_cancelled(unit_icon: UnitIcon)
+signal unit_clicked(unit_icon: UnitIcon)
 
 @export var icon_sprite: Sprite2D
 @export var count_label: Label
 @export var count_badge: Panel
 @export var faction_tint: ColorRect
 @export var selection_outline: Line2D
+@export var unmoved_outline: Line2D
 @export var drag_area: Area2D
 
 const UNIT_ICON_SIZE := 48
+const CLICK_DRAG_THRESHOLD := 8.0
+const UNMOVED_OUTLINE_GAP := 3.0
 
 var unit_type_id: String = ""
 var faction_id: String = ""
@@ -23,7 +27,10 @@ var source_region_id: String = ""
 var is_drag_preview: bool = false
 var _selected: bool = false
 var _inspector_highlight: bool = false
+var _unmoved: bool = false
 var _dragging: bool = false
+var _pending_click: bool = false
+var _press_screen_pos: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -65,6 +72,9 @@ func _autobind() -> void:
 	if selection_outline == null:
 		selection_outline = get_node_or_null("SelectionOutline") as Line2D
 
+	if unmoved_outline == null:
+		unmoved_outline = get_node_or_null("UnmovedOutline") as Line2D
+
 	if drag_area == null:
 		drag_area = get_node_or_null("DragArea") as Area2D
 
@@ -77,12 +87,15 @@ func reset_for_pool() -> void:
 	source_region_id = ""
 	_selected = false
 	_inspector_highlight = false
+	_unmoved = false
 	_dragging = false
+	_pending_click = false
 	is_drag_preview = false
 	visible = true
 	modulate = Color.WHITE
 	scale = Vector2.ONE
 	set_selected(false)
+	set_unmoved_indicator(false)
 
 	if icon_sprite:
 		icon_sprite.texture = null
@@ -134,6 +147,11 @@ func set_selected(is_selected: bool) -> void:
 func set_inspector_highlight(is_highlighted: bool) -> void:
 	_inspector_highlight = is_highlighted
 	_update_selection_outline()
+
+
+func set_unmoved_indicator(show_indicator: bool) -> void:
+	_unmoved = show_indicator
+	_update_unmoved_outline()
 
 
 func set_source_region(region_id: String) -> void:
@@ -241,33 +259,82 @@ func _update_selection_outline() -> void:
 		selection_outline.default_color = Color(1, 1, 1, 0)
 
 
+func _update_unmoved_outline() -> void:
+	if unmoved_outline == null:
+		return
+	unmoved_outline.visible = _unmoved and not _dragging
+	if not unmoved_outline.visible:
+		return
+	var half_icon := UNIT_ICON_SIZE * 0.5
+	var outer := half_icon + UNMOVED_OUTLINE_GAP
+	unmoved_outline.points = PackedVector2Array([
+		Vector2(-outer, -outer),
+		Vector2(outer, -outer),
+		Vector2(outer, outer),
+		Vector2(-outer, outer),
+		Vector2(-outer, -outer),
+	])
+	unmoved_outline.width = 3.0
+	unmoved_outline.default_color = Color(1, 1, 1, 0.95)
+
+
 func _on_drag_area_input(_viewport: Node, event: InputEvent, _shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			_dragging = true
+			_pending_click = true
+			_press_screen_pos = event.position
 			set_process_unhandled_input(true)
-			set_selected(true)
-			drag_started.emit(self)
-		elif _dragging:
-			_dragging = false
+		elif _pending_click and not _dragging:
+			_pending_click = false
 			set_process_unhandled_input(false)
-			set_selected(false)
-			drag_ended.emit(self, event.global_position)
+			get_viewport().set_input_as_handled()
+			unit_clicked.emit(self)
+		elif _dragging:
+			_finish_drag(event.global_position)
 
-	elif event is InputEventMouseMotion and _dragging:
-		drag_updated.emit(self, event.global_position)
+	elif event is InputEventMouseMotion:
+		if _pending_click and not _dragging:
+			if event.position.distance_to(_press_screen_pos) >= CLICK_DRAG_THRESHOLD:
+				_start_drag()
+		if _dragging:
+			drag_updated.emit(self, event.global_position)
+
+
+func _start_drag() -> void:
+	_pending_click = false
+	_dragging = true
+	get_viewport().set_input_as_handled()
+	set_unmoved_indicator(false)
+	set_selected(true)
+	drag_started.emit(self)
+
+
+func _finish_drag(global_pos: Vector2) -> void:
+	_dragging = false
+	set_process_unhandled_input(false)
+	set_selected(false)
+	set_unmoved_indicator(_unmoved)
+	drag_ended.emit(self, global_pos)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not _dragging:
+	if not _dragging and not _pending_click:
 		return
 
 	if event is InputEventMouseButton and not event.pressed:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
-			_cancel_drag()
+			if _pending_click:
+				_pending_click = false
+				set_process_unhandled_input(false)
+			else:
+				_cancel_drag()
 
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_cancel_drag()
+		if _pending_click:
+			_pending_click = false
+			set_process_unhandled_input(false)
+		else:
+			_cancel_drag()
 
 
 func cancel_drag() -> void:
@@ -279,8 +346,10 @@ func cancel_drag() -> void:
 
 func clear_drag_state() -> void:
 	_dragging = false
+	_pending_click = false
 	set_process_unhandled_input(false)
 	set_selected(false)
+	set_unmoved_indicator(_unmoved)
 
 
 func _cancel_drag() -> void:

@@ -18,6 +18,8 @@ var faction_colors = {
 }
 
 var highlight_color := Color(1, 1, 0, 0.8)
+var reachable_highlight_color := Color(0.95, 0.15, 0.12, 0.55)
+var _reachable_from_region: String = ""
 
 func _ready() -> void:
 	_autobind()
@@ -70,8 +72,9 @@ func _build_regions(data: Dictionary) -> void:
 			continue
 		var faction = str(meta.get("faction", ""))
 		var ipc = int(meta.get("ipc", 0))
+		var region_type := _infer_region_type(region_id, meta, ipc)
 		var points_raw = region_dict.get("polygon", [])
-		var region_node = _create_region(region_id, points_raw, faction, ipc, region_dict)
+		var region_node = _create_region(region_id, points_raw, faction, ipc, region_dict, region_type)
 		region_layer.add_child(region_node)
 		regions[region_id] = region_node
 
@@ -80,7 +83,8 @@ func _create_region(
 	points_raw: Array,
 	faction: String,
 	ipc: int,
-	region_dict: Dictionary = {}
+	region_dict: Dictionary = {},
+	region_type: String = "land"
 ) -> Node2D:
 	var region := Node2D.new()
 	region.name = region_id
@@ -108,6 +112,7 @@ func _create_region(
 	meta.region_id = region_id
 	meta.faction = faction
 	meta.ipc_value = ipc
+	meta.region_type = region_type
 	var meta_dict: Dictionary = region_dict.get("metadata", {})
 	meta.has_factory = bool(meta_dict.get("factory", false))
 	meta.unit_bounds = _polygon_bounds(points)
@@ -120,6 +125,8 @@ func _create_region(
 	if meta.unit_anchor == Vector2.ZERO:
 		meta.unit_anchor = _region_unit_anchor(points_raw, meta.unit_bounds)
 	region.add_child(meta)
+	if region_type == "land" and ipc > 0:
+		_add_ipc_label(region, points, ipc)
 	var area := Area2D.new()
 	area.input_pickable = true
 	var col := CollisionPolygon2D.new()
@@ -223,7 +230,84 @@ func highlight_movement_targets(
 
 
 func clear_movement_highlights(snapshot: Dictionary) -> void:
+	_reachable_from_region = ""
 	update_region_colors(snapshot)
+
+
+func highlight_reachable_destinations(
+	from_region_id: String,
+	legal_region_ids: Array,
+	snapshot: Dictionary,
+	hover_region_id: String = ""
+) -> void:
+	_reachable_from_region = from_region_id
+	var valid: Array = legal_region_ids
+	for region_id in regions.keys():
+		var region_node: Node2D = regions[region_id]
+		var poly: Polygon2D = region_node.get_node_or_null("Polygon2D") as Polygon2D
+		if poly == null:
+			continue
+		var owner := _region_owner_id(region_node)
+		var base := _owner_color(owner)
+		if region_id == from_region_id:
+			poly.color = base.lightened(0.12)
+		elif region_id in valid:
+			var alpha := 0.68 if region_id == hover_region_id else 0.52
+			poly.color = Color(
+				reachable_highlight_color.r,
+				reachable_highlight_color.g,
+				reachable_highlight_color.b,
+				alpha
+			)
+		else:
+			poly.color = Color(base.r * 0.55, base.g * 0.55, base.b * 0.55, 0.18)
+
+
+func clear_reachable_highlights(snapshot: Dictionary) -> void:
+	_reachable_from_region = ""
+	update_region_colors(snapshot)
+
+
+func _infer_region_type(region_id: String, meta: Dictionary, ipc: int) -> String:
+	var explicit := str(meta.get("type", meta.get("region_type", ""))).to_lower()
+	if explicit in ["land", "sea"]:
+		return explicit
+	if region_id.to_lower().contains("sea zone") or region_id.to_lower().begins_with("sea "):
+		return "sea"
+	if ipc <= 0 and not bool(meta.get("factory", false)):
+		return "sea"
+	return "land"
+
+
+func _add_ipc_label(region: Node2D, points: PackedVector2Array, ipc: int) -> void:
+	var centroid := _polygon_centroid(points)
+	var label := Label.new()
+	label.name = "IPCLabel"
+	label.text = str(ipc)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_color_override("font_color", Color(1, 1, 1, 0.92))
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	label.add_theme_constant_override("outline_size", 3)
+	label.add_theme_font_size_override("font_size", 16)
+	var text_size := label.get_theme_default_font().get_string_size(
+		label.text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		-1,
+		16
+	)
+	label.position = centroid - text_size * 0.5
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	region.add_child(label)
+
+
+func _polygon_centroid(points: PackedVector2Array) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var sum := Vector2.ZERO
+	for pt in points:
+		sum += pt
+	return sum / float(points.size())
 
 
 func highlight_mobilize_targets(

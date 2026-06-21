@@ -9,6 +9,8 @@ signal movement_drop_requested(
 	instance_id: String
 )
 signal combat_marker_clicked(region_id: String)
+signal bomb_marker_clicked(region_id: String)
+signal unit_clicked(icon: UnitIcon)
 
 @export var unit_icon_scene: PackedScene = null
 @export var debug_logging: bool = false
@@ -22,6 +24,7 @@ var _last_snapshot: Dictionary = {}
 var _region_icons: Dictionary = {}
 var _factory_icons: Dictionary = {}
 var _combat_markers: Dictionary = {}
+var _bomb_markers: Dictionary = {}
 var _inspector_highlight_icon: UnitIcon = null
 var _icon_pool: Array = []
 var _movement_arrow: Line2D = null
@@ -29,6 +32,7 @@ var _drag_controller = null  # DragController
 var _session = null
 var _current_zoom := 1.0
 const CombatPoolMarkerScript := preload("res://scripts/combat_pool_marker.gd")
+const BombPoolMarkerScript := preload("res://scripts/bomb_pool_marker.gd")
 
 
 func _ready() -> void:
@@ -109,6 +113,7 @@ func refresh_all() -> void:
 		var entries := RegionUnitDisplay.build_display_entries(region_entry.get("units", []))
 		update_region_units(region_id, entries)
 	_refresh_combat_markers()
+	_refresh_bomb_markers()
 	apply_zoom_scale(_current_zoom)
 
 
@@ -138,6 +143,7 @@ func clear_all_units() -> void:
 	for region_id in _factory_icons.keys():
 		_release_icon(_factory_icons[region_id])
 	_clear_combat_markers()
+	_clear_bomb_markers()
 	_region_icons.clear()
 	_factory_icons.clear()
 
@@ -188,6 +194,7 @@ func update_region_units(region_id: String, units: Array) -> void:
 		icon.position = local_anchor + layout_slots[slot_idx]
 		icon.z_index = icon.get_z_layer()
 		icon.visible = true
+		_apply_unmoved_indicator(icon, entry)
 		_connect_drag_signals(icon)
 		add_child(icon)
 		_apply_icon_zoom_scale(icon)
@@ -223,6 +230,68 @@ func _find_display_entry(entries: Array, key: String) -> Dictionary:
 		if _display_entry_key(entry) == key:
 			return entry
 	return {}
+
+
+func _refresh_bomb_markers() -> void:
+	_clear_bomb_markers()
+	var state := _live_state()
+	if _map_root == null or state == null or _current_faction.is_empty():
+		return
+	var show_phase := _current_phase in ["combat_move", "combat"]
+	if not show_phase:
+		return
+	for region_id in RegionUnitDisplay.regions_with_bomb_targets(state, _current_faction):
+		var count := RegionUnitDisplay.bomb_unit_count(state, str(region_id), _current_faction)
+		if count <= 0:
+			continue
+		var marker = BombPoolMarkerScript.new()
+		marker.configure(str(region_id), count)
+		if not marker.clicked.is_connected(_on_bomb_marker_clicked):
+			marker.clicked.connect(_on_bomb_marker_clicked)
+		var region_node := _find_region_node(str(region_id), _map_root)
+		if region_node == null:
+			marker.queue_free()
+			continue
+		var meta := region_node.get_node_or_null("RegionMetadata") as RegionMetadata
+		if meta == null:
+			marker.queue_free()
+			continue
+		var global_anchor := region_node.to_global(meta.unit_anchor)
+		marker.position = to_local(global_anchor) + Vector2(UnitIcon.UNIT_ICON_SIZE * 0.55, -UnitIcon.UNIT_ICON_SIZE * 0.75)
+		add_child(marker)
+		_bomb_markers[str(region_id)] = marker
+
+
+func _clear_bomb_markers() -> void:
+	for region_id in _bomb_markers.keys():
+		var marker = _bomb_markers[region_id]
+		if is_instance_valid(marker):
+			marker.queue_free()
+	_bomb_markers.clear()
+
+
+func _on_bomb_marker_clicked(region_id: String) -> void:
+	bomb_marker_clicked.emit(region_id)
+
+
+func _apply_unmoved_indicator(icon: UnitIcon, entry: Dictionary) -> void:
+	if icon == null:
+		return
+	var state := _live_state()
+	if state == null or _current_phase not in ["combat_move", "noncombat_move"]:
+		icon.set_unmoved_indicator(false)
+		return
+	var faction := _current_faction.to_lower()
+	if icon.faction_id.to_lower() != faction:
+		icon.set_unmoved_indicator(false)
+		return
+	var instance_id := str(entry.get("instance_id", ""))
+	if not instance_id.is_empty():
+		icon.set_unmoved_indicator(not state.has_instance_moved(instance_id))
+		return
+	var unit_type := str(entry.get("unit_type_id", ""))
+	var movable := state.movable_stack_count(faction, icon.source_region_id, unit_type)
+	icon.set_unmoved_indicator(movable > 0)
 
 
 func _refresh_combat_markers() -> void:
@@ -334,11 +403,19 @@ func _release_icon(icon: UnitIcon) -> void:
 func _connect_drag_signals(icon: UnitIcon) -> void:
 	if _drag_controller:
 		_drag_controller.bind_map_icon(icon)
+	if not icon.unit_clicked.is_connected(_on_unit_icon_clicked):
+		icon.unit_clicked.connect(_on_unit_icon_clicked)
 
 
 func _disconnect_drag_signals(icon: UnitIcon) -> void:
 	if _drag_controller:
 		_drag_controller.unbind_map_icon(icon)
+	if icon.unit_clicked.is_connected(_on_unit_icon_clicked):
+		icon.unit_clicked.disconnect(_on_unit_icon_clicked)
+
+
+func _on_unit_icon_clicked(icon: UnitIcon) -> void:
+	unit_clicked.emit(icon)
 
 
 func _on_controller_movement_drop(
@@ -365,6 +442,14 @@ func _owner_faction_for_region(region_id: String, meta: RegionMetadata) -> Strin
 				return UnitTextureCache.normalize_faction_id(owner)
 			break
 	return _region_owner_faction(meta)
+
+
+func get_legal_destinations_for_icon(icon: UnitIcon) -> Array[String]:
+	if icon == null:
+		return []
+	if _drag_controller and _drag_controller.has_method("compute_legal_destinations_for_icon"):
+		return _drag_controller.compute_legal_destinations_for_icon(icon)
+	return []
 
 
 func _find_region_node(region_id: String, map_root: Node2D) -> Node2D:

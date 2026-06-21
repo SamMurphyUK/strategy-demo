@@ -2,64 +2,211 @@
 	"schema_version": "0.5",
 	"unit_types": [
 		{
-			"attack": 1,
-			"category": "land",
-			"container": null,
-			"cost": 3,
-			"defense": 2,
 			"id": "infantry",
-			"movement": 1,
-			"name": "Infantry"
-		},
-		{
-			"attack": 2,
+			"name": "Infantry",
 			"category": "land",
-			"container": null,
-			"cost": 4,
+			"cost": 3,
+			"attack": 1,
 			"defense": 2,
-			"id": "artillery",
 			"movement": 1,
-			"name": "Artillery"
+			"container": null,
+			"special": {
+				"can_be_boosted_by_artillery": true
+			}
 		},
 		{
-			"attack": 3,
+			"id": "artillery",
+			"name": "Artillery",
 			"category": "land",
+			"cost": 4,
+			"attack": 2,
+			"defense": 2,
+			"movement": 1,
 			"container": null,
-			"cost": 6,
-			"defense": 3,
+			"special": {
+				"boosts_infantry": true,
+				"boosts_infantry_attack_to": 2
+			}
+		},
+		{
+			"id": "mech_infantry",
+			"name": "Mechanised Infantry",
+			"category": "land",
+			"cost": 4,
+			"attack": 1,
+			"defense": 2,
+			"movement": 2,
+			"container": null,
+			"special": {
+				"can_be_boosted_by_artillery": true,
+				"moves_like_tank": true,
+				"can_blitz_with_tank": true
+			}
+		},
+		{
 			"id": "tank",
+			"name": "Tank",
+			"category": "land",
+			"cost": 6,
+			"attack": 3,
+			"defense": 3,
 			"movement": 2,
-			"name": "Tank"
-		},
-		{
-			"attack": 4,
-			"category": "sea",
 			"container": null,
-			"cost": 20,
-			"defense": 4,
-			"id": "battleship",
-			"movement": 2,
-			"name": "Battleship"
+			"special": {
+				"can_blitz": true,
+				"boosts_tactical_bomber": true,
+				"can_be_boosted_by_tactical_bomber": true
+			}
 		},
 		{
-			"attack": 0,
+			"id": "fighter",
+			"name": "Fighter",
+			"category": "air",
+			"cost": 10,
+			"attack": 3,
+			"defense": 4,
+			"movement": 4,
+			"container": null,
+			"special": {
+				"can_land_on_carrier": true,
+				"can_scramble": true
+			}
+		},
+		{
+			"id": "tactical_bomber",
+			"name": "Tactical Bomber",
+			"category": "air",
+			"cost": 11,
+			"attack": 3,
+			"defense": 3,
+			"movement": 4,
+			"container": null,
+			"special": {
+				"boosts_tanks": true,
+				"can_be_boosted_by_tanks": true,
+				"can_bomb_naval_base": true,
+				"can_bomb_air_base": true
+			}
+		},
+		{
+			"id": "strategic_bomber",
+			"name": "Strategic Bomber",
+			"category": "air",
+			"cost": 12,
+			"attack": 4,
+			"defense": 1,
+			"movement": 6,
+			"container": null,
+			"special": {
+				"can_strategic_bomb_factory": true,
+				"can_bomb_naval_base": true,
+				"can_bomb_air_base": true
+			}
+		},
+		{
+			"id": "submarine",
+			"name": "Submarine",
 			"category": "sea",
+			"cost": 6,
+			"attack": 2,
+			"defense": 1,
+			"movement": 2,
+			"container": null,
+			"special": {
+				"has_surprise_strike": true,
+				"can_submerge": true,
+				"cannot_hit_air": true,
+				"requires_destroyer_to_be_hit_by_air": true
+			}
+		},
+		{
+			"id": "destroyer",
+			"name": "Destroyer",
+			"category": "sea",
+			"cost": 8,
+			"attack": 2,
+			"defense": 2,
+			"movement": 2,
+			"container": null,
+			"special": {
+				"cancels_submarine_abilities": true
+			}
+		},
+		{
+			"id": "cruiser",
+			"name": "Cruiser",
+			"category": "sea",
+			"cost": 12,
+			"attack": 3,
+			"defense": 3,
+			"movement": 2,
+			"container": null,
+			"special": {
+				"shore_bombardment_attack": 3
+			}
+		},
+		{
+			"id": "battleship",
+			"name": "Battleship",
+			"category": "sea",
+			"cost": 20,
+			"attack": 4,
+			"defense": 4,
+			"movement": 2,
+			"container": null,
+			"special": {
+				"shore_bombardment_attack": 4,
+				"takes_two_hits": true
+			}
+		},
+		{
+			"id": "carrier",
+			"name": "Aircraft Carrier",
+			"category": "sea",
+			"cost": 16,
+			"attack": 1,
+			"defense": 2,
+			"movement": 2,
+			"container": {
+				"allowed_cargo_categories": [
+					"air"
+				],
+				"capacity": 2,
+				"fighter_capacity": 2
+			},
+			"special": {
+				"fighter_capacity": 2,
+				"can_host_fighters": true,
+				"can_host_tactical_bombers": true
+			}
+		},
+		{
+			"id": "transport",
+			"name": "Transport",
+			"category": "sea",
+			"cost": 7,
+			"attack": 0,
+			"defense": 0,
+			"movement": 2,
 			"container": {
 				"allowed_cargo_categories": [
 					"land"
 				],
 				"capacity": 2,
 				"max_per_type": {
-					"artillery": 1,
 					"infantry": 2,
+					"artillery": 1,
 					"tank": 1
 				}
 			},
-			"cost": 7,
-			"defense": 0,
-			"id": "transport",
-			"movement": 2,
-			"name": "Transport"
+			"special": {
+				"can_carry_infantry": true,
+				"can_carry_other_land_unit": true,
+				"max_cargo_slots": 2,
+				"cannot_attack": true,
+				"cannot_defend": true,
+				"dies_first": true
+			}
 		}
 	]
 }

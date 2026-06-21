@@ -36,6 +36,45 @@ func get_unit_move_range(unit_type: String, state: GameState = null) -> int:
 			return unit.movement
 	return 0
 
+
+func sync_from_state(state: GameState) -> void:
+	unit_defs.clear()
+	unit_move_ranges.clear()
+	for utid in state.unit_types.keys():
+		var unit: Unit = state.unit_types[utid]
+		if unit == null:
+			continue
+		unit_defs[utid] = {
+			"move": unit.movement,
+			"cost": unit.cost,
+			"category": unit.category,
+			"special": unit.special,
+		}
+		unit_move_ranges[utid] = unit.movement
+
+
+func unit_can_blitz(unit_type: String, state: GameState) -> bool:
+	var unit: Unit = state.unit_types.get(unit_type)
+	if unit == null:
+		return false
+	return bool(unit.special.get("can_blitz", false))
+
+
+func unit_can_strategic_bomb(unit_type: String, state: GameState) -> bool:
+	var unit: Unit = state.unit_types.get(unit_type)
+	if unit == null:
+		return false
+	return bool(unit.special.get("can_strategic_bomb_factory", false))
+
+
+func is_valid_bomb_target(region_id: String, faction_id: String, state: GameState) -> bool:
+	var region: Region = state.regions.get(region_id)
+	if region == null or not region.is_land_region() or not region.has_factory:
+		return false
+	if not is_region_hostile_to(region_id, faction_id, state):
+		return false
+	return region.owner_faction_id != faction_id
+
 func get_unit_cost(unit_type: String) -> int:
 	var def := get_unit_def(unit_type)
 	return int(def.get("cost", 0))

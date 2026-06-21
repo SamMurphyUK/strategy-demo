@@ -5,6 +5,16 @@ static var _cache: Dictionary = {}
 
 const TEXTURE_ROOT := "res://texture/units/"
 
+const TEXTURE_ALIASES := {
+	"strategic_bomber": "fighter",
+	"tactical_bomber": "fighter",
+	"destroyer": "battleship",
+	"cruiser": "battleship",
+	"submarine": "battleship",
+	"carrier": "battleship",
+	"mech_infantry": "infantry",
+}
+
 const DEBUG_UNIT_TYPES := [
 	"infantry",
 	"artillery",
@@ -78,6 +88,15 @@ static func get_texture(unit_type_id: String, faction_id: String) -> Texture2D:
 		if tex != null:
 			_cache[key] = tex
 		return tex
+
+	if TEXTURE_ALIASES.has(unit):
+		var alias := str(TEXTURE_ALIASES[unit])
+		var alias_path := "%s%s/%s.png" % [TEXTURE_ROOT, folder, alias]
+		if ResourceLoader.exists(alias_path):
+			var alias_tex: Texture2D = load(alias_path)
+			if alias_tex != null:
+				_cache[key] = alias_tex
+				return alias_tex
 
 	var fallback := "%sneutral/%s.png" % [TEXTURE_ROOT, unit]
 	if ResourceLoader.exists(fallback):

@@ -33,7 +33,7 @@ func test_game_scene_smoke_purchase_mobilize_place() -> void:
 	scene._on_spawn_infantry_pressed()
 	assert_eq(str(scene.session.state.current_phase), "purchase")
 
-	for i in 3:
+	for i in 4:
 		scene._on_end_phase_pressed()
 	assert_eq(str(scene.session.state.current_phase), "mobilize")
 

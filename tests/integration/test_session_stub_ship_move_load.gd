@@ -12,7 +12,7 @@ func test_transport_instance_can_move_two_sea_zones() -> void:
 		"type": "purchase_units",
 		"payload": {"purchases": [{"unit_type_id": "transport", "count": 1}]},
 	})
-	for i in 3:
+	for i in 4:
 		stub.apply_command({
 			"command_id": "ep_%d" % i,
 			"player_id": "allies",

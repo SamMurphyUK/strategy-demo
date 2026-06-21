@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" uid="uid://debuhud001" path="res://debug/DebugHUD.tscn" id="9_dbghud"]
 [ext_resource type="PackedScene" uid="uid://debuinsp001" path="res://debug/DebugInspector.tscn" id="10_dbginsp"]
 [ext_resource type="PackedScene" uid="uid://regioninspector001" path="res://scenes/RegionInspectorPanel.tscn" id="11_insp"]
+[ext_resource type="PackedScene" uid="uid://combatchoice001" path="res://scenes/CombatChoiceOverlay.tscn" id="12_combat"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -99,6 +100,8 @@ size_flags_vertical = 0
 
 [node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=195472403]
 visible = false
+
+[node name="CombatChoiceOverlay" parent="." instance=ExtResource("12_combat")]
 
 [node name="BattleColorRect" type="ColorRect" parent="BattleOverlay" unique_id=1027829019]
 anchors_preset = 15

@@ -35,7 +35,7 @@ func test_mobilize_end_phase_forfeits_pending_purchases() -> void:
 
 
 func _advance_to_mobilize(s: GameSessionStub) -> void:
-	for i in 3:
+	for i in 4:
 		s.apply_command({
 			"command_id": "adv_%d" % i,
 			"player_id": "allies",

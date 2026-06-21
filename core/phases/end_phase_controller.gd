@@ -20,6 +20,7 @@ func process_end_phase(
 
 	if phase == "combat_move":
 		events.append_array(sync_seq.call(turn_engine.advance_phase()))
+	elif phase == "combat":
 		var battle_request: BattlePhaseRequestResource = (
 			BattlePhaseRequestResource.from_faction(game_state.current_faction_id)
 		)

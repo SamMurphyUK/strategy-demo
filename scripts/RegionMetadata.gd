@@ -4,6 +4,7 @@ class_name RegionMetadata
 @export var region_id: String = ""
 @export var ipc_value: int = 0
 @export var faction: String = ""
+@export var region_type: String = "land"
 @export var is_victory_city: bool = false
 @export var has_factory: bool = false
 @export var unit_anchor: Vector2 = Vector2.ZERO
