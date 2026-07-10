@@ -10,8 +10,8 @@
 [ext_resource type="Script" uid="uid://b8ifybnvm1113" path="res://debug/debug_snapshot.gd" id="8_dbgsnap"]
 [ext_resource type="PackedScene" uid="uid://debuhud001" path="res://debug/DebugHUD.tscn" id="9_dbghud"]
 [ext_resource type="PackedScene" uid="uid://debuinsp001" path="res://debug/DebugInspector.tscn" id="10_dbginsp"]
-[ext_resource type="PackedScene" uid="uid://regioninspector001" path="res://scenes/RegionInspectorPanel.tscn" id="11_insp"]
-[ext_resource type="PackedScene" uid="uid://combatchoice001" path="res://scenes/CombatChoiceOverlay.tscn" id="12_combat"]
+[ext_resource type="PackedScene" uid="uid://djon2gieo5y0w" path="res://scenes/RegionInspectorPanel.tscn" id="11_insp"]
+[ext_resource type="PackedScene" uid="uid://b2wp8l64f0dee" path="res://scenes/CombatChoiceOverlay.tscn" id="12_combat"]
 
 [node name="GameScene" type="Control" unique_id=693337335]
 layout_mode = 3
@@ -36,7 +36,7 @@ drag_bottom_margin = 0.0
 script = ExtResource("2_map")
 
 [node name="BaseMap" type="Sprite2D" parent="layer = 0/MapRoot" unique_id=1220295928]
-position = Vector2(0, 1)
+position = Vector2(-5, 0)
 texture = ExtResource("3_cxv17")
 
 [node name="RegionLayer" type="Node2D" parent="layer = 0/MapRoot" unique_id=1850460547]
@@ -101,8 +101,6 @@ size_flags_vertical = 0
 [node name="BattleOverlay" type="CanvasLayer" parent="." unique_id=195472403]
 visible = false
 
-[node name="CombatChoiceOverlay" parent="." instance=ExtResource("12_combat")]
-
 [node name="BattleColorRect" type="ColorRect" parent="BattleOverlay" unique_id=1027829019]
 anchors_preset = 15
 anchor_right = 1.0
@@ -130,22 +128,12 @@ layout_mode = 2
 text = "Combat Phase (placeholder)"
 horizontal_alignment = 1
 
-[node name="InspectorLayer" type="CanvasLayer" parent="."]
+[node name="CombatChoiceOverlay" parent="." unique_id=1829668801 instance=ExtResource("12_combat")]
+
+[node name="InspectorLayer" type="CanvasLayer" parent="." unique_id=322175596]
 layer = 15
 
-[node name="RegionInspectorPanel" parent="InspectorLayer" instance=ExtResource("11_insp")]
-layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -180.0
-offset_top = -44.0
-offset_right = 180.0
-offset_bottom = 0.0
-grow_horizontal = 2
-grow_vertical = 0
+[node name="RegionInspectorPanel" parent="InspectorLayer" unique_id=1817168274 instance=ExtResource("11_insp")]
 
 [node name="01" type="CanvasLayer" parent="." unique_id=1255178115]
 

@@ -9,9 +9,6 @@ script = ExtResource("1_36806")
 [node name="MapRoot" type="Node2D" parent="." unique_id=383440590]
 
 [node name="BaseMap" type="Sprite2D" parent="MapRoot" unique_id=1376611886]
-position = Vector2(0, 0)
-scale = Vector2(1, 1)
-centered = true
 
 [node name="RegionLayer" type="Node2D" parent="MapRoot" unique_id=703489435]
 
