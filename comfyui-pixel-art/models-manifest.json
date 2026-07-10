@@ -1,0 +1,84 @@
+{
+  "version": "1.1.0",
+  "comfyui_min_version": "0.3.0",
+  "notes": "Exact filenames match cloud workflow expectations. Source URLs download canonical weights; scripts copy/rename to target filenames.",
+  "models": {
+    "required": [
+      {
+        "filename": "sd_xl_base_1.0.safetensors",
+        "target_dir": "models/checkpoints",
+        "source_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+        "size_gb": 6.9,
+        "purpose": "SDXL base checkpoint for generation"
+      },
+      {
+        "filename": "sd_xl_refiner_1.0.safetensors",
+        "target_dir": "models/checkpoints",
+        "source_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+        "size_gb": 6.1,
+        "purpose": "SDXL refiner pass for detail at high resolution"
+      },
+      {
+        "filename": "controlnet-tile-sdxl.safetensors",
+        "target_dir": "models/controlnet",
+        "source_url": "https://huggingface.co/xinsir/controlnet-tile-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+        "source_repo": "xinsir/controlnet-tile-sdxl-1.0",
+        "size_gb": 2.5,
+        "purpose": "Tile ControlNet — key model for large-canvas detail without blur"
+      }
+    ],
+    "recommended": [
+      {
+        "filename": "controlnet-reference-sdxl.safetensors",
+        "target_dir": "models/controlnet",
+        "source_url": "https://huggingface.co/xinsir/controlnet-union-sdxl-1.0/resolve/main/diffusion_pytorch_model_promax.safetensors",
+        "source_repo": "xinsir/controlnet-union-sdxl-1.0 (ProMax)",
+        "size_gb": 2.5,
+        "purpose": "Reference / multi-control union model — locks composition to your Europe map reference",
+        "compat_note": "Union ControlNet supports multiple control types in one file. Use ComfyUI-Advanced-ControlNet or ControlNetApply nodes. For pure image-reference style transfer, also install IP-Adapter (see compatibility.md)."
+      },
+      {
+        "filename": "controlnet-style-sdxl.safetensors",
+        "target_dir": "models/controlnet",
+        "source_url": "https://huggingface.co/lllyasviel/sd_control_collection/resolve/main/kohya_controllllite_xl_blur.safetensors",
+        "source_repo": "lllyasviel/sd_control_collection",
+        "size_gb": 0.37,
+        "purpose": "Style/blur Control-LLLite — keeps palette and shading consistent across tiles",
+        "compat_note": "Lightweight Control-LLLite model. Pairs well with tile ControlNet for cohesive large-map output."
+      },
+      {
+        "filename": "pixel-art-xl.safetensors",
+        "target_dir": "models/loras",
+        "source_url": "https://civitai.com/api/download/models/135931",
+        "size_gb": 0.2,
+        "purpose": "Pixel art style LoRA for SDXL",
+        "compat_note": "Civitai download — may require browser or API token if link fails. Manual: https://civitai.com/models/120096/pixel-art-xl"
+      }
+    ],
+    "nodes_not_files": [
+      {
+        "name": "tiled_vae",
+        "type": "custom_node",
+        "install_via": "ComfyUI-TiledDiffusion",
+        "builtin_alternative": "VAE Encode/Decode (Tiled) — built into ComfyUI core",
+        "purpose": "Prevents blur and OOM on large canvases. NOT a .safetensors file."
+      }
+    ]
+  },
+  "ipadapter_optional": [
+    {
+      "filename": "ip-adapter-plus_sdxl_vit-h.safetensors",
+      "target_dir": "models/ipadapter",
+      "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+      "size_gb": 0.85,
+      "purpose": "Alternative reference-style lock for Europe map (uses IPAdapter nodes, not ControlNetLoader)"
+    },
+    {
+      "filename": "clip_vision_g.safetensors",
+      "target_dir": "models/clip_vision",
+      "source_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+      "size_gb": 3.5,
+      "purpose": "CLIP vision encoder required by IP-Adapter Plus"
+    }
+  ]
+}

@@ -56,10 +56,16 @@ install_node() {
 echo "==> Installing custom nodes..."
 install_node "ComfyUI-Manager" "https://github.com/ltdrdata/ComfyUI-Manager"
 install_node "ComfyUI-PixelArt-Detector" "https://github.com/dimtoneff/ComfyUI-PixelArt-Detector"
+install_node "ComfyUI-TiledDiffusion" "https://github.com/shiimizu/ComfyUI-TiledDiffusion"
+install_node "comfyui_controlnet_aux" "https://github.com/Fannovel16/comfyui_controlnet_aux"
+install_node "ComfyUI-Advanced-ControlNet" "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet"
+install_node "ComfyUI_IPAdapter_plus" "https://github.com/cubiq/ComfyUI_IPAdapter_plus"
 install_node "pixel_palette_art" "https://github.com/ranska/pixel_palette_art"
 install_node "GlitchNodes" "https://github.com/pxl-pshr/GlitchNodes"
 install_node "ComfyUI-AI-Pixel-Art-Enhancer" "https://github.com/HSDHCdev/ComfyUI-AI-Pixel-Art-Enhancer"
 install_node "comfyui-vslinx-nodes" "https://github.com/vslinx/ComfyUI-vslinx-nodes.git"
+
+mkdir -p models/{checkpoints,controlnet,loras,vae,ipadapter,clip_vision}
 
 # --- Copy workflows ---
 echo "==> Copying workflows..."
@@ -79,9 +85,9 @@ echo "============================================"
 echo " Setup complete!"
 echo "============================================"
 echo
-echo " 1. Download models (see models.md in starter pack):"
-echo "    - SDXL checkpoint -> $INSTALL_DIR/models/checkpoints/"
-echo "    - pixel-art-xl LoRA -> $INSTALL_DIR/models/loras/"
+echo " 1. Download models:"
+echo "    $SCRIPT_DIR/scripts/download-models.sh $INSTALL_DIR"
+echo "    (or see models.md / compatibility.md)"
 echo
 echo " 2. Start ComfyUI:"
 echo "    cd $INSTALL_DIR"
@@ -91,6 +97,8 @@ echo
 echo " 3. Open http://127.0.0.1:8188 and drag a workflow JSON from:"
 echo "    $DEST_WF/"
 echo
-echo " Recommended first workflow: sdxl-pixel-art-txt2img.json"
-echo " (built-in nodes only — needs checkpoint + LoRA)"
+echo " Recommended first workflow: sdxl-tile-europe-map.json"
+echo " (large canvas — needs tile ControlNet + TiledDiffusion)"
+echo
+echo " Already have ComfyUI elsewhere? Use pull-packs.sh instead of setup.sh"
 echo

@@ -2,18 +2,31 @@
 
 Everything you need to build a **local pixel art workflow** in ComfyUI: install scripts, ready-made workflow JSONs, retro palettes, and model download links.
 
-## Quick start (your PC)
-
-### Option A — clone just this folder
-
-If you only want the starter pack (you already have ComfyUI):
+## Already have ComfyUI? Start here
 
 ```bash
 git clone https://github.com/SamMurphyUK/strategy-demo.git
 cd strategy-demo/comfyui-pixel-art
+
+# 1. Pull all custom node packs + workflows (no ComfyUI reinstall)
+COMFYUI_DIR=/path/to/your/ComfyUI ./pull-packs.sh
+
+# 2. Download models (SDXL base/refiner + ControlNet tile + optional reference/style)
+./scripts/download-models.sh /path/to/your/ComfyUI
+
+# 3. Verify compatibility
+./scripts/verify-setup.sh /path/to/your/ComfyUI
 ```
 
-On Windows, open PowerShell in that folder and run `.\setup.ps1`.  
+Restart ComfyUI, then load `workflows/sdxl-tile-europe-map.json`.
+
+See **[compatibility.md](compatibility.md)** for how cloud model names map to local files.
+
+## Quick start (fresh install)
+
+### Option A — full setup (no existing ComfyUI)
+
+On Windows: `.\setup.ps1`  
 On Linux/macOS: `chmod +x setup.sh && ./setup.sh`
 
 ### Option B — copy workflows manually
@@ -35,6 +48,7 @@ Then drag any `.json` file into the ComfyUI browser.
 | File | What it does | Custom nodes needed |
 |------|----------------|---------------------|
 | `sdxl-pixel-art-txt2img.json` | Generate pixel art from a text prompt (SDXL + LoRA, nearest upscale) | Built-in only |
+| `sdxl-tile-europe-map.json` | Large-canvas tile upscale with ControlNet tile + tiled VAE | TiledDiffusion, controlnet_aux, Advanced-ControlNet |
 | `img2pixel-nearest-only.json` | Quick downscale/upscale pixelate on any image | Built-in only |
 | `workflow.json` | Full PixelArt Detector pipeline (quantize, palette, save) | PixelArt-Detector |
 | `palette_generator.json` | Extract a palette from a reference image | PixelArt-Detector |
@@ -52,12 +66,16 @@ ComfyUI/custom_nodes/ComfyUI-PixelArt-Detector/palettes/1x/
 
 The setup script does this automatically.
 
-### Custom nodes (installed by `setup.sh`)
+### Custom nodes (installed by `pull-packs.sh` or `setup.sh`)
 
 | Node pack | Purpose |
 |-----------|---------|
 | [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) | Install/update nodes from the UI |
 | [ComfyUI-PixelArt-Detector](https://github.com/dimtoneff/ComfyUI-PixelArt-Detector) | Palette swap, downscale, dither, pixel-perfect output |
+| [ComfyUI-TiledDiffusion](https://github.com/shiimizu/ComfyUI-TiledDiffusion) | **tiled_vae** + tiled diffusion for large canvases |
+| [comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux) | TilePreprocessor for ControlNet tile |
+| [ComfyUI-Advanced-ControlNet](https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet) | Union/reference ControlNet stacking |
+| [ComfyUI_IPAdapter_plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus) | Alternative reference style lock |
 | [pixel_palette_art](https://github.com/ranska/pixel_palette_art) | Build and export palettes |
 | [GlitchNodes](https://github.com/pxl-pshr/GlitchNodes) | Pixel8Bit + retro dithering |
 | [ComfyUI-AI-Pixel-Art-Enhancer](https://github.com/HSDHCdev/ComfyUI-AI-Pixel-Art-Enhancer) | AI → pixel art conversion |
@@ -69,12 +87,25 @@ See `manifest.json` for the full machine-readable list.
 
 ## Models you still need to download
 
-Models are too large to bundle. See **[models.md](models.md)** for direct links.
+Models are too large to bundle. Use the download script:
 
-Minimum for text-to-image:
+```bash
+./scripts/download-models.sh /path/to/ComfyUI --required-only   # base + refiner + tile CN
+./scripts/download-models.sh /path/to/ComfyUI                   # + reference, style, LoRA
+```
 
-1. **SDXL 1.0 base checkpoint** → `ComfyUI/models/checkpoints/`
-2. **pixel-art-xl LoRA** → `ComfyUI/models/loras/`
+Or see **[models.md](models.md)** and **[compatibility.md](compatibility.md)** for manual links.
+
+**Your model stack:**
+
+| Model | Required |
+|-------|----------|
+| `sd_xl_base_1.0.safetensors` | Yes |
+| `sd_xl_refiner_1.0.safetensors` | Yes |
+| `controlnet-tile-sdxl.safetensors` | Yes (key model) |
+| `controlnet-reference-sdxl.safetensors` | Recommended |
+| `controlnet-style-sdxl.safetensors` | Recommended |
+| `tiled_vae` | Custom node, not a file |
 
 ---
 
