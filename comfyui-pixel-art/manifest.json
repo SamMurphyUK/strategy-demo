@@ -1,0 +1,92 @@
+{
+  "name": "comfyui-pixel-art-starter",
+  "version": "1.0.0",
+  "description": "Workflows, palettes, and install scripts for a local ComfyUI pixel art pipeline.",
+  "custom_nodes": [
+    {
+      "id": "ComfyUI-Manager",
+      "repo": "https://github.com/ltdrdata/ComfyUI-Manager",
+      "required": true,
+      "purpose": "Install and update other custom nodes from the UI."
+    },
+    {
+      "id": "ComfyUI-PixelArt-Detector",
+      "repo": "https://github.com/dimtoneff/ComfyUI-PixelArt-Detector",
+      "required": true,
+      "purpose": "Palette swap, downscale, dither, and pixel-perfect post-processing."
+    },
+    {
+      "id": "pixel_palette_art",
+      "repo": "https://github.com/ranska/pixel_palette_art",
+      "required": false,
+      "purpose": "Build, mix, sort, and export color palettes."
+    },
+    {
+      "id": "GlitchNodes",
+      "repo": "https://github.com/pxl-pshr/GlitchNodes",
+      "required": false,
+      "purpose": "Pixel8Bit node with retro palettes (PICO-8, Game Boy) and dithering."
+    },
+    {
+      "id": "ComfyUI-AI-Pixel-Art-Enhancer",
+      "repo": "https://github.com/HSDHCdev/ComfyUI-AI-Pixel-Art-Enhancer",
+      "required": false,
+      "purpose": "AI image to pixel art with quantization and edge preservation."
+    },
+    {
+      "id": "comfyui-vslinx-nodes",
+      "repo": "https://github.com/vslinx/ComfyUI-vslinx-nodes",
+      "required": false,
+      "purpose": "Image to Pixel Art node with historical palettes and batch tools."
+    }
+  ],
+  "workflows": [
+    {
+      "file": "workflows/sdxl-pixel-art-txt2img.json",
+      "name": "SDXL Pixel Art Text-to-Image",
+      "nodes_required": ["built-in"],
+      "models": ["sd_xl_base checkpoint", "pixel-art-xl LoRA"]
+    },
+    {
+      "file": "workflows/workflow.json",
+      "name": "PixelArt Detector (full pipeline)",
+      "nodes_required": ["ComfyUI-PixelArt-Detector"],
+      "models": ["SD checkpoint optional"]
+    },
+    {
+      "file": "workflows/palette_generator.json",
+      "name": "Palette generator from image",
+      "nodes_required": ["ComfyUI-PixelArt-Detector"]
+    },
+    {
+      "file": "workflows/grid.json",
+      "name": "Palette grid preview",
+      "nodes_required": ["ComfyUI-PixelArt-Detector"]
+    },
+    {
+      "file": "workflows/img2img_webp.json",
+      "name": "Img2img with pixel post-process (webp save)",
+      "nodes_required": ["ComfyUI-PixelArt-Detector", "ComfyUI-Saveaswebp optional"]
+    },
+    {
+      "file": "workflows/img2pixel-nearest-only.json",
+      "name": "Quick nearest-neighbor pixelate (built-in nodes only)",
+      "nodes_required": ["built-in"]
+    },
+    {
+      "file": "workflows/palette-art/09_test_comp_full_pipeline.json",
+      "name": "Full palette pipeline",
+      "nodes_required": ["pixel_palette_art"]
+    }
+  ],
+  "palettes": [
+    "palettes/dawnbringer-32-1x.png",
+    "palettes/pico-8-1x.png",
+    "palettes/sweetie-16-1x.png",
+    "palettes/endesga-32-1x.png",
+    "palettes/kirokaze-gameboy-1x.png",
+    "palettes/nintendo-gameboy-bgb-1x.png",
+    "palettes/mist-gb-1x.png",
+    "palettes/rustic-gb-1x.png"
+  ]
+}
