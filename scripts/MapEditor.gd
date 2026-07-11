@@ -7,6 +7,7 @@ class_name MapEditor
 @onready var map_root: Node2D = $MapRoot
 @onready var base_map: Sprite2D = $MapRoot/BaseMap
 @onready var region_layer: Node2D = $MapRoot/RegionLayer
+@onready var camera: Camera2D = $Camera2D
 
 # UI nodes
 @onready var inspector: Node = $ToolLayer/UI/InspectorPanel
@@ -77,6 +78,11 @@ func _log(message: String) -> void:
 # -------------------------
 func _ready() -> void:
 	print("MapEditor ready")
+
+	if map_root:
+		map_root.position = Vector2.ZERO
+	if camera:
+		camera.make_current()
 
 	# Setup reusable file dialog
 	_file_dialog = FileDialog.new()
@@ -375,22 +381,28 @@ func redo() -> void:
 # -------------------------
 # Camera panning + keyboard shortcuts
 # -------------------------
-func _process(delta: float) -> void:
+func _map_local_from_mouse() -> Vector2:
 	if map_root == null:
+		return get_global_mouse_position()
+	return map_root.to_local(get_global_mouse_position())
+
+
+func _process(delta: float) -> void:
+	if camera == null:
 		return
 
 	var move: Vector2 = Vector2.ZERO
 
-	if Input.is_action_pressed("ui_right"):
+	if Input.is_action_pressed("ui_right") or Input.is_action_pressed("move_right"):
 		move.x += pan_speed * delta
-	if Input.is_action_pressed("ui_left"):
+	if Input.is_action_pressed("ui_left") or Input.is_action_pressed("move_left"):
 		move.x -= pan_speed * delta
-	if Input.is_action_pressed("ui_down"):
+	if Input.is_action_pressed("ui_down") or Input.is_action_pressed("move_down"):
 		move.y += pan_speed * delta
-	if Input.is_action_pressed("ui_up"):
+	if Input.is_action_pressed("ui_up") or Input.is_action_pressed("move_up"):
 		move.y -= pan_speed * delta
 
-	map_root.position += move
+	camera.position += move
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -895,7 +907,7 @@ func _input(event: InputEvent) -> void:
 			return
 
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			var pos: Vector2 = get_global_mouse_position()
+			var pos: Vector2 = _map_local_from_mouse()
 			drawing_points.append(pos)
 			_log("Added point: " + str(pos))
 
@@ -1169,8 +1181,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# If we already handled selection via Area2D, skip
 		if current_region != null:
 			return
-		# Convert global mouse to map_root local
-		var pos := map_root.to_local(get_global_mouse_position())
+		# Convert global mouse to map_root local (accounts for camera pan)
+		var pos := _map_local_from_mouse()
 		for region in _region_index:
 			var poly := region.get_node_or_null("Polygon2D") as Polygon2D
 			if poly and _is_point_in_polygon(pos, poly.polygon):
