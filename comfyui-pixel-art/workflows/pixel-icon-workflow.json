@@ -1,0 +1,287 @@
+{
+  "id": "pixel-icon-workflow",
+  "revision": 0,
+  "last_node_id": 47,
+  "last_link_id": 63,
+  "nodes": [
+    {
+      "id": 6,
+      "type": "CLIPTextEncode",
+      "pos": [-54, 37],
+      "size": [353.07867431640625, 106.052978515625],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        { "name": "clip", "type": "CLIP", "link": 52 }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [4],
+          "slot_index": 0
+        }
+      ],
+      "title": "Prompt Positive",
+      "properties": { "Node name for S&R": "CLIPTextEncode" },
+      "widgets_values": [
+        "pixel art game unit icon, WWII infantry soldier, top-down strategy game sprite, crisp pixels, limited palette, clean silhouette, transparent-ready, 16-bit"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "CLIPTextEncode",
+      "pos": [-50, 187],
+      "size": [348.2786865234375, 81.65301513671875],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        { "name": "clip", "type": "CLIP", "link": 53 }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [6],
+          "slot_index": 0
+        }
+      ],
+      "title": "Prompt Negative",
+      "properties": { "Node name for S&R": "CLIPTextEncode" },
+      "widgets_values": [
+        "low quality, blurry, deformed, watermark, text, signature, depth of field, photoreal, anti-aliased, smooth gradients, busy background"
+      ]
+    },
+    {
+      "id": 47,
+      "type": "SaveImage",
+      "pos": [315, 39],
+      "size": [361.70703125, 382.4826354980469],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        { "name": "images", "type": "IMAGE", "link": 63 }
+      ],
+      "properties": {},
+      "widgets_values": ["pixel-icon-"]
+    },
+    {
+      "id": 4,
+      "type": "CheckpointLoaderSimple",
+      "pos": [-816, -106],
+      "size": [421.4000244140625, 98],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [50],
+          "slot_index": 0
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [51],
+          "slot_index": 1
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [46],
+          "slot_index": 2
+        }
+      ],
+      "title": "SDXL Base",
+      "properties": { "Node name for S&R": "CheckpointLoaderSimple" },
+      "widgets_values": ["sd_xl_base_1.0.safetensors"]
+    },
+    {
+      "id": 39,
+      "type": "LoraLoader",
+      "pos": [-813, 46],
+      "size": [427, 126],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        { "name": "model", "type": "MODEL", "link": 50 },
+        { "name": "clip", "type": "CLIP", "link": 51 }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [54],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [52, 53],
+          "shape": 3,
+          "slot_index": 1
+        }
+      ],
+      "properties": { "Node name for S&R": "LoraLoader" },
+      "widgets_values": ["pixel-art-xl.safetensors", 1, 1]
+    },
+    {
+      "id": 25,
+      "type": "VAEDecode",
+      "pos": [-285, -75],
+      "size": [210, 46],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        { "name": "samples", "type": "LATENT", "link": 29 },
+        { "name": "vae", "type": "VAE", "link": 46, "slot_index": 1 }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [57],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": { "Node name for S&R": "VAEDecode" }
+    },
+    {
+      "id": 45,
+      "type": "ImageScaleBy",
+      "pos": [327, -93],
+      "size": [315, 82],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        { "name": "image", "type": "IMAGE", "link": 61 }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [63],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "title": "Upscale 8x nearest",
+      "properties": { "Node name for S&R": "ImageScaleBy" },
+      "widgets_values": ["nearest-exact", 8]
+    },
+    {
+      "id": 3,
+      "type": "KSampler",
+      "pos": [-330, 40],
+      "size": [255.67864990234375, 262],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        { "name": "model", "type": "MODEL", "link": 54 },
+        { "name": "positive", "type": "CONDITIONING", "link": 4 },
+        { "name": "negative", "type": "CONDITIONING", "link": 6 },
+        { "name": "latent_image", "type": "LATENT", "link": 55 }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [29],
+          "slot_index": 0
+        }
+      ],
+      "title": "Base KSampler",
+      "properties": { "Node name for S&R": "KSampler" },
+      "widgets_values": [
+        946799340898511,
+        "fixed",
+        20,
+        7,
+        "euler_ancestral",
+        "karras",
+        1
+      ]
+    },
+    {
+      "id": 42,
+      "type": "ImageScaleBy",
+      "pos": [-31, -94],
+      "size": [315, 82],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        { "name": "image", "type": "IMAGE", "link": 57 }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [61],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "title": "Downscale 1/8 nearest",
+      "properties": { "Node name for S&R": "ImageScaleBy" },
+      "widgets_values": ["nearest-exact", 0.125]
+    },
+    {
+      "id": 40,
+      "type": "EmptyLatentImage",
+      "pos": [-48, 314],
+      "size": [345.4786376953125, 106],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [55],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": { "Node name for S&R": "EmptyLatentImage" },
+      "widgets_values": [1024, 1024, 1]
+    }
+  ],
+  "links": [
+    [4, 6, 0, 3, 1, "CONDITIONING"],
+    [6, 7, 0, 3, 2, "CONDITIONING"],
+    [29, 3, 0, 25, 0, "LATENT"],
+    [46, 4, 2, 25, 1, "VAE"],
+    [50, 4, 0, 39, 0, "MODEL"],
+    [51, 4, 1, 39, 1, "CLIP"],
+    [52, 39, 1, 6, 0, "CLIP"],
+    [53, 39, 1, 7, 0, "CLIP"],
+    [54, 39, 0, 3, 0, "MODEL"],
+    [55, 40, 0, 3, 3, "LATENT"],
+    [57, 25, 0, 42, 0, "IMAGE"],
+    [61, 42, 0, 45, 0, "IMAGE"],
+    [63, 45, 0, 47, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "info": {
+      "name": "Pixel Icon Workflow",
+      "author": "strategy-demo",
+      "description": "Same SDXL + pixel-art-xl LoRA + nearest downscale/upscale pipeline. Built-in nodes only. Drop into ComfyUI.",
+      "version": "1.0",
+      "workflow": "pixel-icon"
+    }
+  },
+  "version": 0.4
+}
