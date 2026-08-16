@@ -47,6 +47,7 @@ Then drag any `.json` file into the ComfyUI browser.
 
 | File | What it does | Custom nodes needed |
 |------|----------------|---------------------|
+| `pixel-icon-workflow.json` | **Pixel icon / unit sprite** — SDXL + LoRA + nearest down/upscale (built-in only) | Built-in only |
 | `sdxl-pixel-art-txt2img.json` | Generate pixel art from a text prompt (SDXL + LoRA, nearest upscale) | Built-in only |
 | `sdxl-tile-europe-map.json` | Large-canvas tile upscale with ControlNet tile + tiled VAE | TiledDiffusion, controlnet_aux, Advanced-ControlNet |
 | `img2pixel-nearest-only.json` | Quick downscale/upscale pixelate on any image | Built-in only |
