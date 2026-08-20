@@ -1,0 +1,308 @@
+{
+  "id": "pixel-icon-transparent-sprite",
+  "revision": 3,
+  "last_node_id": 22,
+  "last_link_id": 16,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [0, 0],
+      "size": [315, 314],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "COMBO", "widget": {"name": "image"}, "link": null},
+        {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "slot_index": 0, "links": [1]},
+        {"name": "MASK", "type": "MASK", "links": null}
+      ],
+      "title": "1. Source sprite on white",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "LoadImage"},
+      "widgets_values": ["Gemini_Generated_Image_wbxd6vwbxd6vwbxd.png", "image"]
+    },
+    {
+      "id": 2,
+      "type": "ResizeAndPadImage",
+      "pos": [380, 20],
+      "size": [315, 170],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 1},
+        {"name": "target_width", "type": "INT", "widget": {"name": "target_width"}, "link": null},
+        {"name": "target_height", "type": "INT", "widget": {"name": "target_height"}, "link": null},
+        {"name": "padding_color", "type": "COMBO", "widget": {"name": "padding_color"}, "link": null},
+        {"name": "interpolation", "type": "COMBO", "widget": {"name": "interpolation"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "slot_index": 0, "links": [2]}
+      ],
+      "title": "2. Fit inside 64x64 (no crop)",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ResizeAndPadImage"},
+      "widgets_values": [64, 64, "white", "area"]
+    },
+    {
+      "id": 3,
+      "type": "ImageScale",
+      "pos": [760, 20],
+      "size": [315, 130],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 2},
+        {"name": "upscale_method", "type": "COMBO", "widget": {"name": "upscale_method"}, "link": null},
+        {"name": "width", "type": "INT", "widget": {"name": "width"}, "link": null},
+        {"name": "height", "type": "INT", "widget": {"name": "height"}, "link": null},
+        {"name": "crop", "type": "COMBO", "widget": {"name": "crop"}, "link": null}
+      ],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "slot_index": 0, "links": [3, 4, 5, 6]}
+      ],
+      "title": "3. Fixed output 128x128",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ImageScale"},
+      "widgets_values": ["nearest-exact", 128, 128, "disabled"]
+    },
+    {
+      "id": 11,
+      "type": "ImageToMask",
+      "pos": [1120, 180],
+      "size": [240, 60],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 4},
+        {"name": "channel", "type": "COMBO", "widget": {"name": "channel"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [7]}],
+      "title": "Red channel",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ImageToMask"},
+      "widgets_values": ["red"]
+    },
+    {
+      "id": 12,
+      "type": "ImageToMask",
+      "pos": [1120, 300],
+      "size": [240, 60],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 5},
+        {"name": "channel", "type": "COMBO", "widget": {"name": "channel"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [8]}],
+      "title": "Green channel",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ImageToMask"},
+      "widgets_values": ["green"]
+    },
+    {
+      "id": 13,
+      "type": "ImageToMask",
+      "pos": [1120, 420],
+      "size": [240, 60],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 6},
+        {"name": "channel", "type": "COMBO", "widget": {"name": "channel"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [9]}],
+      "title": "Blue channel",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ImageToMask"},
+      "widgets_values": ["blue"]
+    },
+    {
+      "id": 14,
+      "type": "ThresholdMask",
+      "pos": [1420, 180],
+      "size": [240, 60],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {"name": "mask", "type": "MASK", "link": 7},
+        {"name": "value", "type": "FLOAT", "widget": {"name": "value"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [10]}],
+      "title": "White cutoff - RED",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ThresholdMask"},
+      "widgets_values": [0.9]
+    },
+    {
+      "id": 15,
+      "type": "ThresholdMask",
+      "pos": [1420, 300],
+      "size": [240, 60],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {"name": "mask", "type": "MASK", "link": 8},
+        {"name": "value", "type": "FLOAT", "widget": {"name": "value"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [11]}],
+      "title": "White cutoff - GREEN",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ThresholdMask"},
+      "widgets_values": [0.9]
+    },
+    {
+      "id": 16,
+      "type": "ThresholdMask",
+      "pos": [1420, 420],
+      "size": [240, 60],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {"name": "mask", "type": "MASK", "link": 9},
+        {"name": "value", "type": "FLOAT", "widget": {"name": "value"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [13]}],
+      "title": "White cutoff - BLUE",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "ThresholdMask"},
+      "widgets_values": [0.9]
+    },
+    {
+      "id": 17,
+      "type": "MaskComposite",
+      "pos": [1720, 230],
+      "size": [260, 130],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {"name": "destination", "type": "MASK", "link": 10},
+        {"name": "source", "type": "MASK", "link": 11},
+        {"name": "x", "type": "INT", "widget": {"name": "x"}, "link": null},
+        {"name": "y", "type": "INT", "widget": {"name": "y"}, "link": null},
+        {"name": "operation", "type": "COMBO", "widget": {"name": "operation"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [12]}],
+      "title": "Near-white = red AND green",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "MaskComposite"},
+      "widgets_values": [0, 0, "and"]
+    },
+    {
+      "id": 18,
+      "type": "MaskComposite",
+      "pos": [2040, 300],
+      "size": [260, 130],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {"name": "destination", "type": "MASK", "link": 12},
+        {"name": "source", "type": "MASK", "link": 13},
+        {"name": "x", "type": "INT", "widget": {"name": "x"}, "link": null},
+        {"name": "y", "type": "INT", "widget": {"name": "y"}, "link": null},
+        {"name": "operation", "type": "COMBO", "widget": {"name": "operation"}, "link": null}
+      ],
+      "outputs": [{"name": "MASK", "type": "MASK", "slot_index": 0, "links": [14]}],
+      "title": "Near-white = RGB all above cutoff",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "MaskComposite"},
+      "widgets_values": [0, 0, "and"]
+    },
+    {
+      "id": 19,
+      "type": "JoinImageWithAlpha",
+      "pos": [2380, 20],
+      "size": [280, 80],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {"name": "image", "type": "IMAGE", "link": 3},
+        {"name": "alpha", "type": "MASK", "link": 14}
+      ],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "slot_index": 0, "links": [15, 16]}],
+      "title": "4. Make near-white transparent",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "JoinImageWithAlpha"},
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "SaveImage",
+      "pos": [2720, 20],
+      "size": [360, 360],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {"name": "images", "type": "IMAGE", "link": 15},
+        {"name": "filename_prefix", "type": "STRING", "widget": {"name": "filename_prefix"}, "link": null}
+      ],
+      "outputs": [{"name": "images", "type": "IMAGE", "links": null}],
+      "title": "5. Save transparent 128px sprite",
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "SaveImage"},
+      "widgets_values": ["unit-sprite-128-transparent"]
+    },
+    {
+      "id": 21,
+      "type": "PreviewImage",
+      "pos": [2720, 420],
+      "size": [360, 360],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [{"name": "images", "type": "IMAGE", "link": 16}],
+      "outputs": [{"name": "images", "type": "IMAGE", "links": null}],
+      "properties": {"cnr_id": "comfy-core", "ver": "0.27.0", "Node name for S&R": "PreviewImage"},
+      "widgets_values": []
+    },
+    {
+      "id": 22,
+      "type": "Note",
+      "pos": [0, 360],
+      "size": [620, 300],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "TRANSPARENT SPRITE EXPORT (128x128)\n\nNo circle mask and no geometric crop.\n\nPipeline: fit with white padding at 64x64 -> nearest upscale to 128x128 -> remove near-white RGB background.\n\nThe three White cutoff nodes default to 0.90. Raise them to preserve more pale sprite pixels; lower them to remove more light-gray background noise. Keep all three values equal.\n\nImportant: genuine white details in the sprite also become transparent. Use a distinct background color if white must be retained.\n\nGodot should provide the fixed icon background behind this exported sprite."
+      ],
+      "color": "#243",
+      "bgcolor": "#465"
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "IMAGE"],
+    [2, 2, 0, 3, 0, "IMAGE"],
+    [3, 3, 0, 19, 0, "IMAGE"],
+    [4, 3, 0, 11, 0, "IMAGE"],
+    [5, 3, 0, 12, 0, "IMAGE"],
+    [6, 3, 0, 13, 0, "IMAGE"],
+    [7, 11, 0, 14, 0, "MASK"],
+    [8, 12, 0, 15, 0, "MASK"],
+    [9, 13, 0, 16, 0, "MASK"],
+    [10, 14, 0, 17, 0, "MASK"],
+    [11, 15, 0, 17, 1, "MASK"],
+    [12, 17, 0, 18, 0, "MASK"],
+    [13, 16, 0, 18, 1, "MASK"],
+    [14, 18, 0, 19, 1, "MASK"],
+    [15, 19, 0, 20, 0, "IMAGE"],
+    [16, 19, 0, 21, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "info": {
+      "name": "Transparent sprite export",
+      "description": "Fit without cropping, pixelate at 64px, export 128px PNG with near-white removed",
+      "output_size": 128,
+      "pixel_grid": 64,
+      "white_cutoff": 0.9
+    }
+  },
+  "version": 0.4
+}

@@ -39,23 +39,35 @@ ComfyUI/user/default/workflows/pixel-art/
 
 Then drag any `.json` file into the ComfyUI browser.
 
----
+## Pixel icon workflows (unit sprites)
 
-## What's included
+If your output looks like a **grid of the same silhouette on colored squares with red palette names** (`bubblegum-1x`, `cga-1x`, etc.) — you ran **`grid.json`**, which is a palette **picker/preview**, not icon export.
+
+| Use this file | When |
+|---------------|------|
+| **`pixel-icon-img2icon.json`** | You have a silhouette PNG (artillery, infantry, etc.) → one pixel icon |
+| **`pixel-icon-workflow.json`** | Generate a new icon from a text prompt |
+| **`grid.json`** | Compare palettes side-by-side only — never use for final icons |
+
+Both icon workflows have **grid preview OFF** on `PixelArtLoadPalettes` and `PixelArtDetectorConverter`.
+
+Requires **ComfyUI-PixelArt-Detector** (`pull-packs.sh`).
+
+---
 
 ### Workflows (`workflows/`)
 
 | File | What it does | Custom nodes needed |
 |------|----------------|---------------------|
-| `pixel-icon-workflow.json` | **Pixel icon / unit sprite** — SDXL + LoRA + nearest down/upscale (built-in only) | Built-in only |
+| `pixel-icon-img2icon.json` | **Silhouette → pixel icon** (load PNG, one palette, 128px output) | PixelArt-Detector |
+| `pixel-icon-workflow.json` | **Generate icon from prompt** (SDXL + LoRA + pixelize + one palette) | PixelArt-Detector + SDXL LoRA |
+| `grid.json` | **Palette picker only** — previews ALL palettes in a grid (red labels). NOT for final icons. | PixelArt-Detector |
+| `img2img_webp.json` | Img2img + pixel post-process | PixelArt-Detector |
 | `sdxl-pixel-art-txt2img.json` | Generate pixel art from a text prompt (SDXL + LoRA, nearest upscale) | Built-in only |
 | `sdxl-tile-europe-map.json` | Large-canvas tile upscale with ControlNet tile + tiled VAE | TiledDiffusion, controlnet_aux, Advanced-ControlNet |
 | `img2pixel-nearest-only.json` | Quick downscale/upscale pixelate on any image | Built-in only |
 | `workflow.json` | Full PixelArt Detector pipeline (quantize, palette, save) | PixelArt-Detector |
 | `palette_generator.json` | Extract a palette from a reference image | PixelArt-Detector |
-| `grid.json` | Preview all loaded palettes in a grid | PixelArt-Detector |
-| `img2img_webp.json` | Img2img + pixel post-process | PixelArt-Detector |
-| `palette-art/*.json` | Palette build/mix/sort pipelines | pixel_palette_art |
 
 ### Palettes (`palettes/`)
 
