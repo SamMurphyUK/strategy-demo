@@ -6,6 +6,9 @@
 [node name="MapEditor" type="Node2D" unique_id=400672322]
 script = ExtResource("1_36806")
 
+[node name="Camera2D" type="Camera2D" parent="." unique_id=400672323]
+position = Vector2(960, 540)
+
 [node name="MapRoot" type="Node2D" parent="." unique_id=383440590]
 
 [node name="BaseMap" type="Sprite2D" parent="MapRoot" unique_id=1376611886]
