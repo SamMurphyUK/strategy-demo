@@ -1,0 +1,164 @@
+---
+description: Godot strategy-demo architecture — decoupling, signals, no gameplay EventBus
+alwaysApply: true
+---
+
+Axis & Allies Engine — Architectural Ruleset (Cursor Enforcement Version)
+(Senior Software Architect Guidelines for Godot 4.4+ / GDScript)
+
+These rules define the non-negotiable architectural constraints for all agentic code generation.
+Agents MUST follow these rules unless explicitly instructed otherwise.
+
+1. STRICT DECOUPLING (Component & Signal-Driven Architecture)
+1.1 No Hard Dependencies
+Scripts MUST NOT use get_node(), $, or absolute scene paths to reach parents, siblings, or distant nodes.
+
+Nodes may only call methods downward into their own children.
+
+1.2 Directional Communication
+Nodes MUST NOT call methods upward or sideways.
+
+Upward or cross-system communication MUST use typed signals.
+
+1.3 Typed Signals Only
+All signals MUST include explicit type annotations, e.g.:
+
+```gdscript
+signal battle_resolved(result: BattleResultResource)
+signal unit_selected(unit_id: int)
+```
+
+1.4 EventBus for Global Events
+Use a lightweight EventBus Autoload for:
+
+- Achievements
+- Audio triggers
+- Analytics
+- Global notifications
+
+DO NOT use EventBus for UI-to-gameplay chatter or local scene logic.
+
+1.5 Narrow Parent Interfaces
+Children may assume their parent implements a minimal, documented interface, but never a concrete scene structure.
+
+2. DATABASE ISOLATION (Data/Logic Separation)
+2.1 Runtime vs Structural Data
+Gameplay nodes (e.g., units, territories, factories) may only store runtime state, such as:
+
+- current_hp
+- movement_points
+- is_exhausted
+
+They MUST NOT store:
+
+- unit definitions
+- map definitions
+- rule data
+- production costs
+- IPC values
+
+2.2 All Static Data Must Be Resources
+Use custom Resource scripts for:
+
+- Unit definitions
+- Territory definitions
+- Map graph
+- Combat rules
+- Production rules
+- National objectives
+- Technology rules
+
+2.3 SaveManager Is the Only Disk Writer
+Gameplay code MUST NOT call FileAccess, ConfigFile, or any disk API.
+
+All persistence flows through SaveManager.
+
+SaveManager maintains an in-memory dictionary cache and serializes it.
+
+3. DATA INTEGRITY & SECURITY (Anti-Tampering)
+3.1 Encryption Required
+All persistent data MUST be encrypted using:
+
+FileAccess.open_encrypted_with_pass()
+or
+encrypted ConfigFile
+
+3.2 Fail-Safe Loading
+When loading:
+
+- Validate all types
+- Validate ranges
+- Validate required fields
+- Catch all exceptions
+- Fall back to safe defaults
+- Log a warning instead of crashing
+
+3.3 Never Trust External Data
+All deserialization MUST sanitize inputs before applying them to runtime state.
+
+4. AGENTIC WORKFLOW REQUIREMENTS
+4.1 Blueprint Before Code
+Before writing ANY code, agents MUST output exactly three bullet points:
+
+- Signals emitted (names + typed payloads)
+- Custom Resources used (names + purpose)
+- How the component isolates itself from UI
+
+No code may be generated until the blueprint is approved.
+
+4.2 No Architectural Changes Without Permission
+Agents MUST NOT:
+
+- invent new patterns
+- modify architecture
+- introduce new singletons
+- change turn-flow logic
+- alter resource schemas
+
+Unless explicitly instructed.
+
+4.3 Follow the Turn Engine Contract
+All gameplay logic MUST respect:
+
+- deterministic resolution
+- phase ordering
+- validator rules
+- state immutability between phases
+
+5. GODOT-SPECIFIC RULES
+5.1 Static Typing Required
+All GDScript MUST use:
+
+- typed variables
+- typed signals
+- typed function signatures
+- typed arrays and dictionaries
+
+5.2 No Scene-Tree Assumptions
+Agents MUST NOT assume:
+
+- specific parent nodes
+- specific UI structure
+- specific scene paths
+
+All dependencies must be injected or signaled.
+
+5.3 UI Is Always Passive
+UI:
+
+- listens to signals
+- displays state
+- never owns gameplay logic
+- never mutates game state directly
+
+6. OUTPUT FORMAT FOR ALL TASKS
+When implementing a feature, agents MUST:
+
+Step 1 — Output the 3-bullet blueprint (see section 4.1)
+Step 2 — Wait for approval
+Step 3 — Generate clean, statically-typed GDScript
+
+follow all rules above
+no hard dependencies
+no disk access
+no architecture drift
