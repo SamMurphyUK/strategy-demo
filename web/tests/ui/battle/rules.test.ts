@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FiringUnit, HitTarget, RankedUnit } from "../../src/battle/rules";
+import type { FiringUnit, HitTarget, RankedUnit } from "../../../src/ui/battle/rules";
 import {
   aaShotCount,
   assignHits,
@@ -11,7 +11,7 @@ import {
   rankCanFire,
   resolveHit,
   resolveRanks,
-} from "../../src/battle/rules";
+} from "../../../src/ui/battle/rules";
 
 const fighter = (uid: string, active = true): RankedUnit => ({ uid, type: "fighter", active });
 
@@ -67,6 +67,18 @@ describe("ranks", () => {
       "north_africa",
     );
     expect(ranks.find((r) => r.uid === "b")).toMatchObject({ effectiveRank: 4, hasSynergyBonus: true });
+  });
+
+  it("does not pair defenders", () => {
+    const ranks = resolveRanks(
+      [
+        { uid: "b", type: "tactical_bomber", active: true },
+        { uid: "t", type: "tank", active: true },
+      ],
+      "defender",
+      "north_africa",
+    );
+    expect(ranks.find((r) => r.uid === "b")).toMatchObject({ effectiveRank: 3, hasSynergyBonus: false });
   });
 
   it("uses the navy rank table and skips land pairing", () => {

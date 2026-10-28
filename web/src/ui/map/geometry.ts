@@ -138,7 +138,7 @@ export function regionAtPoint(map: MapGeometry, p: Vec2): string {
 // Unit layout (scripts/unit_layout.gd)
 // ---------------------------------------------------------------
 
-export function layoutPositions(count: number): Vec2[] {
+export function layoutPositions(count: number, spacing: Vec2 = ICON_SPACING): Vec2[] {
   const positions: Vec2[] = [];
   if (count <= 0) {
     return positions;
@@ -155,14 +155,14 @@ export function layoutPositions(count: number): Vec2[] {
     cols = 3;
     rows = 3;
   }
-  const startX = -((cols - 1) * ICON_SPACING.x) * 0.5;
-  const startY = -((rows - 1) * ICON_SPACING.y) * 0.5;
+  const startX = -((cols - 1) * spacing.x) * 0.5;
+  const startY = -((rows - 1) * spacing.y) * 0.5;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       if (positions.length >= count) {
         return positions;
       }
-      positions.push({ x: startX + col * ICON_SPACING.x, y: startY + row * ICON_SPACING.y });
+      positions.push({ x: startX + col * spacing.x, y: startY + row * spacing.y });
     }
   }
   return positions;
@@ -211,6 +211,30 @@ export function layoutRegionStacks(region: RegionShape, entries: StackEntry[]): 
     entry: byKey.get(key)!,
     position: { x: region.anchor.x + slots[i].x, y: region.anchor.y + slots[i].y },
   }));
+}
+
+/** Screen-pixel gap between unit counters in a region's stack. Counters are drawn at a fixed pixel size. */
+export const STACK_SPACING_PX: Vec2 = { x: 46, y: 40 };
+
+export interface StackSlot {
+  key: string;
+  entry: StackEntry;
+  /** Offset from the region's anchor, in screen pixels. */
+  offset: Vec2;
+}
+
+/** Same slot order as layoutRegionStacks, but offsets are screen pixels so counters never overlap when zoomed out. */
+export function layoutStackSlots(entries: StackEntry[]): StackSlot[] {
+  const byKey = new Map<string, StackEntry>();
+  for (const entry of entries) {
+    const key = stackKey(entry);
+    if (!byKey.has(key)) {
+      byKey.set(key, entry);
+    }
+  }
+  const keys = [...byKey.keys()].sort();
+  const offsets = layoutPositions(keys.length, STACK_SPACING_PX);
+  return keys.map((key, i) => ({ key, entry: byKey.get(key)!, offset: offsets[i] }));
 }
 
 export function stackKey(entry: StackEntry): string {

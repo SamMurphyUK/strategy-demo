@@ -1,4 +1,4 @@
-import type { Dict } from "../../engine/model/types";
+import type { Dict } from "../../../engine/model/types";
 
 export function factionName(factionId: string): string {
   switch (String(factionId).toLowerCase()) {
@@ -58,11 +58,26 @@ function battleResult(result: string): string {
       return "defender held";
     case "mutual_destruction":
       return "both sides destroyed";
+    case "attacker_retreated":
+      return "attacker retreated";
     case "draw":
       return "draw";
     default:
       return result;
   }
+}
+
+function casualtyText(casualties: unknown): string {
+  const list: Dict[] = Array.isArray(casualties) ? casualties : [];
+  const parts: string[] = [];
+  for (const side of ["attacker", "defender"]) {
+    const own = list.filter((c) => c.side === side);
+    const destroyed = own.filter((c) => c.result === "destroyed").length;
+    const damaged = own.length - destroyed;
+    if (destroyed > 0) parts.push(`${side} lost ${destroyed}`);
+    if (damaged > 0) parts.push(`${side} took ${damaged} damage`);
+  }
+  return parts.join(", ");
 }
 
 /** One line per canonical stub event. Types arrive lowercased with underscores stripped. */
@@ -87,11 +102,20 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
       return `${who} unloaded ${unitList(p.units, unitTypes)} into ${p.to_region_id}`;
     case "battlestarted":
       return `Battle in ${p.region_id}: ${factionName(String(p.attacker ?? ""))} attacks ${factionName(String(p.defender ?? ""))}`;
-    case "dicerolled":
-      return `Round ${p.round}: attacker ${p.attacker_hits} hits, defender ${p.defender_hits} hits`;
-    case "battlefinished":
-      // `rounds` counts the empty check that ends the loop, so it reads one high; the dice lines carry the count.
-      return `${p.region_id}: ${battleResult(String(p.result ?? ""))}`;
+    case "dicerolled": {
+      const lost = casualtyText(p.casualties);
+      return `${p.region_id} round ${p.round}: attacker ${p.attacker_hits} hits, defender ${p.defender_hits} hits${lost ? ` (${lost})` : ""}`;
+    }
+    case "unitsdestroyed": {
+      const lost = casualtyText(p.casualties);
+      return `${p.region_id} round ${p.round}: ${lost || "no casualties"}`;
+    }
+    case "regioncaptured":
+      return `${factionName(String(p.faction_id ?? ""))} captured ${p.region_id}`;
+    case "battlefinished": {
+      const retreat = p.retreat_to ? ` to ${p.retreat_to}` : "";
+      return `${p.region_id}: ${battleResult(String(p.result ?? ""))}${retreat}`;
+    }
     case "unitsplaced": {
       const placements: Dict[] = Array.isArray(p.placements) ? p.placements : [];
       const parts = placements.map((pl) => `${unitList(pl.units, unitTypes)} in ${pl.region_id}`);

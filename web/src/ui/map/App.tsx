@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadJson } from "../engine/content/res";
-import { NEWMAP_PATH } from "../content/game_scene_session_builder";
-import { RegionUnitDisplay } from "../engine/presentation/region_unit_display";
-import { textureUrl } from "./assets";
-import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./map/geometry";
-import { type CombatMarker, MapView } from "./map/MapView";
+import { NEWMAP_PATH } from "../../content/game_scene_session_builder";
+import { loadJson } from "../../engine/content/res";
+import type { ActiveBattle } from "../../engine/model/battle";
+import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
+import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
+import { BattleScreen } from "./BattleScreen";
+import { EditorPanel } from "./editor/EditorPanel";
+import { useMapEditor } from "./editor/useMapEditor";
+import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
+import { projectMapJson } from "./map_space";
+import { type CombatMarker, MapView } from "./MapView";
+import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PhasePanel } from "./panels/PhasePanel";
 import { RegionPanel } from "./panels/RegionPanel";
@@ -18,6 +24,12 @@ export type Selection =
 
 const MOVEMENT_PHASES = ["combat_move", "noncombat_move"];
 
+// Stable empties for editor mode, so the canvas does not see new objects every render.
+const NO_STACKS: Record<string, StackEntry[]> = {};
+const NO_HIGHLIGHT: HighlightMode = { kind: "none" };
+const NO_MARKERS: CombatMarker[] = [];
+const NEVER = () => false;
+
 export function App() {
   const game = useGameSession(12345);
   const { session, version } = game;
@@ -25,12 +37,30 @@ export function App() {
   const faction = state.current_faction_id;
   const phase = state.current_phase;
 
-  const geometry = useMemo(() => buildMapGeometry(loadJson(NEWMAP_PATH)), []);
-  const baseMapUrl = useMemo(() => textureUrl(geometry.baseMap), [geometry]);
+  // The map is drawn in the land SVG's coordinates; demomap01.json predates it and is projected on load.
+  const worldMapJson = useMemo(() => projectMapJson(loadJson(NEWMAP_PATH)), []);
+  const geometry = useMemo(() => buildMapGeometry(worldMapJson), [worldMapJson]);
+  const { land, error: landError } = useMasterLand();
+  const [editing, setEditing] = useState(false);
+  const editor = useMapEditor(worldMapJson, land, editing);
+  const editorOwners = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const r of editor.map.regions) {
+      const owner = factionIdFromDisplay(r.starting_owner);
+      out[r.id] = owner === "neutral" || owner === "independent" ? "" : owner;
+    }
+    return out;
+  }, [editor.map]);
 
   const [selectedRegionId, setSelectedRegionId] = useState("");
   const [hoverRegionId, setHoverRegionId] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
+  // The engine's open battle, kept on screen after it finishes until the player leaves the board.
+  const [battleOnScreen, setBattleOnScreen] = useState<ActiveBattle | null>(null);
+  const activeBattle = state.active_battle;
+  if (activeBattle && battleOnScreen?.region_id !== activeBattle.region_id) {
+    setBattleOnScreen(activeBattle);
+  }
 
   // Any phase or faction change invalidates an in-progress move or placement.
   useEffect(() => {
@@ -176,39 +206,64 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // The battle canvas and the map are never mounted together.
+  if (battleOnScreen) {
+    const regionId = battleOnScreen.region_id;
+    return (
+      <BattleScreen
+        key={regionId}
+        game={game}
+        battle={battleOnScreen}
+        regionName={state.regions[regionId]?.name || regionId}
+        onExit={() => {
+          setBattleOnScreen(null);
+          setSelectedRegionId(regionId);
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="app">
-      <TurnBar game={game} />
+    <div className="campaign">
+      <TurnBar game={game} editing={editing} onToggleEditing={() => setEditing((e) => !e)} />
       <div className="main">
         <MapView
-          geometry={geometry}
-          baseMapUrl={baseMapUrl}
-          owners={owners}
-          stacks={stacks}
-          selectedRegionId={selectedRegionId}
-          selectedStack={selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
-          highlight={highlight}
-          combatMarkers={combatMarkers}
-          isUnmoved={isUnmoved}
+          geometry={editing ? editor.geometry : geometry}
+          land={land}
+          landError={landError}
+          owners={editing ? editorOwners : owners}
+          stacks={editing ? NO_STACKS : stacks}
+          selectedRegionId={editing ? (editor.selected?.id ?? "") : selectedRegionId}
+          selectedStack={!editing && selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
+          highlight={editing ? NO_HIGHLIGHT : highlight}
+          combatMarkers={editing ? NO_MARKERS : combatMarkers}
+          isUnmoved={editing ? NEVER : isUnmoved}
           onRegionClick={onRegionClick}
           onRegionHover={setHoverRegionId}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
+          editor={editing ? editor.binding : undefined}
         />
         <aside className="sidebar">
-          <PhasePanel
-            game={game}
-            selection={selection}
-            setSelection={setSelection}
-            legalTargets={legalTargets}
-            pending={pendingForFaction}
-          />
-          <RegionPanel
-            game={game}
-            regionId={selectedRegionId}
-            selection={selection}
-            onSelectStack={selectStack}
-          />
-          <EventLog log={game.log} />
+          {editing ? (
+            <EditorPanel editor={editor} />
+          ) : (
+            <>
+              <PhasePanel
+                game={game}
+                selection={selection}
+                setSelection={setSelection}
+                legalTargets={legalTargets}
+                pending={pendingForFaction}
+              />
+              <RegionPanel
+                game={game}
+                regionId={selectedRegionId}
+                selection={selection}
+                onSelectStack={selectStack}
+              />
+              <EventLog log={game.log} />
+            </>
+          )}
         </aside>
       </div>
     </div>

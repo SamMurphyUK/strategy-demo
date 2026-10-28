@@ -151,6 +151,18 @@ export class GameSession {
           sync,
         );
         break;
+
+      case CommandType.START_BATTLE:
+      case CommandType.BATTLE_ROLL:
+      case CommandType.BATTLE_CASUALTIES:
+      case CommandType.BATTLE_RETREAT: {
+        const battle = this.combat.applyBattleCommand(cmd.type, cmd.player_id, cmd.payload);
+        if (battle != null && !battle.ok) {
+          return { result_type: "error", error: battle.error, events: [], new_state: this.state.toSnapshot() };
+        }
+        events = this.syncSeq(battle?.ok ? battle.events : []);
+        break;
+      }
     }
 
     this.append(events);

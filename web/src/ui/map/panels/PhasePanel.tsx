@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { PurchaseLine } from "../../engine/model/types";
+import type { Battle } from "../../../engine/combat/combat";
+import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
-import { unitArtUrl } from "../assets";
+import { UnitToken } from "../../theme/tokens/UnitToken";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -19,6 +20,8 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
   const faction = state.current_faction_id;
   const phase = state.current_phase;
   const legal = session.getLegalCommands(faction);
+  const battles = phase === "combat" ? session.getPendingBattles(faction) : [];
+  const fight = (regionId: string) => game.send("start_battle", { region_id: regionId });
 
   return (
     <section className="panel phase-panel">
@@ -32,7 +35,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
         <MoveBody selection={selection} setSelection={setSelection} legalTargets={legalTargets} game={game} />
       )}
 
-      {phase === "combat" && <CombatBody game={game} />}
+      {phase === "combat" && <CombatBody battles={battles} onFight={fight} />}
 
       {phase === "mobilize" && (
         <MobilizeBody
@@ -51,9 +54,18 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
       )}
 
       <div className="phase-actions">
+        {legal.includes("start_battle") && battles.length > 0 && (
+          <button type="button" className="primary" onClick={() => fight(battles[0].region_id)}>
+            Fight next battle
+          </button>
+        )}
         {legal.includes("end_phase") && (
-          <button type="button" className="primary" onClick={() => game.send("end_phase")}>
-            {phase === "combat" ? "Resolve battles and end phase" : "End phase"}
+          <button
+            type="button"
+            className={battles.length > 0 ? "" : "primary"}
+            onClick={() => game.send("end_phase")}
+          >
+            {battles.length > 0 ? "Auto-resolve the rest and end phase" : "End phase"}
           </button>
         )}
         {legal.includes("end_turn") && (
@@ -97,45 +109,35 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
 
   return (
     <>
-      <table className="catalog">
-        <thead>
-          <tr>
-            <th>Unit</th>
-            <th>Cost</th>
-            <th>A/D/M</th>
-            <th>Buy</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.keys(costs).map((id) => {
-            const ut = state.unit_types[id];
-            const art = unitArtUrl(id, faction);
-            return (
-              <tr key={id}>
-                <td className="unit-cell">
-                  {art && <img src={art} alt="" width={22} height={22} />}
-                  {unitName(id, state.unit_types)}
-                </td>
-                <td>{costs[id]}</td>
-                <td>
-                  {ut.attack}/{ut.defense}/{ut.movement}
-                </td>
-                <td className="stepper">
-                  <button type="button" onClick={() => bump(id, -1)} disabled={!staged[id]}>
-                    −
-                  </button>
-                  <span>{staged[id] ?? 0}</span>
-                  <button type="button" onClick={() => bump(id, 1)}>
-                    +
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className={total > ipc ? "warn" : ""}>
-        Total {total} IPC of {ipc} available
+      <p className="muted catalog-legend">Cost in IPC · attack / defense / movement</p>
+      <ul className="catalog">
+        {Object.keys(costs).map((id) => {
+          const ut = state.unit_types[id];
+          const count = staged[id] ?? 0;
+          return (
+            <li key={id} className={count > 0 ? "unit-card staged" : "unit-card"}>
+              <UnitToken unit={id} faction={faction} size={56} />
+              <div className="unit-card-info">
+                <span className="unit-name">{unitName(id, state.unit_types)}</span>
+                <span className="unit-stats mono">
+                  {costs[id]} IPC · {ut.attack}/{ut.defense}/{ut.movement}
+                </span>
+              </div>
+              <div className="stepper">
+                <button type="button" onClick={() => bump(id, -1)} disabled={count === 0} aria-label="Remove one">
+                  −
+                </button>
+                <span className="mono">{count}</span>
+                <button type="button" onClick={() => bump(id, 1)} aria-label="Add one">
+                  +
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className={total > ipc ? "warn" : "budget"}>
+        Total <b className="mono">{total}</b> IPC of <b className="mono">{ipc}</b> available
       </p>
       <div className="row">
         <button type="button" onClick={confirm} disabled={total === 0}>
@@ -213,9 +215,7 @@ function MoveBody({
   );
 }
 
-function CombatBody({ game }: { game: GameSessionHandle }) {
-  const { session } = game;
-  const battles = session.getPendingBattles(session.state.current_faction_id);
+function CombatBody({ battles, onFight }: { battles: Battle[]; onFight(regionId: string): void }) {
   if (battles.length === 0) {
     return <p className="muted">No battles this turn.</p>;
   }
@@ -224,12 +224,18 @@ function CombatBody({ game }: { game: GameSessionHandle }) {
       <ul className="battles">
         {battles.map((b) => (
           <li key={b.region_id}>
+            <button type="button" onClick={() => onFight(b.region_id)}>
+              Fight
+            </button>{" "}
             {b.region_id}: {factionName(b.attacker_faction_id)} attacks {factionName(b.defender_faction_id)} (
             {b.battle_type})
           </li>
         ))}
       </ul>
-      <p className="muted">Ending the phase fights every battle to the finish. Results appear in the event log.</p>
+      <p className="muted">
+        Fight opens the battle board. Ending the phase settles any battle you have not fought, with the cheapest units
+        lost first and no retreat.
+      </p>
     </>
   );
 }
@@ -257,7 +263,6 @@ function MobilizeBody({
       <ul className="pending">
         {pending.map((line) => {
           const active = selection?.kind === "place" && selection.unitTypeId === line.unit_type_id;
-          const art = unitArtUrl(line.unit_type_id, state.current_faction_id);
           return (
             <li key={line.unit_type_id}>
               <button
@@ -265,8 +270,9 @@ function MobilizeBody({
                 className={active ? "active" : ""}
                 onClick={() => setSelection(active ? null : { kind: "place", unitTypeId: line.unit_type_id })}
               >
-                {art && <img src={art} alt="" width={22} height={22} />}
-                {line.count} × {unitName(line.unit_type_id, state.unit_types)}
+                <UnitToken unit={line.unit_type_id} faction={state.current_faction_id} size={48} />
+                <span className="unit-name">{unitName(line.unit_type_id, state.unit_types)}</span>
+                <b className="stack-count mono">×{line.count}</b>
               </button>
             </li>
           );

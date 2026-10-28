@@ -31,7 +31,7 @@ export function buildMapData(mapJson: Dict): Dict {
     }
     regions.push({
       id: regionId,
-      name: regionId,
+      name: String(meta.name ?? "") || regionId,
       type: regionTypeFromMetadata(meta, regionId),
       ipc_value: Math.trunc(Number(meta.ipc ?? 0)),
       owner_faction_id: owner,
@@ -116,7 +116,41 @@ function regionTypeFromMetadata(meta: Dict, regionId: string): string {
   return "land";
 }
 
+/**
+ * Maps authored in the web map editor list each region's `neighbors` explicitly (land, sea and coastal
+ * links, with manual overrides). When any region has that array it is the whole truth; otherwise
+ * adjacency comes from shared polygon vertices as in the Godot builder.
+ */
+function buildAdjacencyFromNeighbors(mapJson: Dict): Dict[] | null {
+  const regions = extractRegions(mapJson);
+  if (!regions.some((r) => Array.isArray(r.neighbors))) {
+    return null;
+  }
+  const known = new Set(regions.map((r) => String((r.metadata ?? {}).region_id ?? "")));
+  const edges: Dict[] = [];
+  const seen = new Set<string>();
+  for (const regionEntry of regions) {
+    const fromId = String((regionEntry.metadata ?? {}).region_id ?? "");
+    for (const raw of Array.isArray(regionEntry.neighbors) ? regionEntry.neighbors : []) {
+      const toId = String(raw);
+      if (fromId === "" || toId === fromId || !known.has(fromId) || !known.has(toId)) {
+        continue;
+      }
+      const [a, b] = fromId < toId ? [fromId, toId] : [toId, fromId];
+      if (!seen.has(`${a}|${b}`)) {
+        seen.add(`${a}|${b}`);
+        edges.push({ from: a, to: b });
+      }
+    }
+  }
+  return edges;
+}
+
 function buildAdjacencyFromPolygons(mapJson: Dict): Dict[] {
+  const explicit = buildAdjacencyFromNeighbors(mapJson);
+  if (explicit) {
+    return explicit;
+  }
   const polygons: Record<string, Point[]> = {};
   const regionIds: string[] = [];
   for (const regionEntry of extractRegions(mapJson)) {

@@ -73,6 +73,7 @@ import {
   resolveHit,
   resolveRanks,
 } from './rules';
+import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
 import {
   drawProceduralUnit,
   drawWWIIBattlefield,
@@ -131,10 +132,30 @@ function getUnitOrganicJitter(uidNum: number, uid: string): {offsetX: number; of
   return {offsetX, offsetY};
 }
 
-function createUnit(type: UnitType, side: 'attacker' | 'defender'): CombatUnit {
+/** Engine casualties as board hit steps, skipping any unit the board no longer shows alive. */
+function matchHitsToSteps(
+  alive: CombatUnit[],
+  hits: MatchHit[],
+): {uid: string; result: 'damaged' | 'destroyed'; hpAfter: number}[] {
+  const hp = new Map(alive.map((u) => [u.uid, u.currentHp]));
+  const steps: {uid: string; result: 'damaged' | 'destroyed'; hpAfter: number}[] = [];
+  for (const hit of hits) {
+    const current = hp.get(hit.unitId);
+    if (current === undefined || current <= 0) continue;
+    const hpAfter = hit.result === 'destroyed' ? 0 : current - 1;
+    hp.set(hit.unitId, hpAfter);
+    steps.push({uid: hit.unitId, result: hit.result, hpAfter});
+  }
+  return steps;
+}
+
+function createUnit(type: UnitType, side: 'attacker' | 'defender', fromMatch?: MatchUnit): CombatUnit {
   const def = UNIT_DEFINITIONS[type];
   const uidNum = nextUnitUid++;
-  const uid = `unit_${side}_${type}_${uidNum}`;
+  const uid = fromMatch ? fromMatch.id : `unit_${side}_${type}_${uidNum}`;
+  const maxHp = fromMatch ? fromMatch.maxHp : def.maxHp;
+  // Carrier fighter launches are a sandbox effect; in a map battle aircraft are real units.
+  const planes = type === 'carrier' && !fromMatch ? 2 : type === 'carrier' ? 0 : undefined;
   const {offsetX, offsetY} = getUnitOrganicJitter(uidNum, uid);
 
   let readyAnimType: CombatUnit['readyAnimType'] = 'rev';
@@ -151,11 +172,12 @@ function createUnit(type: UnitType, side: 'attacker' | 'defender'): CombatUnit {
     uid,
     type,
     side,
-    currentHp: def.maxHp,
-    maxHp: def.maxHp,
+    currentHp: maxHp,
+    maxHp,
     effectiveRank: side === 'attacker' ? def.baseAttackRank : def.baseDefenseRank,
     hasSynergyBonus: false,
     hasFiredThisRound: false,
+    carrierFightersFiredThisRound: fromMatch ? true : undefined,
     isPendingCasualty: false,
     isPermanentCasualty: false, // (BETA)
     isDestroyed: false,
@@ -175,14 +197,15 @@ function createUnit(type: UnitType, side: 'attacker' | 'defender'): CombatUnit {
     damageSmokeParticles: false,
     colIndex: 0,
     rowIndex: 0,
-    planesCarried: type === 'carrier' ? 2 : undefined,
-    maxPlanesCarried: type === 'carrier' ? 2 : undefined,
+    planesCarried: planes,
+    maxPlanesCarried: planes,
     carrierFloatX: 0,
     carrierFloatState: 'IDLE',
   };
 }
 
-export default function App() {
+/** Without `match` this is the standalone sandbox. With it, the engine decides the battle. */
+export default function App({match}: {match?: BattleMatch} = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stepperRef = useRef<ReturnType<typeof createFixedStepper>>(undefined);
 
@@ -222,6 +245,13 @@ export default function App() {
     return Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : 1;
   });
   const diceRef = useRef<() => number>(createBattleDice(diceSeed));
+  const matchRef = useRef(match);
+  matchRef.current = match;
+  const isMatch = match != null;
+  /** The engine's dice for the round being animated. Cleared when the attacker presses on. */
+  const matchRoundRef = useRef<MatchRound | null>(null);
+  /** Unit ids the player has hit this allocation, one entry per hit. */
+  const attackerHitLogRef = useRef<string[]>([]);
 
   const [currentTheater, setCurrentTheater] = useState<TheaterId>('normandy');
   const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
@@ -277,8 +307,8 @@ export default function App() {
   const [defenderIpc, setDefenderIpc] = useState(50);
   const attackerIpcRef = useRef(41);
   const defenderIpcRef = useRef(50);
-  attackerIpcRef.current = attackerIpc;
-  defenderIpcRef.current = defenderIpc;
+  attackerIpcRef.current = match ? match.attackerIpc : attackerIpc;
+  defenderIpcRef.current = match ? match.defenderIpc : defenderIpc;
 
   // Attacker Victory Sequence State & Refs
   const [isVictorySequenceActive, setIsVictorySequenceActive] = useState(false);
@@ -322,6 +352,15 @@ export default function App() {
   const defenderUnitsRef = useRef<CombatUnit[]>([]);
   attackerUnitsRef.current = attackerUnits;
   defenderUnitsRef.current = defenderUnits;
+
+  const currentMatchRound = (): MatchRound | null => {
+    const active = matchRef.current;
+    if (!active) return null;
+    if (!matchRoundRef.current) {
+      matchRoundRef.current = active.rollRound();
+    }
+    return matchRoundRef.current;
+  };
 
   const attackerHitsRef = useRef(0);
   const defenderHitsRef = useRef(0);
@@ -594,9 +633,19 @@ export default function App() {
 
   // Setup Scenario
   const loadScenario = useCallback((scenarioIndex: number) => {
+    const launched = matchRef.current;
     diceRef.current = createBattleDice(diceSeed);
+    matchRoundRef.current = null;
+    attackerHitLogRef.current = [];
     clearSequenceTimeouts();
-    const sc = SCENARIOS[scenarioIndex % SCENARIOS.length];
+    const sc = launched
+      ? {
+          theater: launched.theater,
+          title: `Battle for ${launched.regionName}`,
+          attackerUnits: launched.attackers.map((u) => u.type),
+          defenderUnits: launched.defenders.map((u) => u.type),
+        }
+      : SCENARIOS[scenarioIndex % SCENARIOS.length];
     setCurrentTheater(sc.theater);
     setCurrentScenarioIndex(scenarioIndex);
     setBattlePhase('DEPLOYMENT_MARCH');
@@ -647,7 +696,9 @@ export default function App() {
       elapsed: 0,
       flagElapsed: 0,
       blackFadeAlpha: 0,
-      regionName: sc.theater === 'normandy'
+      regionName: launched
+        ? launched.regionName.toUpperCase()
+        : sc.theater === 'normandy'
         ? 'EUROPEAN TEST (COAST / FOREST)'
         : sc.theater === 'navy_test'
         ? 'OPEN PACIFIC OCEAN (NAVY TEST)'
@@ -675,8 +726,12 @@ export default function App() {
     lastPlayerHitsRef.current = null;
     setLastPlayerHits(null);
 
-    const initialAtk = sc.attackerUnits.map((t) => createUnit(t, 'attacker'));
-    const initialDef = sc.defenderUnits.map((t) => createUnit(t, 'defender'));
+    const initialAtk = launched
+      ? launched.attackers.map((u) => createUnit(u.type, 'attacker', u))
+      : sc.attackerUnits.map((t) => createUnit(t, 'attacker'));
+    const initialDef = launched
+      ? launched.defenders.map((u) => createUnit(u.type, 'defender', u))
+      : sc.defenderUnits.map((t) => createUnit(t, 'defender'));
 
     const {atk, def} = recalculateSynergies(initialAtk, initialDef);
 
@@ -728,18 +783,23 @@ export default function App() {
       round: 1,
     }));
     loadScenario(currentScenarioIndex);
-    if (sdk) {
+    if (sdk && !matchRef.current) {
       sdk.startGame();
     }
   }, [sdk, loadScenario, currentScenarioIndex]);
 
-  usePlaygroundGameLifecycle(gameState, sdk);
+  // A map battle is not a Playground session: no score reporting and no leaderboard.
+  usePlaygroundGameLifecycle(gameState, isMatch ? null : sdk);
 
   // Automatically initialize deployment march on initial boot & handle autoplay
   const hasInitializedOnBoot = useRef(false);
   useEffect(() => {
     if (!hasInitializedOnBoot.current) {
       hasInitializedOnBoot.current = true;
+      if (matchRef.current) {
+        initGame();
+        return;
+      }
       loadScenario(0);
       if (new URLSearchParams(window.location.search).has('autoplay')) {
         initGame();
@@ -758,8 +818,10 @@ export default function App() {
     unitType: UnitType,
     targetSide: 'attacker' | 'defender',
     isTorpedo = false,
+    countsAsHit = true,
   ) => {
     combatShellsRef.current.push({
+      countsAsHit,
       id: `shell_${Math.random()}`,
       startX,
       startY,
@@ -969,6 +1031,7 @@ export default function App() {
     isHit: boolean,
     unitType: UnitType,
     targetSide: 'attacker' | 'defender',
+    countsAsHit = true,
   ) => {
     const isNavyTest = currentTheaterRef.current === 'navy_test';
     const isAirStrikeTest = currentTheaterRef.current === 'air_strike_test';
@@ -1013,14 +1076,18 @@ export default function App() {
         accentColor: targetSide === 'defender' ? PALETTE.terracotta : PALETTE.plum,
       });
 
-      // 3. Increment confirmed hits counter in exact sync with impact
+      // 3. Increment confirmed hits counter in exact sync with impact.
+      // Surprise-strike hits are already removed when they land, so they are not owed again.
+      // In a map battle the engine sets the hits owed at allocation.
       lastHitTimeRef.current = gameTimeRef.current;
-      if (targetSide === 'defender') {
-        attackerHitsRef.current += 1;
-        setPendingDefenderHits(attackerHitsRef.current);
-      } else {
-        defenderHitsRef.current += 1;
-        setPendingAttackerHits(defenderHitsRef.current);
+      if (countsAsHit) {
+        if (targetSide === 'defender') {
+          attackerHitsRef.current += 1;
+          if (!matchRef.current) setPendingDefenderHits(attackerHitsRef.current);
+        } else {
+          defenderHitsRef.current += 1;
+          if (!matchRef.current) setPendingAttackerHits(defenderHitsRef.current);
+        }
       }
 
       const isHumanCrew = unitType === 'infantry' || unitType === 'artillery' || unitType === 'aaa';
@@ -1240,9 +1307,13 @@ export default function App() {
     const currentDef = [...defenderUnitsRef.current];
     const aliveDefenders = currentDef.filter(isCombatActive);
 
-    const steps = assignHits(
-      aliveDefenders.map((u) => ({uid: u.uid, type: u.type, rank: u.effectiveRank, currentHp: u.currentHp, maxHp: u.maxHp})),
-      pendingDefenderHits,
+    const engineRound = matchRef.current ? currentMatchRound() : null;
+    const steps = (engineRound
+      ? matchHitsToSteps(aliveDefenders, engineRound.defenderCasualties)
+      : assignHits(
+          aliveDefenders.map((u) => ({uid: u.uid, type: u.type, rank: u.effectiveRank, currentHp: u.currentHp, maxHp: u.maxHp})),
+          pendingDefenderHits,
+        )
     ).map((step) => ({step, unit: aliveDefenders.find((u) => u.uid === step.uid)!}));
 
     steps.forEach(({step, unit}) => {
@@ -1294,6 +1365,31 @@ export default function App() {
     }
   }, [pendingDefenderHits, scheduleSequenceTimeout]);
 
+  // One assigned hit on one of the player's units: two-hit units are damaged first.
+  const assignHitToFriendlyUnit = (target: CombatUnit) => {
+    attackerHitLogRef.current.push(target.uid);
+    if (resolveHit(target.currentHp, target.maxHp) === 'damaged') {
+      target.currentHp -= 1;
+      target.listingAngle = 0.175;
+      target.staggerY = (target.staggerY || 0) + 3;
+      target.damageSmokeParticles = true;
+      gameAudio.playShieldBlock();
+    } else {
+      target.isPendingCasualty = true;
+      target.isPermanentCasualty = false; // (BETA)
+      target.status = 'downed';
+      target.isDestroyed = true;
+      target.currentHp = 0;
+      target.fadeAlpha = 1.0;
+      target.isFadingOut = false;
+      registerCasualtyRecord(target, true);
+    }
+    setPendingAttackerHits((h) => Math.max(0, h - 1));
+    const {atk} = recalculateSynergies(attackerUnitsRef.current, defenderUnitsRef.current);
+    attackerUnitsRef.current = atk;
+    setAttackerUnits([...atk]);
+  };
+
   // Player manual assignment by rank row click (marks unit as pending casualty)
   const handleAssignHitToFriendlyRank = (rankNum: number) => {
     const currentAtk = [...attackerUnitsRef.current];
@@ -1311,32 +1407,7 @@ export default function App() {
         return compareByCostThenRank(a, b);
       });
 
-      const target = rankUnits[0];
-      if (resolveHit(target.currentHp, target.maxHp) === 'damaged') {
-        target.currentHp -= 1;
-        target.listingAngle = 0.175;
-        target.staggerY = (target.staggerY || 0) + 3;
-        target.damageSmokeParticles = true;
-        gameAudio.playShieldBlock();
-        setPendingAttackerHits((h) => Math.max(0, h - 1));
-        const {atk, def} = recalculateSynergies(currentAtk, defenderUnitsRef.current);
-        attackerUnitsRef.current = atk;
-        setAttackerUnits([...atk]);
-        return;
-      }
-      target.isPendingCasualty = true;
-      target.isPermanentCasualty = false; // (BETA)
-      target.status = 'downed';
-      target.isDestroyed = true;
-      target.currentHp = 0;
-      target.fadeAlpha = 1.0;
-      target.isFadingOut = false;
-      registerCasualtyRecord(target, true);
-      setPendingAttackerHits((h) => Math.max(0, h - 1));
-
-      const {atk, def} = recalculateSynergies(currentAtk, defenderUnitsRef.current);
-      attackerUnitsRef.current = atk;
-      setAttackerUnits([...atk]);
+      assignHitToFriendlyUnit(rankUnits[0]);
     } else {
       // (BETA) Toggle unassign ONLY for currently pending casualties that are NOT permanent from prior rounds
       const pendingUnits = currentAtk.filter(
@@ -1345,10 +1416,12 @@ export default function App() {
       if (pendingUnits.length > 0) {
         gameAudio.playCrispClick();
         const pUnit = pendingUnits[0];
+        const restoredHits = attackerHitLogRef.current.filter((id) => id === pUnit.uid).length;
+        attackerHitLogRef.current = attackerHitLogRef.current.filter((id) => id !== pUnit.uid);
         pUnit.isPendingCasualty = false;
         pUnit.status = 'alive';
         pUnit.isDestroyed = false;
-        pUnit.currentHp = pUnit.maxHp;
+        pUnit.currentHp = restoredHits > 0 ? Math.min(pUnit.maxHp, restoredHits) : pUnit.maxHp;
         pUnit.fadeAlpha = 1.0;
         pUnit.isFadingOut = false;
 
@@ -1365,7 +1438,7 @@ export default function App() {
           if (cIdx !== -1) cratersRef.current.splice(cIdx, 1);
         }
 
-        setPendingAttackerHits((h) => h + 1);
+        setPendingAttackerHits((h) => h + Math.max(1, restoredHits));
 
         const {atk, def} = recalculateSynergies(currentAtk, defenderUnitsRef.current);
         attackerUnitsRef.current = atk;
@@ -1389,6 +1462,7 @@ export default function App() {
     );
     for (const step of steps) {
       const u = availableAttackers.find((unit) => unit.uid === step.uid)!;
+      attackerHitLogRef.current.push(step.uid);
       if (step.result === 'damaged') {
         u.currentHp = step.hpAfter;
         u.listingAngle = 0.175;
@@ -1416,6 +1490,10 @@ export default function App() {
   // Return to Combat action after Victory Sequence
   const handleReturnToCombat = useCallback(() => {
     gameAudio.playConfirmSelect();
+    if (matchRef.current) {
+      matchRef.current.exit();
+      return;
+    }
     victorySeqRef.current = {
       active: false,
       stage: 'INACTIVE',
@@ -1462,7 +1540,9 @@ export default function App() {
     }, 400);
 
     const theaterObj = THEATERS[currentTheaterRef.current];
-    const regionName = currentTheaterRef.current === 'normandy'
+    const regionName = matchRef.current
+      ? matchRef.current.regionName.toUpperCase()
+      : currentTheaterRef.current === 'normandy'
       ? 'EUROPEAN TEST (COAST / FOREST)'
       : currentTheaterRef.current === 'navy_test'
       ? 'OPEN PACIFIC OCEAN (NAVY TEST)'
@@ -1504,6 +1584,7 @@ export default function App() {
 
   // Debug Auto-Win Handler: eliminates all active defender units and triggers victory march
   const handleInstantKillDefenders = useCallback(() => {
+    if (matchRef.current) return;
     gameAudio.playCrispClick();
     defenderUnitsRef.current.forEach((u) => {
       u.currentHp = 0;
@@ -1623,6 +1704,11 @@ export default function App() {
 
     const finalizeDelay = Math.max(250, pendingUnits.length * 150 + 200);
 
+    // The engine has the final word on a map battle; the board's own count only drives the sandbox.
+    const hitLog = attackerHitLogRef.current;
+    attackerHitLogRef.current = [];
+    const engineOutcome = matchRef.current ? matchRef.current.confirmCasualties(hitLog) : null;
+
     scheduleSequenceTimeout(() => {
       const liveAtk = attackerUnitsRef.current.filter(isCombatActive).length;
       const liveDef = defenderUnitsRef.current.filter(isCombatActive).length;
@@ -1630,7 +1716,7 @@ export default function App() {
       const scoreGain = defenderUnitsRef.current.filter((u) => u.status === 'downed' || u.isDestroyed).length * 150;
       setGameState((prev) => ({...prev, score: prev.score + scoreGain}));
 
-      const outcome = battleOutcome(liveAtk, liveDef);
+      const outcome = engineOutcome ?? battleOutcome(liveAtk, liveDef);
       if (outcome === 'attacker_wins') {
         triggerAttackerVictorySequence();
       } else if (outcome === 'defender_wins' || outcome === 'mutual') {
@@ -1656,7 +1742,7 @@ export default function App() {
         ]);
       }
     }, finalizeDelay);
-  }, [roundNumber, scheduleSequenceTimeout]);
+  }, [roundNumber, scheduleSequenceTimeout, triggerAttackerVictorySequence]);
 
   // Helper to check if a specific side and rank has living, un-downed units to fire
   const toFiringUnit = (u: CombatUnit) => ({
@@ -1689,25 +1775,18 @@ export default function App() {
   const handlePressOn = useCallback(() => {
     gameAudio.playConfirmSelect();
     setRoundNumber((r) => r + 1);
+    matchRoundRef.current = null;
+    const resetForRound = (u: CombatUnit) => {
+      if (!isCombatActive(u)) return; // (BETA)
+      u.hasFiredThisRound = false;
+      u.carrierFightersFiredThisRound = matchRef.current ? true : false;
+      if (u.type === 'carrier') {
+        u.planesCarried = u.maxPlanesCarried ?? 2;
+      }
+    };
     // (BETA) Permanent casualty exclusion: only reset units that are alive and not permanent casualties
-    attackerUnitsRef.current.forEach((u) => {
-      if (isCombatActive(u)) { // (BETA)
-        u.hasFiredThisRound = false;
-        u.carrierFightersFiredThisRound = false;
-        if (u.type === 'carrier') {
-          u.planesCarried = u.maxPlanesCarried || 2;
-        }
-      }
-    });
-    defenderUnitsRef.current.forEach((u) => {
-      if (isCombatActive(u)) { // (BETA)
-        u.hasFiredThisRound = false;
-        u.carrierFightersFiredThisRound = false;
-        if (u.type === 'carrier') {
-          u.planesCarried = u.maxPlanesCarried || 2;
-        }
-      }
-    });
+    attackerUnitsRef.current.forEach(resetForRound);
+    defenderUnitsRef.current.forEach(resetForRound);
     const firstActive = getNextActiveCombatPhase('IDLE');
     setBattlePhase(firstActive);
     setRankStepState('READY_TO_FIRE');
@@ -1730,6 +1809,13 @@ export default function App() {
 
   const handleRetreatDecision = useCallback(() => {
     gameAudio.playCrispClick();
+    if (matchRef.current) {
+      if (matchRef.current.canRetreat()) {
+        setIsAutoRolling(false);
+        matchRef.current.retreat();
+      }
+      return;
+    }
     setIsAutoRolling(false);
     setBattlePhase('IDLE');
     setGameState((prev) => ({...prev, status: 'RETREATED'}));
@@ -1762,6 +1848,7 @@ export default function App() {
     targetValue: number,
     dieResult: DiceResult | undefined,
     targetEnemy?: CombatUnit,
+    countsAsHit = true,
   ) => {
     u.animRecoil = 1;
     const pos = getUnitScreenPos(u);
@@ -1807,6 +1894,7 @@ export default function App() {
         u.type,
         isAtk ? 'defender' : 'attacker',
         true, // isTorpedo
+        countsAsHit,
       );
       return;
     } else if (u.type === 'carrier') {
@@ -2009,6 +2097,11 @@ export default function App() {
     if (nextPhase === 'ALLOCATION') {
       setLastVolleySummary('All salvos complete! Allocate round casualties.');
       autoAssignDefenderCasualties();
+      const engineRound = matchRef.current ? currentMatchRound() : null;
+      if (engineRound) {
+        attackerHitLogRef.current = [];
+        setPendingAttackerHits(engineRound.attackerHitsToTake);
+      }
       // Record player hits for the round tracker once attacking is done
       lastPlayerHitsRef.current = attackerHitsRef.current;
       setLastPlayerHits(attackerHitsRef.current);
@@ -2093,9 +2186,12 @@ export default function App() {
       // Roll dice for active side in the bottom sea tray
       const newDice: DiceResult[] = [];
       let totalHits = 0;
+      const engineRound = matchRef.current ? currentMatchRound() : null;
       shooters.forEach((u, i) => {
-        const roll = diceRef.current();
-        const isHit = hitsOn(roll, targetValue);
+        // A unit the engine did not roll for (it already fired this round) shows a miss.
+        const engineDie = engineRound ? engineRound.dice[u.uid] ?? {roll: 6, hit: false} : null;
+        const roll = engineDie ? engineDie.roll : diceRef.current();
+        const isHit = engineDie ? engineDie.hit : hitsOn(roll, targetValue);
         if (isHit) totalHits++;
 
         // Tray coordinates at bottom sea (X: 496..784, Y: 544..694)
@@ -2171,7 +2267,7 @@ export default function App() {
               ? sortedEnemies[idx % sortedEnemies.length]
               : undefined;
 
-            fireSingleUnit(u, targetValue, dieRes, targetEnemy);
+            fireSingleUnit(u, targetValue, dieRes, targetEnemy, !isSurpriseStrike);
           }, idx * STAGGER_DELAY_MS);
         });
 
@@ -2179,10 +2275,15 @@ export default function App() {
         // Any hits scored immediately remove enemy units as casualties BEFORE normal ranks!
         if (isSurpriseStrike && totalHits > 0) {
           scheduleSequenceTimeout(() => {
-            const plan = assignHits(
-              sortedEnemies.map((u) => ({uid: u.uid, type: u.type, rank: u.effectiveRank, currentHp: u.currentHp, maxHp: u.maxHp})),
-              totalHits,
-            );
+            const plan = engineRound
+              ? matchHitsToSteps(
+                  sortedEnemies,
+                  side === 'attacker' ? engineRound.surpriseCasualties.defender : engineRound.surpriseCasualties.attacker,
+                )
+              : assignHits(
+                  sortedEnemies.map((u) => ({uid: u.uid, type: u.type, rank: u.effectiveRank, currentHp: u.currentHp, maxHp: u.maxHp})),
+                  totalHits,
+                );
             for (const step of plan) {
               const victim = sortedEnemies.find((u) => u.uid === step.uid)!;
               if (step.result === 'destroyed') victim.isPermanentCasualty = true;
@@ -3106,18 +3207,8 @@ export default function App() {
         });
 
         if (hitAtk) {
-          hitAtk.isPendingCasualty = true;
-          hitAtk.status = 'downed';
-          hitAtk.isDestroyed = true;
-          hitAtk.currentHp = 0;
-          hitAtk.fadeAlpha = 1.0;
-          hitAtk.isFadingOut = false;
-          registerCasualtyRecord(hitAtk, true);
-
-          setPendingAttackerHits((h) => Math.max(0, h - 1));
-          const {atk, def} = recalculateSynergies(attackerUnitsRef.current, defenderUnitsRef.current);
-          attackerUnitsRef.current = atk;
-          setAttackerUnits([...atk]);
+          gameAudio.playCrispClick();
+          assignHitToFriendlyUnit(hitAtk);
           return;
         }
 
@@ -3598,7 +3689,7 @@ export default function App() {
       if (shell.trail.length > 5) shell.trail.shift();
 
       if (shell.progress >= 1) {
-        triggerHitImpact(shell.endX, shell.endY, shell.isHit, shell.unitType, shell.targetSide);
+        triggerHitImpact(shell.endX, shell.endY, shell.isHit, shell.unitType, shell.targetSide, shell.countsAsHit !== false);
         combatShellsRef.current.splice(i, 1);
       }
     }
@@ -3917,6 +4008,7 @@ export default function App() {
         victorySeqRef.current.regionName,
         attackerIpcRef.current,
         defenderIpcRef.current,
+        matchRef.current ? 'RETURN TO MAP' : 'RETURN TO COMBAT',
       );
       returnButtonRectRef.current = returnButtonRect;
 
@@ -4566,8 +4658,14 @@ export default function App() {
       {/* TOP HUD: Dedicated Safe Zone Container (Fades out cleanly during Victory Sequence) */}
       <header className={`w-full bg-[#423840] border-b-2 border-[#5E4E54] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0 text-xs transition-opacity duration-700 ${isVictorySequenceActive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="flex items-center gap-3">
+          {match && (
+            <div className="bg-[#2b242a] px-2.5 py-1 rounded border border-[#7D6652] font-bold" data-testid="match-region">
+              <span className="text-[#DFCE91] tracking-wider">BATTLE FOR </span>
+              <span className="text-[#CAA574] uppercase">{match.regionName}</span>
+            </div>
+          )}
           {/* Interactive Theater Selector with Custom Dropdown & Direct Switch */}
-          <div className="relative" ref={theaterDropdownRef}>
+          <div className={`relative ${isMatch ? 'hidden' : ''}`} ref={theaterDropdownRef}>
             <button
               onClick={() => setIsTheaterMenuOpen((prev) => !prev)}
               data-testid="theater-dropdown-btn"
@@ -4648,7 +4746,7 @@ export default function App() {
           </button>
 
           {/* Discreet Debug Auto-Win / Kill Enemy Forces Button */}
-          <button
+          {!isMatch && <button
             onClick={handleInstantKillDefenders}
             title="Debug: Auto-Win / Eliminate Enemy Forces (Shortcut: K)"
             data-testid="debug-autowin-btn"
@@ -4656,7 +4754,7 @@ export default function App() {
             <Zap size={11} className="text-[#DFCE91]" />
             <span className="hidden sm:inline">AUTO-WIN</span>
             <span className="sm:hidden">WIN</span>
-          </button>
+          </button>}
 
           {/* Speed Toggle Button (Displays '>>' at 1x, '>' at 2x) */}
           <button
@@ -4672,12 +4770,12 @@ export default function App() {
           </button>
 
           {/* Army Builder Button */}
-          <button
+          {!isMatch && <button
             onClick={() => setIsSandboxOpen((prev) => !prev)}
             className="px-2.5 py-1 bg-[#5E4E54] hover:bg-[#7D6652] text-[#DFCE91] border border-[#7D6652] rounded font-bold transition-colors flex items-center gap-1 text-[11px]">
             <RefreshCw size={13} />
             <span className="hidden md:inline">ARMY BUILDER</span>
-          </button>
+          </button>}
 
           <button
             onClick={() => setIsGameMenuOpen(true)}
@@ -5159,7 +5257,7 @@ export default function App() {
       </div>
 
       {/* START SCREEN OVERLAY */}
-      {gameState.status === 'START' && (
+      {gameState.status === 'START' && !isMatch && (
         <MenuOverlay tone="neutral" zIndex={50}>
           <div className="w-full max-w-lg bg-[#423840] border-2 border-[#A1A258] rounded-xl p-6 m-4 shadow-2xl flex flex-col items-center text-center">
             <div className="flex items-center gap-2 text-[#DFCE91] mb-1">
@@ -5267,14 +5365,14 @@ export default function App() {
                 </button>
               </div>
 
-              <button
+              {!isMatch && <button
                 onClick={() => {
                   setIsGameMenuOpen(false);
                   loadScenario(currentScenarioIndex);
                 }}
                 className="w-full min-h-[48px] bg-[#5E4E54] hover:bg-[#7D6652] text-[#DFCE91] border border-[#7D6652] py-2.5 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2">
                 <RotateCw size={16} /> RESTART ENGAGEMENT
-              </button>
+              </button>}
 
               <button
                 onClick={() => setIsHowToPlayOpen(true)}
@@ -5282,14 +5380,14 @@ export default function App() {
                 <HelpCircle size={16} /> HOW TO PLAY
               </button>
 
-              <button
+              {!isMatch && <button
                 onClick={() => {
                   setIsGameMenuOpen(false);
                   setGameState((prev) => ({...prev, status: 'START'}));
                 }}
                 className="w-full min-h-[48px] bg-[#9A4E48] hover:bg-[#B77958] text-[#DFCE91] border border-[#6F3B4A] py-2.5 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2">
                 <Flag size={16} /> QUIT TO MAIN MENU
-              </button>
+              </button>}
             </div>
           </div>
         </MenuOverlay>
@@ -5350,9 +5448,13 @@ export default function App() {
       {gameState.status === 'GAME_OVER' && (
         <Overlay
           title="DEFEAT"
-          description={`Forces Depleted. Final Score: ${gameState.score}`}
-          actionLabel="RE-ENGAGE BATTLE"
+          description={isMatch ? 'The attack is broken. The defender holds the ground.' : `Forces Depleted. Final Score: ${gameState.score}`}
+          actionLabel={isMatch ? 'RETURN TO MAP' : 'RE-ENGAGE BATTLE'}
           onAction={() => {
+            if (matchRef.current) {
+              matchRef.current.exit();
+              return;
+            }
             loadScenario(currentScenarioIndex);
             initGame();
           }}
@@ -5369,8 +5471,8 @@ export default function App() {
               ? 'Both sides are destroyed. The defender holds the ground.'
               : 'The attack breaks off. Survivors withdraw and the defender holds the ground.'
           }
-          actionLabel="RE-ENGAGE BATTLE"
-          onAction={() => initGame()}
+          actionLabel={isMatch ? 'RETURN TO MAP' : 'RE-ENGAGE BATTLE'}
+          onAction={() => (matchRef.current ? matchRef.current.exit() : initGame())}
           icon={<RotateCw size={24} />}
           tone="neutral"
         />

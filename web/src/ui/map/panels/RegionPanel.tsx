@@ -1,7 +1,7 @@
-import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
+import { RegionUnitDisplay } from "../../../engine/presentation/region_unit_display";
 import type { Selection } from "../App";
-import { unitArtUrl } from "../assets";
-import { type StackEntry, stackKey } from "../map/geometry";
+import { UnitToken } from "../../theme/tokens/UnitToken";
+import { type StackEntry, stackKey } from "../geometry";
 import { factionName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -36,7 +36,7 @@ export function RegionPanel({ game, regionId, selection, onSelectStack }: Props)
   return (
     <section className="panel region-panel">
       <h2>{regionId}</h2>
-      <p>
+      <p className="region-tags">
         {factionName(region.owner_faction_id)} · {tags.join(" · ")}
       </p>
       {entries.length === 0 ? (
@@ -46,7 +46,6 @@ export function RegionPanel({ game, regionId, selection, onSelectStack }: Props)
           {entries.map((entry) => {
             const key = stackKey(entry);
             const active = selection?.kind === "stack" && selection.regionId === regionId && selection.key === key;
-            const art = unitArtUrl(entry.unit_type_id, entry.faction_id);
             const cargo =
               entry.instance_id && RegionUnitDisplay.isContainerUnit(state, entry.unit_type_id)
                 ? RegionUnitDisplay.cargoSummaryLines(state, entry.instance_id).join(", ")
@@ -58,11 +57,13 @@ export function RegionPanel({ game, regionId, selection, onSelectStack }: Props)
                   className={active ? "active" : ""}
                   onClick={() => onSelectStack(regionId, entry)}
                 >
-                  {art && <img src={art} alt="" width={22} height={22} />}
-                  <span>
-                    {factionName(entry.faction_id)} {unitName(entry.unit_type_id, state.unit_types)} × {entry.count}
-                    {cargo && <span className="muted"> · cargo: {cargo}</span>}
+                  <UnitToken unit={entry.unit_type_id} faction={entry.faction_id} size={40} />
+                  <span className="stack-label">
+                    <span className="unit-name">{unitName(entry.unit_type_id, state.unit_types)}</span>
+                    <span className="stack-faction">{factionName(entry.faction_id)}</span>
+                    {cargo && <span className="stack-cargo">cargo: {cargo}</span>}
                   </span>
+                  <b className="stack-count mono">×{entry.count}</b>
                 </button>
               </li>
             );

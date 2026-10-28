@@ -10,6 +10,10 @@ export const CommandType = {
   END_PHASE: "end_phase",
   END_TURN: "end_turn",
   STRATEGIC_BOMB: "strategic_bomb",
+  START_BATTLE: "start_battle",
+  BATTLE_ROLL: "battle_roll",
+  BATTLE_CASUALTIES: "battle_casualties",
+  BATTLE_RETREAT: "battle_retreat",
 } as const;
 
 export type CommandTypeValue = (typeof CommandType)[keyof typeof CommandType];

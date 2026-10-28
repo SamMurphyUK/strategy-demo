@@ -506,6 +506,7 @@ export interface CombatShell {
   unitType: UnitType;
   targetSide: 'attacker' | 'defender';
   isTorpedo?: boolean; // submarine torpedo wake cutting through water
+  countsAsHit?: boolean; // false for surprise-strike shots, whose casualties are removed directly
 }
 
 export interface WaterGeyser {

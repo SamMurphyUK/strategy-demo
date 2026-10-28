@@ -232,6 +232,22 @@ export class GameSessionStub {
       case CommandType.END_TURN:
         return this.handleEndTurn(cmd.player_id, sourceId);
 
+      case CommandType.START_BATTLE:
+      case CommandType.BATTLE_ROLL:
+      case CommandType.BATTLE_CASUALTIES:
+      case CommandType.BATTLE_RETREAT: {
+        const battle = this.combat.applyBattleCommand(cmd.type, cmd.player_id, cmd.payload);
+        if (battle == null || !battle.ok) {
+          return {
+            result_type: "error",
+            error: battle && !battle.ok ? battle.error : { code: "UNSUPPORTED", message: cmd.type },
+            events: [],
+          };
+        }
+        events = this.syncSeq(battle.events);
+        break;
+      }
+
       default:
         return {
           result_type: "error",
@@ -334,7 +350,7 @@ export class GameSessionStub {
       case "combat_move":
         return ["move_units", "end_phase"];
       case "combat":
-        return ["strategic_bomb", "end_phase"];
+        return this.legalCombatCommands();
       case "noncombat_move":
         return ["move_units", "end_phase"];
       case "mobilize":
@@ -343,6 +359,27 @@ export class GameSessionStub {
         return ["end_turn", "collect_income"];
     }
     return [];
+  }
+
+  private legalCombatCommands(): string[] {
+    const battle = this.state.active_battle;
+    if (battle == null) {
+      const pending = this.combat.identifyBattles(this.state.current_faction_id).length > 0;
+      return pending ? ["start_battle", "strategic_bomb", "end_phase"] : ["strategic_bomb", "end_phase"];
+    }
+    switch (battle.stage) {
+      case "awaiting_roll":
+        return ["battle_roll"];
+      case "awaiting_casualties":
+        return ["battle_casualties"];
+      case "awaiting_decision":
+        return this.combat.legalRetreats().length > 0 ? ["battle_roll", "battle_retreat"] : ["battle_roll"];
+    }
+    return [];
+  }
+
+  getLegalRetreats(): string[] {
+    return this.combat.legalRetreats();
   }
 
   static validateEventShape(evt: Dict): boolean {

@@ -1,6 +1,13 @@
-// Combat decisions for the battle screen, with no rendering and no timers.
-// The screen asks this module what happens, then plays the animation.
-import { PCG } from "../engine/rng/pcg";
+// Combat decisions for the sandbox battle screen, with no rendering and no timers.
+// Hit, damage and outcome rules come from the engine. What stays here is sandbox-only:
+// theater rank tables, AA guns, shore bombardment and carrier fighter launches.
+// A battle started from the map is decided by the engine, not by this module.
+import {
+  battleOutcome as engineBattleOutcome,
+  hitsOn as engineHitsOn,
+  resolveHit as engineResolveHit,
+} from "../../engine/combat/battle_rules";
+import { PCG } from "../../engine/rng/pcg";
 import {
   type BattlePhase,
   type TheaterId,
@@ -17,10 +24,7 @@ export function createBattleDice(seed: number): DieRoll {
   return () => pcg.rollD6();
 }
 
-/** A roll hits when it is at or under the firing rank. */
-export function hitsOn(roll: number, targetRank: number): boolean {
-  return roll <= targetRank;
-}
+export const hitsOn = engineHitsOn;
 
 export interface RankedUnit {
   uid: string;
@@ -57,9 +61,9 @@ function baseRank(type: UnitType, side: "attacker" | "defender", theater: Theate
 }
 
 /**
- * Firing ranks for one side. On land, each artillery raises one infantry to rank 2,
- * and each tank or fighter raises one tactical bomber to rank 4. Sea theaters do neither.
- * Pairing follows list order and only uses units that are still fighting.
+ * Firing ranks for one side. On attack over land, each artillery raises one infantry to rank 2,
+ * and each tank or fighter raises one tactical bomber to rank 4. Defenders and sea theaters
+ * get neither, matching the engine. Pairing follows list order and only uses units still fighting.
  */
 export function resolveRanks(
   units: RankedUnit[],
@@ -71,7 +75,7 @@ export function resolveRanks(
     effectiveRank: baseRank(unit.type, side, theater),
     hasSynergyBonus: false,
   }));
-  if (MARITIME.includes(theater)) {
+  if (MARITIME.includes(theater) || side === "defender") {
     return resolved;
   }
 
@@ -127,10 +131,7 @@ export interface AssignedHit {
   hpAfter: number;
 }
 
-export function resolveHit(currentHp: number, maxHp: number): "damaged" | "destroyed" {
-  if (maxHp > 1 && currentHp > 1) return "damaged";
-  return "destroyed";
-}
+export const resolveHit = engineResolveHit;
 
 /**
  * Spend hits on the cheapest units first. A two-hit ship takes the first hit as damage
@@ -284,10 +285,14 @@ export function nextCombatPhase(query: PhaseQuery): BattlePhase {
 
 export type BattleOutcome = "attacker_wins" | "defender_wins" | "mutual" | "undecided";
 
+const OUTCOME_NAMES = {
+  attacker_won: "attacker_wins",
+  defender_won: "defender_wins",
+  mutual_destruction: "mutual",
+  undecided: "undecided",
+} as const;
+
 /** Both sides gone is a draw: the attacker does not take the ground. */
 export function battleOutcome(attackersAlive: number, defendersAlive: number): BattleOutcome {
-  if (attackersAlive <= 0 && defendersAlive <= 0) return "mutual";
-  if (defendersAlive <= 0) return "attacker_wins";
-  if (attackersAlive <= 0) return "defender_wins";
-  return "undecided";
+  return OUTCOME_NAMES[engineBattleOutcome(attackersAlive, defendersAlive)];
 }

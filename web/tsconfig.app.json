@@ -5,6 +5,6 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src/playground/**/*.ts", "src/playground/**/*.tsx"],
+  "include": ["src/ui/map/**/*.ts", "src/ui/map/**/*.tsx", "src/ui/theme/**/*.ts", "src/ui/theme/**/*.tsx"],
   "exclude": []
 }

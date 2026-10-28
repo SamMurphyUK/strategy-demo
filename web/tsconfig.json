@@ -15,5 +15,5 @@
     "types": []
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts", "vite.config.ts"],
-  "exclude": ["src/playground/**", "src/battle/**"]
+  "exclude": ["src/ui/**"]
 }

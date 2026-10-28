@@ -16,5 +16,5 @@
     "strictNullChecks": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/battle/**/*.ts", "src/battle/**/*.tsx"]
+  "include": ["src/ui/battle/**/*.ts", "src/ui/battle/**/*.tsx"]
 }

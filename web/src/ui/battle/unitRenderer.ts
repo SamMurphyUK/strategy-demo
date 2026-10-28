@@ -4350,6 +4350,7 @@ export function drawVictorySequenceModal(
   regionName: string,
   attackerIpc: number,
   defenderIpc: number,
+  returnLabel = 'RETURN TO COMBAT',
 ): {returnButtonRect: {x: number; y: number; w: number; h: number}} {
   ctx.save();
 
@@ -4555,7 +4556,7 @@ export function drawVictorySequenceModal(
     // "RETURN TO COMBAT" in pixel text
     drawPixelString(
       ctx,
-      'RETURN TO COMBAT',
+      returnLabel,
       centerX,
       btnY + 13,
       3,

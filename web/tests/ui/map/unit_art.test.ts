@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeUnitTypeAndFaction, resolveUnitArtPath } from "../../src/playground/map/unit_art";
+import { normalizeUnitTypeAndFaction, resolveUnitArtPath } from "../../../src/ui/map/unit_art";
 
 const files = new Set([
   "res://texture/units/us/infantry.png",

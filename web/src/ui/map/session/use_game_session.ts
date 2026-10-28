@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Dict } from "../../engine/model/types";
-import { GameSessionStub, type StubResult } from "../../engine/session/game_session_stub";
+import type { Dict } from "../../../engine/model/types";
+import { GameSessionStub, type StubResult } from "../../../engine/session/game_session_stub";
 import { describeEvent } from "./event_text";
 
 export interface LogEntry {

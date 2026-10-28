@@ -9,7 +9,14 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
     CommandType.DESIGNATE_AMPHIBIOUS,
     CommandType.END_PHASE,
   ],
-  combat: [CommandType.STRATEGIC_BOMB, CommandType.END_PHASE],
+  combat: [
+    CommandType.STRATEGIC_BOMB,
+    CommandType.START_BATTLE,
+    CommandType.BATTLE_ROLL,
+    CommandType.BATTLE_CASUALTIES,
+    CommandType.BATTLE_RETREAT,
+    CommandType.END_PHASE,
+  ],
   noncombat_move: [
     CommandType.MOVE_UNITS,
     CommandType.LOAD_TRANSPORT,
@@ -19,6 +26,13 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
   mobilize: [CommandType.PLACE_UNITS, CommandType.END_PHASE],
   collect_income: [CommandType.END_TURN],
 };
+
+/** The only commands accepted while a battle is open. */
+export const BATTLE_COMMANDS: readonly CommandTypeValue[] = [
+  CommandType.BATTLE_ROLL,
+  CommandType.BATTLE_CASUALTIES,
+  CommandType.BATTLE_RETREAT,
+];
 
 export interface CommandError {
   code: string;
@@ -43,6 +57,12 @@ export class CommandValidator {
     if (!legal.includes(command.type)) {
       this.errorCode = "ILLEGAL_ACTION";
       this.errorMessage = "Command not allowed in phase";
+      return false;
+    }
+    const battle = this.state.active_battle;
+    if (battle != null && !BATTLE_COMMANDS.includes(command.type)) {
+      this.errorCode = "BATTLE_IN_PROGRESS";
+      this.errorMessage = `Finish the battle in ${battle.region_id} first`;
       return false;
     }
     return true;

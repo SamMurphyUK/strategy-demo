@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Dict } from "../../src/engine/model/types";
-import { RegionUnitDisplay } from "../../src/engine/presentation/region_unit_display";
-import { GameSessionStub } from "../../src/engine/session/game_session_stub";
-import { describeEvent } from "../../src/playground/session/event_text";
+import type { Dict } from "../../../src/engine/model/types";
+import { RegionUnitDisplay } from "../../../src/engine/presentation/region_unit_display";
+import { GameSessionStub } from "../../../src/engine/session/game_session_stub";
+import { describeEvent } from "../../../src/ui/map/session/event_text";
 
 // Walks one full turn the way the playground UI does and checks every event renders as text.
 describe("playground turn walk", () => {

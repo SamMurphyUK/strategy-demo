@@ -1,0 +1,57 @@
+/* Wrapper and retreat prompt around the tactical board. Self-contained: nothing here targets board elements. */
+
+.battle-screen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.retreat-picker {
+  position: absolute;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 26, 24, 0.6);
+}
+
+.retreat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+  padding: 18px;
+  background: #f4f1ea;
+  color: #1a1a18;
+  border: 1px solid #85877c;
+  border-radius: 4px;
+  box-shadow: 0 6px 0 #1a1a18;
+}
+
+.retreat-card h2 {
+  margin: 0 0 4px;
+  font: 700 18px/1.2 Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+}
+
+.retreat-card button {
+  padding: 7px 12px;
+  background: #eae6db;
+  color: #1a1a18;
+  border: 1px solid #85877c;
+  border-radius: 3px;
+  box-shadow: 0 3px 0 #1a1a18;
+  font: 600 13px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  text-align: left;
+  cursor: pointer;
+}
+
+.retreat-card button:hover {
+  background: #fff;
+}
+
+.retreat-card button:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #1a1a18;
+}

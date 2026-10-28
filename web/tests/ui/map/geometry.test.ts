@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadJson } from "../../src/engine/content/res";
+import { loadJson } from "../../../src/engine/content/res";
 import {
   baseMapRect,
   buildMapGeometry,
@@ -13,7 +13,7 @@ import {
   type RegionShape,
   stackKey,
   toCss,
-} from "../../src/playground/map/geometry";
+} from "../../../src/ui/map/geometry";
 
 describe("layoutPositions", () => {
   it("puts 1-3 icons in one centred row", () => {

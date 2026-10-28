@@ -1,3 +1,4 @@
+import type { ActiveBattle } from "./battle";
 import { Faction } from "./faction";
 import { Region } from "./region";
 import { type Dict, deepCopy, type PurchaseLine, type TransportInstance, type UnitStackEntry } from "./types";
@@ -58,6 +59,8 @@ export class GameState {
   units_embarked_this_phase: Record<string, number> = {};
   /** Container instances that already spent movement this window. */
   instances_moved_this_phase: Record<string, boolean> = {};
+  /** The battle being fought round by round in the combat phase, if any. */
+  active_battle: ActiveBattle | null = null;
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS
@@ -255,6 +258,7 @@ export class GameState {
       pending_amphibious_assaults: deepCopy(this.pending_amphibious_assaults),
       game_over: this.game_over,
       winner_faction_id: this.winner_faction_id,
+      active_battle: deepCopy(this.active_battle),
     };
   }
 }

@@ -1,7 +1,25 @@
 export { AmphibiousEngine } from "./amphibious/amphibious";
 export { CarrierConstraintChecker } from "./air/carrier_constraint_checker";
 export { PlaneLandingRequirement } from "./air/plane_landing_requirement";
-export { type Battle, CombatEngine, MAX_BATTLE_ROUNDS } from "./combat/combat";
+export {
+  type BattleOutcome,
+  battleOutcome,
+  cheapestCasualties,
+  firingRanks,
+  hitsOn,
+  isCombatUnit,
+  maxHpOf,
+  resolveHit,
+} from "./combat/battle_rules";
+export { type Battle, type BattleCommandResult, CombatEngine, MAX_BATTLE_ROUNDS } from "./combat/combat";
+export type {
+  ActiveBattle,
+  BattleCasualty,
+  BattleDie,
+  BattleSide,
+  BattleStage,
+  BattleUnitState,
+} from "./model/battle";
 export { ContentLoader } from "./content/content_loader";
 export { type JsonLoader, loadJson } from "./content/res";
 export { UnitDatabase } from "./content/unit_database";
