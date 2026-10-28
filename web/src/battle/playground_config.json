@@ -1,0 +1,83 @@
+{
+  "schema": [
+    {
+      "name": "animationSpeed",
+      "type": "number",
+      "label": "Animation Speed",
+      "default": 1.0,
+      "min": 0.5,
+      "max": 2.5,
+      "step": 0.1
+    },
+    {
+      "name": "shakeIntensity",
+      "type": "number",
+      "label": "Screen Shake Multiplier",
+      "default": 1.0,
+      "min": 0,
+      "max": 2.5,
+      "step": 0.1
+    },
+    {
+      "name": "autoRollDelay",
+      "type": "number",
+      "label": "Auto Roll Delay (ms)",
+      "default": 750,
+      "min": 300,
+      "max": 1500,
+      "step": 50
+    },
+    {
+      "name": "diceRollDuration",
+      "type": "number",
+      "label": "Dice Tumbling Time (ms)",
+      "default": 600,
+      "min": 200,
+      "max": 1200,
+      "step": 50
+    },
+    {
+      "name": "startingFunds",
+      "type": "number",
+      "label": "Sandbox Budget",
+      "default": 40,
+      "min": 10,
+      "max": 100,
+      "step": 5
+    },
+    {
+      "name": "enableDicePhysicsJuice",
+      "type": "boolean",
+      "label": "Dice Physics Juice",
+      "default": true
+    },
+    {
+      "name": "defaultMusicVolume",
+      "type": "number",
+      "label": "Default Music Volume",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.1
+    },
+    {
+      "name": "defaultSfxVolume",
+      "type": "number",
+      "label": "Default SFX Volume",
+      "default": 0.7,
+      "min": 0,
+      "max": 1,
+      "step": 0.1
+    }
+  ],
+  "values": {
+    "animationSpeed": 1.0,
+    "shakeIntensity": 1.0,
+    "autoRollDelay": 750,
+    "diceRollDuration": 600,
+    "startingFunds": 40,
+    "enableDicePhysicsJuice": true,
+    "defaultMusicVolume": 0.5,
+    "defaultSfxVolume": 0.7
+  }
+}
