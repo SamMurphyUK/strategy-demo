@@ -27,6 +27,8 @@ interface Box {
 export interface ClipInput {
   id: string;
   points: Vec2[];
+  /** Further outlines of the same region (an archipelago's other islands). Disjoint from `points`. */
+  extra?: Vec2[][];
   type: "land" | "sea";
 }
 
@@ -106,7 +108,9 @@ export function multiPolygonArea(mp: MultiPolygon): number {
   return total;
 }
 
-const keyOf = (region: ClipInput) => `${region.type}|${region.points.map((p) => `${p.x},${p.y}`).join(" ")}`;
+const keyOfPoints = (points: Vec2[]) => points.map((p) => `${p.x},${p.y}`).join(" ");
+const keyOf = (region: ClipInput) =>
+  `${region.type}|${keyOfPoints(region.points)}${(region.extra ?? []).map((e) => `|${keyOfPoints(e)}`).join("")}`;
 
 export class RegionClipper {
   private readonly parts: { poly: Polygon; box: Box }[];
@@ -128,17 +132,28 @@ export class RegionClipper {
     if (ring.length < 3) {
       return [];
     }
-    const near = this.near(ringBox(ring));
+    const rings: Ring[] = [
+      ring,
+      ...(region.extra ?? []).filter((e) => e.length >= 3).map((e): Ring => e.map((p): Pair => [p.x, p.y])),
+    ];
+    const subject: MultiPolygon = rings.map((r): Polygon => [r]);
+    const boxes = rings.map(ringBox);
+    const near = this.near({
+      x0: Math.min(...boxes.map((b) => b.x0)),
+      y0: Math.min(...boxes.map((b) => b.y0)),
+      x1: Math.max(...boxes.map((b) => b.x1)),
+      y1: Math.max(...boxes.map((b) => b.y1)),
+    });
     try {
       if (region.type === "sea") {
-        return near.length === 0 ? [[ring]] : polygonClipping.difference([ring], near);
+        return near.length === 0 ? subject : polygonClipping.difference(subject, near);
       }
-      return near.length === 0 ? [] : polygonClipping.intersection([ring], near);
+      return near.length === 0 ? [] : polygonClipping.intersection(subject, near);
     } catch {
       // A degenerate cutter (zero-area spike, self-crossing edge) can defeat the clipper. Show the raw
       // cutter instead of losing the region, so it can still be selected and repaired.
       this.failed.add(region.id);
-      return [[ring]];
+      return subject;
     }
   }
 

@@ -46,7 +46,15 @@ export function multiPolygonPath2D(mp: MultiPolygon): Path2D {
 
 /** The rough cutter outlines: what the editor drags. */
 export function buildCutterPaths(regions: RegionShape[]): Map<string, Path2D> {
-  return new Map(regions.map((r) => [r.id, polygonPath2D(r.points)]));
+  return new Map(
+    regions.map((r) => {
+      const path = polygonPath2D(r.points);
+      for (const ring of r.extra ?? []) {
+        path.addPath(polygonPath2D(ring));
+      }
+      return [r.id, path];
+    }),
+  );
 }
 
 /**

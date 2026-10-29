@@ -6,6 +6,8 @@ export type Pair = [string, string];
 export interface AdjacencyRegion {
   id: string;
   polygon: Vec2[];
+  /** The other islands of a multi-island territory. The territory touches whatever any of them touches. */
+  extra?: Vec2[][];
   is_sea: boolean;
 }
 
@@ -15,9 +17,38 @@ export const COAST_STEP = 1;
 export const COAST_REACH = 3;
 
 export function sharedVertexCount(a: Vec2[], b: Vec2[], eps: number): number {
+  if (a.length * b.length <= 2500) {
+    let shared = 0;
+    for (const p of a) {
+      if (b.some((q) => Math.hypot(p.x - q.x, p.y - q.y) <= eps)) {
+        shared++;
+      }
+    }
+    return shared;
+  }
+  // Real coastlines have thousands of vertices: look each one up in a grid of B instead of scanning all of B.
+  const cell = Math.max(eps, 1e-9);
+  const grid = new Map<string, Vec2[]>();
+  for (const q of b) {
+    const key = `${Math.floor(q.x / cell)},${Math.floor(q.y / cell)}`;
+    const bucket = grid.get(key);
+    if (bucket) {
+      bucket.push(q);
+    } else {
+      grid.set(key, [q]);
+    }
+  }
   let shared = 0;
   for (const p of a) {
-    if (b.some((q) => Math.hypot(p.x - q.x, p.y - q.y) <= eps)) {
+    const cx = Math.floor(p.x / cell);
+    const cy = Math.floor(p.y / cell);
+    let near = false;
+    for (let dx = -1; dx <= 1 && !near; dx++) {
+      for (let dy = -1; dy <= 1 && !near; dy++) {
+        near = grid.get(`${cx + dx},${cy + dy}`)?.some((q) => Math.hypot(p.x - q.x, p.y - q.y) <= eps) ?? false;
+      }
+    }
+    if (near) {
       shared++;
     }
   }
@@ -182,6 +213,32 @@ export function coastalAdjacent(
   return false;
 }
 
+/**
+ * A region that did not change between edits keeps its polygon array, so a pair of them keeps its answer.
+ * Cutting one landmass then re-checks only the pieces it made, not every pair on the map.
+ */
+const pairMemo = new WeakMap<Vec2[], WeakMap<Vec2[], { coastal: boolean; linked: boolean }[]>>();
+
+function remembered(a: Vec2[], b: Vec2[], coastal: boolean, compute: () => boolean): boolean {
+  let inner = pairMemo.get(a);
+  if (!inner) {
+    inner = new WeakMap();
+    pairMemo.set(a, inner);
+  }
+  let answers = inner.get(b);
+  if (!answers) {
+    answers = [];
+    inner.set(b, answers);
+  }
+  const known = answers.find((x) => x.coastal === coastal);
+  if (known) {
+    return known.linked;
+  }
+  const linked = compute();
+  answers.push({ coastal, linked });
+  return linked;
+}
+
 /** Every neighbor pair the two rules find. `isLand` may be null before the land mask loads (coastal links are skipped). */
 export function autoNeighborPairs(
   regions: AdjacencyRegion[],
@@ -194,12 +251,28 @@ export function autoNeighborPairs(
       const a = regions[i];
       const b = regions[j];
       let linked = false;
-      if (a.is_sea === b.is_sea) {
-        linked = sameDomainAdjacent(a.polygon, b.polygon);
-      } else if (mask) {
-        const land = a.is_sea ? b : a;
-        const sea = a.is_sea ? a : b;
-        linked = coastalAdjacent(land.polygon, sea.polygon, mask);
+      // Every island of one territory against every island of the other: any touch links the two.
+      const partsA = [a.polygon, ...(a.extra ?? [])];
+      const partsB = [b.polygon, ...(b.extra ?? [])];
+      for (const pa of partsA) {
+        for (const pb of partsB) {
+          if (linked) {
+            break;
+          }
+          if (a.is_sea === b.is_sea) {
+            linked = remembered(pa, pb, false, () => sameDomainAdjacent(pa, pb));
+          } else if (mask) {
+            const land = a.is_sea ? pb : pa;
+            const sea = a.is_sea ? pa : pb;
+            linked = remembered(land, sea, true, () => {
+              // Blocks cut from the real coast share its vertices with the sea beside them: that is the shore.
+              if (sharedVertexCount(land, sea, SHARED_VERTEX_EPS) >= 2) {
+                return true;
+              }
+              return coastalAdjacent(land, sea, mask);
+            });
+          }
+        }
       }
       if (linked) {
         pairs.push(a.id < b.id ? [a.id, b.id] : [b.id, a.id]);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionFactory, type GameSessionStub, SessionMode } from "../../../src/engine";
+import { type GameSessionStub } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function firstAlliesFactoryRegion(session: GameSessionStub): string {
   for (const rid of Object.keys(session.state.regions)) {
@@ -13,7 +14,7 @@ function firstAlliesFactoryRegion(session: GameSessionStub): string {
 
 describe("integration/test_pending_purchases_and_place", () => {
   it("test_pending_purchases_then_place_updates_region", () => {
-    const session = GameSessionFactory.create(SessionMode.STUB);
+    const session = campaignSession();
     session.applyCommand({
       command_id: "pp1",
       player_id: session.state.current_faction_id,

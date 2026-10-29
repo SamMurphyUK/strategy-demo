@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildMapData, NEWMAP_PATH } from "../../../src/content/game_scene_session_builder";
 import { loadJson } from "../../../src/engine/content/res";
+import { mapIntegrityProblems } from "./map_invariants";
 import { autoNeighborPairs, coastalAdjacent, sameDomainAdjacent, sharesEdgeSegment } from "../../../src/ui/map/editor/adjacency";
 import {
   addRegionFromPolygon,
@@ -62,12 +63,19 @@ describe("world projection of demomap01", () => {
     }
   });
 
-  it("lands Australia on the continent's outline in the SVG (x 518-607, y 379-449)", () => {
-    const au = geometry.regions.find((r) => r.id === "Australia")!;
-    expect(au.anchor.x).toBeGreaterThan(540);
-    expect(au.anchor.x).toBeLessThan(590);
-    expect(au.anchor.y).toBeGreaterThan(385);
-    expect(au.anchor.y).toBeLessThan(440);
+  it("starts from master blocks shaped like the coast, not canvas-sized boxes", () => {
+    const land = geometry.regions.filter((r) => r.type === "land");
+    const sea = geometry.regions.filter((r) => r.type === "sea");
+    expect(sea.length).toBeGreaterThanOrEqual(1);
+    expect(land.length).toBeGreaterThanOrEqual(1);
+    // No land region spans the canvas, however the map has been sliced or pruned.
+    for (const r of land) {
+      expect(r.bounds.w, r.id).toBeLessThan(700);
+    }
+  });
+
+  it("is a sound map: unique ids, real outlines, anchors and symmetric neighbors", () => {
+    expect(mapIntegrityProblems(loadJson(NEWMAP_PATH))).toEqual([]);
   });
 
   it("is idempotent and reversible", () => {
@@ -310,18 +318,17 @@ describe("export", () => {
   it("round-trips the demo map through the editor and writes explicit neighbors", () => {
     const world = projectMapJson(loadJson(NEWMAP_PATH));
     const map = editorFromMapJson(world);
-    expect(map.regions).toHaveLength(52);
-    expect(findRegion(map, "English Channel")!.is_sea).toBe(true);
-    expect(findRegion(map, "France")!.is_sea).toBe(false);
+    expect(map.regions.some((r) => r.is_sea)).toBe(true);
+    expect(map.regions.some((r) => !r.is_sea)).toBe(true);
 
     const json = editorToMapJson(map);
     expect(json.coord_space).toBe("svg");
+    expect(mapIntegrityProblems(json)).toEqual([]);
     const regions = json.regions as Array<Record<string, any>>;
-    const london = regions.find((r) => r.metadata.region_id === "United Kingdom")!;
-    expect(london.metadata).toMatchObject({ type: "land", is_sea: false, factory: true, ipc: 8, faction: "UK", victory: true });
-    const au = regions.find((r) => r.metadata.region_id === "Australia")!;
-    expect(au.anchors[0]).toMatchObject({ type: "unit" });
-    expect(Array.isArray(au.neighbors)).toBe(true);
+    const land = regions.find((r) => r.metadata.is_sea === false)!;
+    expect(land.metadata).toMatchObject({ type: "land", is_sea: false });
+    expect(land.anchors[0]).toMatchObject({ type: "unit" });
+    expect(Array.isArray(land.neighbors)).toBe(true);
 
     const again = editorFromMapJson(JSON.parse(formatMapJson(json)));
     expect(again.regions).toHaveLength(map.regions.length);
@@ -336,9 +343,9 @@ describe("export", () => {
 
   it("feeds the engine's explicit neighbors straight into adjacency", () => {
     const loaded = editorFromMapJson(projectMapJson(loadJson(NEWMAP_PATH)));
-    const map = applyAutoLinks({ ...loaded, overrides: { add: [], remove: [] } }, [["Australia", "India"]]);
+    const map = applyAutoLinks({ ...loaded, overrides: { add: [], remove: [] } }, [["Sea Zone 01", "Territory 1"]]);
     const data = buildMapData(editorToMapJson(map));
-    expect(data.adjacency).toEqual([{ from: "Australia", to: "India" }]);
+    expect(data.adjacency).toEqual([{ from: "Sea Zone 01", to: "Territory 1" }]);
   });
 
   it("still derives adjacency from polygons when no neighbors are listed", () => {

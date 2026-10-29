@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { GameSessionStub, MovementValidator, Ruleset } from "../../../src/engine";
+import { type GameSessionStub, MovementValidator, Ruleset } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function findAlliesInfantryMovePair(s: GameSessionStub): { from: string; to: string } | null {
   const validator = new MovementValidator();
@@ -22,8 +23,7 @@ describe("integration/test_session_stub_move_once", () => {
   let session: GameSessionStub;
 
   beforeEach(() => {
-    session = new GameSessionStub();
-    session.initializeDemo(12345);
+    session = campaignSession();
     session.applyCommand({ command_id: "to_combat", player_id: session.state.current_faction_id, type: "end_phase", payload: {} });
   });
 

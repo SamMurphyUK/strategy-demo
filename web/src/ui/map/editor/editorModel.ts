@@ -12,7 +12,7 @@ export type LinkKind = "land" | "sea" | "coastal";
 /** Starting owners as demomap01.json spells them (`metadata.faction`). */
 export const OWNER_OPTIONS = ["GER", "USSR", "UK", "USA", "JAP", "Neutral"] as const;
 
-export const LAND_SVG_REF = "assets/ne_110m_land_adjsut.svg";
+export const LAND_SVG_REF = "assets/ne_110m_land_FINAL.svg";
 const DEFAULT_ANCHOR_CAPACITY = 5;
 /** Two vertices closer than this are the same vertex. Snapped borders are exact; hand-drawn ones are not. */
 export const SAME_VERTEX_EPS = 0.75;
@@ -57,6 +57,11 @@ export interface EditorRegion {
   factory: FactoryLevel;
   capital: boolean;
   polygon: Vec2[];
+  /**
+   * The other islands of a multi-island territory (Japan, the Philippines): disjoint outlines that share this
+   * region's id, IPC value and anchor. `polygon` is the largest one. They are not editable with the vertex tool.
+   */
+  extra?: Vec2[][];
   /** Unit stack anchor, also where the region's links attach. */
   cx: number;
   cy: number;
@@ -509,6 +514,119 @@ export function subdivideEdge(map: EditorMap, regionId: string, index: number): 
 }
 
 // ---------------------------------------------------------------
+// Roughening shared borders
+// ---------------------------------------------------------------
+
+const MIN_ROUGHEN_LENGTH = 6;
+
+/** Where in `polygon` the edge a-b sits (either direction): its start index and whether it runs b to a. */
+function findEdge(polygon: Vec2[], a: Vec2, b: Vec2): { at: number; reversed: boolean } | null {
+  const n = polygon.length;
+  for (let k = 0; k < n && n >= 2; k++) {
+    const p = polygon[k];
+    const q = polygon[(k + 1) % n];
+    if (dist(p, a) <= STACKED_EPS && dist(q, b) <= STACKED_EPS) {
+      return { at: k, reversed: false };
+    }
+    if (dist(p, b) <= STACKED_EPS && dist(q, a) <= STACKED_EPS) {
+      return { at: k, reversed: true };
+    }
+  }
+  return null;
+}
+
+/** Ids of the other same-layer regions that list exactly this edge. */
+export function edgeSharers(map: EditorMap, regionId: string, index: number): string[] {
+  const region = findRegion(map, regionId);
+  if (!region || region.polygon.length < 3) {
+    return [];
+  }
+  const a = region.polygon[index];
+  const b = region.polygon[(index + 1) % region.polygon.length];
+  if (!a || !b) {
+    return [];
+  }
+  return map.regions
+    .filter((r) => r.id !== regionId && r.is_sea === region.is_sea && findEdge(r.polygon, a, b) !== null)
+    .map((r) => r.id);
+}
+
+/** The edge of the region nearest `p` within `tol` that another region shares, as its start index, or -1. */
+export function nearestSharedEdge(map: EditorMap, regionId: string, p: Vec2, tol: number, only = ""): number {
+  const region = findRegion(map, regionId);
+  if (!region) {
+    return -1;
+  }
+  let best = -1;
+  let bestDist = tol;
+  const n = region.polygon.length;
+  for (let i = 0; i < n; i++) {
+    const d = dist(p, nearestOnSegment(p, region.polygon[i], region.polygon[(i + 1) % n]).point);
+    if (d > bestDist) {
+      continue;
+    }
+    const sharers = edgeSharers(map, regionId, i);
+    if (sharers.length > 0 && (only === "" || sharers.includes(only))) {
+      best = i;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * Turns one straight shared edge into a winding wargame border of 5 to 7 new points. The same points go
+ * into every region that shares the edge (in that region's own winding order), so no gap or overlap opens.
+ * `rand` returns [0, 1); pass a seeded one for a repeatable result.
+ */
+export function roughenEdge(
+  map: EditorMap,
+  regionId: string,
+  index: number,
+  rand: () => number,
+  minLength = MIN_ROUGHEN_LENGTH,
+): { map: EditorMap; added: number } | null {
+  const region = findRegion(map, regionId);
+  if (!region || region.polygon.length < 3) {
+    return null;
+  }
+  const a = region.polygon[index];
+  const b = region.polygon[(index + 1) % region.polygon.length];
+  if (!a || !b || dist(a, b) < minLength || edgeSharers(map, regionId, index).length === 0) {
+    return null;
+  }
+  const len = dist(a, b);
+  const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+  const normal = { x: -dir.y, y: dir.x };
+  const count = 5 + Math.floor(rand() * 3);
+  const amp = Math.min(len * 0.09, 8);
+  const phase1 = rand() * Math.PI * 2;
+  const phase2 = rand() * Math.PI * 2;
+  const along: Vec2[] = [];
+  for (let i = 1; i <= count; i++) {
+    const t = i / (count + 1) + (rand() - 0.5) * (0.5 / (count + 1));
+    const wiggle = 0.65 * Math.sin(phase1 + t * Math.PI * 2 * 1.4) + 0.35 * Math.sin(phase2 + t * Math.PI * 2 * 3.1);
+    const off = Math.max(-amp, Math.min(amp, amp * wiggle * (0.75 + rand() * 0.5)));
+    along.push({ x: a.x + dir.x * len * t + normal.x * off, y: a.y + dir.y * len * t + normal.y * off });
+  }
+  const insertInto = (polygon: Vec2[], at: number, reversed: boolean): Vec2[] => {
+    const pts = (reversed ? [...along].reverse() : along).map((p) => ({ ...p }));
+    return [...polygon.slice(0, at + 1), ...pts, ...polygon.slice(at + 1)];
+  };
+  const regions = map.regions.map((r) => {
+    if (r.id === regionId) {
+      return { ...r, polygon: insertInto(r.polygon, index, false) };
+    }
+    if (r.is_sea !== region.is_sea) {
+      return r;
+    }
+    const hit = findEdge(r.polygon, a, b);
+    return hit ? { ...r, polygon: insertInto(r.polygon, hit.at, hit.reversed) } : r;
+  });
+  return { map: { ...map, regions }, added: count };
+}
+
+// ---------------------------------------------------------------
 // Slicing
 // ---------------------------------------------------------------
 
@@ -657,6 +775,91 @@ export function applyMerge(
   return weldRegion(next, aId);
 }
 
+/**
+ * Folds the regions in `absorbIds` into `keepId`, whose id and settings win. `merged` is the combined geometry
+ * (touching outlines welded, separated islands kept as extra outlines) and the one anchor, which sits in the
+ * largest island. Every neighbor link of an absorbed region moves to the survivor, so the combined territory
+ * touches every sea zone and land neighbor any of its islands touched. Starting units move over too; a
+ * capital or factory on any of them survives.
+ */
+export function applyMergeMany(
+  map: EditorMap,
+  keepId: string,
+  absorbIds: string[],
+  merged: { polygon: Vec2[]; extra: Vec2[][]; cx: number; cy: number },
+): EditorMap | null {
+  const keep = findRegion(map, keepId);
+  const absorbed = [...new Set(absorbIds)].filter((id) => id !== keepId).map((id) => findRegion(map, id));
+  if (!keep || absorbed.length === 0 || absorbed.some((r) => !r)) {
+    return null;
+  }
+  const gone = new Set(absorbed.map((r) => (r as EditorRegion).id));
+  const level = (r: EditorRegion) => FACTORY_LEVELS.indexOf(r.factory);
+  const all = [keep, ...(absorbed as EditorRegion[])];
+  const factory = all.reduce((best, r) => (level(r) > FACTORY_LEVELS.indexOf(best) ? r.factory : best), keep.factory);
+  const move = (p: Pair): Pair | null => {
+    const x = gone.has(p[0]) ? keepId : p[0];
+    const y = gone.has(p[1]) ? keepId : p[1];
+    return x === y ? null : pairOf(x, y);
+  };
+  const remap = (list: Pair[]): Pair[] => uniquePairs(list.map(move).filter((p): p is Pair => p !== null));
+  const regions = map.regions
+    .filter((r) => !gone.has(r.id))
+    .map((r) => {
+      if (r.id !== keepId) {
+        return r;
+      }
+      const { extra: _old, ...rest } = r;
+      return {
+        ...rest,
+        polygon: merged.polygon.map((p) => ({ ...p })),
+        ...(merged.extra.length > 0 ? { extra: merged.extra.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
+        cx: merged.cx,
+        cy: merged.cy,
+        capital: all.some((x) => x.capital),
+        factory,
+      };
+    });
+  const next: EditorMap = {
+    ...map,
+    meta: mapStartingUnits(map.meta, (u) => (gone.has(u.region_id) ? { ...u, region_id: keepId } : u)),
+    regions,
+    links: remap(map.links),
+    auto: remap(map.auto),
+    overrides: { add: remap(map.overrides.add), remove: remap(map.overrides.remove) },
+  };
+  return weldRegion(next, keepId);
+}
+
+/** An untouched `Territory N`: nobody has named, owned, garrisoned or fortified it, so dropping it loses no work. */
+export function isUnconfiguredLand(map: EditorMap, region: EditorRegion): boolean {
+  return (
+    !region.is_sea &&
+    /^Territory \d+$/.test(region.id) &&
+    region.name === region.id &&
+    region.starting_owner.toLowerCase() === "neutral" &&
+    region.ipc_value <= 1 &&
+    region.factory === "none" &&
+    !region.capital &&
+    (region.extra ?? []).length === 0 &&
+    startingUnitsOf(map, region.id).length === 0
+  );
+}
+
+/** Removes every unconfigured land region whose visible area is under `threshold`. The land stays drawn on the map. */
+export function pruneSmallIslands(
+  map: EditorMap,
+  areaOf: (region: EditorRegion) => number,
+  threshold: number,
+): { map: EditorMap; removed: string[] } {
+  const removed = map.regions.filter((r) => isUnconfiguredLand(map, r) && areaOf(r) < threshold).map((r) => r.id);
+  let next = map;
+  for (const id of removed) {
+    next = deleteRegion(next, id);
+  }
+  return { map: next, removed };
+}
+
 /** Adds each outline as a new region of the layer, placed under the existing ones. */
 export function addBlocks(map: EditorMap, blocks: Vec2[][], sea: boolean, anchors: Vec2[]): { map: EditorMap; ids: string[] } {
   let next = map;
@@ -684,6 +887,41 @@ export function addBlocks(map: EditorMap, blocks: Vec2[][], sea: boolean, anchor
     next = weldRegion(next, id);
   }
   return { map: next, ids };
+}
+
+/**
+ * Detaches islands of a multi-island territory into regions of their own (default settings, like a fresh
+ * block). `only` lists the island indexes in `extra`; null takes them all. The territory keeps its id and its
+ * remaining islands. `anchors[i]` is the anchor of the i-th detached island.
+ */
+export function detachIslands(
+  map: EditorMap,
+  regionId: string,
+  only: number[] | null,
+  anchors: Vec2[] = [],
+): { map: EditorMap; ids: string[] } | null {
+  const region = findRegion(map, regionId);
+  const extra = region?.extra ?? [];
+  if (!region || region.is_sea || extra.length === 0) {
+    return null;
+  }
+  const take = new Set(only ?? extra.map((_, i) => i));
+  const taken = extra.filter((_, i) => take.has(i));
+  if (taken.length === 0) {
+    return null;
+  }
+  const kept = extra.filter((_, i) => !take.has(i));
+  const trimmed: EditorMap = {
+    ...map,
+    regions: map.regions.map((r) => {
+      if (r.id !== regionId) {
+        return r;
+      }
+      const { extra: _dropped, ...rest } = r;
+      return kept.length > 0 ? { ...rest, extra: kept } : rest;
+    }),
+  };
+  return addBlocks(trimmed, taken, false, anchors);
 }
 
 export function moveVertices(map: EditorMap, refs: VertexRef[], to: Vec2): EditorMap {
@@ -772,6 +1010,7 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
       factory: factoryLevelOf(meta),
       capital: Boolean(meta.victory ?? false),
       polygon: polygonOf(raw.polygon),
+      ...(shape.extra && shape.extra.length > 0 ? { extra: shape.extra.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
       cx: shape.anchor.x,
       cy: shape.anchor.y,
     });
@@ -825,7 +1064,7 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
     options.clipper
       ? {
           clipped_polygon: options.clipper
-            .clip({ id: region.id, type: region.is_sea ? "sea" : "land", points: region.polygon })
+            .clip({ id: region.id, type: region.is_sea ? "sea" : "land", points: region.polygon, extra: region.extra })
             .map((polygon) => polygon.map((ring) => ring.map(([x, y]) => [r(x), r(y)]))),
         }
       : {};
@@ -853,6 +1092,9 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         is_sea: region.is_sea,
       },
       polygon: region.polygon.map((p) => [r(p.x), r(p.y)]),
+      ...(region.extra && region.extra.length > 0
+        ? { extra_polygons: region.extra.map((ring) => ring.map((p) => [r(p.x), r(p.y)])) }
+        : {}),
       ...clipped(region),
       neighbors: neighborsOf(map, region.id),
     })),

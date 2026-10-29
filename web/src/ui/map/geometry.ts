@@ -28,6 +28,8 @@ export interface RegionShape {
   ipc: number;
   hasFactory: boolean;
   points: Vec2[];
+  /** The other islands of a multi-island territory (`extra_polygons`). Absent for an ordinary region. */
+  extra?: Vec2[][];
   bounds: Rect;
   centroid: Vec2;
   /** Where unit icons are laid out around. */
@@ -65,13 +67,18 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
     }
     const ipc = Math.trunc(Number(meta.ipc ?? 0));
     const points = polygonPoints(regionDict.polygon ?? []);
-    const bounds = polygonBounds(points);
+    const extra = (Array.isArray(regionDict.extra_polygons) ? regionDict.extra_polygons : [])
+      .map((ring: unknown) => polygonPoints(Array.isArray(ring) ? ring : []))
+      .filter((ring: Vec2[]) => ring.length >= 3);
+    // Bounds cover every island, so unit stacks clamp to the whole territory.
+    const bounds = polygonBounds(extra.length > 0 ? [...points, ...extra.flat()] : points);
     regions.push({
       id,
       type: inferRegionType(id, meta, ipc),
       ipc,
       hasFactory: Boolean(meta.factory ?? false),
       points,
+      ...(extra.length > 0 ? { extra } : {}),
       bounds,
       centroid: polygonCentroid(points),
       anchor: unitAnchor(regionDict, points, bounds),
@@ -127,7 +134,7 @@ export function pointInPolygon(p: Vec2, points: Vec2[]): boolean {
 
 export function regionAtPoint(map: MapGeometry, p: Vec2): string {
   for (const region of map.regions) {
-    if (pointInPolygon(p, region.points)) {
+    if (pointInPolygon(p, region.points) || (region.extra ?? []).some((ring) => pointInPolygon(p, ring))) {
       return region.id;
     }
   }

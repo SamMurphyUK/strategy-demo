@@ -342,7 +342,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
 export const LINK_COLORS = { land: "#3f6b2a", sea: "#2b5f9a", coastal: "#b5651d" } as const;
 export type EditorLinkKind = keyof typeof LINK_COLORS;
 
-export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link";
+export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote";
 
 export interface EditorOverlay {
   regions: RegionShape[];
@@ -351,6 +351,8 @@ export interface EditorOverlay {
   selectedId: string;
   /** The second region of a merge (Shift-click), or "". */
   secondId: string;
+  /** Every region picked for the merge besides the selected one (secondId is the first of them). */
+  mergeIds?: string[];
   linkFirstId: string;
   draft: Vec2[];
   drawSea: boolean;
@@ -390,15 +392,18 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   }
   ctx.globalAlpha = 1;
 
-  // The second region of a merge.
-  const second = editor.secondId === "" ? undefined : editor.paths.get(editor.secondId);
-  if (second) {
-    ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(43, 108, 176, 0.2)";
-    ctx.fill(second, "evenodd");
-    ctx.lineWidth = 2.5 * px;
-    ctx.strokeStyle = MERGE_COLOR;
-    ctx.stroke(second);
+  // The other regions picked for a merge. Each path covers every island of its territory.
+  const picked = new Set([...(editor.secondId === "" ? [] : [editor.secondId]), ...(editor.mergeIds ?? [])]);
+  for (const id of picked) {
+    const path = editor.paths.get(id);
+    if (path) {
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(43, 108, 176, 0.2)";
+      ctx.fill(path, "evenodd");
+      ctx.lineWidth = 2.5 * px;
+      ctx.strokeStyle = MERGE_COLOR;
+      ctx.stroke(path);
+    }
   }
 
   // Neighbor links, dotted, colour-coded.

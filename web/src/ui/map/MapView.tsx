@@ -32,8 +32,10 @@ export interface EditorBinding {
   onDragEnd(handle: unknown): void;
   /** True when a press-and-drag should draw a straight cut (the knife with no line started). */
   swipeable(): boolean;
-  /** A dragged straight line from `from` to `to`; `done` is true when the pointer is released. */
-  onSwipe(from: Vec2, to: Vec2, tolWorld: number, done: boolean): void;
+  /** A freehand stroke starts (the pointer moved far enough from where it went down). */
+  strokeBegin(): void;
+  /** The world points of the stroke so far; `pxToWorld` is world units per screen pixel. `done` on release. */
+  onStroke(points: Vec2[], pxToWorld: number, done: boolean): void;
 }
 
 export interface MapViewProps {
@@ -56,7 +58,10 @@ export interface MapViewProps {
 }
 
 const DRAG_THRESHOLD_PX = 4;
-const SNAP_PX = 8;
+/** The knife turns a drag into a freehand stroke after this much travel, then samples every STROKE_STEP_PX. */
+const STROKE_START_PX = 6;
+const STROKE_STEP_PX = 3;
+export const SNAP_PX = 8;
 const HANDLE_PX = 10;
 const COUNTER_HIT_PX = 18;
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
@@ -64,7 +69,7 @@ const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
 type Drag =
   | { kind: "pan"; startX: number; startY: number; view: View; moved: boolean }
   | { kind: "handle"; handle: unknown }
-  | { kind: "swipe"; from: Vec2; to: Vec2; moved: boolean; startX: number; startY: number };
+  | { kind: "swipe"; from: Vec2; points: Vec2[]; moved: boolean; startX: number; startY: number; lastX: number; lastY: number };
 
 export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
@@ -201,7 +206,7 @@ export function MapView(props: MapViewProps) {
       drag.current = { kind: "handle", handle };
     } else if (ed?.swipeable() && !e.altKey) {
       // Knife: dragging draws the cut. Alt-drag still pans.
-      drag.current = { kind: "swipe", from, to: from, moved: false, startX: e.clientX, startY: e.clientY };
+      drag.current = { kind: "swipe", from, points: [], moved: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
     } else {
       drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
     }
@@ -218,12 +223,20 @@ export function MapView(props: MapViewProps) {
       return;
     }
     if (d?.kind === "swipe") {
-      if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) {
-        return;
+      if (!d.moved) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < STROKE_START_PX) {
+          return;
+        }
+        d.moved = true;
+        d.points = [d.from];
+        p.editor?.strokeBegin();
       }
-      d.moved = true;
-      d.to = world;
-      p.editor?.onSwipe(d.from, world, SNAP_PX / v.k, false);
+      if (Math.hypot(e.clientX - d.lastX, e.clientY - d.lastY) >= STROKE_STEP_PX) {
+        d.lastX = e.clientX;
+        d.lastY = e.clientY;
+        d.points.push(world);
+        p.editor?.onStroke(d.points, 1 / v.k, false);
+      }
       return;
     }
     if (d?.kind === "pan") {
@@ -262,7 +275,12 @@ export function MapView(props: MapViewProps) {
       return;
     }
     if (d.kind === "swipe" && d.moved) {
-      p.editor?.onSwipe(d.from, screenToWorld(v, pointer(e)), SNAP_PX / v.k, true);
+      const end = screenToWorld(v, pointer(e));
+      const last = d.points[d.points.length - 1];
+      if (!last || Math.hypot(end.x - last.x, end.y - last.y) * v.k >= 1) {
+        d.points.push(end);
+      }
+      p.editor?.onStroke(d.points, 1 / v.k, true);
       return;
     }
     if (d.kind === "swipe") {

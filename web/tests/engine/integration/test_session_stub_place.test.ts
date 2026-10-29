@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { GameSessionStub } from "../../../src/engine";
+import { type GameSessionStub } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function advanceToMobilize(s: GameSessionStub): void {
   for (let i = 0; i < 4; i++) {
@@ -32,8 +33,7 @@ describe("integration/test_session_stub_place", () => {
   let demoStub: GameSessionStub;
 
   beforeEach(() => {
-    demoStub = new GameSessionStub();
-    demoStub.initializeDemo(12345);
+    demoStub = campaignSession();
   });
 
   it("test_place_consumes_pending_and_updates_region_units", () => {

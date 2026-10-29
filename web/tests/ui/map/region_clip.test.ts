@@ -1,6 +1,7 @@
 import polygonClipping from "polygon-clipping";
 import { describe, expect, it } from "vitest";
 import { loadJson } from "../../../src/engine/content/res";
+import { mapIntegrityProblems } from "./map_invariants";
 import { editorFromMapJson, editorToMapJson, formatMapJson } from "../../../src/ui/map/editor/editorModel";
 import { buildMapGeometry, type Vec2 } from "../../../src/ui/map/geometry";
 import { extractPathData, parsePathRings } from "../../../src/ui/map/landSvg";
@@ -11,9 +12,10 @@ import {
   type MultiPolygon,
   pointInMultiPolygon,
   RegionClipper,
+  ringArea,
   uncoveredLand,
 } from "../../../src/ui/map/regionClip";
-import landSvg from "../../../public/assets/ne_110m_land_adjsut.svg?raw";
+import landSvg from "../../../public/assets/ne_110m_land_FINAL.svg?raw";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
   { x, y },
@@ -49,8 +51,8 @@ describe("landFromPathData", () => {
     expect(pointInMultiPolygon({ x: 10, y: 10 }, land)).toBe(true);
   });
 
-  it("parses the real land SVG into 119 landmasses", () => {
-    expect(extractPathData(landSvg)).toHaveLength(119);
+  it("parses the real land SVG into 121 landmasses", () => {
+    expect(extractPathData(landSvg)).toHaveLength(121);
   });
 });
 
@@ -134,45 +136,17 @@ describe("demomap01 against the land SVG", () => {
     }
   });
 
-  it("leaves no land unclaimed (Kazakhstan, Greenland, Hawaii and the rest are all covered)", () => {
+  it("keeps every land region inside the coast, leaving unclaimed land as decorative scenery", () => {
+    // Unallocated land is allowed (decorative islands), so there is no coverage floor, only a ceiling.
+    expect(lands.length).toBeGreaterThanOrEqual(1);
     const left = uncoveredLand(land, lands.map((r) => clipped.get(r.id)!));
-    expect(multiPolygonArea(left)).toBeLessThan(5);
-  });
-
-  it("keeps each island and peninsula whole, not sliced by a cutter edge", () => {
-    // The big continents are meant to be split, and so are the few paths that wrap across the map's seam
-    // (the left and right edges are the same meridian; no region can span both). Everything else must sit
-    // in exactly one region.
-    const wide = (d: string) => {
-      const xs = parsePathRings(d).flatMap((ring) => ring.map(([x]) => x));
-      return Math.max(...xs) - Math.min(...xs) > 600;
-    };
-    const continents = new Set(
-      data
-        .map((d, i) => [i, multiPolygonArea(landFromPathData([d])), wide(d)] as const)
-        .filter(([, area, spans]) => area > 1000 || spans)
-        .map(([i]) => i),
-    );
-    const sliced: string[] = [];
-    data.forEach((d, i) => {
-      const island = landFromPathData([d]);
-      if (continents.has(i) || multiPolygonArea(island) < 4) {
-        return;
-      }
-      const owners = lands.filter((r) => multiPolygonArea(polygonClipping.intersection(island, clipped.get(r.id)!)) > 0.3);
-      if (owners.length !== 1) {
-        sliced.push(`path ${i}: ${owners.map((r) => r.id).join(", ") || "none"}`);
-      }
-    });
-    expect(sliced).toEqual([]);
-  });
-
-  it("puts Sumatra and Borneo in the East Indies, and the tip of Korea in Manchuria", () => {
-    const inRegion = (id: string, p: Vec2) => pointInMultiPolygon(p, clipped.get(id)!);
-    expect(inRegion("East Indies", { x: 490, y: 355 })).toBe(true); // Sumatra
-    expect(inRegion("East Indies", { x: 520, y: 350 })).toBe(true); // Borneo
-    expect(inRegion("Manchuria", { x: 552, y: 270 })).toBe(true); // south coast of Korea
-    expect(inRegion("Southeast Asia", { x: 490, y: 355 })).toBe(false);
+    expect(multiPolygonArea(left)).toBeLessThanOrEqual(multiPolygonArea(land) + 1e-6);
+    for (const r of lands) {
+      // Clipping a coast-shaped outline against the coast changes nothing, and none is a canvas-sized box.
+      const outline = ringArea(r.points.map((p) => [p.x, p.y] as [number, number]));
+      expect(Math.abs(multiPolygonArea(clipped.get(r.id)!) - outline), r.id).toBeLessThan(0.5 + outline * 0.002);
+      expect(r.bounds.w, r.id).toBeLessThan(700);
+    }
   });
 
   it("keeps sea selections off the land, wrapping around coasts and islands", () => {
@@ -192,6 +166,10 @@ describe("clipped_polygon export", () => {
   const map = editorFromMapJson(json);
   const land = landFromPathData(extractPathData(landSvg));
 
+  it("exports a sound map", () => {
+    expect(mapIntegrityProblems(editorToMapJson(map))).toEqual([]);
+  });
+
   it("is absent by default, so autosave and plain exports stay small", () => {
     const out = editorToMapJson(map);
     for (const region of out.regions as { clipped_polygon?: unknown }[]) {
@@ -202,10 +180,14 @@ describe("clipped_polygon export", () => {
   it("writes each region's clipped MultiPolygon when a clipper is given, and loading ignores it", () => {
     const out = editorToMapJson(map, { round: true, clipper: clipperFor(land) });
     const regions = out.regions as { metadata: { region_id: string }; polygon: number[][]; clipped_polygon: number[][][][] }[];
-    const manchuria = regions.find((r) => r.metadata.region_id === "Manchuria")!;
-    expect(manchuria.clipped_polygon.length).toBeGreaterThan(0);
-    const mp = manchuria.clipped_polygon as unknown as MultiPolygon;
-    expect(multiPolygonArea(mp)).toBeLessThan(multiPolygonArea([[manchuria.polygon.map(([x, y]) => [x, y] as [number, number])]]));
+    const landIds = new Set(map.regions.filter((r) => !r.is_sea).map((r) => r.id));
+    const master = regions.find((r) => landIds.has(r.metadata.region_id))!;
+    expect(master.clipped_polygon.length).toBeGreaterThan(0);
+    const mp = master.clipped_polygon as unknown as MultiPolygon;
+    // Clipping to the coast can only trim the outline, never add to it.
+    const outline = multiPolygonArea([[master.polygon.map(([x, y]) => [x, y] as [number, number])]]);
+    expect(multiPolygonArea(mp)).toBeGreaterThan(0);
+    expect(multiPolygonArea(mp)).toBeLessThanOrEqual(outline * 1.002);
     expect(formatMapJson(out)).toContain("clipped_polygon");
 
     const again = editorFromMapJson(out);

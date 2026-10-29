@@ -86,9 +86,13 @@ export class GameSessionStub {
   private _fixedTimestamp = 0;
 
   initializeDemo(seed = 12345): void {
+    this.initializeFromMap(loadJson(NEWMAP_PATH), seed);
+  }
+
+  /** Same boot as initializeDemo, against a map JSON other than the live demomap01.json. */
+  initializeFromMap(mapJson: Dict, seed = 12345): void {
     this._demoSeed = seed;
     this._fixedTimestamp = 1680000000;
-    const mapJson = loadJson(NEWMAP_PATH);
     this.initSession(
       buildMapData(mapJson),
       loadJson(UNITS_PATH),

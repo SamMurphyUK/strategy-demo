@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Dict, GameSessionStub } from "../../../src/engine";
+import { type Dict, type GameSessionStub } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   for (const rid of Object.keys(stub.state.regions)) {
@@ -31,8 +32,7 @@ function hasEvent(events: Dict[], typeName: string): boolean {
 
 describe("integration/test_mobilize_drag_place", () => {
   it("test_place_units_emits_unitsplaced_and_updates_snapshot", () => {
-    const demoStub = new GameSessionStub();
-    demoStub.initializeDemo(12345);
+    const demoStub = campaignSession();
     demoStub.applyCommand({
       command_id: "drag_p1",
       player_id: demoStub.state.current_faction_id,

@@ -81,7 +81,9 @@ export function buildFactionsData(mapJson: Dict = {}): Dict {
 }
 
 export function buildSetupData(mapJson: Dict): Dict {
-  if (Array.isArray(mapJson.starting_units) && mapJson.starting_units.length > 0) {
+  // An authored list, including an empty one, is the whole setup. The region_1 fallback below is only
+  // for older files that omit the key; a blank slicing map must be allowed to start with no units.
+  if (Array.isArray(mapJson.starting_units)) {
     const order = Array.isArray(mapJson.turn_order) ? mapJson.turn_order : [...TURN_ORDER];
     return { schema_version: "0.5", turn_order: order, starting_units: mapJson.starting_units };
   }

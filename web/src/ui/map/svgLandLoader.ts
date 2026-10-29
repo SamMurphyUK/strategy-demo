@@ -3,7 +3,7 @@ import type { Rect } from "./geometry";
 import { combinePathData, parseViewBox } from "./landSvg";
 import { landFromPathData, type MultiPolygon } from "./regionClip";
 
-export const LAND_SVG_URL = `${import.meta.env.BASE_URL}assets/ne_110m_land_adjsut.svg`;
+export const LAND_SVG_URL = `${import.meta.env.BASE_URL}assets/ne_110m_land_FINAL.svg`;
 
 export interface MasterLand {
   /** Every land path in the SVG, in viewBox units. Fill with nonzero so lakes (opposite winding) stay open. */

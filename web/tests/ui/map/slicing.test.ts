@@ -10,13 +10,28 @@ import {
   editorFromMapJson,
   editorToMapJson,
   type EditorMap,
+  edgeSharers,
   findRegion,
+  nearestSharedEdge,
+  roughenEdge,
   setStartingUnits,
   startingUnitsOf,
   subdivideEdge,
   toggleLink,
 } from "../../../src/ui/map/editor/editorModel";
-import { anchorFor, interiorPoint, masterBlocks, mergePolygons, splitPolygon, splitPolygonInto } from "../../../src/ui/map/editor/slicing";
+import {
+  anchorFor,
+  carveLoop,
+  chaikin,
+  interiorPoint,
+  masterBlocks,
+  mergePolygons,
+  prepareStroke,
+  rdp,
+  removeLoops,
+  splitPolygon,
+  splitPolygonInto,
+} from "../../../src/ui/map/editor/slicing";
 import { multiPolygonArea, type MultiPolygon, RegionClipper, ringArea } from "../../../src/ui/map/regionClip";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
@@ -56,12 +71,20 @@ describe("knife", () => {
     expect(shared.some((v) => v.x === 55.123456789 && v.y === 40.987654321)).toBe(true);
   });
 
-  it("extends the line's ends, so it only has to be aimed across the region", () => {
-    const r = splitPolygon(square(0, 0, 100), [
-      { x: 30, y: 30 },
-      { x: 60, y: 60 },
-    ]);
-    expect(r.ok).toBe(true);
+  it("stretches an end that stopped short of the edge, but only by the reach", () => {
+    const shortOfBothEdges = [
+      { x: 8, y: 50 },
+      { x: 92, y: 50 },
+    ];
+    expect(splitPolygon(square(0, 0, 100), shortOfBothEdges).ok).toBe(true);
+    expect(splitPolygon(square(0, 0, 100), shortOfBothEdges, { reach: 5 }).ok).toBe(false);
+    // 30 from the left edge is beyond the 25 reach: the line is refused, never extended across the map.
+    expect(
+      splitPolygon(square(0, 0, 100), [
+        { x: 30, y: 50 },
+        { x: 92, y: 50 },
+      ]).ok,
+    ).toBe(false);
   });
 
   it("cuts a concave region when the line crosses its outline twice", () => {
@@ -164,17 +187,28 @@ describe("master blocks", () => {
   const land: MultiPolygon = [[[[50, 50], [350, 50], [350, 350], [50, 350]]]];
   const canvas = { x: 0, y: 0, w: 400, h: 400 };
 
-  it("makes one block covering the whole canvas for an empty layer", () => {
+  it("makes a block shaped like the coast, not like the canvas", () => {
     const r = masterBlocks([], canvas, "land", new RegionClipper(land));
     expect(r.blocks).toHaveLength(1);
-    expect(area(r.blocks[0])).toBe(160000);
+    expect(area(r.blocks[0])).toBe(90000);
+    expect(r.blocks[0].every((p) => p.x >= 50 && p.x <= 350 && p.y >= 50 && p.y <= 350)).toBe(true);
   });
 
   it("covers only what is unallocated, so existing regions are left alone", () => {
     const r = masterBlocks([square(0, 0, 200)], canvas, "land", new RegionClipper(land));
     expect(r.blocks).toHaveLength(1);
-    // The canvas minus a 200x200 corner: 160000 - 40000.
-    expect(area(r.blocks[0])).toBeCloseTo(120000, 6);
+    // The 300x300 land minus the 150x150 corner a 200x200 cutter takes of it.
+    expect(area(r.blocks[0])).toBeCloseTo(90000 - 22500, 6);
+  });
+
+  it("makes one block per landmass, largest first, so a cut on one never reaches another", () => {
+    const world: MultiPolygon = [
+      [[[300, 300], [320, 300], [320, 320], [300, 320]]], // an island
+      [[[20, 20], [220, 20], [220, 140], [20, 140]]], // a continent
+      [[[40, 300], [140, 300], [140, 380], [40, 380]]], // another
+    ];
+    const r = masterBlocks([], canvas, "land", new RegionClipper(world));
+    expect(r.blocks.map(area)).toEqual([24000, 8000, 400]);
   });
 
   it("drops leftovers with no land in them, and returns nothing when everything is allocated", () => {
@@ -195,9 +229,12 @@ describe("master blocks", () => {
     expect(shown).toBeCloseTo(160000 - 10000 - 2500, 3);
   });
 
-  it("makes sea blocks from the water the land leaves", () => {
-    const r = masterBlocks([], canvas, "sea", new RegionClipper(land));
+  it("makes sea blocks from the water the land leaves, with the coast as their outline", () => {
+    const clipper = new RegionClipper(land);
+    const r = masterBlocks([], canvas, "sea", clipper);
     expect(r.blocks).toHaveLength(1);
+    const shown = multiPolygonArea(clipper.clip({ id: "s", type: "sea", points: r.blocks[0] }));
+    expect(shown).toBeCloseTo(160000 - 90000, 3);
   });
 
   it("adds blocks under the existing regions, welded to them", () => {
@@ -434,5 +471,146 @@ describe("inspector data", () => {
     expect(meta.map((m: Record<string, unknown>) => m.factory)).toEqual([false, true, true]);
     const back = editorFromMapJson(json);
     expect(back.regions.map((r) => r.factory)).toEqual(["none", "minor", "major"]);
+  });
+});
+
+describe("knife on the real outline", () => {
+  const opts = { tolerance: 1, smooth: false, tangentSpan: 18, closeDist: 20, minLoop: 12 };
+  const circle = (cx: number, cy: number, r: number, from: number, to: number, n = 48): Vec2[] =>
+    Array.from({ length: n + 1 }, (_, i) => {
+      const a = from + ((to - from) * i) / n;
+      return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+    });
+  const inside = (p: Vec2, ring: Vec2[]) => ring.some((q) => q.x === p.x && q.y === p.y);
+
+  it("carves a closed circular territory out of the middle of a landmass", () => {
+    const country = square(0, 0, 200);
+    // A hand-drawn circle that stops 10px short of where it began.
+    const raw = circle(100, 100, 30, 0, Math.PI * 2 - 0.33);
+    const prepared = prepareStroke(raw, opts)!;
+    expect(prepared.loop).not.toBeNull();
+    const r = carveLoop(country, prepared.loop!);
+    if (!r.ok) {
+      throw new Error(r.error);
+    }
+    expect(r.pieces).toHaveLength(2);
+    const [outer, carved] = r.pieces;
+    expect(area(outer) + area(carved)).toBeCloseTo(40000, 3);
+    expect(area(carved)).toBeGreaterThan(2500);
+    expect(area(carved)).toBeLessThan(Math.PI * 900 + 1);
+    // The new country is entirely within the circle, and the two share their border exactly.
+    expect(carved.every((p) => Math.hypot(p.x - 100, p.y - 100) <= 30.5)).toBe(true);
+    expect(carved.every((p) => outer.some((q) => same(p, q)))).toBe(true);
+    // The big country keeps the original id: it comes first, though the carved piece is far smaller.
+    expect(r.ordered).toBe(true);
+    expect(area(outer)).toBeGreaterThan(area(carved));
+  });
+
+  it("recognises a loop by the stroke crossing itself, and ignores tremor loops", () => {
+    const overshoot = circle(100, 100, 30, 0, Math.PI * 2 + 0.6);
+    expect(prepareStroke(overshoot, opts)!.loop).not.toBeNull();
+    const withTremor = [{ x: 0, y: 100 }, { x: 40, y: 100 }, { x: 44, y: 94 }, { x: 48, y: 104 }, { x: 40, y: 100.5 }, { x: 80, y: 100 }, { x: 200, y: 100 }];
+    const prepared = prepareStroke(withTremor, opts)!;
+    expect(prepared.loop).toBeNull();
+  });
+
+  it("does not turn a long open stroke whose ends are far apart into a loop", () => {
+    const arc = circle(100, 100, 60, 0, Math.PI);
+    expect(prepareStroke(arc, opts)!.loop).toBeNull();
+  });
+
+  it("refuses a loop outside the region, and one that swallows it", () => {
+    expect(carveLoop(square(0, 0, 100), circle(300, 300, 20, 0, 6.28)).ok).toBe(false);
+    expect(carveLoop(square(0, 0, 100), circle(50, 50, 200, 0, 6.28)).ok).toBe(false);
+  });
+
+  it("carves only what is land when a loop spills over the coast", () => {
+    const r = carveLoop(square(0, 0, 100), [{ x: 80, y: 20 }, { x: 140, y: 20 }, { x: 140, y: 80 }, { x: 80, y: 80 }]);
+    if (!r.ok) {
+      throw new Error(r.error);
+    }
+    expect(r.pieces).toHaveLength(2);
+    expect(area(r.pieces[1])).toBeCloseTo(20 * 60, 6);
+  });
+
+  describe("a peninsula on a continent, with other land across the water", () => {
+    // Mainland 0..200 with a peninsula 40 tall reaching east to x=260, plus Australia-like land due east.
+    const land: MultiPolygon = [
+      [[[0, 0], [200, 0], [200, 80], [260, 80], [260, 120], [200, 120], [200, 200], [0, 200]]],
+      [[[300, 60], [420, 60], [420, 140], [300, 140]]],
+      [[[30, 300], [130, 300], [130, 380], [30, 380]]],
+    ];
+    const blocks = () => masterBlocks([], { x: 0, y: 0, w: 800, h: 504 }, "land", new RegionClipper(land)).blocks;
+
+    it("splits land into a region per landmass", () => {
+      const found = blocks();
+      expect(found).toHaveLength(3);
+      expect(found.map(area).sort((a, b) => b - a)).toEqual([40000 + 40 * 60, 120 * 80, 100 * 80].sort((a, b) => b - a));
+    });
+
+    it("cuts the peninsula neck when the stroke stops within 10px of the coast, and touches nothing else", () => {
+      const [mainland] = blocks();
+      expect(area(mainland)).toBe(42400);
+      // Vertical stroke across the 40-tall peninsula, 8px short of the north and south shores.
+      const stroke = [{ x: 230, y: 88 }, { x: 230, y: 112 }];
+      const r = splitPolygonInto(mainland, stroke, { reach: 25 });
+      if (!r.ok) {
+        throw new Error(r.error);
+      }
+      expect(r.pieces).toHaveLength(2);
+      const [big, tip] = r.pieces;
+      expect(area(tip)).toBeCloseTo(30 * 40, 6);
+      expect(area(big) + area(tip)).toBeCloseTo(42400, 6);
+      // Everything stayed on the mainland: nothing reaches the land across the water (x >= 300) or below.
+      const all = [...big, ...tip];
+      expect(Math.max(...all.map((p) => p.x))).toBeLessThanOrEqual(260);
+      expect(Math.max(...all.map((p) => p.y))).toBeLessThanOrEqual(200);
+      expect(Math.min(...all.map((p) => p.y))).toBeGreaterThanOrEqual(0);
+      // The cut itself is the short chord between the two shores, not a line across the map.
+      // It runs from shore (y=80) to shore (y=120) through the two points drawn, nowhere else.
+      const cut = big.filter((p) => p.x === 230).map((p) => p.y).sort((a, b) => a - b);
+      expect(cut).toEqual([80, 88, 112, 120]);
+      expect(big.filter((p) => p.x === 230).every((p) => inside(p, tip))).toBe(true);
+    });
+
+    it("refuses the same stroke when it stops more than the reach from the coast", () => {
+      const [mainland] = blocks();
+      const r = splitPolygonInto(mainland, [{ x: 230, y: 98 }, { x: 230, y: 102 }], { reach: 10 });
+      expect(r.ok).toBe(false);
+    });
+
+    it("cuts a coast-to-coast border through the mainland and leaves the other landmasses as they were", () => {
+      const found = blocks();
+      const [mainland, australia, island] = found;
+      const r = splitPolygonInto(mainland, [{ x: 100, y: -5 }, { x: 100, y: 205 }]);
+      if (!r.ok) {
+        throw new Error(r.error);
+      }
+      expect(r.pieces).toHaveLength(2);
+      expect(area(r.pieces[0]) + area(r.pieces[1])).toBeCloseTo(42400, 6);
+      expect(area(australia)).toBe(120 * 80);
+      expect(area(island)).toBe(100 * 80);
+    });
+  });
+
+  it("bites a coastal country out with a stroke that goes in and out through the same coast", () => {
+    const country = square(0, 0, 100);
+    const r = splitPolygonInto(country, [{ x: 30, y: -20 }, { x: 50, y: 40 }, { x: 70, y: -20 }]);
+    if (!r.ok) {
+      throw new Error(r.error);
+    }
+    expect(r.pieces).toHaveLength(2);
+    const [rest, bite] = r.pieces;
+    expect(area(rest) + area(bite)).toBeCloseTo(10000, 6);
+    // The bite is closed by the shore between entry and exit: it stays under the cut and inside the two crossings.
+    expect(Math.min(...bite.map((p) => p.x))).toBeGreaterThanOrEqual(36);
+    expect(Math.max(...bite.map((p) => p.x))).toBeLessThanOrEqual(64);
+    expect(Math.max(...bite.map((p) => p.y))).toBeCloseTo(40, 6);
+    expect(bite.some((p) => p.y === 0)).toBe(true);
+  });
+
+  it("stretches a bite stroke that stopped just inside the coast on its way out", () => {
+    const r = splitPolygonInto(square(0, 0, 100), [{ x: 30, y: -20 }, { x: 50, y: 40 }, { x: 62, y: 8 }]);
+    expect(r.ok).toBe(true);
   });
 });

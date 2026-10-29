@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type Dict, GameSessionStub } from "../../../src/engine";
+import { type Dict } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function hasEventType(events: Dict[], typeName: string): boolean {
   return events.some((evt) => String(evt.type ?? "") === typeName);
@@ -7,8 +8,7 @@ function hasEventType(events: Dict[], typeName: string): boolean {
 
 describe("integration/test_session_stub_collect_income", () => {
   it("test_end_turn_collects_income_from_owned_land", () => {
-    const stub = new GameSessionStub();
-    stub.initializeDemo(12345);
+    const stub = campaignSession();
     for (let i = 0; i < 5; i++) {
       stub.applyCommand({ command_id: `ep_${i}`, player_id: stub.state.current_faction_id, type: "end_phase", payload: {} });
     }

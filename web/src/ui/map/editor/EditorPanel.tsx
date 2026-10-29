@@ -200,7 +200,30 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
               </button>
             </div>
 
-            <p className="muted field-wide mono">{selected.polygon.length} vertices</p>
+            <p className="muted field-wide mono">
+              {selected.polygon.length} vertices
+              {(selected.extra ?? []).length > 0 ? ` \u00b7 ${(selected.extra ?? []).length + 1} islands` : ""}
+            </p>
+            {(selected.extra ?? []).length > 0 && (
+              <button
+                type="button"
+                className="field-wide"
+                title="Break this territory back into one region per island. The main island keeps this id; each other island becomes a new default territory."
+                onClick={editor.splitIslands}
+              >
+                Unmerge / Split Islands
+              </button>
+            )}
+            {!selected.is_sea && (
+              <button
+                type="button"
+                className="field-wide"
+                title="Remove this region from play (Delete or Backspace). The land stays on the map as plain terrain with no id, IPC or selection box. The Promote tool brings it back."
+                onClick={editor.makeDecorative}
+              >
+                Mark as Decorative (Unplayable)
+              </button>
+            )}
             <button type="button" className="field-wide danger" onClick={editor.removeSelected}>
               Delete region
             </button>

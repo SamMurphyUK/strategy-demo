@@ -12,6 +12,7 @@ import {
   Unit,
   type UnitStackEntry,
 } from "../../../src/engine";
+import { campaignSession } from "../campaign_session";
 
 function newState(): GameState {
   const state = new GameState();
@@ -212,8 +213,7 @@ describe("core/test_battle", () => {
 
 describe("session battle commands", () => {
   function demoInCombat(): { s: GameSessionStub; send: (type: string, payload?: Dict) => ReturnType<GameSessionStub["applyCommand"]> } {
-    const s = new GameSessionStub();
-    s.initializeDemo(12345);
+    const s = campaignSession();
     let n = 0;
     const send = (type: string, payload: Dict = {}) =>
       s.applyCommand({ command_id: `t${++n}`, player_id: s.state.current_faction_id, type, payload });

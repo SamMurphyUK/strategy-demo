@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadJson } from "../../../src/engine/content/res";
+import { mapIntegrityProblems } from "./map_invariants";
 import {
   baseMapRect,
   buildMapGeometry,
@@ -135,9 +136,16 @@ describe("fills", () => {
 describe("demomap01", () => {
   const map = buildMapGeometry(loadJson("res://demomap01.json"));
 
+  it("is a sound map: unique ids, real outlines, anchors and symmetric neighbors", () => {
+    expect(mapIntegrityProblems(loadJson("res://demomap01.json"))).toEqual([]);
+  });
+
   it("loads every region of the world scenario", () => {
     expect(map.baseMap).toBe("");
-    expect(map.regions.length).toBe(52);
+    const ids = map.regions.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(map.regions.some((r) => r.type === "land")).toBe(true);
+    expect(map.regions.some((r) => r.type === "sea")).toBe(true);
     for (const region of map.regions) {
       expect(region.points.length).toBeGreaterThanOrEqual(3);
       expect(region.bounds.w).toBeGreaterThan(0);
