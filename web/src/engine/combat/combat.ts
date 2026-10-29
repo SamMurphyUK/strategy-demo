@@ -107,7 +107,7 @@ export class CombatEngine {
         return false;
       }
       if (battle.battle_type === "land") {
-        return region.isLandRegion() && region.owner_faction_id === attacker;
+        return region.isLandRegion() && this.state.sameTeam(region.owner_faction_id, attacker);
       }
       return region.isSeaRegion();
     });
@@ -265,7 +265,10 @@ export class CombatEngine {
 
   private defenderIn(regionId: string, attackerFactionId: string): string {
     for (const entry of this.state.region_units[regionId] ?? []) {
-      if (entry.faction_id !== attackerFactionId && isCombatUnit(this.state.unit_types[entry.unit_type_id])) {
+      if (
+        !this.state.sameTeam(String(entry.faction_id ?? ""), attackerFactionId) &&
+        isCombatUnit(this.state.unit_types[entry.unit_type_id])
+      ) {
         return entry.faction_id;
       }
     }

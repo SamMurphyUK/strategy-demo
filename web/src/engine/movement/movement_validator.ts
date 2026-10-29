@@ -210,7 +210,7 @@ export class MovementValidator {
   /** Returns true on the first non-friendly entry with count > 0, and false if that first entry is empty. */
   private regionHasEnemyUnits(regionId: string, factionId: string, state: GameState): boolean {
     for (const entry of state.getUnitsInRegion(regionId)) {
-      if (String(entry.faction_id ?? "") !== factionId) {
+      if (!state.sameTeam(String(entry.faction_id ?? ""), factionId)) {
         return Math.trunc(Number(entry.count ?? 0)) > 0;
       }
     }

@@ -4,11 +4,11 @@ import { GameSessionStub, MovementValidator, Ruleset } from "../../../src/engine
 function findAlliesInfantryMovePair(s: GameSessionStub): { from: string; to: string } | null {
   const validator = new MovementValidator();
   for (const regionId of Object.keys(s.state.region_units)) {
-    if (s.state.movableStackCount("allies", regionId, "infantry") <= 0) {
+    if (s.state.movableStackCount(s.state.current_faction_id, regionId, "infantry") <= 0) {
       continue;
     }
     const legal = validator.getLegalDestinationsForStack(
-      regionId, "infantry", "allies", s.state, s.ruleset as Ruleset,
+      regionId, "infantry", s.state.current_faction_id, s.state, s.ruleset as Ruleset,
     );
     if (legal.length === 0) {
       continue;
@@ -24,7 +24,7 @@ describe("integration/test_session_stub_move_once", () => {
   beforeEach(() => {
     session = new GameSessionStub();
     session.initializeDemo(12345);
-    session.applyCommand({ command_id: "to_combat", player_id: "allies", type: "end_phase", payload: {} });
+    session.applyCommand({ command_id: "to_combat", player_id: session.state.current_faction_id, type: "end_phase", payload: {} });
   });
 
   it("test_second_move_from_destination_rejected", () => {
@@ -36,7 +36,7 @@ describe("integration/test_session_stub_move_once", () => {
 
     const first = session.applyCommand({
       command_id: "move_1",
-      player_id: "allies",
+      player_id: session.state.current_faction_id,
       type: "move_units",
       payload: { moves: [{
         from_region_id: fromRegion,
@@ -48,7 +48,7 @@ describe("integration/test_session_stub_move_once", () => {
 
     const second = session.applyCommand({
       command_id: "move_2",
-      player_id: "allies",
+      player_id: session.state.current_faction_id,
       type: "move_units",
       payload: { moves: [{
         from_region_id: toRegion,

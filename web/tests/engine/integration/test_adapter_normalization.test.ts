@@ -7,7 +7,7 @@ describe("integration/test_adapter_normalization", () => {
     const adapter = GameSessionAdapter.fromSession(session);
     const result = adapter.applyCommand({
       command_id: "an1",
-      player_id: "allies",
+      player_id: session.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });

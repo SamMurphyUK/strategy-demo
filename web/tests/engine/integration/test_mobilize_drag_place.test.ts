@@ -4,7 +4,7 @@ import { type Dict, GameSessionStub } from "../../../src/engine";
 function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
-    if (r.owner_faction_id === "allies" && r.has_factory) {
+    if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
       return rid;
     }
   }
@@ -35,17 +35,17 @@ describe("integration/test_mobilize_drag_place", () => {
     demoStub.initializeDemo(12345);
     demoStub.applyCommand({
       command_id: "drag_p1",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
     for (let i = 0; i < 4; i++) {
-      demoStub.applyCommand({ command_id: `drag_ep_${i}`, player_id: "allies", type: "end_phase", payload: {} });
+      demoStub.applyCommand({ command_id: `drag_ep_${i}`, player_id: demoStub.state.current_faction_id, type: "end_phase", payload: {} });
     }
     const regionId = firstAlliesFactoryRegion(demoStub);
     const place = demoStub.applyCommand({
       command_id: "drag_place",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "place_units",
       payload: { placements: [{ region_id: regionId, units: [{ unit_type_id: "infantry", count: 1 }] }] },
     });

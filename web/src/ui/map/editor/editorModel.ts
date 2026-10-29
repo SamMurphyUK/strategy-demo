@@ -3,13 +3,14 @@
 import type { Dict } from "../../../engine/model/types";
 import { buildMapGeometry, type MapGeometry, pointInPolygon, type Vec2 } from "../geometry";
 import { WORLD_COORD_SPACE } from "../map_space";
+import type { RegionClipper } from "../regionClip";
 import { type Pair, sharedVertexCount } from "./adjacency";
 
 export type { Pair };
 export type LinkKind = "land" | "sea" | "coastal";
 
 /** Starting owners as demomap01.json spells them (`metadata.faction`). */
-export const OWNER_OPTIONS = ["Neutral", "Allies", "Axis", "Independent"] as const;
+export const OWNER_OPTIONS = ["Neutral", "USSR", "UK", "USA", "GER", "JAP"] as const;
 
 export const LAND_SVG_REF = "assets/ne_110m_land_adjsut.svg";
 const DEFAULT_ANCHOR_CAPACITY = 5;
@@ -505,10 +506,24 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
 export interface ExportOptions {
   /** Round coordinates to 2 decimals. On for files, off while editing so snapping stays exact. */
   round: boolean;
+  /**
+   * When given, every region also exports `clipped_polygon`: its cutter boolean-clipped against the land SVG,
+   * as a GeoJSON-style MultiPolygon ([polygon][ring][x, y]). This is what the map draws and selects.
+   * It is derived data, so loading ignores it and the editor never autosaves it.
+   */
+  clipper?: RegionClipper;
 }
 
 export function editorToMapJson(map: EditorMap, options: ExportOptions = { round: true }): Dict {
   const r = options.round ? round2 : (n: number) => n;
+  const clipped = (region: EditorRegion): Dict =>
+    options.clipper
+      ? {
+          clipped_polygon: options.clipper
+            .clip({ id: region.id, type: region.is_sea ? "sea" : "land", points: region.polygon })
+            .map((polygon) => polygon.map((ring) => ring.map(([x, y]) => [r(x), r(y)]))),
+        }
+      : {};
   return {
     ...map.meta,
     version: map.meta.version ?? 2,
@@ -532,6 +547,7 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         is_sea: region.is_sea,
       },
       polygon: region.polygon.map((p) => [r(p.x), r(p.y)]),
+      ...clipped(region),
       neighbors: neighborsOf(map, region.id),
     })),
   };

@@ -8,7 +8,7 @@ import {
   layoutPositions,
   layoutRegionStacks,
   ownerFill,
-  regionAtPoint,
+  pointInPolygon,
   regionFill,
   type RegionShape,
   stackKey,
@@ -135,9 +135,9 @@ describe("fills", () => {
 describe("demomap01", () => {
   const map = buildMapGeometry(loadJson("res://demomap01.json"));
 
-  it("loads the base map and every region", () => {
-    expect(map.baseMap).toBe("res://texture/test.jpg");
-    expect(map.regions.length).toBe(7);
+  it("loads every region of the world scenario", () => {
+    expect(map.baseMap).toBe("");
+    expect(map.regions.length).toBe(52);
     for (const region of map.regions) {
       expect(region.points.length).toBeGreaterThanOrEqual(3);
       expect(region.bounds.w).toBeGreaterThan(0);
@@ -145,24 +145,27 @@ describe("demomap01", () => {
   });
 
   it("hit-tests every region somewhere inside its bounds", () => {
-    // Some regions are concave, so the vertex centroid can fall outside; sample a grid instead.
+    // Land and sea polygons overlap on purpose, and some are concave, so sample each polygon on its own.
     for (const region of map.regions) {
       let found = false;
       for (let i = 1; i < 20 && !found; i++) {
         for (let j = 1; j < 20 && !found; j++) {
           const p = { x: region.bounds.x + (region.bounds.w * i) / 20, y: region.bounds.y + (region.bounds.h * j) / 20 };
-          found = regionAtPoint(map, p) === region.id;
+          found = pointInPolygon(p, region.points);
         }
       }
       expect(found, region.id).toBe(true);
     }
   });
 
-  it("lies inside the base map frame", () => {
-    const rect = baseMapRect(3000, 2139);
-    expect(map.bounds.x).toBeGreaterThanOrEqual(rect.x);
-    expect(map.bounds.y).toBeGreaterThanOrEqual(rect.y);
-    expect(map.bounds.x + map.bounds.w).toBeLessThanOrEqual(rect.x + rect.w);
-    expect(map.bounds.y + map.bounds.h).toBeLessThanOrEqual(rect.y + rect.h);
+  it("lies inside the land SVG viewBox", () => {
+    expect(map.bounds.x).toBeGreaterThanOrEqual(0);
+    expect(map.bounds.y).toBeGreaterThanOrEqual(0);
+    expect(map.bounds.x + map.bounds.w).toBeLessThanOrEqual(800);
+    expect(map.bounds.y + map.bounds.h).toBeLessThanOrEqual(504);
+  });
+
+  it("centres a sprite on the map origin", () => {
+    expect(baseMapRect(3000, 2139)).toEqual({ x: -1500, y: -1068.5, w: 3000, h: 2139 });
   });
 });

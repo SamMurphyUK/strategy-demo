@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
 import type { HighlightMode, MapGeometry, Rect, StackEntry, Vec2 } from "./geometry";
-import { buildRegionPaths, pickCounter, pickRegion } from "./hitTest";
+import { buildCutterPaths, buildRegionPaths, pickCounter, pickRegion } from "./hitTest";
 import {
   drawEditorOverlay,
   drawGameOverlay,
@@ -11,6 +11,7 @@ import {
   setImageLoadListener,
   type TerrainScene,
 } from "./mapRenderer";
+import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
 import { fitView, panBy, screenToWorld, type View, zoomAt } from "./viewMath";
 
@@ -74,12 +75,17 @@ export function MapView(props: MapViewProps) {
   const drag = useRef<Drag | null>(null);
   const suppressClick = useRef(false);
 
-  const paths = useMemo(() => buildRegionPaths(geometry.regions), [geometry]);
+  // True shapes: each cutter boolean-clipped against the land SVG. Cached per cutter, so dragging one
+  // vertex re-clips only the regions that share it. Without the land, the rough cutters stand in.
+  const clipped = useMemo(() => (land ? clipperFor(land.polygons).clipAll(geometry.regions) : null), [land, geometry]);
+  const paths = useMemo(() => buildRegionPaths(geometry.regions, clipped), [geometry, clipped]);
+  const cutterPaths = useMemo(() => buildCutterPaths(geometry.regions), [geometry]);
+  const exact = clipped !== null;
   const layouts = layoutRegions(geometry.regions, props.stacks, view);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds });
-  live.current = { view, size, layouts, paths, props, fitK, bounds };
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -128,6 +134,7 @@ export function MapView(props: MapViewProps) {
       land,
       regions: geometry.regions,
       paths,
+      exact,
       owners: props.owners,
       highlight: props.highlight,
       selectedRegionId: props.selectedRegionId,
@@ -135,7 +142,7 @@ export function MapView(props: MapViewProps) {
     };
     drawTerrain(ctx, scene);
     if (editor) {
-      drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths });
+      drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
     } else {
       drawGameOverlay(ctx, scene, {
         layouts,
@@ -186,7 +193,7 @@ export function MapView(props: MapViewProps) {
 
   const onPointerMove = (e: React.PointerEvent) => {
     const sp = pointer(e);
-    const { view: v, layouts: ls, paths: ps, props: p } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex } = live.current;
     const world = screenToWorld(v, sp);
     const d = drag.current;
     if (d?.kind === "handle") {
@@ -207,7 +214,7 @@ export function MapView(props: MapViewProps) {
     if (p.editor) {
       p.editor.onHover(world, SNAP_PX / v.k);
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, world);
+    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex);
     setHoverId((prev) => (prev === id ? prev : id));
     if (!p.editor) {
       p.onRegionHover(id);
@@ -222,7 +229,7 @@ export function MapView(props: MapViewProps) {
     if (!d) {
       return;
     }
-    const { view: v, layouts: ls, paths: ps, props: p } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex } = live.current;
     if (d.kind === "handle") {
       p.editor?.onDragEnd(d.handle);
       return;
@@ -237,7 +244,7 @@ export function MapView(props: MapViewProps) {
     const sp = pointer(e);
     const world = screenToWorld(v, sp);
     if (p.editor) {
-      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world), SNAP_PX / v.k);
+      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex), SNAP_PX / v.k);
       return;
     }
     const counter = pickCounter(ls, sp, COUNTER_HIT_PX);
@@ -245,7 +252,7 @@ export function MapView(props: MapViewProps) {
       p.onStackClick(counter.regionId, counter.slot.entry, counter.slot.key);
       return;
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, world);
+    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex);
     if (id !== "") {
       p.onRegionClick(id);
     }

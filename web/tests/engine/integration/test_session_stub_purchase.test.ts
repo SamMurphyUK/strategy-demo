@@ -10,10 +10,10 @@ describe("integration/test_session_stub_purchase", () => {
   });
 
   it("test_purchase_reduces_ipc_and_emits_event", () => {
-    const initialIpc = demoStub.getState()["ipc"]["allies"];
+    const initialIpc = demoStub.getState()["ipc"][demoStub.state.current_faction_id];
     const res = demoStub.applyCommand({
       command_id: "cmd1",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
@@ -21,6 +21,6 @@ describe("integration/test_session_stub_purchase", () => {
     expect(res["events"].length).toBeGreaterThan(0);
     expect(res["events"][0]["type"]).toBe("unitspurchased");
     expect(GameSessionStub.validateEventShape(res["events"][0])).toBe(true);
-    expect(demoStub.getState()["ipc"]["allies"]).toBe(initialIpc - 3);
+    expect(demoStub.getState()["ipc"][demoStub.state.current_faction_id]).toBe(initialIpc - 3);
   });
 });

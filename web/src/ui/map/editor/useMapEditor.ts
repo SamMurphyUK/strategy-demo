@@ -4,6 +4,7 @@ import type { MapGeometry, Vec2 } from "../geometry";
 import { isLandAt } from "../hitTest";
 import type { EditorBinding } from "../MapView";
 import type { EditorLinkKind } from "../mapRenderer";
+import { clipperFor } from "../regionClip";
 import type { MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
 import {
@@ -33,7 +34,7 @@ export type EditorTool = "select" | "draw" | "link";
 
 type Handle = { kind: "vertex"; regionId: string; group: VertexRef[] } | { kind: "anchor"; regionId: string };
 
-const STORAGE_KEY = "strategy-demo.map-editor.v1";
+const STORAGE_KEY = "strategy-demo.map-editor.v2";
 const HISTORY_LIMIT = 100;
 
 interface Doc {
@@ -257,7 +258,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   }, [apply]);
 
   const exportJson = useCallback(() => {
-    const text = formatMapJson(editorToMapJson(docRef.current.map));
+    // With the land loaded the file also carries each region's true clipped shape (same clipper the canvas uses).
+    const land = live.current.land;
+    const text = formatMapJson(editorToMapJson(docRef.current.map, { round: true, clipper: land ? clipperFor(land.polygons) : undefined }));
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

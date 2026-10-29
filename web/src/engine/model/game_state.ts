@@ -100,17 +100,34 @@ export class GameState {
     return region != null && region.owner_faction_id === factionId;
   }
 
+  /** A faction with no team is its own side, so the two-power scenarios stay hostile to each other. */
+  teamOf(factionId: string): string {
+    if (factionId === "") {
+      return "";
+    }
+    const team = this.factions[factionId]?.team ?? "";
+    return team !== "" ? team : factionId;
+  }
+
+  sameTeam(a: string, b: string): boolean {
+    if (a === "" || b === "") {
+      return false;
+    }
+    return this.teamOf(a) === this.teamOf(b);
+  }
+
   isRegionHostileTo(regionId: string, factionId: string): boolean {
     const region = this.regions[regionId];
     if (region == null) {
       return true;
     }
     const owner = String(region.owner_faction_id);
-    if (owner !== "" && owner !== factionId) {
+    if (owner !== "" && !this.sameTeam(owner, factionId)) {
       return true;
     }
     for (const entry of this.getUnitsInRegion(regionId)) {
-      if (String(entry.faction_id ?? "") !== factionId) {
+      const other = String(entry.faction_id ?? "");
+      if (other !== "" && !this.sameTeam(other, factionId)) {
         return true;
       }
     }
@@ -194,7 +211,7 @@ export class GameState {
   }
 
   getEnemyUnitsInRegion(regionId: string, factionId: string): UnitStackEntry[] {
-    return this.getUnitsInRegion(regionId).filter((entry) => entry.faction_id !== factionId);
+    return this.getUnitsInRegion(regionId).filter((entry) => !this.sameTeam(String(entry.faction_id ?? ""), factionId));
   }
 
   getUnit(id: number): UnitStackEntry | Dict {

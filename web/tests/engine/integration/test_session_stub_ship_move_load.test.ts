@@ -4,7 +4,7 @@ import { GameSessionStub, MovementValidator, type Ruleset } from "../../../src/e
 function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
-    if (r.owner_faction_id === "allies" && r.has_factory) {
+    if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
       return rid;
     }
   }
@@ -34,7 +34,7 @@ function reachableSeaTwoAway(stub: GameSessionStub, start: string): string {
   const validator = new MovementValidator();
   const legal = validator.getLegalDestinationsForInstance(
     firstTransportInRegion(stub, start),
-    "allies",
+    stub.state.current_faction_id,
     stub.state,
     stub.ruleset as Ruleset,
   );
@@ -76,12 +76,12 @@ describe("integration/test_session_stub_ship_move_load", () => {
     stub.initializeDemo(12345);
     stub.applyCommand({
       command_id: "buy_transport",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "transport", count: 1 }] },
     });
     for (let i = 0; i < 4; i++) {
-      stub.applyCommand({ command_id: `ep_${i}`, player_id: "allies", type: "end_phase", payload: {} });
+      stub.applyCommand({ command_id: `ep_${i}`, player_id: stub.state.current_faction_id, type: "end_phase", payload: {} });
     }
     const factory = firstAlliesFactoryRegion(stub);
     const sea = seaZoneAdjacentTo(stub, factory);
@@ -91,7 +91,7 @@ describe("integration/test_session_stub_ship_move_load", () => {
     }
     stub.applyCommand({
       command_id: "place_transport",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "place_units",
       payload: { placements: [{ region_id: sea, units: [{ unit_type_id: "transport", count: 1 }] }] },
     });
@@ -104,7 +104,7 @@ describe("integration/test_session_stub_ship_move_load", () => {
     }
     const res = stub.applyCommand({
       command_id: "move_transport",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "move_units",
       payload: { moves: [{
         from_region_id: sea,
@@ -120,16 +120,16 @@ describe("integration/test_session_stub_ship_move_load", () => {
     const stub = new GameSessionStub();
     stub.initializeDemo(12345);
     for (let i = 0; i < 1; i++) {
-      stub.applyCommand({ command_id: `ep_${i}`, player_id: "allies", type: "end_phase", payload: {} });
+      stub.applyCommand({ command_id: `ep_${i}`, player_id: stub.state.current_faction_id, type: "end_phase", payload: {} });
     }
-    const pair = landSeaWithTransport(stub, "allies");
+    const pair = landSeaWithTransport(stub, stub.state.current_faction_id);
     if (pair === null) {
       ctx.skip("No land/sea transport setup on demo map");
       return;
     }
     const res = stub.applyCommand({
       command_id: "load_inf",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "load_transport",
       payload: {
         transport_instance_id: pair.transport_id,

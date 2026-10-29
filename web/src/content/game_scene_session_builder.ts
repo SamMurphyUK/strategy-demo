@@ -6,10 +6,28 @@ export const NEWMAP_PATH = "res://demomap01.json";
 export const UNITS_PATH = "res://data/scenarios/minimal/units.json";
 export const RULES_PATH = "res://data/scenarios/minimal/rules.json";
 
-export const PLAYABLE_FACTIONS = ["allies", "axis"];
+export const PLAYABLE_FACTIONS = ["ussr", "ger", "uk", "jap", "usa"];
+/** Classic 1942 order: Soviet Union, Germany, United Kingdom, Japan, United States. */
+export const TURN_ORDER = ["ussr", "ger", "uk", "jap", "usa"] as const;
 const FACTION_DISPLAY: Record<string, string> = {
   Allies: "allies",
   Axis: "axis",
+  USSR: "ussr",
+  GER: "ger",
+  UK: "uk",
+  USA: "usa",
+  JAP: "jap",
+};
+
+const FACTION_NAMES: Record<string, string> = {
+  ussr: "Soviet Union",
+  ger: "Germany",
+  uk: "United Kingdom",
+  jap: "Japan",
+  usa: "United States",
+  allies: "Allies",
+  axis: "Axis",
+  neutral: "Neutral",
 };
 
 const VERTEX_EPS = 5.0;
@@ -27,7 +45,7 @@ export function buildMapData(mapJson: Dict): Dict {
     }
     let owner = ownerFromMetadataFaction(String(meta.faction ?? ""));
     if (owner === "" && regionId === "region_1") {
-      owner = "allies";
+      owner = "ussr";
     }
     regions.push({
       id: regionId,
@@ -46,48 +64,51 @@ export function buildMapData(mapJson: Dict): Dict {
   };
 }
 
-export function buildFactionsData(): Dict {
+export function buildFactionsData(mapJson: Dict = {}): Dict {
+  if (Array.isArray(mapJson.factions) && mapJson.factions.length > 0) {
+    return { schema_version: "0.5", factions: mapJson.factions };
+  }
   return {
     schema_version: "0.5",
     factions: [
-      { id: "allies", name: "Allies", color: "#3366CC", starting_ipc: 30 },
-      { id: "axis", name: "Axis", color: "#CC3333", starting_ipc: 30 },
+      { id: "ussr", name: "Soviet Union", color: "#9A4E48", team: "allies", turn_order: 1, starting_ipc: 15 },
+      { id: "ger", name: "Germany", color: "#857577", team: "axis", turn_order: 2, starting_ipc: 22 },
+      { id: "uk", name: "United Kingdom", color: "#9E7F55", team: "allies", turn_order: 3, starting_ipc: 21 },
+      { id: "jap", name: "Japan", color: "#B77958", team: "axis", turn_order: 4, starting_ipc: 16 },
+      { id: "usa", name: "United States", color: "#72745C", team: "allies", turn_order: 5, starting_ipc: 17 },
     ],
   };
 }
 
 export function buildSetupData(mapJson: Dict): Dict {
+  if (Array.isArray(mapJson.starting_units) && mapJson.starting_units.length > 0) {
+    const order = Array.isArray(mapJson.turn_order) ? mapJson.turn_order : [...TURN_ORDER];
+    return { schema_version: "0.5", turn_order: order, starting_units: mapJson.starting_units };
+  }
   const startingUnits: Dict[] = [];
   for (const regionEntry of extractRegions(mapJson)) {
     const meta: Dict = regionEntry.metadata ?? {};
     const regionId = String(meta.region_id ?? "");
     let owner = ownerFromMetadataFaction(String(meta.faction ?? ""));
     if (owner === "" && regionId === "region_1") {
-      owner = "allies";
+      owner = "ussr";
     }
     if (PLAYABLE_FACTIONS.includes(owner)) {
       startingUnits.push({ region_id: regionId, faction_id: owner, unit_type_id: "infantry", count: 2 });
     }
   }
   if (startingUnits.length === 0) {
-    startingUnits.push({ region_id: "region_1", faction_id: "allies", unit_type_id: "infantry", count: 2 });
+    startingUnits.push({ region_id: "region_1", faction_id: "ussr", unit_type_id: "infantry", count: 2 });
   }
   return {
     schema_version: "0.5",
-    turn_order: ["allies", "axis"],
+    turn_order: [...TURN_ORDER],
     starting_units: startingUnits,
   };
 }
 
 export function displayNameForFactionId(factionId: string): string {
-  switch (factionId) {
-    case "allies":
-      return "Allies";
-    case "axis":
-      return "Axis";
-    default:
-      return factionId;
-  }
+  return FACTION_NAMES[factionId.toLowerCase()] ?? factionId;
 }
 
 export function factionIdFromDisplay(displayName: string): string {

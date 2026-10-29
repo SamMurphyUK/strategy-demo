@@ -6,7 +6,7 @@ describe("integration/test_mobilize_forfeit", () => {
     const session = GameSessionFactory.create(SessionMode.STUB);
     const r1 = session.applyCommand({
       command_id: "test_cmd_002",
-      player_id: "allies",
+      player_id: session.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
@@ -14,12 +14,12 @@ describe("integration/test_mobilize_forfeit", () => {
     for (let i = 0; i < 5; i++) {
       session.applyCommand({
         command_id: `test_cmd_${String(3 + i).padStart(3, "0")}`,
-        player_id: "allies",
+        player_id: session.state.current_faction_id,
         type: "end_phase",
         payload: {},
       });
     }
     const snapshot = session.getState();
-    expect(snapshot["pending_purchases"]["allies"]).toEqual([]);
+    expect(snapshot["pending_purchases"][session.state.current_faction_id]).toEqual([]);
   });
 });

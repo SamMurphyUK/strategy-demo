@@ -25,7 +25,7 @@ export function createSessionFromNewmap(): GameSession {
   return GameSession.create(
     buildMapData(mapJson),
     loadJson(UNITS_PATH),
-    buildFactionsData(),
+    buildFactionsData(mapJson),
     buildSetupData(mapJson),
     loadJson(RULES_PATH),
     { state: 12345, sequence: 1 },

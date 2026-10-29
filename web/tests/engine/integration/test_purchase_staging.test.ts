@@ -23,15 +23,16 @@ describe("integration/test_purchase_staging", () => {
     const unitsBefore = totalUnits(before);
     const res = demoStub.applyCommand({
       command_id: "staging_1",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
     expect(String(res.result_type ?? "")).toBe("ok");
     expect(hasEvent(res.events ?? [], "unitspurchased")).toBe(true);
     const after = demoStub.getState();
-    expect("allies" in (after.pending_purchases ?? {})).toBe(true);
-    expect(Math.trunc(Number((after.pending_purchases ?? {}).allies?.[0]?.count ?? 0))).toBe(1);
+    const faction = demoStub.state.current_faction_id;
+    expect(faction in (after.pending_purchases ?? {})).toBe(true);
+    expect(Math.trunc(Number((after.pending_purchases ?? {})[faction]?.[0]?.count ?? 0))).toBe(1);
     expect(unitsBefore).toBe(totalUnits(after));
   });
 });

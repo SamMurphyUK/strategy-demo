@@ -1,139 +1,2365 @@
 {
   "version": 2,
-  "base_map": "res://texture/test.jpg",
-  "faction_colors": {
-    "": [1.0, 0.0, 0.0, 0.4],
-    "Allies": [0.2, 0.4, 0.8, 0.4],
-    "Axis": [0.8, 0.2, 0.2, 0.4],
-    "Independent": [0.2, 0.7, 0.2, 0.4],
-    "Neutral": [0.5, 0.5, 0.5, 0.4]
+  "name": "DEMO - TEST RUN",
+  "coord_space": "svg",
+  "land_mask": "assets/ne_110m_land_adjsut.svg",
+  "projection": {
+    "type": "mercator",
+    "lon_0": 60,
+    "px_per_degree": 2.22,
+    "origin": [400, 355]
   },
-
-  "regions": [
-
+  "base_map": "",
+  "faction_colors": {
+    "USSR": [
+      0.604,
+      0.306,
+      0.282,
+      0.55
+    ],
+    "UK": [
+      0.62,
+      0.498,
+      0.333,
+      0.55
+    ],
+    "USA": [
+      0.447,
+      0.455,
+      0.361,
+      0.55
+    ],
+    "GER": [
+      0.522,
+      0.459,
+      0.467,
+      0.55
+    ],
+    "JAP": [
+      0.718,
+      0.475,
+      0.345,
+      0.55
+    ],
+    "Neutral": [
+      0.65,
+      0.612,
+      0.565,
+      0.4
+    ]
+  },
+  "factions": [
     {
-      "metadata": {
-        "region_id": "Sea Zone 02",
-        "faction": "Neutral",
-        "factory": false,
-        "ipc": 0,
-        "victory": false
-      },
-      "polygon": [
-        [584,548],[666,536],[709,617],[578,643],[583,550]
-      ]
+      "id": "ussr",
+      "name": "Soviet Union",
+      "color": "#9A4E48",
+      "team": "allies",
+      "turn_order": 1,
+      "starting_ipc": 15
     },
-
+    {
+      "id": "ger",
+      "name": "Germany",
+      "color": "#857577",
+      "team": "axis",
+      "turn_order": 2,
+      "starting_ipc": 22
+    },
+    {
+      "id": "uk",
+      "name": "United Kingdom",
+      "color": "#9E7F55",
+      "team": "allies",
+      "turn_order": 3,
+      "starting_ipc": 21
+    },
+    {
+      "id": "jap",
+      "name": "Japan",
+      "color": "#B77958",
+      "team": "axis",
+      "turn_order": 4,
+      "starting_ipc": 16
+    },
+    {
+      "id": "usa",
+      "name": "United States",
+      "color": "#72745C",
+      "team": "allies",
+      "turn_order": 5,
+      "starting_ipc": 17
+    }
+  ],
+  "turn_order": [
+    "ussr",
+    "ger",
+    "uk",
+    "jap",
+    "usa"
+  ],
+  "neighbor_overrides": {
+    "add": [
+      [
+        "Central Pacific",
+        "West US Coast"
+      ],
+      [
+        "Caribbean",
+        "West US Coast"
+      ],
+      [
+        "Indian Ocean",
+        "Mediterranean"
+      ],
+      [
+        "Alaska",
+        "Canada"
+      ],
+      [
+        "Alaska",
+        "Western United States"
+      ]
+    ],
+    "remove": []
+  },
+  "starting_units": [
+    {
+      "region_id": "Moscow",
+      "faction_id": "ussr",
+      "unit_type_id": "infantry",
+      "count": 6
+    },
+    {
+      "region_id": "Moscow",
+      "faction_id": "ussr",
+      "unit_type_id": "artillery",
+      "count": 2
+    },
+    {
+      "region_id": "Moscow",
+      "faction_id": "ussr",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "Karelia",
+      "faction_id": "ussr",
+      "unit_type_id": "infantry",
+      "count": 4
+    },
+    {
+      "region_id": "Karelia",
+      "faction_id": "ussr",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "Caucasus",
+      "faction_id": "ussr",
+      "unit_type_id": "infantry",
+      "count": 3
+    },
+    {
+      "region_id": "Caucasus",
+      "faction_id": "ussr",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "Siberia",
+      "faction_id": "ussr",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Germany",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 4
+    },
+    {
+      "region_id": "Germany",
+      "faction_id": "ger",
+      "unit_type_id": "tank",
+      "count": 2
+    },
+    {
+      "region_id": "Germany",
+      "faction_id": "ger",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "Germany",
+      "faction_id": "ger",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "France",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 3
+    },
+    {
+      "region_id": "France",
+      "faction_id": "ger",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "France",
+      "faction_id": "ger",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "Eastern Europe",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 5
+    },
+    {
+      "region_id": "Eastern Europe",
+      "faction_id": "ger",
+      "unit_type_id": "tank",
+      "count": 2
+    },
+    {
+      "region_id": "Eastern Europe",
+      "faction_id": "ger",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "Southern Europe",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Southern Europe",
+      "faction_id": "ger",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "Scandinavia",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "North Africa",
+      "faction_id": "ger",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "North Africa",
+      "faction_id": "ger",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "North Sea",
+      "faction_id": "ger",
+      "unit_type_id": "battleship",
+      "count": 1
+    },
+    {
+      "region_id": "North Sea",
+      "faction_id": "ger",
+      "unit_type_id": "submarine",
+      "count": 1
+    },
+    {
+      "region_id": "North Sea",
+      "faction_id": "ger",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "United Kingdom",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 3
+    },
+    {
+      "region_id": "United Kingdom",
+      "faction_id": "uk",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "United Kingdom",
+      "faction_id": "uk",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "English Channel",
+      "faction_id": "uk",
+      "unit_type_id": "battleship",
+      "count": 1
+    },
+    {
+      "region_id": "English Channel",
+      "faction_id": "uk",
+      "unit_type_id": "destroyer",
+      "count": 1
+    },
+    {
+      "region_id": "English Channel",
+      "faction_id": "uk",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "Mediterranean",
+      "faction_id": "uk",
+      "unit_type_id": "cruiser",
+      "count": 1
+    },
+    {
+      "region_id": "Mediterranean",
+      "faction_id": "uk",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "Egypt",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Egypt",
+      "faction_id": "uk",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "India",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "India",
+      "faction_id": "uk",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "Australia",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "South Africa",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 1
+    },
+    {
+      "region_id": "Middle East",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 1
+    },
+    {
+      "region_id": "Canada",
+      "faction_id": "uk",
+      "unit_type_id": "infantry",
+      "count": 1
+    },
+    {
+      "region_id": "Japan",
+      "faction_id": "jap",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Japan",
+      "faction_id": "jap",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "Sea of Japan",
+      "faction_id": "jap",
+      "unit_type_id": "carrier",
+      "count": 1
+    },
+    {
+      "region_id": "Sea of Japan",
+      "faction_id": "jap",
+      "unit_type_id": "battleship",
+      "count": 1
+    },
+    {
+      "region_id": "Sea of Japan",
+      "faction_id": "jap",
+      "unit_type_id": "destroyer",
+      "count": 1
+    },
+    {
+      "region_id": "Sea of Japan",
+      "faction_id": "jap",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "Manchuria",
+      "faction_id": "jap",
+      "unit_type_id": "infantry",
+      "count": 4
+    },
+    {
+      "region_id": "Manchuria",
+      "faction_id": "jap",
+      "unit_type_id": "artillery",
+      "count": 1
+    },
+    {
+      "region_id": "Manchuria",
+      "faction_id": "jap",
+      "unit_type_id": "tank",
+      "count": 1
+    },
+    {
+      "region_id": "Southeast Asia",
+      "faction_id": "jap",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "East Indies",
+      "faction_id": "jap",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Eastern United States",
+      "faction_id": "usa",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "Eastern United States",
+      "faction_id": "usa",
+      "unit_type_id": "fighter",
+      "count": 1
+    },
+    {
+      "region_id": "East US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "battleship",
+      "count": 1
+    },
+    {
+      "region_id": "East US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "destroyer",
+      "count": 1
+    },
+    {
+      "region_id": "East US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "Western United States",
+      "faction_id": "usa",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "West US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "carrier",
+      "count": 1
+    },
+    {
+      "region_id": "West US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "destroyer",
+      "count": 1
+    },
+    {
+      "region_id": "West US Coast",
+      "faction_id": "usa",
+      "unit_type_id": "transport",
+      "count": 1
+    },
+    {
+      "region_id": "China",
+      "faction_id": "usa",
+      "unit_type_id": "infantry",
+      "count": 3
+    },
+    {
+      "region_id": "Spain",
+      "faction_id": "neutral",
+      "unit_type_id": "infantry",
+      "count": 2
+    },
+    {
+      "region_id": "South America",
+      "faction_id": "neutral",
+      "unit_type_id": "infantry",
+      "count": 2
+    }
+  ],
+  "regions": [
     {
       "anchors": [
-        {"capacity":5,"type":"unit","x":1089.0,"y":602.090881347656}
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 241,
+          "y": 199
+        }
       ],
       "metadata": {
-        "region_id": "Australia",
-        "faction": "Allies",
+        "region_id": "United Kingdom",
+        "name": "United Kingdom",
+        "faction": "UK",
         "factory": true,
-        "ipc": 3,
-        "victory": true
+        "ipc": 8,
+        "victory": true,
+        "type": "land",
+        "is_sea": false
       },
       "polygon": [
-        [957,593],[1004,575],[1028,547],[1062,526],[1082,532],[1092,508],
-        [1124,506],[1140,508],[1144,539],[1172,552],[1187,513],[1226,551],
-        [1279,652],[1246,743],[1188,754],[1125,696],[1063,685],[1014,715],
-        [957,720],[952,643],[952,600],[964,588]
+        [213, 150.5],
+        [249.9, 150.5],
+        [249.9, 210],
+        [213, 210]
+      ],
+      "neighbors": [
+        "English Channel",
+        "North Atlantic",
+        "North Sea"
       ]
     },
-
     {
       "anchors": [
-        {"capacity":5,"type":"unit","x":638.764709472656,"y":202.352935791016}
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 266,
+          "y": 225
+        }
+      ],
+      "metadata": {
+        "region_id": "France",
+        "name": "France",
+        "faction": "GER",
+        "factory": false,
+        "ipc": 4,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [250, 188.5],
+        [284.44, 188.5],
+        [284.44, 236.38],
+        [268, 236.38],
+        [268, 241],
+        [257, 241],
+        [257, 238.5],
+        [230, 238.5],
+        [230, 210],
+        [250, 210]
+      ],
+      "neighbors": [
+        "English Channel",
+        "Germany",
+        "North Sea",
+        "Southern Europe",
+        "Spain"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 237,
+          "y": 251
+        }
+      ],
+      "metadata": {
+        "region_id": "Spain",
+        "name": "Spain",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [213, 237],
+        [230, 237],
+        [230, 238.5],
+        [257, 238.5],
+        [257, 272.5],
+        [213, 272.5]
+      ],
+      "neighbors": [
+        "France",
+        "Mediterranean",
+        "North Atlantic"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 291,
+          "y": 223
+        }
+      ],
+      "metadata": {
+        "region_id": "Germany",
+        "name": "Germany",
+        "faction": "GER",
+        "factory": true,
+        "ipc": 8,
+        "victory": true,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [284.44, 208.04],
+        [300, 208.04],
+        [300, 236.38],
+        [284.44, 236.38]
+      ],
+      "neighbors": [
+        "Eastern Europe",
+        "France",
+        "Scandinavia",
+        "Southern Europe"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 284,
+          "y": 241
+        }
+      ],
+      "metadata": {
+        "region_id": "Southern Europe",
+        "name": "Southern Europe",
+        "faction": "GER",
+        "factory": false,
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [268, 236.38],
+        [284.44, 236.38],
+        [300, 236.38],
+        [311.11, 236.38],
+        [311.11, 266.38],
+        [268, 266.38]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Eastern Europe",
+        "France",
+        "Germany",
+        "Mediterranean"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 321,
+          "y": 186
+        }
+      ],
+      "metadata": {
+        "region_id": "Scandinavia",
+        "name": "Scandinavia",
+        "faction": "GER",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [257, 0],
+        [337.78, 0],
+        [337.78, 134.04],
+        [337.78, 187.32],
+        [337.78, 208.04],
+        [300, 208.04],
+        [284.44, 208.04],
+        [284.44, 188.5],
+        [257, 188.5]
+      ],
+      "neighbors": [
+        "Barents Sea",
+        "Eastern Europe",
+        "Germany",
+        "Karelia",
+        "Moscow",
+        "North Sea"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 316,
+          "y": 223
+        }
+      ],
+      "metadata": {
+        "region_id": "Eastern Europe",
+        "name": "Eastern Europe",
+        "faction": "GER",
+        "factory": false,
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [300, 236.38],
+        [337.78, 236.38],
+        [337.78, 226.32],
+        [337.78, 208.04],
+        [300, 208.04]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Germany",
+        "Moscow",
+        "Scandinavia",
+        "Southern Europe"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 338,
+          "y": 259
+        }
+      ],
+      "metadata": {
+        "region_id": "Balkans",
+        "name": "Balkans",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [311.11, 236.38],
+        [337.78, 236.38],
+        [337.78, 226.32],
+        [346.67, 226.32],
+        [346.67, 257.86],
+        [351.11, 257.86],
+        [351.11, 279.87],
+        [351.11, 284.5],
+        [337.8, 284.5],
+        [337.8, 279.87],
+        [322.22, 279.87],
+        [322.22, 276],
+        [316, 276],
+        [316, 266.38],
+        [311.11, 266.38]
+      ],
+      "neighbors": [
+        "Caucasus",
+        "Eastern Europe",
+        "Egypt",
+        "Mediterranean",
+        "Middle East",
+        "Moscow",
+        "North Africa",
+        "Southern Europe"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 237,
+          "y": 134
+        }
+      ],
+      "metadata": {
+        "region_id": "Iceland",
+        "name": "Iceland",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [226.5, 118],
+        [254, 118],
+        [254, 144],
+        [226.5, 144]
+      ],
+      "neighbors": [
+        "Barents Sea"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 178,
+          "y": 120
+        }
+      ],
+      "metadata": {
+        "region_id": "Greenland",
+        "name": "Greenland",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [146, 0],
+        [245, 0],
+        [245, 112],
+        [226, 112],
+        [226, 150],
+        [200, 150],
+        [200, 197.5],
+        [135, 197.5],
+        [135, 104],
+        [102, 104],
+        [102, 72],
+        [103, 64],
+        [108, 56],
+        [115, 48],
+        [115.5, 40],
+        [121.5, 32],
+        [123, 24],
+        [132, 16]
+      ],
+      "neighbors": [
+        "Barents Sea",
+        "North Atlantic"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 356,
+          "y": 168
+        }
+      ],
+      "metadata": {
+        "region_id": "Karelia",
+        "name": "Karelia",
+        "faction": "USSR",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [337.78, 0],
+        [423, 0],
+        [423, 187.32],
+        [400, 187.32],
+        [382.22, 187.32],
+        [337.78, 187.32]
+      ],
+      "neighbors": [
+        "Arctic Ocean",
+        "Barents Sea",
+        "Moscow",
+        "Scandinavia",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 356,
+          "y": 208
+        }
+      ],
+      "metadata": {
+        "region_id": "Moscow",
+        "name": "Moscow",
+        "faction": "USSR",
+        "factory": true,
+        "ipc": 8,
+        "victory": true,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [337.78, 226.32],
+        [346.67, 226.32],
+        [388.89, 226.32],
+        [400, 226.32],
+        [400, 187.32],
+        [382.22, 187.32],
+        [337.78, 187.32],
+        [337.78, 208.04]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Caucasus",
+        "Central Asia",
+        "Eastern Europe",
+        "Karelia",
+        "Scandinavia",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 367,
+          "y": 233
+        }
+      ],
+      "metadata": {
+        "region_id": "Caucasus",
+        "name": "Caucasus",
+        "faction": "USSR",
+        "factory": false,
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [346.67, 257.86],
+        [351.11, 257.86],
+        [388.89, 257.86],
+        [388.89, 226.32],
+        [346.67, 226.32]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Central Asia",
+        "Mediterranean",
+        "Middle East",
+        "Moscow"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 466,
+          "y": 188
+        }
+      ],
+      "metadata": {
+        "region_id": "Siberia",
+        "name": "Siberia",
+        "faction": "USSR",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [400, 226.32],
+        [400, 187.32],
+        [423, 187.32],
+        [423, 0],
+        [691.5, 0],
+        [691.5, 241.3],
+        [558.5, 241.3],
+        [558.5, 226.32]
+      ],
+      "neighbors": [
+        "Arctic Ocean",
+        "Central Asia",
+        "Karelia",
+        "Manchuria",
+        "Mongolia",
+        "Moscow",
+        "North Pacific",
+        "Sea of Japan"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 419,
+          "y": 245
+        }
+      ],
+      "metadata": {
+        "region_id": "Central Asia",
+        "name": "Central Asia",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [388.89, 257.86],
+        [417.78, 257.86],
+        [417.78, 279.87],
+        [471.11, 279.87],
+        [471.11, 226.32],
+        [400, 226.32],
+        [388.89, 226.32]
+      ],
+      "neighbors": [
+        "Caucasus",
+        "India",
+        "Middle East",
+        "Mongolia",
+        "Moscow",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 500,
+          "y": 239
+        }
+      ],
+      "metadata": {
+        "region_id": "Mongolia",
+        "name": "Mongolia",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [471.11, 226.32],
+        [528.89, 226.32],
+        [528.89, 251.97],
+        [471.11, 251.97]
+      ],
+      "neighbors": [
+        "Central Asia",
+        "China",
+        "Manchuria",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 277,
+          "y": 293
+        }
+      ],
+      "metadata": {
+        "region_id": "North Africa",
+        "name": "North Africa",
+        "faction": "GER",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [213, 272.5],
+        [257, 272.5],
+        [257, 266.38],
+        [316, 266.38],
+        [316, 276],
+        [322.22, 276],
+        [322.22, 279.87],
+        [322.22, 309.62],
+        [213, 309.62]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Egypt",
+        "Mediterranean",
+        "North Atlantic",
+        "South Africa"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 333,
+          "y": 304
+        }
+      ],
+      "metadata": {
+        "region_id": "Egypt",
+        "name": "Egypt",
+        "faction": "UK",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [322.22, 314.33],
+        [322.22, 309.62],
+        [322.22, 279.87],
+        [337.8, 279.87],
+        [337.8, 284.5],
+        [351.11, 284.5],
+        [351.11, 314.33]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Mediterranean",
+        "Middle East",
+        "North Africa",
+        "South Africa"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 372,
+          "y": 286
+        }
+      ],
+      "metadata": {
+        "region_id": "Middle East",
+        "name": "Middle East",
+        "faction": "UK",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [351.11, 318.97],
+        [360, 318.97],
+        [360, 327.68],
+        [400, 327.68],
+        [400, 318.97],
+        [417.78, 318.97],
+        [417.78, 279.87],
+        [417.78, 257.86],
+        [388.89, 257.86],
+        [351.11, 257.86],
+        [351.11, 279.87],
+        [351.11, 314.33]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Caucasus",
+        "Central Asia",
+        "Egypt",
+        "India",
+        "Indian Ocean",
+        "South Africa"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 323,
+          "y": 378
+        }
+      ],
+      "metadata": {
+        "region_id": "South Africa",
+        "name": "South Africa",
+        "faction": "UK",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [213, 309.62],
+        [322.22, 309.62],
+        [322.22, 314.33],
+        [351.11, 314.33],
+        [351.11, 318.97],
+        [360, 318.97],
+        [360, 327.68],
+        [400, 327.68],
+        [400, 441],
+        [425, 441],
+        [425, 484],
+        [213, 484]
+      ],
+      "neighbors": [
+        "Egypt",
+        "Indian Ocean",
+        "Middle East",
+        "North Africa",
+        "South Atlantic"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 440,
+          "y": 302
+        }
       ],
       "metadata": {
         "region_id": "India",
-        "faction": "Axis",
+        "name": "India",
+        "faction": "UK",
         "factory": true,
-        "ipc": 4,
-        "victory": true
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
       },
       "polygon": [
-        [558,187],[556,139],[586,151],[587,120],[619,116],[671,146],[738,163],
-        [769,182],[746,221],[714,232],[681,265],[655,325],[635,324],[604,251],
-        [597,218],[586,216],[557,184]
+        [417.78, 343],
+        [417.78, 318.97],
+        [417.78, 279.87],
+        [471.11, 279.87],
+        [471.11, 300.03],
+        [471.11, 343]
+      ],
+      "neighbors": [
+        "Central Asia",
+        "China",
+        "Indian Ocean",
+        "Middle East",
+        "Southeast Asia"
       ]
     },
-
     {
       "anchors": [
-        {"capacity":5,"type":"unit","x":794.599975585938,"y":214.266662597656}
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 506,
+          "y": 280
+        }
       ],
       "metadata": {
-        "region_id": "Burma",
-        "faction": "Allies",
-        "factory": true,
-        "ipc": 2,
-        "victory": false
-      },
-      "polygon": [
-        [768,182],[851,168],[873,195],[870,225],[813,252],[809,262],[797,272],
-        [785,262],[784,237],[758,216],[749,218],[765,182],[760,180],[767,179],
-        [770,184]
-      ]
-    },
-
-    {
-      "metadata": {
-        "region_id": "Sea Zone 01",
-        "faction": "Neutral",
-        "factory": false,
-        "ipc": 0,
-        "victory": false
-      },
-      "anchors": [
-        {"capacity":5,"type":"unit","x":891.625,"y":341.375}
-      ],
-      "polygon": [
-        [871,224],[933,276],[952,311],[949,392],[987,447],[1005,481],[965,494],
-        [923,492],[873,464],[791,422],[794,270],[808,258],[826,245],[848,232],
-        [868,228],[873,226]
-      ]
-    },
-
-    {
-      "metadata": {
-        "region_id": "Sea Zone 03",
-        "faction": "Neutral",
-        "factory": false,
-        "ipc": 0,
-        "victory": false
-      },
-      "anchors": [
-        {"capacity":5,"type":"unit","x":870.121215820313,"y":576.121215820313}
-      ],
-      "polygon": [
-        [1003,478],[1089,485],[1139,508],[1088,509],[1080,523],[1081,530],
-        [1058,525],[1030,545],[1000,578],[968,590],[946,593],[882,631],
-        [818,677],[730,699],[642,703],[597,686],[574,651],[576,643],[581,641],
-        [643,629],[701,615],[705,615],[715,618],[757,621],[815,616],[858,594],
-        [901,552],[923,518],[926,491],[941,491],[961,491],[981,489],[1005,477]
-      ]
-    },
-
-    {
-      "anchors": [
-        {"capacity":5,"type":"unit","x":531.944458007813,"y":131.222229003906}
-      ],
-      "metadata": {
-        "region_id": "Iran",
-        "faction": "Axis",
+        "region_id": "China",
+        "name": "China",
+        "faction": "USA",
         "factory": false,
         "ipc": 3,
-        "victory": false
+        "victory": false,
+        "type": "land",
+        "is_sea": false
       },
       "polygon": [
-        [623,115],[597,83],[541,79],[498,92],[458,69],[404,99],[430,144],
-        [440,169],[468,165],[483,180],[515,189],[560,187],[559,146],[580,152],
-        [586,139],[588,121],[621,120],[624,113]
+        [471.11, 251.97],
+        [528.89, 251.97],
+        [528.89, 277.24],
+        [540, 277.24],
+        [540, 306.5],
+        [515.56, 306.5],
+        [515.56, 300.03],
+        [506.67, 300.03],
+        [480, 300.03],
+        [471.11, 300.03]
+      ],
+      "neighbors": [
+        "India",
+        "Manchuria",
+        "Mongolia",
+        "Southeast Asia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 492,
+          "y": 315
+        }
+      ],
+      "metadata": {
+        "region_id": "Southeast Asia",
+        "name": "Southeast Asia",
+        "faction": "JAP",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [471.11, 300.03],
+        [480, 300.03],
+        [506.67, 300.03],
+        [515.56, 300.03],
+        [515.56, 312],
+        [515.56, 336.7],
+        [471.11, 336.7]
+      ],
+      "neighbors": [
+        "China",
+        "East Indies Sea",
+        "India",
+        "Indian Ocean"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 543,
+          "y": 245
+        }
+      ],
+      "metadata": {
+        "region_id": "Manchuria",
+        "name": "Manchuria",
+        "faction": "JAP",
+        "factory": false,
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [528.89, 226.32],
+        [558.5, 226.32],
+        [558.5, 273.5],
+        [553.5, 273.5],
+        [553.5, 277.24],
+        [540, 277.24],
+        [528.89, 277.24],
+        [528.89, 251.97]
+      ],
+      "neighbors": [
+        "China",
+        "Mongolia",
+        "Sea of Japan",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 574,
+          "y": 270
+        }
+      ],
+      "metadata": {
+        "region_id": "Japan",
+        "name": "Japan",
+        "faction": "JAP",
+        "factory": true,
+        "ipc": 8,
+        "victory": true,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [558.5, 241.3],
+        [593, 241.3],
+        [593, 286],
+        [553.5, 286],
+        [553.5, 273.5],
+        [558.5, 273.5]
+      ],
+      "neighbors": [
+        "Sea of Japan"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 520,
+          "y": 354
+        }
+      ],
+      "metadata": {
+        "region_id": "East Indies",
+        "name": "East Indies",
+        "faction": "JAP",
+        "factory": false,
+        "ipc": 3,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [476, 336.7],
+        [515.56, 336.7],
+        [515.56, 312],
+        [556.1, 312],
+        [556.1, 359],
+        [557.5, 359],
+        [557.5, 364.5],
+        [556.1, 364.5],
+        [556.1, 378.6],
+        [476, 378.6]
+      ],
+      "neighbors": [
+        "East Indies Sea",
+        "Indian Ocean",
+        "Papua and Melanesia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 581,
+          "y": 368
+        }
+      ],
+      "metadata": {
+        "region_id": "Papua and Melanesia",
+        "name": "Papua and Melanesia",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [556.1, 350],
+        [668, 350],
+        [668, 408],
+        [609.5, 408],
+        [609.5, 378.65],
+        [556.1, 378.65],
+        [556.1, 364.5],
+        [557.5, 364.5],
+        [557.5, 359],
+        [556.1, 359]
+      ],
+      "neighbors": [
+        "East Indies",
+        "East Indies Sea",
+        "South Pacific"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 565,
+          "y": 413
+        }
+      ],
+      "metadata": {
+        "region_id": "Australia",
+        "name": "Australia",
+        "faction": "UK",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [517, 378.65],
+        [609, 378.65],
+        [609, 463],
+        [517, 463]
+      ],
+      "neighbors": [
+        "East Indies Sea",
+        "South Pacific"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 648,
+          "y": 460
+        }
+      ],
+      "metadata": {
+        "region_id": "New Zealand",
+        "name": "New Zealand",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [630, 430],
+        [668, 430],
+        [668, 474],
+        [630, 474]
+      ],
+      "neighbors": [
+        "South Pacific"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 714,
+          "y": 306
+        }
+      ],
+      "metadata": {
+        "region_id": "Hawaii",
+        "name": "Hawaii",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [708, 302],
+        [724, 302],
+        [724, 315],
+        [708, 315]
+      ],
+      "neighbors": [
+        "Central Pacific"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 716,
+          "y": 164
+        }
+      ],
+      "metadata": {
+        "region_id": "Alaska",
+        "name": "Alaska",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [691.5, 70],
+        [800, 70],
+        [800, 282],
+        [691.5, 282]
+      ],
+      "neighbors": [
+        "Canada",
+        "North Pacific",
+        "Western United States"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 56,
+          "y": 210
+        }
+      ],
+      "metadata": {
+        "region_id": "Canada",
+        "name": "Canada",
+        "faction": "UK",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [0, 0],
+        [146, 0],
+        [132, 16],
+        [123, 24],
+        [121.5, 32],
+        [115.5, 40],
+        [115, 48],
+        [108, 56],
+        [103, 64],
+        [102, 72],
+        [102, 104],
+        [135, 104],
+        [135, 197.5],
+        [153, 197.5],
+        [153, 250],
+        [117.78, 250],
+        [117.78, 229.74],
+        [40, 229.74],
+        [0, 229.74]
+      ],
+      "neighbors": [
+        "Alaska",
+        "East US Coast",
+        "Eastern United States",
+        "Western United States"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 18,
+          "y": 258
+        }
+      ],
+      "metadata": {
+        "region_id": "Western United States",
+        "name": "Western United States",
+        "faction": "USA",
+        "factory": true,
+        "ipc": 4,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [0, 229.74],
+        [40, 229.74],
+        [40, 282.48],
+        [0, 282.48]
+      ],
+      "neighbors": [
+        "Alaska",
+        "Canada",
+        "Eastern United States",
+        "Mexico",
+        "West US Coast"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 84,
+          "y": 262
+        }
+      ],
+      "metadata": {
+        "region_id": "Eastern United States",
+        "name": "Eastern United States",
+        "faction": "USA",
+        "factory": true,
+        "ipc": 10,
+        "victory": true,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [40, 300.03],
+        [40, 282.48],
+        [40, 229.74],
+        [117.78, 229.74],
+        [117.78, 300.03]
+      ],
+      "neighbors": [
+        "Canada",
+        "Caribbean",
+        "East US Coast",
+        "Mexico",
+        "Western United States"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 40,
+          "y": 307
+        }
+      ],
+      "metadata": {
+        "region_id": "Mexico",
+        "name": "Mexico",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 1,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [0, 282.48],
+        [40, 282.48],
+        [40, 300.03],
+        [117.78, 300.03],
+        [124.44, 300.03],
+        [124.44, 325.86],
+        [64.44, 325.86],
+        [40, 337.16],
+        [0, 337.16]
+      ],
+      "neighbors": [
+        "Caribbean",
+        "Eastern United States",
+        "South America",
+        "West US Coast",
+        "Western United States"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 138,
+          "y": 382
+        }
+      ],
+      "metadata": {
+        "region_id": "South America",
+        "name": "South America",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 2,
+        "victory": false,
+        "type": "land",
+        "is_sea": false
+      },
+      "polygon": [
+        [64.44, 325.86],
+        [191.11, 325.86],
+        [191.11, 503.9],
+        [88.89, 503.9],
+        [40, 337.16]
+      ],
+      "neighbors": [
+        "Caribbean",
+        "Mexico",
+        "South Atlantic"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 2,
+          "y": 277
+        }
+      ],
+      "metadata": {
+        "region_id": "West US Coast",
+        "name": "West US Coast",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [0, 285.06],
+        [26.67, 285.06],
+        [26.67, 226.32],
+        [0, 226.32]
+      ],
+      "neighbors": [
+        "Caribbean",
+        "Central Pacific",
+        "Mexico",
+        "Western United States"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 128,
+          "y": 269
+        }
+      ],
+      "metadata": {
+        "region_id": "East US Coast",
+        "name": "East US Coast",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [71.11, 297.59],
+        [144.44, 297.59],
+        [160, 297.59],
+        [160, 236.38],
+        [71.11, 236.38]
+      ],
+      "neighbors": [
+        "Canada",
+        "Caribbean",
+        "Eastern United States",
+        "North Atlantic"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 122,
+          "y": 318
+        }
+      ],
+      "metadata": {
+        "region_id": "Caribbean",
+        "name": "Caribbean",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [55.56, 337.16],
+        [133.33, 337.16],
+        [177.78, 337.16],
+        [177.78, 314.33],
+        [133.33, 314.33],
+        [133.33, 297.59],
+        [71.11, 297.59],
+        [55.56, 297.59]
+      ],
+      "neighbors": [
+        "East US Coast",
+        "Eastern United States",
+        "Mexico",
+        "South America",
+        "West US Coast"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 200,
+          "y": 234
+        }
+      ],
+      "metadata": {
+        "region_id": "North Atlantic",
+        "name": "North Atlantic",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [160, 290.14],
+        [228, 290.14],
+        [228, 226],
+        [228, 207],
+        [228, 157.83],
+        [222.22, 157.83],
+        [160, 157.83],
+        [160, 236.38]
+      ],
+      "neighbors": [
+        "Barents Sea",
+        "East US Coast",
+        "English Channel",
+        "Greenland",
+        "Mediterranean",
+        "North Africa",
+        "Spain",
+        "United Kingdom"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 234,
+          "y": 388
+        }
+      ],
+      "metadata": {
+        "region_id": "South Atlantic",
+        "name": "South Atlantic",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [177.78, 458.03],
+        [311.11, 458.03],
+        [346.67, 458.03],
+        [346.67, 395.67],
+        [300, 395.67],
+        [300, 337.16],
+        [177.78, 337.16]
+      ],
+      "neighbors": [
+        "Indian Ocean",
+        "South Africa",
+        "South America"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 242,
+          "y": 209
+        }
+      ],
+      "metadata": {
+        "region_id": "English Channel",
+        "name": "English Channel",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [228, 207],
+        [262, 207],
+        [262, 226],
+        [228, 226]
+      ],
+      "neighbors": [
+        "France",
+        "North Atlantic",
+        "North Sea",
+        "United Kingdom"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 260,
+          "y": 182
+        }
+      ],
+      "metadata": {
+        "region_id": "North Sea",
+        "name": "North Sea",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [250, 157.83],
+        [320, 157.83],
+        [320, 207],
+        [262, 207],
+        [250, 207]
+      ],
+      "neighbors": [
+        "Barents Sea",
+        "English Channel",
+        "France",
+        "Scandinavia",
+        "United Kingdom"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 267,
+          "y": 120
+        }
+      ],
+      "metadata": {
+        "region_id": "Barents Sea",
+        "name": "Barents Sea",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [222.22, 157.83],
+        [248.89, 157.83],
+        [280, 157.83],
+        [355.56, 157.83],
+        [355.56, 105.16],
+        [222.22, 105.16]
+      ],
+      "neighbors": [
+        "Arctic Ocean",
+        "Greenland",
+        "Iceland",
+        "Karelia",
+        "North Atlantic",
+        "North Sea",
+        "Scandinavia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 276,
+          "y": 262
+        }
+      ],
+      "metadata": {
+        "region_id": "Mediterranean",
+        "name": "Mediterranean",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [228, 245.9],
+        [275.56, 245.9],
+        [346.67, 245.9],
+        [346.67, 279.87],
+        [346.67, 285.06],
+        [228, 285.06]
+      ],
+      "neighbors": [
+        "Balkans",
+        "Caucasus",
+        "Egypt",
+        "Indian Ocean",
+        "North Africa",
+        "North Atlantic",
+        "Southern Europe",
+        "Spain"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 423,
+          "y": 377
+        }
+      ],
+      "metadata": {
+        "region_id": "Indian Ocean",
+        "name": "Indian Ocean",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [346.67, 458.03],
+        [488.89, 458.03],
+        [488.89, 318.97],
+        [417.78, 318.97],
+        [346.67, 318.97],
+        [346.67, 395.67]
+      ],
+      "neighbors": [
+        "East Indies",
+        "East Indies Sea",
+        "India",
+        "Mediterranean",
+        "Middle East",
+        "South Africa",
+        "South Atlantic",
+        "Southeast Asia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 547,
+          "y": 351
+        }
+      ],
+      "metadata": {
+        "region_id": "East Indies Sea",
+        "name": "East Indies Sea",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [488.89, 386.43],
+        [577.78, 386.43],
+        [577.78, 337.16],
+        [515.56, 337.16],
+        [515.56, 318.97],
+        [488.89, 318.97]
+      ],
+      "neighbors": [
+        "Australia",
+        "East Indies",
+        "Indian Ocean",
+        "Papua and Melanesia",
+        "Southeast Asia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 564,
+          "y": 260
+        }
+      ],
+      "metadata": {
+        "region_id": "Sea of Japan",
+        "name": "Sea of Japan",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [551.11, 285.06],
+        [582.22, 285.06],
+        [595.56, 274.57],
+        [595.56, 239.61],
+        [555.56, 239.61],
+        [551.11, 257.86]
+      ],
+      "neighbors": [
+        "Central Pacific",
+        "Japan",
+        "Manchuria",
+        "North Pacific",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 656,
+          "y": 310
+        }
+      ],
+      "metadata": {
+        "region_id": "Central Pacific",
+        "name": "Central Pacific",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [595.56, 355],
+        [733.33, 355],
+        [733.33, 257.86],
+        [595.56, 257.86],
+        [595.56, 274.57]
+      ],
+      "neighbors": [
+        "Hawaii",
+        "North Pacific",
+        "Sea of Japan",
+        "South Pacific",
+        "West US Coast"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 656,
+          "y": 405
+        }
+      ],
+      "metadata": {
+        "region_id": "South Pacific",
+        "name": "South Pacific",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [577.78, 458.03],
+        [733.33, 458.03],
+        [733.33, 355],
+        [595.56, 355],
+        [577.78, 386.43]
+      ],
+      "neighbors": [
+        "Australia",
+        "Central Pacific",
+        "New Zealand",
+        "Papua and Melanesia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 656,
+          "y": 220
+        }
+      ],
+      "metadata": {
+        "region_id": "North Pacific",
+        "name": "North Pacific",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [595.56, 257.86],
+        [733.33, 257.86],
+        [733.33, 157.83],
+        [600, 157.83],
+        [595.56, 239.61]
+      ],
+      "neighbors": [
+        "Alaska",
+        "Central Pacific",
+        "Sea of Japan",
+        "Siberia"
+      ]
+    },
+    {
+      "anchors": [
+        {
+          "capacity": 8,
+          "type": "unit",
+          "x": 410,
+          "y": 111
+        }
+      ],
+      "metadata": {
+        "region_id": "Arctic Ocean",
+        "name": "Arctic Ocean",
+        "faction": "Neutral",
+        "factory": false,
+        "ipc": 0,
+        "victory": false,
+        "type": "sea",
+        "is_sea": true
+      },
+      "polygon": [
+        [355.56, 157.83],
+        [600, 157.83],
+        [600, 96.84],
+        [355.56, 96.84]
+      ],
+      "neighbors": [
+        "Barents Sea",
+        "Karelia",
+        "Siberia"
       ]
     }
-
   ]
 }

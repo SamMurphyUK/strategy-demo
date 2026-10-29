@@ -228,7 +228,7 @@ export class GameSceneController {
   }
 
   private selectedFactionId(): string {
-    return "allies";
+    return this.session.state.turn_order[0] || "ussr";
   }
 
   private commandPlayerId(): string {

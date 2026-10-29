@@ -1,12 +1,18 @@
 // Layered canvas renderer for the strategic map.
 //
-//   Layer 0  ocean fill and sea zones (rough polygons; they may run inland)
-//   Layer 1  master land path filled opaque parchment: covers sea-zone lines that overlap the shore
-//   Layer 2  land regions, clipped to the master land path so rough polygons stop at the coastline
+//   Layer 0  ocean fill and sea zones
+//   Layer 1  master land path filled opaque parchment
+//   Layer 2  land regions
 //   Layer 3  master coastline stroke
-//   Layer 4  anchors, IPC shields, unit counters, markers, and the editor overlay
+//   Layer 4  hover and selection: gold tint plus outline on the region's true shape
+//   Layer 5  anchors, IPC shields, unit counters, markers, and the editor overlay
 //
-// Layers 0-3 draw in world units; layer 4 draws in screen pixels so counters keep their size at any zoom.
+// `scene.paths` are the regions' true shapes: each cutter polygon boolean-clipped against the land SVG
+// (land regions intersected with it, sea zones differenced from it). Fills and outlines on them follow
+// the inland borders and the exact coastline. When the land has not loaded they are the rough cutters
+// and `exact` is false, so land regions are clipped to the stencil at draw time instead.
+//
+// Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { factionPalette } from "../theme/factionPalette";
 import { renderUnitToken } from "../theme/tokens/drawUnitToken";
 import { unitArtUrl } from "./assets";
@@ -24,11 +30,13 @@ import {
   COASTLINE_COLOR,
   COASTLINE_WIDTH_PX,
   HOVER_COLOR,
+  HOVER_TINT,
   LAND_PARCHMENT,
   landFill,
   NAVAL_BORDER_COLOR,
   OCEAN_COLOR,
   SELECTED_COLOR,
+  SELECTED_TINT,
   seaFill,
 } from "./mapStyle";
 import type { MasterLand } from "./svgLandLoader";
@@ -47,7 +55,9 @@ export interface TerrainScene {
   view: View;
   land: MasterLand | null;
   regions: RegionShape[];
+  /** True region shapes (coastline-clipped) when `exact`, rough cutters otherwise. */
   paths: Map<string, Path2D>;
+  exact: boolean;
   owners: Record<string, string>;
   highlight: HighlightMode;
   selectedRegionId: string;
@@ -118,7 +128,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
       continue;
     }
     ctx.fillStyle = seaFill(region.id, s.highlight);
-    ctx.fill(path);
+    ctx.fill(path, "evenodd");
     ctx.stroke(path);
   }
   ctx.setLineDash([]);
@@ -129,9 +139,9 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     ctx.fill(land.masterLandPath);
   }
 
-  // Layer 2: land regions, clipped to the coastline.
+  // Layer 2: land regions. Already clipped to the coastline when exact; otherwise clip while drawing.
   ctx.save();
-  if (land) {
+  if (land && !s.exact) {
     ctx.clip(land.masterLandPath);
   }
   ctx.lineWidth = 1.25 * px;
@@ -144,7 +154,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     const fill = landFill(region.id, s.owners[region.id] ?? "", s.highlight);
     if (fill) {
       ctx.fillStyle = fill;
-      ctx.fill(path);
+      ctx.fill(path, "evenodd");
     }
     ctx.stroke(path);
   }
@@ -157,13 +167,16 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     ctx.stroke(land.masterLandPath);
   }
 
-  // Hover and selection outlines sit above the coastline, unclipped.
-  for (const [id, color, width] of [
-    [s.hoverRegionId, HOVER_COLOR, 2],
-    [s.selectedRegionId, SELECTED_COLOR, SELECTED_OUTLINE_WIDTH],
+  // Layer 4: hover, then selection. A gold tint inside the true shape, then its outline, which follows
+  // the inland borders and the coastline alike. The selected region draws last so it wins on overlap.
+  for (const [id, tint, color, width] of [
+    [s.hoverRegionId, HOVER_TINT, HOVER_COLOR, 2],
+    [s.selectedRegionId, SELECTED_TINT, SELECTED_COLOR, SELECTED_OUTLINE_WIDTH],
   ] as const) {
     const path = id === "" ? undefined : s.paths.get(id);
     if (path) {
+      ctx.fillStyle = tint;
+      ctx.fill(path, "evenodd");
       ctx.lineWidth = width * px;
       ctx.strokeStyle = color;
       ctx.stroke(path);

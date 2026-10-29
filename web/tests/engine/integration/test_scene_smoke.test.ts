@@ -18,7 +18,7 @@ function regionHasInfantry(snap: Dict, regionId: string): boolean {
 function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
-    if (r.owner_faction_id === "allies" && r.has_factory) {
+    if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
       return rid;
     }
   }
@@ -46,7 +46,7 @@ describe("integration/test_scene_smoke", () => {
     scene.onSpawnInfantryPressed();
 
     const snap = stub.getState();
-    expect(snap["pending_purchases"]["allies"]).toEqual([]);
+    expect(snap["pending_purchases"][stub.state.current_faction_id]).toEqual([]);
     expect(regionHasInfantry(snap, regionId)).toBe(true);
   });
 });

@@ -54,10 +54,10 @@ describe("world projection of demomap01", () => {
   it("puts every region inside the 800 x 504 land SVG", () => {
     for (const r of geometry.regions) {
       for (const p of r.points) {
-        expect(p.x).toBeGreaterThan(0);
-        expect(p.x).toBeLessThan(800);
-        expect(p.y).toBeGreaterThan(0);
-        expect(p.y).toBeLessThan(504);
+        expect(p.x).toBeGreaterThanOrEqual(0);
+        expect(p.x).toBeLessThanOrEqual(800);
+        expect(p.y).toBeGreaterThanOrEqual(0);
+        expect(p.y).toBeLessThanOrEqual(504);
       }
     }
   });
@@ -79,8 +79,8 @@ describe("world projection of demomap01", () => {
     expect(LEGACY_TO_WORLD.scale).toBeGreaterThan(0);
   });
 
-  it("leaves the engine's copy of the file alone", () => {
-    expect(loadJson(NEWMAP_PATH).coord_space).toBeUndefined();
+  it("is already in land-SVG coordinates", () => {
+    expect(loadJson(NEWMAP_PATH).coord_space).toBe("svg");
   });
 });
 
@@ -302,17 +302,16 @@ describe("export", () => {
   it("round-trips the demo map through the editor and writes explicit neighbors", () => {
     const world = projectMapJson(loadJson(NEWMAP_PATH));
     const map = editorFromMapJson(world);
-    expect(map.regions.map((r) => r.id).sort()).toEqual(
-      ["Australia", "Burma", "India", "Iran", "Sea Zone 01", "Sea Zone 02", "Sea Zone 03"].sort(),
-    );
-    expect(findRegion(map, "Sea Zone 01")!.is_sea).toBe(true);
-    expect(findRegion(map, "India")!.is_sea).toBe(false);
+    expect(map.regions).toHaveLength(52);
+    expect(findRegion(map, "English Channel")!.is_sea).toBe(true);
+    expect(findRegion(map, "France")!.is_sea).toBe(false);
 
     const json = editorToMapJson(map);
     expect(json.coord_space).toBe("svg");
     const regions = json.regions as Array<Record<string, any>>;
+    const london = regions.find((r) => r.metadata.region_id === "United Kingdom")!;
+    expect(london.metadata).toMatchObject({ type: "land", is_sea: false, factory: true, ipc: 8, faction: "UK", victory: true });
     const au = regions.find((r) => r.metadata.region_id === "Australia")!;
-    expect(au.metadata).toMatchObject({ type: "land", is_sea: false, factory: true, ipc: 3, faction: "Allies" });
     expect(au.anchors[0]).toMatchObject({ type: "unit" });
     expect(Array.isArray(au.neighbors)).toBe(true);
 
@@ -328,16 +327,19 @@ describe("export", () => {
   });
 
   it("feeds the engine's explicit neighbors straight into adjacency", () => {
-    const map = applyAutoLinks(
-      editorFromMapJson(projectMapJson(loadJson(NEWMAP_PATH))),
-      [["Australia", "India"]],
-    );
+    const loaded = editorFromMapJson(projectMapJson(loadJson(NEWMAP_PATH)));
+    const map = applyAutoLinks({ ...loaded, overrides: { add: [], remove: [] } }, [["Australia", "India"]]);
     const data = buildMapData(editorToMapJson(map));
     expect(data.adjacency).toEqual([{ from: "Australia", to: "India" }]);
   });
 
   it("still derives adjacency from polygons when no neighbors are listed", () => {
-    const data = buildMapData(loadJson(NEWMAP_PATH));
+    const raw = loadJson(NEWMAP_PATH);
+    const stripped = {
+      ...raw,
+      regions: (raw.regions as Array<Record<string, unknown>>).map(({ neighbors: _n, ...region }) => region),
+    };
+    const data = buildMapData(stripped);
     expect((data.adjacency as unknown[]).length).toBeGreaterThan(0);
   });
 });

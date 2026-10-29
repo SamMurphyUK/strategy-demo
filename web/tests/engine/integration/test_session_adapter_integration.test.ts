@@ -18,7 +18,7 @@ function regionHasInfantry(snap: Dict, regionId: string): boolean {
 function firstAlliesFactoryRegion(session: GameSessionStub): string {
   for (const rid of Object.keys(session.state.regions)) {
     const r = session.state.regions[rid];
-    if (r.owner_faction_id === "allies" && r.has_factory) {
+    if (r.owner_faction_id === session.state.current_faction_id && r.has_factory) {
       return rid;
     }
   }
@@ -32,7 +32,7 @@ describe("integration/test_session_adapter_integration", () => {
     const adapter = GameSessionAdapter.fromSession(demoStub);
     const res = adapter.applyCommand({
       command_id: "a1",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
@@ -60,7 +60,7 @@ describe("integration/test_session_adapter_integration", () => {
     scene.onSpawnInfantryPressed();
 
     expect(String(scene.session.state.current_phase)).toBe("mobilize");
-    const pending = scene.session.getState()["pending_purchases"]["allies"];
+    const pending = scene.session.getState()["pending_purchases"][scene.session.state.current_faction_id];
     expect(pending).toEqual([]);
     const snap = scene.session.getState();
     expect(regionHasInfantry(snap, regionId)).toBe(true);

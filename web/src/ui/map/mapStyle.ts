@@ -9,7 +9,10 @@ export const COASTLINE_WIDTH_PX = 1.5;
 export const BORDER_COLOR = "rgba(26, 26, 24, 0.72)";
 export const NAVAL_BORDER_COLOR = "rgba(26, 26, 24, 0.5)";
 export const SELECTED_COLOR = "rgba(255, 255, 0, 0.85)";
-export const HOVER_COLOR = "rgba(244, 241, 234, 0.95)";
+export const HOVER_COLOR = "rgba(255, 224, 96, 0.9)";
+/** Inner tint under the outline, so a hovered or selected region reads as a shape, not only a line. */
+export const SELECTED_TINT = "rgba(255, 214, 51, 0.24)";
+export const HOVER_TINT = "rgba(255, 214, 51, 0.12)";
 
 const OWNED_ALPHA = 0.62;
 const DIMMED_ALPHA = 0.25;

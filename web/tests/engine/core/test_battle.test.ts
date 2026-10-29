@@ -219,7 +219,7 @@ describe("session battle commands", () => {
       s.applyCommand({ command_id: `t${++n}`, player_id: s.state.current_faction_id, type, payload });
     send("end_phase");
     send("move_units", {
-      moves: [{ from_region_id: "Burma", to_region_id: "India", units: [{ unit_type_id: "infantry", count: 2 }] }],
+      moves: [{ from_region_id: "Moscow", to_region_id: "Eastern Europe", units: [{ unit_type_id: "infantry", count: 2 }] }],
     });
     send("end_phase");
     return { s, send };
@@ -227,18 +227,19 @@ describe("session battle commands", () => {
 
   it("fights a map battle through commands and refuses to end the phase mid-battle", () => {
     const { s, send } = demoInCombat();
-    expect(s.getLegalCommands("allies")).toContain("start_battle");
-    expect(send("start_battle", { region_id: "India" }).result_type).toBe("ok");
+    const faction = s.state.current_faction_id;
+    expect(s.getLegalCommands(faction)).toContain("start_battle");
+    expect(send("start_battle", { region_id: "Eastern Europe" }).result_type).toBe("ok");
     expect(send("end_phase")).toMatchObject({ result_type: "error", error: { code: "BATTLE_IN_PROGRESS" } });
 
     let guard = 0;
     while (s.state.active_battle != null && guard++ < 200) {
-      const legal = s.getLegalCommands("allies");
+      const legal = s.getLegalCommands(faction);
       const type = legal.includes("battle_casualties") ? "battle_casualties" : "battle_roll";
       expect(send(type).result_type).toBe("ok");
     }
     expect(s.state.active_battle).toBeNull();
-    expect(s.getPendingBattles("allies")).toHaveLength(0);
+    expect(s.getPendingBattles(faction)).toHaveLength(0);
     expect(send("end_phase").result_type).toBe("ok");
   });
 

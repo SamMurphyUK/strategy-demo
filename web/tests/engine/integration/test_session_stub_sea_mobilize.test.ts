@@ -4,7 +4,7 @@ import { GameSessionStub } from "../../../src/engine";
 function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
-    if (r.owner_faction_id === "allies" && r.has_factory) {
+    if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
       return rid;
     }
   }
@@ -26,12 +26,12 @@ function buyTransportAndAdvance(): GameSessionStub {
   stub.initializeDemo(12345);
   stub.applyCommand({
     command_id: "buy_transport",
-    player_id: "allies",
+    player_id: stub.state.current_faction_id,
     type: "purchase_units",
     payload: { purchases: [{ unit_type_id: "transport", count: 1 }] },
   });
   for (let i = 0; i < 4; i++) {
-    stub.applyCommand({ command_id: `ep_${i}`, player_id: "allies", type: "end_phase", payload: {} });
+    stub.applyCommand({ command_id: `ep_${i}`, player_id: stub.state.current_faction_id, type: "end_phase", payload: {} });
   }
   return stub;
 }
@@ -42,7 +42,7 @@ describe("integration/test_session_stub_sea_mobilize", () => {
     const factory = firstAlliesFactoryRegion(stub);
     const res = stub.applyCommand({
       command_id: "place_ship_on_land",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "place_units",
       payload: { placements: [{ region_id: factory, units: [{ unit_type_id: "transport", count: 1 }] }] },
     });
@@ -59,7 +59,7 @@ describe("integration/test_session_stub_sea_mobilize", () => {
     }
     const res = stub.applyCommand({
       command_id: "place_ship_at_sea",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "place_units",
       payload: { placements: [{ region_id: sea, units: [{ unit_type_id: "transport", count: 1 }] }] },
     });

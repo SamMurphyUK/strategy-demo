@@ -2,11 +2,22 @@ import type { Dict } from "../../../engine/model/types";
 
 export function factionName(factionId: string): string {
   switch (String(factionId).toLowerCase()) {
+    case "ussr":
+      return "Soviet Union";
+    case "ger":
+      return "Germany";
+    case "uk":
+      return "United Kingdom";
+    case "jap":
+      return "Japan";
+    case "usa":
+      return "United States";
     case "allies":
       return "Allies";
     case "axis":
       return "Axis";
     case "":
+    case "neutral":
       return "Neutral";
     default:
       return factionId;

@@ -23,7 +23,7 @@ describe("integration/test_session_adapter_normalization", () => {
     const adapter = GameSessionAdapter.fromSession(demoStub);
     const res = adapter.applyCommand({
       command_id: "norm_stub",
-      player_id: "allies",
+      player_id: demoStub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });

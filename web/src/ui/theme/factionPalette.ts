@@ -81,8 +81,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
 };
 
 /**
- * The demo scenario only has two factions, "allies" and "axis"; they stand in for the US and Germany
- * until the full five-power setup lands. `data/factions.json` ids (`germany`, `uk`) resolve directly.
+ * Scenario ids are `ussr`, `uk`, `usa`, `ger` and `jap`. The old two-faction demo ids `allies` and
+ * `axis` still resolve, to the US and Germany palettes. `data/factions.json` ids (`germany`, `uk`) too.
  */
 const ALIASES: Record<string, FactionKey> = {
   us: "US",

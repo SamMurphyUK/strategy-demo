@@ -20,7 +20,7 @@ export class VictoryEngine {
       let controlsAll = true;
       for (const rid of Object.keys(state.regions)) {
         const r = state.regions[rid];
-        if (r.is_capital && r.owner_faction_id !== faction) {
+        if (r.is_capital && !state.sameTeam(r.owner_faction_id, faction)) {
           controlsAll = false;
           break;
         }

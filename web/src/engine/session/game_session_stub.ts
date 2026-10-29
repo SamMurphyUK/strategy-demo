@@ -92,7 +92,7 @@ export class GameSessionStub {
     this.initSession(
       buildMapData(mapJson),
       loadJson(UNITS_PATH),
-      buildFactionsData(),
+      buildFactionsData(mapJson),
       buildSetupData(mapJson),
       loadJson(RULES_PATH),
       { state: seed, sequence: 1 },
@@ -260,9 +260,9 @@ export class GameSessionStub {
     return { result_type: "ok", events: canonical };
   }
 
-  /** Hard-codes the two demo factions and skips TurnEngine, as GameSessionStub.gd does. */
+  /** Advances turn_order. The Godot stub still hard-codes allies/axis; this one follows the scenario. */
   handleEndTurn(playerId: string, commandId: string): StubResult {
-    const factions = ["allies", "axis"];
+    const factions = this.state.turn_order.length > 0 ? this.state.turn_order : ["ussr", "ger", "uk", "jap", "usa"];
     const current = playerId.toLowerCase();
     const idx = factions.indexOf(current);
     if (idx === -1) {

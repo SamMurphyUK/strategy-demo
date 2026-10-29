@@ -38,7 +38,7 @@ describe("integration/test_event_schema", () => {
     stub.initializeDemo(12345);
     const res = stub.applyCommand({
       command_id: "schema_cmd",
-      player_id: "allies",
+      player_id: stub.state.current_faction_id,
       type: "purchase_units",
       payload: { purchases: [{ unit_type_id: "infantry", count: 1 }] },
     });
