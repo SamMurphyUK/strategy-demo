@@ -13,7 +13,7 @@ import {
 } from "./mapRenderer";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
-import { fitView, panBy, screenToWorld, tokenZoomScale, type View, zoomAt } from "./viewMath";
+import { fitView, panBy, screenToWorld, tokenZoomScale, type View, worldToScreen, zoomAt } from "./viewMath";
 
 export interface CombatMarker {
   regionId: string;
@@ -23,6 +23,8 @@ export interface CombatMarker {
 /** What the map editor plugs into the canvas. All points are world coordinates. */
 export interface EditorBinding {
   overlay: Omit<EditorOverlay, "regions" | "paths">;
+  /** Set once a Prune Box is drawn: the floating confirmation over it. */
+  prunePrompt?: { box: { minX: number; minY: number; maxX: number; maxY: number }; count: number; confirm(): void; cancel(): void } | null;
   /** A draggable handle under the pointer (a vertex or the anchor), or null. */
   pickHandle(world: Vec2, tolWorld: number): unknown | null;
   onClick(world: Vec2, regionId: string, tolWorld: number, mods: { shift: boolean }): void;
@@ -348,6 +350,29 @@ export function MapView(props: MapViewProps) {
         </button>
       </div>
       {props.children}
+      {editor?.prunePrompt &&
+        (() => {
+          const { box, count, confirm, cancel } = editor.prunePrompt;
+          const top = worldToScreen(view, { x: (box.minX + box.maxX) / 2, y: box.minY });
+          return (
+            <div
+              className="prune-badge"
+              style={{ left: Math.min(Math.max(top.x, 150), Math.max(size.w - 150, 150)), top: Math.max(top.y - 6, 40) }}
+              role="dialog"
+              aria-label="Confirm prune"
+            >
+              <span>
+                Prune {count} small island{count === 1 ? "" : "s"} in box?
+              </span>
+              <button type="button" className="primary" onClick={confirm} disabled={count === 0}>
+                Confirm
+              </button>
+              <button type="button" onClick={cancel}>
+                Cancel
+              </button>
+            </div>
+          );
+        })()}
       {props.landError !== "" && <div className="map-error">Land mask not loaded: {props.landError}</div>}
     </div>
   );

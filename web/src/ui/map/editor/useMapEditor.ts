@@ -13,9 +13,11 @@ import {
   applyAutoLinks,
   applyMergeMany,
   applySplitMany,
+  boxFromPoints,
   coincidentVertices,
   deleteRegion,
   detachIslands,
+  type WorldBox,
   edgeSharers,
   dist,
   type EditorMap,
@@ -117,7 +119,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return el !== null && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
 }
 
-const TOOL_KEYS: Record<string, EditorTool> = { s: "select", v: "vertex", k: "knife", m: "merge", d: "draw", l: "link", p: "promote" };
+const TOOL_KEYS: Record<string, EditorTool> = { s: "select", v: "vertex", k: "knife", m: "merge", d: "draw", l: "link", p: "promote", b: "prune" };
 
 const ringOf = (points: Vec2[]): Ring => points.map((p) => [p.x, p.y]);
 
@@ -157,6 +159,9 @@ export interface MapEditor {
   /** Land regions below this visible area (world square units) that Prune Small Islands removes. */
   pruneArea: number;
   setPruneArea(area: number): void;
+  /** The Prune Box marquee being drawn or awaiting confirmation, and how many islands it would prune. */
+  pruneBox: WorldBox | null;
+  boxPruneCount: number;
   /** How many regions Prune Small Islands would remove right now. */
   pruneCount: number;
   pruneSmallIslands(): void;
@@ -189,6 +194,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   const secondId = mergeIds[0] ?? "";
   const setSecondId = useCallback((id: string) => setMergeIds(id === "" ? [] : [id]), []);
   const [pruneArea, setPruneArea] = useState(DEFAULT_PRUNE_AREA);
+  /** The Prune Box marquee. `boxDone` once the pointer is released and the confirmation badge shows. */
+  const [pruneBox, setPruneBox] = useState<WorldBox | null>(null);
+  const [boxDone, setBoxDone] = useState(false);
   const [linkFirstId, setLinkFirstId] = useState("");
   const [cursor, setCursor] = useState<{ point: Vec2; kind: "vertex" | "edge" | "free" } | null>(null);
   const [closing, setClosing] = useState(false);
@@ -282,10 +290,16 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
 
   const setTool = useCallback(
     (next: EditorTool) => {
+      if (next === "prune" && live.current.layer === "sea") {
+        setStatus("Prune Box works on land. Switch to Land mode.");
+        return;
+      }
       cancelDraft();
       setLinkFirstId("");
       setSecondId("");
       setStatus("");
+      setPruneBox(null);
+      setBoxDone(false);
       setToolState(next);
     },
     [cancelDraft],
@@ -297,6 +311,11 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       setLinkFirstId("");
       setSecondId("");
       setStatus("");
+      setPruneBox(null);
+      setBoxDone(false);
+      if (next === "sea") {
+        setToolState((t) => (t === "prune" ? "select" : t));
+      }
       setLayerState(next);
       const picked = findRegion(docRef.current.map, live.current.selectedId);
       if (picked && picked.is_sea !== (next === "sea")) {
@@ -556,6 +575,43 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     () => (land ? map.regions.filter((r) => isUnconfiguredLand(map, r) && multiPolygonArea(shapeOf(r)) < pruneArea).length : 0),
     [map, land, pruneArea, shapeOf],
   );
+
+  // The regions the marquee would prune: untouched, under the threshold, anchor strictly inside the box.
+  const boxIds = useMemo(
+    () =>
+      pruneBox && land
+        ? pruneSmallIslands(map, (region) => multiPolygonArea(shapeOf(region)), pruneArea, pruneBox).removed
+        : [],
+    [map, land, pruneBox, pruneArea, shapeOf],
+  );
+
+  const cancelBoxPrune = useCallback(() => {
+    setPruneBox(null);
+    setBoxDone(false);
+  }, []);
+
+  const confirmBoxPrune = useCallback(() => {
+    const box = pruneBox;
+    if (!box || !live.current.land) {
+      return;
+    }
+    const out = pruneSmallIslands(docRef.current.map, (region) => multiPolygonArea(shapeOf(region)), pruneArea, box);
+    setPruneBox(null);
+    setBoxDone(false);
+    if (out.removed.length === 0) {
+      setStatus(`Nothing to prune in that box (untouched Territories under ${pruneArea} square units).`);
+      return;
+    }
+    // One commit, so a single Undo brings every island in the box back.
+    commit(withAutoLinks(out.map).map);
+    if (out.removed.includes(live.current.selectedId)) {
+      setSelectedId("");
+    }
+    setMergeIds((ids) => ids.filter((id) => !out.removed.includes(id)));
+    setStatus(
+      `Pruned ${out.removed.length} small island${out.removed.length === 1 ? "" : "s"} in the box. They stay on the map as decorative land. Undo brings them back.`,
+    );
+  }, [commit, pruneArea, pruneBox, shapeOf, withAutoLinks]);
 
   const pruneIslands = useCallback(() => {
     if (!live.current.land) {
@@ -858,7 +914,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         e.preventDefault();
         makeDecorative();
       } else if (e.key === "Escape") {
-        if (live.current.draft.length > 0 || live.current.linkFirstId !== "") {
+        if (live.current.tool === "prune") {
+          cancelBoxPrune();
+        } else if (live.current.draft.length > 0 || live.current.linkFirstId !== "") {
           cancelDraft();
           setLinkFirstId("");
         } else if (live.current.secondId !== "") {
@@ -870,7 +928,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, cancelDraft, finishDraft, makeDecorative, redo, setTool, undo, undoVertex]);
+  }, [active, cancelBoxPrune, cancelDraft, finishDraft, makeDecorative, redo, setTool, undo, undoVertex]);
 
   const binding = useMemo<EditorBinding>(
     () => ({
@@ -886,7 +944,10 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         cursor,
         closing,
         tool,
+        pruneBox,
+        pruneIds: boxIds,
       },
+      prunePrompt: pruneBox && boxDone ? { box: pruneBox, count: boxIds.length, confirm: confirmBoxPrune, cancel: cancelBoxPrune } : null,
       pickHandle(world, tol) {
         const { tool: t, selectedId: id } = live.current;
         if (id === "" || !(t === "select" || t === "vertex" || t === "merge")) {
@@ -974,6 +1035,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
             setStatus(`Toggled ${first} \u2194 ${regionId} (${linked} links).`);
             setLinkFirstId("");
           }
+        } else if (t === "prune") {
+          // A plain click (no drag) dismisses the marquee.
+          cancelBoxPrune();
         } else if (t === "promote") {
           promoteAt(world, regionId);
         } else if (t === "vertex" && mods.shift && pickedId !== "" && roughenAt(world, tol)) {
@@ -1030,12 +1094,21 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         setClosing(false);
       },
       swipeable() {
-        return live.current.tool === "knife" && live.current.draft.length === 0;
+        const { tool: t, draft: pts, layer: current } = live.current;
+        return (t === "knife" && pts.length === 0) || (t === "prune" && current === "land");
       },
       strokeBegin() {
         stroke.current = { active: true, ignore: false, raw: [], scale: 1 };
       },
       onStroke(points, pxToWorld, done) {
+        if (live.current.tool === "prune") {
+          // Not a freehand cut: the first and latest points are the marquee's opposite corners.
+          if (points.length >= 2) {
+            setPruneBox(boxFromPoints(points[0], points[points.length - 1]));
+            setBoxDone(done);
+          }
+          return;
+        }
         if (stroke.current.ignore) {
           if (done) {
             stroke.current.ignore = false;
@@ -1090,7 +1163,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         apply({ map: next, past: [...cur.past, before].slice(-HISTORY_LIMIT), future: [] });
       },
     }),
-    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt],
+    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt],
   );
 
   const selected = selectedId === "" ? null : (findRegion(map, selectedId) ?? null);
@@ -1129,6 +1202,8 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     splitIslands,
     pruneArea,
     setPruneArea,
+    pruneBox,
+    boxPruneCount: boxIds.length,
     pruneCount,
     pruneSmallIslands: pruneIslands,
     mergeSelected,

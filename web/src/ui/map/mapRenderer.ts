@@ -342,7 +342,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
 export const LINK_COLORS = { land: "#3f6b2a", sea: "#2b5f9a", coastal: "#b5651d" } as const;
 export type EditorLinkKind = keyof typeof LINK_COLORS;
 
-export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote";
+export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote" | "prune";
 
 export interface EditorOverlay {
   regions: RegionShape[];
@@ -362,6 +362,9 @@ export interface EditorOverlay {
   /** The cursor is near enough to the draft's first vertex to close it. */
   closing: boolean;
   tool: EditorToolName;
+  /** The Prune Box marquee, in world coordinates, and the regions inside it that would be pruned. */
+  pruneBox?: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  pruneIds?: string[];
 }
 
 const KNIFE_COLOR = "#c0392b";
@@ -581,6 +584,31 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       ctx.strokeStyle = color;
       ctx.stroke();
     });
+  }
+
+  // Prune Box marquee, and an outline on every region it would prune.
+  if (editor.pruneBox) {
+    const box = editor.pruneBox;
+    setWorldTransform(ctx, view, dpr);
+    for (const id of editor.pruneIds ?? []) {
+      const path = editor.paths.get(id);
+      if (path) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2 * px;
+        ctx.fillStyle = "rgba(192, 57, 43, 0.3)";
+        ctx.fill(path, "evenodd");
+        ctx.strokeStyle = KNIFE_COLOR;
+        ctx.stroke(path);
+      }
+    }
+    ctx.fillStyle = "rgba(192, 57, 43, 0.12)";
+    ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
+    ctx.setLineDash([5 * px, 4 * px]);
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = KNIFE_COLOR;
+    ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
+    ctx.setLineDash([]);
+    setScreenTransform(ctx, dpr);
   }
 
   // Snap indicator.

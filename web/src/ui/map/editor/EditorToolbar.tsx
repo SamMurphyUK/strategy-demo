@@ -18,6 +18,7 @@ const HINTS: Record<EditorTool, string> = {
   merge: "Click a region, then Shift-click any number of others of the same type, then press Merge Regions. Islands across water become one territory.",
   draw: "Click to place vertices. Click the first vertex, double-click or press Enter to finish.",
   link: "Click region A, then region B, to add or remove a neighbor link.",
+  prune: "Drag a box over small default islands. Only untouched Territories under the threshold whose anchor is inside the box are pruned. Confirm on the badge, or Esc to cancel.",
   promote: "Click land that no territory covers (a decorative island) to make it a playable region again.",
 };
 
@@ -101,7 +102,15 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
           </button>
         )}
         {!sea && (
-          <>
+          <div className="segmented" role="group" aria-label="Prune">
+            <button
+              type="button"
+              className={editor.tool === "prune" ? "active" : ""}
+              title="Drag a box over the islands to prune, then confirm (B). Only untouched Territories under the threshold with their anchor inside the box are removed."
+              onClick={() => editor.setTool("prune")}
+            >
+              Prune Box <kbd>B</kbd>
+            </button>
             <button
               type="button"
               disabled={editor.pruneCount === 0}
@@ -120,7 +129,7 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
               title={`Prune threshold: ${editor.pruneArea} world square units`}
               onChange={(e) => editor.setPruneArea(Number(e.target.value))}
             />
-          </>
+          </div>
         )}
         {editor.tool === "knife" && (
           <>

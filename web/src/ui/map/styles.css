@@ -714,6 +714,27 @@
     color: var(--ink-soft);
   }
 
+  & .prune-badge {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    transform: translate(-50%, -100%);
+    white-space: nowrap;
+    font: 12px/1.3 var(--mono);
+    background: rgba(244, 241, 234, 0.98);
+    border: 1px solid var(--ink);
+    border-radius: 3px;
+    box-shadow: 0 2px 0 rgba(26, 26, 24, 0.35);
+  }
+
+  & .prune-badge button {
+    padding: 2px 8px;
+    font-size: 12px;
+  }
+
   & .editor-toolbar-hint {
     margin: 0;
     font: 12px/1.35 var(--mono);

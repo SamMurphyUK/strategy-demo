@@ -846,13 +846,37 @@ export function isUnconfiguredLand(map: EditorMap, region: EditorRegion): boolea
   );
 }
 
-/** Removes every unconfigured land region whose visible area is under `threshold`. The land stays drawn on the map. */
+/** A world-space rectangle. */
+export interface WorldBox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** The rectangle spanned by two corner points, whichever way it was dragged. */
+export function boxFromPoints(a: Vec2, b: Vec2): WorldBox {
+  return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+}
+
+/** True when the region's unit anchor lies strictly inside the box (on its edge does not count). */
+export function anchorInBox(region: EditorRegion, box: WorldBox): boolean {
+  return region.cx > box.minX && region.cx < box.maxX && region.cy > box.minY && region.cy < box.maxY;
+}
+
+/**
+ * Removes every unconfigured land region whose visible area is under `threshold`. The land stays drawn on the
+ * map. With a `box`, only regions whose anchor is strictly inside it are considered.
+ */
 export function pruneSmallIslands(
   map: EditorMap,
   areaOf: (region: EditorRegion) => number,
   threshold: number,
+  box?: WorldBox | null,
 ): { map: EditorMap; removed: string[] } {
-  const removed = map.regions.filter((r) => isUnconfiguredLand(map, r) && areaOf(r) < threshold).map((r) => r.id);
+  const removed = map.regions
+    .filter((r) => (!box || anchorInBox(r, box)) && isUnconfiguredLand(map, r) && areaOf(r) < threshold)
+    .map((r) => r.id);
   let next = map;
   for (const id of removed) {
     next = deleteRegion(next, id);
