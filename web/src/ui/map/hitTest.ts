@@ -81,11 +81,16 @@ export function pickRegion(
   land: MasterLand | null,
   p: Vec2,
   exact = false,
+  /** Only regions of this layer can be picked (the editor's Land / Sea mode). */
+  only: "land" | "sea" | null = null,
 ): string {
   const ctx = probeContext();
   const stage = !exact && land ? isLandAt(land, p) : null;
   for (let i = regions.length - 1; i >= 0; i--) {
     const region = regions[i];
+    if (only !== null && region.type !== only) {
+      continue;
+    }
     if (stage !== null && (region.type === "land") !== stage) {
       continue;
     }

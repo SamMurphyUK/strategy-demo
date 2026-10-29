@@ -6,6 +6,7 @@ import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display
 import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
 import { BattleScreen } from "./BattleScreen";
 import { EditorPanel } from "./editor/EditorPanel";
+import { EditorToolbar } from "./editor/EditorToolbar";
 import { useMapEditor } from "./editor/useMapEditor";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { projectMapJson } from "./map_space";
@@ -242,7 +243,9 @@ export function App() {
           onRegionHover={setHoverRegionId}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
           editor={editing ? editor.binding : undefined}
-        />
+        >
+          {editing && <EditorToolbar editor={editor} />}
+        </MapView>
         <aside className="sidebar">
           {editing ? (
             <EditorPanel editor={editor} />

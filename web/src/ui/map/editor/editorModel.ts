@@ -10,12 +10,41 @@ export type { Pair };
 export type LinkKind = "land" | "sea" | "coastal";
 
 /** Starting owners as demomap01.json spells them (`metadata.faction`). */
-export const OWNER_OPTIONS = ["Neutral", "USSR", "UK", "USA", "GER", "JAP"] as const;
+export const OWNER_OPTIONS = ["GER", "USSR", "UK", "USA", "JAP", "Neutral"] as const;
 
 export const LAND_SVG_REF = "assets/ne_110m_land_adjsut.svg";
 const DEFAULT_ANCHOR_CAPACITY = 5;
 /** Two vertices closer than this are the same vertex. Snapped borders are exact; hand-drawn ones are not. */
 export const SAME_VERTEX_EPS = 0.75;
+/** Dragging a vertex moves every same-layer region's vertex within this many world units of it. */
+export const TOPO_LOCK_EPS = 2;
+
+/** `none` has no factory. The engine only needs to know there is one; minor and major are for the map's author. */
+export type FactoryLevel = "none" | "minor" | "major";
+export const FACTORY_LEVELS: readonly FactoryLevel[] = ["none", "minor", "major"];
+
+/** One line of the scenario's `starting_units`. */
+export interface StartingUnit {
+  region_id: string;
+  faction_id: string;
+  unit_type_id: string;
+  count: number;
+}
+
+export const UNIT_TYPE_OPTIONS = [
+  "infantry",
+  "artillery",
+  "tank",
+  "fighter",
+  "battleship",
+  "cruiser",
+  "destroyer",
+  "submarine",
+  "carrier",
+  "transport",
+] as const;
+
+export const UNIT_FACTION_OPTIONS = ["ussr", "ger", "uk", "jap", "usa", "neutral"] as const;
 /** A point this close to an edge counts as lying on it (for welding T-junctions). */
 const ON_EDGE_EPS = 0.05;
 
@@ -25,7 +54,7 @@ export interface EditorRegion {
   ipc_value: number;
   starting_owner: string;
   is_sea: boolean;
-  factory: boolean;
+  factory: FactoryLevel;
   capital: boolean;
   polygon: Vec2[];
   /** Unit stack anchor, also where the region's links attach. */
@@ -137,6 +166,40 @@ export function applyAutoLinks(map: EditorMap, auto: Pair[]): EditorMap {
 // Region operations
 // ---------------------------------------------------------------
 
+// ---------------------------------------------------------------
+// Starting units (the scenario's top-level `starting_units`, carried in `meta`)
+// ---------------------------------------------------------------
+
+function unitList(meta: Dict): StartingUnit[] {
+  return Array.isArray(meta.starting_units) ? meta.starting_units : [];
+}
+
+function mapStartingUnits(meta: Dict, fn: (u: StartingUnit) => StartingUnit): Dict {
+  return Array.isArray(meta.starting_units) ? { ...meta, starting_units: unitList(meta).map(fn) } : meta;
+}
+
+function dropStartingUnits(meta: Dict, regionId: string): Dict {
+  return Array.isArray(meta.starting_units)
+    ? { ...meta, starting_units: unitList(meta).filter((u) => u.region_id !== regionId) }
+    : meta;
+}
+
+export function startingUnitsOf(map: EditorMap, regionId: string): StartingUnit[] {
+  return unitList(map.meta).filter((u) => u.region_id === regionId);
+}
+
+/** Replaces one region's starting units. Rows keep their place in the file; the region's block is rewritten in order. */
+export function setStartingUnits(map: EditorMap, regionId: string, rows: Omit<StartingUnit, "region_id">[]): EditorMap {
+  const clean = rows
+    .filter((r) => r.unit_type_id !== "" && Math.trunc(r.count) > 0)
+    .map((r) => ({ region_id: regionId, faction_id: r.faction_id, unit_type_id: r.unit_type_id, count: Math.trunc(r.count) }));
+  const all = unitList(map.meta);
+  const at = all.findIndex((u) => u.region_id === regionId);
+  const rest = all.filter((u) => u.region_id !== regionId);
+  const insertAt = at < 0 ? rest.length : Math.min(at, rest.length);
+  return { ...map, meta: { ...map.meta, starting_units: [...rest.slice(0, insertAt), ...clean, ...rest.slice(insertAt)] } };
+}
+
 export function updateRegion(map: EditorMap, id: string, patch: Partial<EditorRegion>): EditorMap {
   return { ...map, regions: map.regions.map((r) => (r.id === id ? { ...r, ...patch } : r)) };
 }
@@ -155,6 +218,7 @@ export function renameRegion(map: EditorMap, oldId: string, newId: string): Edit
   const rename = (p: Pair): Pair => pairOf(p[0] === oldId ? id : p[0], p[1] === oldId ? id : p[1]);
   return {
     ...map,
+    meta: mapStartingUnits(map.meta, (u) => (u.region_id === oldId ? { ...u, region_id: id } : u)),
     regions: map.regions.map((r) => (r.id === oldId ? { ...r, id, name: r.name === oldId ? id : r.name } : r)),
     links: map.links.map(rename),
     auto: map.auto.map(rename),
@@ -166,6 +230,7 @@ export function deleteRegion(map: EditorMap, id: string): EditorMap {
   const keep = (p: Pair) => p[0] !== id && p[1] !== id;
   return {
     ...map,
+    meta: dropStartingUnits(map.meta, id),
     regions: map.regions.filter((r) => r.id !== id),
     links: map.links.filter(keep),
     auto: map.auto.filter(keep),
@@ -193,7 +258,7 @@ export function addRegionFromPolygon(map: EditorMap, polygon: Vec2[], sea: boole
     ipc_value: sea ? 0 : 1,
     starting_owner: "Neutral",
     is_sea: sea,
-    factory: false,
+    factory: "none",
     capital: false,
     polygon: polygon.map((p) => ({ ...p })),
     cx: label.x,
@@ -372,21 +437,253 @@ export interface VertexRef {
   index: number;
 }
 
-/** Every vertex (this one included) sitting on the same spot, so a shared border moves as one. */
+/** Vertices this close are stacked on one spot, whatever the lock radius is. */
+const STACKED_EPS = 0.01;
+
+/**
+ * Every vertex that moves with this one, so a shared border moves as one. That is this vertex, plus in
+ * each region of the same layer (sea or land) the vertex nearest to it within `eps`. Taking only the
+ * nearest keeps a stepped border from collapsing when its steps are closer together than `eps`. Vertices
+ * stacked exactly on the spot always come along, in this region too.
+ */
 export function coincidentVertices(map: EditorMap, regionId: string, index: number, eps = SAME_VERTEX_EPS): VertexRef[] {
-  const origin = findRegion(map, regionId)?.polygon[index];
-  if (!origin) {
+  const source = findRegion(map, regionId);
+  const origin = source?.polygon[index];
+  if (!source || !origin) {
     return [];
   }
   const refs: VertexRef[] = [{ regionId, index }];
   for (const r of map.regions) {
+    if (r.is_sea !== source.is_sea) {
+      continue;
+    }
+    let nearest = -1;
+    let nearestDist = eps;
+    let stacked = false;
     r.polygon.forEach((v, i) => {
-      if (!(r.id === regionId && i === index) && dist(v, origin) <= eps) {
+      if (r.id === regionId && i === index) {
+        return;
+      }
+      const d = dist(v, origin);
+      if (d <= STACKED_EPS) {
         refs.push({ regionId: r.id, index: i });
+        stacked = true;
+      } else if (r.id !== regionId && d <= nearestDist) {
+        nearestDist = d;
+        nearest = i;
       }
     });
+    if (nearest >= 0 && !stacked) {
+      refs.push({ regionId: r.id, index: nearest });
+    }
   }
   return refs;
+}
+
+/**
+ * Adds a vertex at the midpoint of edge `index` of the region (the edge from vertex `index` to the next),
+ * and into every same-layer region whose outline passes through that point, so a shared border stays shared.
+ */
+export function subdivideEdge(map: EditorMap, regionId: string, index: number): { map: EditorMap; at: number } | null {
+  const region = findRegion(map, regionId);
+  if (!region || region.polygon.length < 2) {
+    return null;
+  }
+  const a = region.polygon[index];
+  const b = region.polygon[(index + 1) % region.polygon.length];
+  if (!a || !b) {
+    return null;
+  }
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const regions = map.regions.map((r) => {
+    if (r.is_sea !== region.is_sea) {
+      return r;
+    }
+    if (r.id === regionId) {
+      return { ...r, polygon: [...r.polygon.slice(0, index + 1), { ...mid }, ...r.polygon.slice(index + 1)] };
+    }
+    const polygon = insertOnEdges(r.polygon, [mid]);
+    return polygon === r.polygon ? r : { ...r, polygon };
+  });
+  return { map: { ...map, regions }, at: index + 1 };
+}
+
+// ---------------------------------------------------------------
+// Slicing
+// ---------------------------------------------------------------
+
+/** A temporary id for the new half of a split: "Moscow B", "Moscow B 2", ... */
+export function splitId(map: EditorMap, baseId: string): string {
+  const taken = new Set(map.regions.map((r) => r.id));
+  const first = `${baseId} B`;
+  if (!taken.has(first)) {
+    return first;
+  }
+  for (let n = 2; ; n++) {
+    const id = `${first} ${n}`;
+    if (!taken.has(id)) {
+      return id;
+    }
+  }
+}
+
+export interface SplitPlan {
+  /** The piece that keeps the original region's id and settings. */
+  keep: { polygon: Vec2[]; cx: number; cy: number };
+  /** The piece that becomes the new region. */
+  fresh: { polygon: Vec2[]; cx: number; cy: number };
+}
+
+/**
+ * Applies a split: `keep` replaces the region's outline, `fresh` becomes a new region right after it (same
+ * owner and layer, no ipc, factory or units), and both are welded to the neighbors they touch, so the cut
+ * vertices are listed by both halves and by any region whose edge the cut ended on.
+ */
+export function applySplit(map: EditorMap, regionId: string, plan: SplitPlan): { map: EditorMap; newId: string } | null {
+  const original = findRegion(map, regionId);
+  if (!original) {
+    return null;
+  }
+  const newId = splitId(map, original.id);
+  const fresh: EditorRegion = {
+    id: newId,
+    name: newId,
+    ipc_value: 0,
+    starting_owner: original.starting_owner,
+    is_sea: original.is_sea,
+    factory: "none",
+    capital: false,
+    polygon: plan.fresh.polygon.map((p) => ({ ...p })),
+    cx: plan.fresh.cx,
+    cy: plan.fresh.cy,
+  };
+  const regions: EditorRegion[] = [];
+  for (const r of map.regions) {
+    if (r.id === regionId) {
+      regions.push({ ...r, polygon: plan.keep.polygon.map((p) => ({ ...p })), cx: plan.keep.cx, cy: plan.keep.cy }, fresh);
+    } else {
+      regions.push(r);
+    }
+  }
+  let next: EditorMap = { ...map, regions };
+  next = weldRegion(next, regionId);
+  next = weldRegion(next, newId);
+  return { map: next, newId };
+}
+
+/**
+ * Applies a split into any number of pieces. The first piece keeps the region's id and settings; each of the
+ * others becomes a new region right after it (ids "X B", "X B 2", ...). Returns the new ids.
+ */
+export function applySplitMany(
+  map: EditorMap,
+  regionId: string,
+  pieces: { polygon: Vec2[]; cx: number; cy: number }[],
+): { map: EditorMap; newIds: string[] } | null {
+  const original = findRegion(map, regionId);
+  if (!original || pieces.length < 2) {
+    return null;
+  }
+  const fresh: EditorRegion[] = [];
+  for (const piece of pieces.slice(1)) {
+    const id = splitId({ ...map, regions: [...map.regions, ...fresh] }, original.id);
+    fresh.push({
+      id,
+      name: id,
+      ipc_value: 0,
+      starting_owner: original.starting_owner,
+      is_sea: original.is_sea,
+      factory: "none",
+      capital: false,
+      polygon: piece.polygon.map((p) => ({ ...p })),
+      cx: piece.cx,
+      cy: piece.cy,
+    });
+  }
+  const keep = pieces[0];
+  const regions: EditorRegion[] = [];
+  for (const r of map.regions) {
+    if (r.id === regionId) {
+      regions.push({ ...r, polygon: keep.polygon.map((p) => ({ ...p })), cx: keep.cx, cy: keep.cy }, ...fresh);
+    } else {
+      regions.push(r);
+    }
+  }
+  let next: EditorMap = { ...map, regions };
+  for (const id of [regionId, ...fresh.map((f) => f.id)]) {
+    next = weldRegion(next, id);
+  }
+  return { map: next, newIds: fresh.map((f) => f.id) };
+}
+
+/**
+ * Replaces region A with the weld of A and B, then removes B. A keeps its id and settings (a capital or
+ * factory on either one survives); B's neighbor links, starting units and any manual link overrides move to A.
+ */
+export function applyMerge(
+  map: EditorMap,
+  aId: string,
+  bId: string,
+  merged: { polygon: Vec2[]; cx: number; cy: number },
+): EditorMap | null {
+  const a = findRegion(map, aId);
+  const b = findRegion(map, bId);
+  if (!a || !b || aId === bId) {
+    return null;
+  }
+  const level = (r: EditorRegion) => FACTORY_LEVELS.indexOf(r.factory);
+  const factory = level(b) > level(a) ? b.factory : a.factory;
+  const move = (p: Pair): Pair | null => {
+    const x = p[0] === bId ? aId : p[0];
+    const y = p[1] === bId ? aId : p[1];
+    return x === y ? null : pairOf(x, y);
+  };
+  const remap = (list: Pair[]): Pair[] => uniquePairs(list.map(move).filter((p): p is Pair => p !== null));
+  const regions = map.regions
+    .filter((r) => r.id !== bId)
+    .map((r) =>
+      r.id === aId
+        ? { ...r, polygon: merged.polygon.map((p) => ({ ...p })), cx: merged.cx, cy: merged.cy, capital: a.capital || b.capital, factory }
+        : r,
+    );
+  const next: EditorMap = {
+    ...map,
+    meta: mapStartingUnits(map.meta, (u) => (u.region_id === bId ? { ...u, region_id: aId } : u)),
+    regions,
+    links: remap(map.links),
+    auto: remap(map.auto),
+    overrides: { add: remap(map.overrides.add), remove: remap(map.overrides.remove) },
+  };
+  return weldRegion(next, aId);
+}
+
+/** Adds each outline as a new region of the layer, placed under the existing ones. */
+export function addBlocks(map: EditorMap, blocks: Vec2[][], sea: boolean, anchors: Vec2[]): { map: EditorMap; ids: string[] } {
+  let next = map;
+  const ids: string[] = [];
+  const added: EditorRegion[] = [];
+  blocks.forEach((polygon, i) => {
+    const id = nextRegionId({ ...next, regions: [...next.regions, ...added] }, sea);
+    const label = anchors[i] ?? labelPoint(polygon);
+    ids.push(id);
+    added.push({
+      id,
+      name: id,
+      ipc_value: sea ? 0 : 1,
+      starting_owner: "Neutral",
+      is_sea: sea,
+      factory: "none",
+      capital: false,
+      polygon: polygon.map((p) => ({ ...p })),
+      cx: label.x,
+      cy: label.y,
+    });
+  });
+  next = { ...next, regions: [...added, ...next.regions] };
+  for (const id of ids) {
+    next = weldRegion(next, id);
+  }
+  return { map: next, ids };
 }
 
 export function moveVertices(map: EditorMap, refs: VertexRef[], to: Vec2): EditorMap {
@@ -445,6 +742,14 @@ function uniquePairs(list: Pair[]): Pair[] {
   });
 }
 
+/** Older files only say `factory: true`; those become major. */
+function factoryLevelOf(meta: Dict): FactoryLevel {
+  if (!meta.factory) {
+    return "none";
+  }
+  return meta.factory_size === "minor" ? "minor" : "major";
+}
+
 /** `mapJson` must already be in world space (see projectMapJson). */
 export function editorFromMapJson(mapJson: Dict): EditorMap {
   const regions: EditorRegion[] = [];
@@ -464,7 +769,7 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
       ipc_value: Math.trunc(Number(meta.ipc ?? 0)),
       starting_owner: String(meta.faction ?? "Neutral") || "Neutral",
       is_sea: shape.type === "sea",
-      factory: Boolean(meta.factory ?? false),
+      factory: factoryLevelOf(meta),
       capital: Boolean(meta.victory ?? false),
       polygon: polygonOf(raw.polygon),
       cx: shape.anchor.x,
@@ -540,7 +845,8 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         region_id: region.id,
         name: region.name,
         faction: region.starting_owner,
-        factory: region.factory,
+        factory: region.factory !== "none",
+        ...(region.factory === "none" ? {} : { factory_size: region.factory }),
         ipc: region.ipc_value,
         victory: region.capital,
         type: region.is_sea ? "sea" : "land",

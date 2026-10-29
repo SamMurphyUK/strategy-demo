@@ -25,7 +25,7 @@ import { buildMapGeometry, layoutStackSlots, type Vec2 } from "../../../src/ui/m
 import { combinePathData, parseViewBox } from "../../../src/ui/map/landSvg";
 import { LEGACY_TO_WORLD, legacyToWorld, projectMapJson, worldToLegacy } from "../../../src/ui/map/map_space";
 import { landFill, seaFill } from "../../../src/ui/map/mapStyle";
-import { fitView, panBy, screenToWorld, worldToScreen, zoomAt } from "../../../src/ui/map/viewMath";
+import { fitView, panBy, screenToWorld, tokenZoomScale, worldToScreen, zoomAt } from "../../../src/ui/map/viewMath";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
   { x, y },
@@ -101,6 +101,14 @@ describe("view maths", () => {
     const back = screenToWorld(v, worldToScreen(v, p));
     expect(back.x).toBeCloseTo(p.x, 9);
     expect(back.y).toBeCloseTo(p.y, 9);
+  });
+
+  it("shrinks units by at most 10% when zoomed out and grows them by at most 10% when zoomed in", () => {
+    expect(tokenZoomScale(2, 2)).toBe(1);
+    expect(tokenZoomScale(1.6, 2)).toBeCloseTo(0.9, 9);
+    expect(tokenZoomScale(1, 2)).toBeCloseTo(0.9, 9);
+    expect(tokenZoomScale(2.2, 2)).toBeCloseTo(1.1, 9);
+    expect(tokenZoomScale(8, 2)).toBeCloseTo(1.1, 9);
   });
 
   it("zooms about the cursor and clamps", () => {

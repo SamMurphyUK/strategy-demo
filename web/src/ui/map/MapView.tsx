@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
 import type { HighlightMode, MapGeometry, Rect, StackEntry, Vec2 } from "./geometry";
 import { buildCutterPaths, buildRegionPaths, pickCounter, pickRegion } from "./hitTest";
@@ -13,7 +13,7 @@ import {
 } from "./mapRenderer";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
-import { fitView, panBy, screenToWorld, type View, zoomAt } from "./viewMath";
+import { fitView, panBy, screenToWorld, tokenZoomScale, type View, zoomAt } from "./viewMath";
 
 export interface CombatMarker {
   regionId: string;
@@ -25,11 +25,15 @@ export interface EditorBinding {
   overlay: Omit<EditorOverlay, "regions" | "paths">;
   /** A draggable handle under the pointer (a vertex or the anchor), or null. */
   pickHandle(world: Vec2, tolWorld: number): unknown | null;
-  onClick(world: Vec2, regionId: string, tolWorld: number): void;
+  onClick(world: Vec2, regionId: string, tolWorld: number, mods: { shift: boolean }): void;
   onDoubleClick(world: Vec2, tolWorld: number): void;
   onHover(world: Vec2 | null, tolWorld: number): void;
   onDrag(handle: unknown, world: Vec2, tolWorld: number): void;
   onDragEnd(handle: unknown): void;
+  /** True when a press-and-drag should draw a straight cut (the knife with no line started). */
+  swipeable(): boolean;
+  /** A dragged straight line from `from` to `to`; `done` is true when the pointer is released. */
+  onSwipe(from: Vec2, to: Vec2, tolWorld: number, done: boolean): void;
 }
 
 export interface MapViewProps {
@@ -47,6 +51,8 @@ export interface MapViewProps {
   onRegionHover(regionId: string): void;
   onStackClick(regionId: string, entry: StackEntry, key: string): void;
   editor?: EditorBinding;
+  /** Floating controls drawn over the map (the editor toolbar). */
+  children?: ReactNode;
 }
 
 const DRAG_THRESHOLD_PX = 4;
@@ -57,7 +63,8 @@ const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
 
 type Drag =
   | { kind: "pan"; startX: number; startY: number; view: View; moved: boolean }
-  | { kind: "handle"; handle: unknown };
+  | { kind: "handle"; handle: unknown }
+  | { kind: "swipe"; from: Vec2; to: Vec2; moved: boolean; startX: number; startY: number };
 
 export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
@@ -81,11 +88,14 @@ export function MapView(props: MapViewProps) {
   const paths = useMemo(() => buildRegionPaths(geometry.regions, clipped), [geometry, clipped]);
   const cutterPaths = useMemo(() => buildCutterPaths(geometry.regions), [geometry]);
   const exact = clipped !== null;
-  const layouts = layoutRegions(geometry.regions, props.stacks, view);
+  /** In the editor only the chosen layer (land or sea) can be hovered or clicked, and the other is faded. */
+  const only = editor ? editor.overlay.layer : null;
+  const unitScale = tokenZoomScale(view.k, fitK);
+  const layouts = layoutRegions(geometry.regions, props.stacks, view, unitScale);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact };
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -139,6 +149,7 @@ export function MapView(props: MapViewProps) {
       highlight: props.highlight,
       selectedRegionId: props.selectedRegionId,
       hoverRegionId: hoverId,
+      dim: only === null ? null : only === "land" ? "sea" : "land",
     };
     drawTerrain(ctx, scene);
     if (editor) {
@@ -150,6 +161,7 @@ export function MapView(props: MapViewProps) {
         selectedStack: props.selectedStack,
         isUnmoved: props.isUnmoved,
         combatMarkers: props.combatMarkers,
+        unitScale,
       });
     }
   });
@@ -184,20 +196,34 @@ export function MapView(props: MapViewProps) {
     const { view: v } = live.current;
     const ed = live.current.props.editor;
     const handle = ed?.pickHandle(screenToWorld(v, sp), HANDLE_PX / v.k) ?? null;
-    drag.current =
-      handle !== null
-        ? { kind: "handle", handle }
-        : { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
+    const from = screenToWorld(v, sp);
+    if (handle !== null) {
+      drag.current = { kind: "handle", handle };
+    } else if (ed?.swipeable() && !e.altKey) {
+      // Knife: dragging draws the cut. Alt-drag still pans.
+      drag.current = { kind: "swipe", from, to: from, moved: false, startX: e.clientX, startY: e.clientY };
+    } else {
+      drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
+    }
     canvasRef.current?.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const sp = pointer(e);
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
     const world = screenToWorld(v, sp);
     const d = drag.current;
     if (d?.kind === "handle") {
       p.editor?.onDrag(d.handle, world, SNAP_PX / v.k);
+      return;
+    }
+    if (d?.kind === "swipe") {
+      if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+      d.moved = true;
+      d.to = world;
+      p.editor?.onSwipe(d.from, world, SNAP_PX / v.k, false);
       return;
     }
     if (d?.kind === "pan") {
@@ -214,13 +240,14 @@ export function MapView(props: MapViewProps) {
     if (p.editor) {
       p.editor.onHover(world, SNAP_PX / v.k);
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex);
+    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex, layer);
     setHoverId((prev) => (prev === id ? prev : id));
     if (!p.editor) {
       p.onRegionHover(id);
     }
-    const overCounter = !p.editor && pickCounter(ls, sp, COUNTER_HIT_PX) !== null;
-    canvasRef.current!.style.cursor = overCounter || id !== "" ? "pointer" : "default";
+    const overCounter = !p.editor && pickCounter(ls, sp, COUNTER_HIT_PX * tokenZoomScale(v.k, live.current.fitK)) !== null;
+    const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw";
+    canvasRef.current!.style.cursor = aiming ? "crosshair" : overCounter || id !== "" ? "pointer" : "default";
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -229,9 +256,19 @@ export function MapView(props: MapViewProps) {
     if (!d) {
       return;
     }
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
     if (d.kind === "handle") {
       p.editor?.onDragEnd(d.handle);
+      return;
+    }
+    if (d.kind === "swipe" && d.moved) {
+      p.editor?.onSwipe(d.from, screenToWorld(v, pointer(e)), SNAP_PX / v.k, true);
+      return;
+    }
+    if (d.kind === "swipe") {
+      // Not dragged far enough: a plain click.
+      const world = screenToWorld(v, pointer(e));
+      p.editor?.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
       return;
     }
     if (d.moved) {
@@ -244,10 +281,10 @@ export function MapView(props: MapViewProps) {
     const sp = pointer(e);
     const world = screenToWorld(v, sp);
     if (p.editor) {
-      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex), SNAP_PX / v.k);
+      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
       return;
     }
-    const counter = pickCounter(ls, sp, COUNTER_HIT_PX);
+    const counter = pickCounter(ls, sp, COUNTER_HIT_PX * tokenZoomScale(v.k, live.current.fitK));
     if (counter) {
       p.onStackClick(counter.regionId, counter.slot.entry, counter.slot.key);
       return;
@@ -292,6 +329,7 @@ export function MapView(props: MapViewProps) {
           Fit map
         </button>
       </div>
+      {props.children}
       {props.landError !== "" && <div className="map-error">Land mask not loaded: {props.landError}</div>}
     </div>
   );

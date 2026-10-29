@@ -10,6 +10,17 @@ export interface View {
 
 export const MIN_ZOOM_FACTOR = 0.6; // relative to the fitted view
 export const MAX_ZOOM_FACTOR = 24;
+/** How far a unit's on-screen size may drift from its size on the fitted map. */
+export const TOKEN_ZOOM_LIMIT = 0.1;
+
+/**
+ * Unit screen size relative to the fitted view. Zooming out shrinks a unit and zooming in grows it,
+ * each by at most 10%. `viewK` and `fitK` are screen pixels per world unit.
+ */
+export function tokenZoomScale(viewK: number, fitK: number): number {
+  const zoom = fitK > 0 ? viewK / fitK : 1;
+  return Math.min(Math.max(zoom, 1 - TOKEN_ZOOM_LIMIT), 1 + TOKEN_ZOOM_LIMIT);
+}
 
 export function fitView(bounds: Rect, width: number, height: number, padding = 16): View {
   const w = Math.max(1, width - padding * 2);

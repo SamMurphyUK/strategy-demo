@@ -1,14 +1,15 @@
 import { useState } from "react";
+import { factionIdFromDisplay } from "../../../content/game_scene_session_builder";
 import { LINK_COLORS } from "../mapRenderer";
-import { neighborsOf, OWNER_OPTIONS } from "./editorModel";
-import type { EditorTool, MapEditor } from "./useMapEditor";
-
-const TOOL_HINTS: Record<EditorTool, string> = {
-  select:
-    "Click a region to inspect it. Drag its square handles to reshape (shared borders move together) and the amber diamond to move its unit anchor.",
-  draw: "Click to place vertices. Clicks within 8 px of an existing vertex or edge snap to it. Click the first vertex, double-click or press Enter to finish.",
-  link: "Click region A, then region B, to add or remove a neighbor link between them. Use it for straits, canals and other edge cases.",
-};
+import {
+  FACTORY_LEVELS,
+  type FactoryLevel,
+  neighborsOf,
+  OWNER_OPTIONS,
+  UNIT_FACTION_OPTIONS,
+  UNIT_TYPE_OPTIONS,
+} from "./editorModel";
+import type { MapEditor } from "./useMapEditor";
 
 /** Commits on blur or Enter, so typing does not create an undo step per keystroke. */
 function CommitInput(props: {
@@ -38,70 +39,31 @@ function CommitInput(props: {
   );
 }
 
+const FACTORY_LABELS: Record<FactoryLevel, string> = { none: "None", minor: "Minor", major: "Major" };
+
+/** Always lists the current value, even if it is not one of the usual options. */
+function withCurrent(options: readonly string[], current: string): string[] {
+  return [...new Set([...options, current])];
+}
+
 export function EditorPanel({ editor }: { editor: MapEditor }) {
   const [renameError, setRenameError] = useState("");
   const { selected, map } = editor;
   const num = (value: string, fallback: number) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+  const units = editor.selectedUnits;
+  const unitRows = units.map(({ faction_id, unit_type_id, count }) => ({ faction_id, unit_type_id, count }));
+  const editUnit = (index: number, patch: Partial<(typeof unitRows)[number]>) =>
+    editor.setUnits(unitRows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
 
   return (
     <>
       <section className="panel editor-panel">
-        <h2>Map editor</h2>
-        <div className="tool-row" role="toolbar" aria-label="Editor tools">
-          {(["select", "draw", "link"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={editor.tool === t ? "active" : ""}
-              onClick={() => editor.setTool(t)}
-            >
-              {t === "select" ? "Select" : t === "draw" ? "Draw" : "Link"}
-            </button>
-          ))}
-        </div>
-        {editor.tool === "draw" && (
-          <div className="tool-row">
-            <button type="button" className={editor.drawSea ? "" : "active"} onClick={() => editor.setDrawSea(false)}>
-              Land region
-            </button>
-            <button type="button" className={editor.drawSea ? "active" : ""} onClick={() => editor.setDrawSea(true)}>
-              Sea zone
-            </button>
-          </div>
-        )}
-        {editor.tool === "draw" && editor.draft.length > 0 && (
-          <div className="tool-row">
-            <button type="button" className="primary" onClick={editor.finishDraft} disabled={editor.draft.length < 3}>
-              Finish ({editor.draft.length})
-            </button>
-            <button type="button" onClick={editor.undoVertex}>
-              Back
-            </button>
-            <button type="button" onClick={editor.cancelDraft}>
-              Cancel
-            </button>
-          </div>
-        )}
-        <p className="muted editor-hint">{TOOL_HINTS[editor.tool]}</p>
-        {editor.tool === "link" && editor.linkFirstId !== "" && (
-          <p className="budget">
-            Linking from <strong>{editor.linkFirstId}</strong>. Click the second region.
-          </p>
-        )}
-        <div className="tool-row">
-          <button type="button" onClick={editor.undo} disabled={!editor.canUndo}>
-            Undo
-          </button>
-          <button type="button" onClick={editor.redo} disabled={!editor.canRedo}>
-            Redo
-          </button>
-        </div>
-      </section>
-
-      <section className="panel editor-panel">
         <h2>{selected ? selected.id : "Region"}</h2>
         {!selected ? (
-          <p className="muted">Select a region on the map to edit its metadata.</p>
+          <p className="muted">
+            Click a {editor.layer === "sea" ? "sea zone" : "land region"} on the map to edit it. Use the toolbar over the
+            map to slice, reshape or merge.
+          </p>
         ) : (
           <div className="field-grid">
             <label>
@@ -119,6 +81,19 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
               <CommitInput value={selected.name} onCommit={(v) => editor.patchSelected({ name: v })} />
             </label>
             <label>
+              Owner
+              <select
+                value={selected.starting_owner}
+                onChange={(e) => editor.patchSelected({ starting_owner: e.target.value })}
+              >
+                {withCurrent(OWNER_OPTIONS, selected.starting_owner).map((o) => (
+                  <option key={o} value={o}>
+                    {o.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               IPC value
               <CommitInput
                 type="number"
@@ -127,14 +102,14 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
               />
             </label>
             <label>
-              Starting owner
+              Factory
               <select
-                value={selected.starting_owner}
-                onChange={(e) => editor.patchSelected({ starting_owner: e.target.value })}
+                value={selected.factory}
+                onChange={(e) => editor.patchSelected({ factory: e.target.value as FactoryLevel })}
               >
-                {[...new Set([...OWNER_OPTIONS, selected.starting_owner])].map((o) => (
-                  <option key={o} value={o}>
-                    {o}
+                {FACTORY_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {FACTORY_LABELS[level]}
                   </option>
                 ))}
               </select>
@@ -142,26 +117,10 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
             <label className="check">
               <input
                 type="checkbox"
-                checked={selected.is_sea}
-                onChange={(e) => editor.patchSelected({ is_sea: e.target.checked })}
-              />
-              Sea zone
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={selected.factory}
-                onChange={(e) => editor.patchSelected({ factory: e.target.checked })}
-              />
-              Factory
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
                 checked={selected.capital}
                 onChange={(e) => editor.patchSelected({ capital: e.target.checked })}
               />
-              Capital / victory
+              Capital
             </label>
             <label>
               Anchor x (cx)
@@ -181,6 +140,66 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
                 onCommit={(v) => editor.patchSelected({ cy: num(v, selected.cy) })}
               />
             </label>
+
+            <div className="field-wide unit-editor">
+              <span className="unit-editor-title">Starting units</span>
+              {unitRows.length === 0 && <p className="muted">None.</p>}
+              {unitRows.map((row, i) => (
+                <div className="unit-row" key={`${i}-${row.faction_id}-${row.unit_type_id}`}>
+                  <select
+                    aria-label="Faction"
+                    value={row.faction_id}
+                    onChange={(e) => editUnit(i, { faction_id: e.target.value })}
+                  >
+                    {withCurrent(UNIT_FACTION_OPTIONS, row.faction_id).map((f) => (
+                      <option key={f} value={f}>
+                        {f.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Unit type"
+                    value={row.unit_type_id}
+                    onChange={(e) => editUnit(i, { unit_type_id: e.target.value })}
+                  >
+                    {withCurrent(UNIT_TYPE_OPTIONS, row.unit_type_id).map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                  <CommitInput
+                    type="number"
+                    value={row.count}
+                    onCommit={(v) => editUnit(i, { count: Math.max(0, Math.trunc(num(v, row.count))) })}
+                  />
+                  <button
+                    type="button"
+                    title="Remove this line"
+                    onClick={() => editor.setUnits(unitRows.filter((_, k) => k !== i))}
+                  >
+                    {"\u00d7"}
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  const owner = factionIdFromDisplay(selected.starting_owner);
+                  editor.setUnits([
+                    ...unitRows,
+                    {
+                      faction_id: owner === "independent" ? "neutral" : owner,
+                      unit_type_id: selected.is_sea ? "destroyer" : "infantry",
+                      count: 1,
+                    },
+                  ]);
+                }}
+              >
+                Add units
+              </button>
+            </div>
+
             <p className="muted field-wide mono">{selected.polygon.length} vertices</p>
             <button type="button" className="field-wide danger" onClick={editor.removeSelected}>
               Delete region
@@ -225,18 +244,20 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
 
       <section className="panel editor-panel">
         <h2>Export</h2>
-        <div className="tool-row">
+        <div className="export-buttons">
           <button type="button" className="primary" onClick={editor.exportJson}>
-            Export Map JSON
+            Recalculate All Adjacencies &amp; Download JSON
+          </button>
+          <button type="button" className="primary" onClick={editor.saveToDevServer}>
+            Save Directly to Dev Server
           </button>
           <button type="button" onClick={editor.resetToDemo}>
             Reset to demo map
           </button>
         </div>
-        {editor.status !== "" && <p className="muted editor-status">{editor.status}</p>}
         <p className="muted editor-hint">
-          Edits autosave in this browser. The running game still uses the demo map until the exported file replaces
-          demomap01.json.
+          Edits autosave in this browser. Save Directly writes demomap01.json in the repo (dev server only). The running
+          game uses the demo map until that file changes.
         </p>
       </section>
     </>

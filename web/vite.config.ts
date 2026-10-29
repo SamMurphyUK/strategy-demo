@@ -1,9 +1,10 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { saveMapPlugin } from "./dev/saveMapPlugin.mjs";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), saveMapPlugin({ file: "../demomap01.json" })],
   server: {
     // Bind IPv4 explicitly. On this machine localhost resolves to 127.0.0.1, and Vite's
     // default listen was IPv6-only (::1), so the browser was refused.

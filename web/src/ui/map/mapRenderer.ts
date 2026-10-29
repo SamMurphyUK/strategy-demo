@@ -62,7 +62,12 @@ export interface TerrainScene {
   highlight: HighlightMode;
   selectedRegionId: string;
   hoverRegionId: string;
+  /** Regions of this layer are drawn faded (the editor's other layer). */
+  dim?: "land" | "sea" | null;
 }
+
+/** How much of a faded layer still shows. */
+const DIM_ALPHA = 0.3;
 
 export interface PlacedCounter {
   regionId: string;
@@ -80,7 +85,13 @@ export interface RegionLayout {
   halfHeight: number;
 }
 
-export function layoutRegions(regions: RegionShape[], stacks: Record<string, StackEntry[]>, view: View): RegionLayout[] {
+export function layoutRegions(
+  regions: RegionShape[],
+  stacks: Record<string, StackEntry[]>,
+  view: View,
+  tokenScale = 1,
+): RegionLayout[] {
+  const tokenPx = TOKEN_PX * tokenScale;
   return regions.map((region) => {
     const anchor = worldToScreen(view, region.anchor);
     const slots = layoutStackSlots(stacks[region.id] ?? []);
@@ -91,7 +102,7 @@ export function layoutRegions(regions: RegionShape[], stacks: Record<string, Sta
       y: anchor.y + slot.offset.y,
     }));
     const reach = slots.reduce((m, s) => Math.max(m, Math.abs(s.offset.y)), 0);
-    return { region, anchor, counters, halfHeight: slots.length > 0 ? reach + TOKEN_PX / 2 + 2 : 0 };
+    return { region, anchor, counters, halfHeight: slots.length > 0 ? reach + tokenPx / 2 + 2 : 0 };
   });
 }
 
@@ -127,10 +138,12 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     if (region.type !== "sea" || !path) {
       continue;
     }
+    ctx.globalAlpha = s.dim === "sea" ? DIM_ALPHA : 1;
     ctx.fillStyle = seaFill(region.id, s.highlight);
     ctx.fill(path, "evenodd");
     ctx.stroke(path);
   }
+  ctx.globalAlpha = 1;
   ctx.setLineDash([]);
 
   // Layer 1: the land stencil. Opaque, so it hides anything a sea zone drew over the shore.
@@ -151,6 +164,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     if (region.type !== "land" || !path) {
       continue;
     }
+    ctx.globalAlpha = s.dim === "land" ? DIM_ALPHA : 1;
     const fill = landFill(region.id, s.owners[region.id] ?? "", s.highlight);
     if (fill) {
       ctx.fillStyle = fill;
@@ -158,7 +172,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     }
     ctx.stroke(path);
   }
-  ctx.restore();
+  ctx.restore(); // also puts globalAlpha back
 
   // Layer 3: the coastline.
   if (land) {
@@ -212,6 +226,8 @@ export interface GameOverlay {
   selectedStack: { regionId: string; key: string } | null;
   isUnmoved(regionId: string, entry: StackEntry): boolean;
   combatMarkers: { regionId: string; count: number }[];
+  /** On-screen unit size relative to the fitted map. 1 at the fit; within 0.9 and 1.1 while zooming. */
+  unitScale: number;
 }
 
 function shieldPath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -226,6 +242,7 @@ function shieldPath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
 
 export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
   const dpr = scene.dpr;
+  const tokenPx = TOKEN_PX * game.unitScale;
   setScreenTransform(ctx, dpr);
   const markers = new Map(game.combatMarkers.map((m) => [m.regionId, m.count]));
 
@@ -265,13 +282,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
       ctx.shadowColor = "rgba(26, 26, 24, 0.55)";
       ctx.shadowBlur = 3 * dpr;
       ctx.shadowOffsetY = 1 * dpr;
-      ctx.drawImage(
-        token.canvas,
-        counter.x - token.canvas.width / dpr / 2,
-        counter.y - token.canvas.height / dpr / 2,
-        token.canvas.width / dpr,
-        token.canvas.height / dpr,
-      );
+      ctx.drawImage(token.canvas, counter.x - tokenPx / 2, counter.y - tokenPx / 2, tokenPx, tokenPx);
       ctx.shadowColor = "transparent";
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
@@ -280,7 +291,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
       const unmoved = game.isUnmoved(region.id, entry);
       if (selected || unmoved) {
         ctx.beginPath();
-        ctx.arc(counter.x, counter.y, TOKEN_PX / 2 + 3, 0, Math.PI * 2);
+        ctx.arc(counter.x, counter.y, tokenPx / 2 + 3 * game.unitScale, 0, Math.PI * 2);
         ctx.lineWidth = selected ? 3 : 1.5;
         ctx.strokeStyle = selected ? SELECTED_COLOR : "rgba(244, 241, 234, 0.9)";
         ctx.setLineDash(selected ? [] : [4, 3]);
@@ -288,17 +299,17 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
         ctx.setLineDash([]);
       }
       if (entry.count > 1) {
-        const bx = counter.x + TOKEN_PX * 0.42;
-        const by = counter.y + TOKEN_PX * 0.42;
+        const bx = counter.x + tokenPx * 0.42;
+        const by = counter.y + tokenPx * 0.42;
         ctx.beginPath();
-        ctx.arc(bx, by, 10, 0, Math.PI * 2);
+        ctx.arc(bx, by, 10 * game.unitScale, 0, Math.PI * 2);
         ctx.fillStyle = INK;
         ctx.fill();
         ctx.lineWidth = 1;
         ctx.strokeStyle = PAPER;
         ctx.stroke();
         ctx.fillStyle = PAPER;
-        ctx.font = `700 12px ${MONO}`;
+        ctx.font = `700 ${12 * game.unitScale}px ${MONO}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(entry.count), bx, by + 0.5);
@@ -331,23 +342,38 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
 export const LINK_COLORS = { land: "#3f6b2a", sea: "#2b5f9a", coastal: "#b5651d" } as const;
 export type EditorLinkKind = keyof typeof LINK_COLORS;
 
+export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link";
+
 export interface EditorOverlay {
   regions: RegionShape[];
   paths: Map<string, Path2D>;
   links: { a: Vec2; b: Vec2; kind: EditorLinkKind }[];
   selectedId: string;
+  /** The second region of a merge (Shift-click), or "". */
+  secondId: string;
   linkFirstId: string;
   draft: Vec2[];
   drawSea: boolean;
+  /** The layer being edited. The other one is drawn faded. */
+  layer: "land" | "sea";
   cursor: { point: Vec2; kind: "vertex" | "edge" | "free" } | null;
   /** The cursor is near enough to the draft's first vertex to close it. */
   closing: boolean;
-  tool: "select" | "draw" | "link";
+  tool: EditorToolName;
 }
+
+const KNIFE_COLOR = "#c0392b";
+const MERGE_COLOR = "#2b6cb0";
+const HANDLE_COLOR = "#e0a000";
+/** Edges shorter than this on screen get no midpoint "+" handle. */
+const MIDPOINT_MIN_PX = 22;
+/** How far the knife preview runs past the line's ends, in world units. */
+const KNIFE_PREVIEW_REACH = 4000;
 
 export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, editor: EditorOverlay): void {
   const { view, dpr } = scene;
   const px = 1 / view.k;
+  const active = (type: "land" | "sea") => type === editor.layer;
 
   // Full rough outlines (including the parts the land mask hides) so the slicing is visible.
   setWorldTransform(ctx, view, dpr);
@@ -358,8 +384,21 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   for (const region of editor.regions) {
     const path = editor.paths.get(region.id);
     if (path) {
+      ctx.globalAlpha = active(region.type) ? 1 : 0.35;
       ctx.stroke(path);
     }
+  }
+  ctx.globalAlpha = 1;
+
+  // The second region of a merge.
+  const second = editor.secondId === "" ? undefined : editor.paths.get(editor.secondId);
+  if (second) {
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(43, 108, 176, 0.2)";
+    ctx.fill(second, "evenodd");
+    ctx.lineWidth = 2.5 * px;
+    ctx.strokeStyle = MERGE_COLOR;
+    ctx.stroke(second);
   }
 
   // Neighbor links, dotted, colour-coded.
@@ -382,6 +421,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   // Anchors and names.
   ctx.textAlign = "center";
   for (const region of editor.regions) {
+    ctx.globalAlpha = active(region.type) ? 1 : 0.3;
     const a = S(region.anchor);
     ctx.beginPath();
     ctx.arc(a.x, a.y, 4, 0, Math.PI * 2);
@@ -398,6 +438,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.fillStyle = INK;
     ctx.fillText(region.id, a.x, a.y + 7);
   }
+  ctx.globalAlpha = 1;
 
   if (editor.linkFirstId !== "") {
     const region = editor.regions.find((r) => r.id === editor.linkFirstId);
@@ -406,21 +447,45 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       ctx.beginPath();
       ctx.arc(a.x, a.y, 11, 0, Math.PI * 2);
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = "#e0a000";
+      ctx.strokeStyle = HANDLE_COLOR;
       ctx.stroke();
     }
   }
 
-  // Handles on the selected region: vertices, and the anchor you can drag.
+  // Handles on the selected region: the anchor you can drag, and in the vertex tool every vertex
+  // (squares) and edge midpoint ("+" circles, click to insert a vertex).
   const selected = editor.regions.find((r) => r.id === editor.selectedId);
-  if (selected && editor.tool !== "draw") {
-    for (const v of selected.points) {
-      const p = S(v);
-      ctx.fillStyle = PAPER;
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = 1.5;
-      ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
-      ctx.strokeRect(p.x - 4, p.y - 4, 8, 8);
+  const handles = editor.tool === "select" || editor.tool === "vertex" || editor.tool === "merge";
+  if (selected && handles) {
+    if (editor.tool === "vertex") {
+      const pts = selected.points.map(S);
+      pts.forEach((p, i) => {
+        const q = pts[(i + 1) % pts.length];
+        if (pts.length >= 2 && Math.hypot(q.x - p.x, q.y - p.y) >= MIDPOINT_MIN_PX) {
+          const mx = (p.x + q.x) / 2;
+          const my = (p.y + q.y) / 2;
+          ctx.beginPath();
+          ctx.arc(mx, my, 6, 0, Math.PI * 2);
+          ctx.fillStyle = PAPER;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = HANDLE_COLOR;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(mx - 3, my);
+          ctx.lineTo(mx + 3, my);
+          ctx.moveTo(mx, my - 3);
+          ctx.lineTo(mx, my + 3);
+          ctx.stroke();
+        }
+      });
+      for (const p of pts) {
+        ctx.fillStyle = PAPER;
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+        ctx.strokeRect(p.x - 4, p.y - 4, 8, 8);
+      }
     }
     const a = S(selected.anchor);
     ctx.beginPath();
@@ -432,12 +497,55 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.fillStyle = "rgba(224, 160, 0, 0.35)";
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "#e0a000";
+    ctx.strokeStyle = HANDLE_COLOR;
     ctx.stroke();
   }
 
+  // The knife line, with a faint preview of where its ends run on to.
+  if (editor.tool === "knife" && editor.draft.length > 0) {
+    const pts = [...editor.draft];
+    if (editor.cursor) {
+      pts.push(editor.cursor.point);
+    }
+    if (pts.length >= 2) {
+      const head = pts[0];
+      const tail = pts[pts.length - 1];
+      const dh = { x: head.x - pts[1].x, y: head.y - pts[1].y };
+      const dt = { x: tail.x - pts[pts.length - 2].x, y: tail.y - pts[pts.length - 2].y };
+      const lh = Math.hypot(dh.x, dh.y) || 1;
+      const lt = Math.hypot(dt.x, dt.y) || 1;
+      ctx.setLineDash([6, 6]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(192, 57, 43, 0.55)";
+      ctx.beginPath();
+      const h2 = S({ x: head.x + (dh.x / lh) * KNIFE_PREVIEW_REACH, y: head.y + (dh.y / lh) * KNIFE_PREVIEW_REACH });
+      const t2 = S({ x: tail.x + (dt.x / lt) * KNIFE_PREVIEW_REACH, y: tail.y + (dt.y / lt) * KNIFE_PREVIEW_REACH });
+      ctx.moveTo(h2.x, h2.y);
+      ctx.lineTo(S(head).x, S(head).y);
+      ctx.moveTo(S(tail).x, S(tail).y);
+      ctx.lineTo(t2.x, t2.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const screen = pts.map(S);
+    ctx.beginPath();
+    screen.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = KNIFE_COLOR;
+    ctx.stroke();
+    editor.draft.map(S).forEach((p) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = PAPER;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = KNIFE_COLOR;
+      ctx.stroke();
+    });
+  }
+
   // The polygon being drawn.
-  if (editor.draft.length > 0) {
+  if (editor.tool === "draw" && editor.draft.length > 0) {
     const color = editor.drawSea ? LINK_COLORS.sea : "#7a3e1d";
     const pts = editor.draft.map(S);
     ctx.beginPath();
@@ -462,7 +570,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     pts.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, i === 0 && editor.closing ? 8 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 ? "#e0a000" : PAPER;
+      ctx.fillStyle = i === 0 ? HANDLE_COLOR : PAPER;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = color;
@@ -471,7 +579,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   }
 
   // Snap indicator.
-  if (editor.cursor && editor.tool === "draw") {
+  if (editor.cursor && (editor.tool === "draw" || editor.tool === "knife")) {
     const c = S(editor.cursor.point);
     ctx.beginPath();
     ctx.arc(c.x, c.y, editor.cursor.kind === "free" ? 3 : 7, 0, Math.PI * 2);

@@ -87,7 +87,7 @@ export function pointInMultiPolygon(p: Vec2, mp: MultiPolygon): boolean {
   return inside;
 }
 
-function ringArea(ring: Ring): number {
+export function ringArea(ring: Ring): number {
   let a = 0;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
