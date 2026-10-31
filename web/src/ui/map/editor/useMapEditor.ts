@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dict } from "../../../engine/model/types";
 import { type MapGeometry, pointInPolygon, type Vec2 } from "../geometry";
+import { effectiveUnitSlots } from "../unitSlots";
 import { isLandAt } from "../hitTest";
 import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
@@ -25,6 +26,8 @@ import {
   editorFromMapJson,
   editorToGeometry,
   editorToMapJson,
+  anchorHandleAt,
+  moveSlot,
   findRegion,
   formatMapJson,
   labelPoint,
@@ -76,7 +79,16 @@ const MIN_BATCH_ROUGHEN_LENGTH = 16;
 /** Prune Small Islands starts here: untouched territories under 25 world square units are specks. */
 export const DEFAULT_PRUNE_AREA = 25;
 
-type Handle = { kind: "vertex"; regionId: string; group: VertexRef[] } | { kind: "anchor"; regionId: string };
+/**
+ * `anchor` is the unit anchor; `facility` and `air` are the Facility Anchor and Air Anchor. A `slot` is unit slot
+ * `index` (S1 is 0); `from` is every slot as it was when the drag began, so a generated set becomes hand-placed.
+ */
+type Handle =
+  | { kind: "vertex"; regionId: string; group: VertexRef[] }
+  | { kind: "anchor"; regionId: string }
+  | { kind: "facility"; regionId: string }
+  | { kind: "air"; regionId: string }
+  | { kind: "slot"; regionId: string; index: number; from: Vec2[] };
 
 const STORAGE_KEY = "strategy-demo.map-editor.v3";
 const HISTORY_LIMIT = 100;
@@ -256,6 +268,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     return counts;
   }, [links]);
 
+  const geometryRef = useRef(geometry);
+  geometryRef.current = geometry;
+
   /** A region's true shape: its cutter clipped against the land, or the raw cutter without it. */
   const shapeOf = useCallback((region: { id: string; polygon: Vec2[]; extra?: Vec2[][]; is_sea: boolean }): MultiPolygon => {
     const mask = live.current.land;
@@ -269,6 +284,22 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       extra: region.extra,
     });
   }, []);
+
+  /** A region's unit slots as the map draws them: hand-placed, or generated from its true shape. */
+  const slotsOf = useCallback(
+    (id: string): Vec2[] => {
+      const shape = geometryRef.current.regions.find((r) => r.id === id);
+      const region = findRegion(docRef.current.map, id);
+      return shape && region ? effectiveUnitSlots(shape, shapeOf(region)) : [];
+    },
+    [shapeOf],
+  );
+  const selectedSlots = useMemo(
+    () => (selectedId === "" ? [] : slotsOf(selectedId)),
+    // `geometry` and `land` change what the generator sees, though the callback does not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedId, slotsOf, geometry, land],
+  );
 
   /** Recomputes neighbor links from the geometry, keeping manual overrides. */
   const withAutoLinks = useCallback((current: EditorMap): { map: EditorMap; pairs: number; masked: boolean } => {
@@ -946,6 +977,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         tool,
         pruneBox,
         pruneIds: boxIds,
+        slots: selectedSlots,
       },
       prunePrompt: pruneBox && boxDone ? { box: pruneBox, count: boxIds.length, confirm: confirmBoxPrune, cancel: cancelBoxPrune } : null,
       pickHandle(world, tol) {
@@ -958,8 +990,11 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         if (!region) {
           return null;
         }
-        if (dist(world, { x: region.cx, y: region.cy }) <= tol) {
-          return { kind: "anchor", regionId: id } satisfies Handle;
+        // The three anchors and the unit slots: the nearest one under the pointer wins, the unit anchor on a tie.
+        const slots = slotsOf(id);
+        const nearest = anchorHandleAt(region, world, tol, slots);
+        if (nearest) {
+          return (nearest.kind === "slot" ? { ...nearest, from: slots } : nearest) satisfies Handle;
         }
         if (t !== "vertex") {
           return null;
@@ -1135,6 +1170,18 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
           apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { cx: world.x, cy: world.y }) });
           return;
         }
+        if (handle.kind === "facility") {
+          apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { facility_anchor: [world.x, world.y] }) });
+          return;
+        }
+        if (handle.kind === "air") {
+          apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { air_anchor: [world.x, world.y] }) });
+          return;
+        }
+        if (handle.kind === "slot") {
+          apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { unit_slots: moveSlot(handle.from, handle.index, world) }) });
+          return;
+        }
         const inGroup = (id: string, i: number) => handle.group.some((g) => g.regionId === id && g.index === i);
         // Snap only to the layer being dragged, so a coast vertex cannot latch onto a sea border.
         const sea = findRegion(base, handle.regionId)?.is_sea ?? false;
@@ -1163,7 +1210,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         apply({ map: next, past: [...cur.past, before].slice(-HISTORY_LIMIT), future: [] });
       },
     }),
-    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt],
+    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf],
   );
 
   const selected = selectedId === "" ? null : (findRegion(map, selectedId) ?? null);

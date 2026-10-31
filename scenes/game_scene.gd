@@ -40,10 +40,12 @@ var right_ui_root: Control = null
 var _map_camera: Camera2D = null
 var _target_zoom := Vector2.ONE
 var _range_preview_icon: UnitIcon = null
+var _pan_active: bool = false
 
 const MIN_ZOOM := 0.4
 const MAX_ZOOM := 2.5
 const ZOOM_SMOOTH_SPEED := 12.0
+const PAN_KEY_SPEED := 900.0
 
 var session = null
 var _command_counter: int = 0
@@ -129,7 +131,9 @@ func _wire_debug_system() -> void:
 func _process(delta: float) -> void:
 	if _map_camera == null:
 		return
-	var speed := 900.0 * delta
+	if _pan_active and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+		_end_camera_pan()
+	var speed := PAN_KEY_SPEED * delta
 	var move := Vector2.ZERO
 	if Input.is_action_pressed("ui_left"):
 		move.x -= 1.0
@@ -159,9 +163,41 @@ func _process(delta: float) -> void:
 		_sync_zoom_to_subsystems()
 
 
+func _input(event: InputEvent) -> void:
+	if not _pan_active:
+		return
+	if event is InputEventMouseMotion:
+		_map_camera.position -= event.relative
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton \
+			and event.button_index == MOUSE_BUTTON_MIDDLE \
+			and not event.pressed:
+		_end_camera_pan()
+		get_viewport().set_input_as_handled()
+
+
+func _begin_camera_pan() -> void:
+	if _map_camera == null:
+		return
+	_pan_active = true
+	Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+
+
+func _end_camera_pan() -> void:
+	_pan_active = false
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		if event.pressed:
+			_begin_camera_pan()
+		else:
+			_end_camera_pan()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed:
-		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+		if event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
 			if unit_visualizer and unit_visualizer.has_method("clear_inspector_highlight"):
 				unit_visualizer.call("clear_inspector_highlight")
 			_clear_movement_range_preview()

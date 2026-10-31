@@ -10,6 +10,7 @@
 import type { RegionShape, Vec2 } from "./geometry";
 import type { PlacedCounter, RegionLayout } from "./mapRenderer";
 import type { MultiPolygon } from "./regionClip";
+import type { DomainCluster } from "./unitStacks";
 import type { MasterLand } from "./svgLandLoader";
 
 let probe: CanvasRenderingContext2D | null = null;
@@ -108,6 +109,30 @@ export function pickRegion(
     }
   }
   return "";
+}
+
+export interface PickedBubble {
+  layout: RegionLayout;
+  cluster: DomainCluster;
+}
+
+/** The collapsed domain bubble under a screen point (within `slack` px of its edge), nearest first. */
+export function pickBubble(layouts: RegionLayout[], p: Vec2, slack = 4): PickedBubble | null {
+  let best: PickedBubble | null = null;
+  let bestGap = Infinity;
+  for (const layout of layouts) {
+    for (const cluster of layout.clusters) {
+      if (!cluster.collapsed) {
+        continue;
+      }
+      const gap = Math.hypot(cluster.x - p.x, cluster.y - p.y) - cluster.bubbleRadius;
+      if (gap <= slack && gap < bestGap) {
+        bestGap = gap;
+        best = { layout, cluster };
+      }
+    }
+  }
+  return best;
 }
 
 /** The unit counter under a screen point, nearest first. */

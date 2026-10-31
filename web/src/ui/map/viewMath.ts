@@ -22,6 +22,18 @@ export function tokenZoomScale(viewK: number, fitK: number): number {
   return Math.min(Math.max(zoom, 1 - TOKEN_ZOOM_LIMIT), 1 + TOKEN_ZOOM_LIMIT);
 }
 
+/** A unit token never draws smaller or larger than this on screen, however far the camera is in or out. */
+export const TOKEN_MIN_PX = 8;
+export const TOKEN_MAX_PX = 64;
+
+/**
+ * On-screen diameter of a unit token: its world diameter times the zoom, so tokens grow and shrink with the
+ * map and every formation keeps its exact shape. Only the extremes are clamped.
+ */
+export function worldTokenPx(viewK: number, tokenWorld: number): number {
+  return Math.min(Math.max(tokenWorld * viewK, TOKEN_MIN_PX), TOKEN_MAX_PX);
+}
+
 export function fitView(bounds: Rect, width: number, height: number, padding = 16): View {
   const w = Math.max(1, width - padding * 2);
   const h = Math.max(1, height - padding * 2);
@@ -50,4 +62,45 @@ export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: numb
   const k = Math.min(Math.max(view.k * factor, fitK * MIN_ZOOM_FACTOR), fitK * MAX_ZOOM_FACTOR);
   const anchor = screenToWorld(view, screenPoint);
   return { k, x: anchor.x - screenPoint.x / k, y: anchor.y - screenPoint.y / k };
+}
+
+/** World x folded into [bounds.x, bounds.x + bounds.w): the same spot on the primary copy of a wrapped world. */
+export function wrapWorldX(x: number, bounds: Rect): number {
+  if (bounds.w <= 0) {
+    return x;
+  }
+  return bounds.x + ((((x - bounds.x) % bounds.w) + bounds.w) % bounds.w);
+}
+
+/**
+ * Keeps the view's centre inside the primary copy of a wrapped world, shifting by whole world widths, so
+ * the three drawn copies (-1, 0, +1) always surround it however far the user pans.
+ */
+export function wrapView(view: View, canvasWidth: number, bounds: Rect): View {
+  if (bounds.w <= 0 || view.k <= 0) {
+    return view;
+  }
+  const centre = view.x + canvasWidth / 2 / view.k;
+  const folded = wrapWorldX(centre, bounds);
+  return folded === centre ? view : { ...view, x: view.x + (folded - centre) };
+}
+
+/**
+ * Horizontal offsets (-w, 0, +w) of the world copies that intersect the canvas. With `wrap` off, only the
+ * primary copy (the editor edits one copy, so its coordinates stay true).
+ */
+export function visibleCopies(view: View, canvasWidth: number, bounds: Rect, wrap: boolean): number[] {
+  if (!wrap || bounds.w <= 0 || view.k <= 0) {
+    return [0];
+  }
+  const left = view.x;
+  const right = view.x + canvasWidth / view.k;
+  const out: number[] = [];
+  for (const n of [-1, 0, 1]) {
+    const from = bounds.x + n * bounds.w;
+    if (from < right && from + bounds.w > left) {
+      out.push(n * bounds.w);
+    }
+  }
+  return out.length > 0 ? out : [0];
 }

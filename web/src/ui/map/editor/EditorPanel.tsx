@@ -6,6 +6,7 @@ import {
   type FactoryLevel,
   neighborsOf,
   OWNER_OPTIONS,
+  sampleGarrison,
   UNIT_FACTION_OPTIONS,
   UNIT_TYPE_OPTIONS,
 } from "./editorModel";
@@ -114,6 +115,26 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
                 ))}
               </select>
             </label>
+            {!selected.is_sea && (
+              <>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={selected.has_airbase ?? false}
+                    onChange={(e) => editor.patchSelected({ has_airbase: e.target.checked })}
+                  />
+                  Airbase
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={selected.has_harbour ?? false}
+                    onChange={(e) => editor.patchSelected({ has_harbour: e.target.checked })}
+                  />
+                  Harbour
+                </label>
+              </>
+            )}
             <label className="check">
               <input
                 type="checkbox"
@@ -140,6 +161,16 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
                 onCommit={(v) => editor.patchSelected({ cy: num(v, selected.cy) })}
               />
             </label>
+
+            <button
+              type="button"
+              className="field-wide"
+              disabled={!(selected.facility_anchor || selected.air_anchor || selected.unit_slots)}
+              title="Put the facility anchor, air anchor and unit slots S1 to S6 back to what the map generates, which follows the territory's shape and unit anchor."
+              onClick={() => editor.patchSelected({ facility_anchor: undefined, air_anchor: undefined, unit_slots: undefined })}
+            >
+              Reset Anchors / Slots
+            </button>
 
             <div className="field-wide unit-editor">
               <span className="unit-editor-title">Starting units</span>
@@ -198,6 +229,22 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
               >
                 Add units
               </button>
+              <div className="unit-editor-quick">
+                <button
+                  type="button"
+                  title={`Six unit types for ${selected.is_sea ? "a sea zone" : "a land territory"}, to see how its slots fit. Replaces the units listed here.`}
+                  onClick={() => {
+                    const owner = factionIdFromDisplay(selected.starting_owner);
+                    // Neutral tokens are plain grey, so a neutral territory's sample wears the Soviet colours.
+                    editor.setUnits(sampleGarrison(selected.is_sea, owner === "independent" || owner === "neutral" ? "ussr" : owner));
+                  }}
+                >
+                  Fill Sample Garrison
+                </button>
+                <button type="button" disabled={unitRows.length === 0} onClick={() => editor.setUnits([])}>
+                  Clear units
+                </button>
+              </div>
             </div>
 
             <p className="muted field-wide mono">

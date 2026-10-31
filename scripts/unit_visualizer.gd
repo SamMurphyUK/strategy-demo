@@ -129,8 +129,7 @@ func apply_zoom_scale(zoom: float) -> void:
 func _apply_icon_zoom_scale(icon: UnitIcon) -> void:
 	if icon == null or not is_instance_valid(icon):
 		return
-	var base_scale := icon.get_texture_base_scale()
-	icon.scale = Vector2(base_scale / _current_zoom, base_scale / _current_zoom)
+	icon.scale = icon.scale_for_zoom(_current_zoom, true)
 
 
 func clear_all_units() -> void:

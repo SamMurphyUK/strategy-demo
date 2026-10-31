@@ -7,6 +7,7 @@ import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
 import { BattleScreen } from "./BattleScreen";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorToolbar } from "./editor/EditorToolbar";
+import { startingStacks } from "./editor/editorModel";
 import { useMapEditor } from "./editor/useMapEditor";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { projectMapJson } from "./map_space";
@@ -26,7 +27,6 @@ export type Selection =
 const MOVEMENT_PHASES = ["combat_move", "noncombat_move"];
 
 // Stable empties for editor mode, so the canvas does not see new objects every render.
-const NO_STACKS: Record<string, StackEntry[]> = {};
 const NO_HIGHLIGHT: HighlightMode = { kind: "none" };
 const NO_MARKERS: CombatMarker[] = [];
 const NEVER = () => false;
@@ -44,6 +44,7 @@ export function App() {
   const { land, error: landError } = useMasterLand();
   const [editing, setEditing] = useState(false);
   const editor = useMapEditor(worldMapJson, land, editing);
+  const editorStacks = useMemo(() => startingStacks(editor.map), [editor.map]);
   const editorOwners = useMemo(() => {
     const out: Record<string, string> = {};
     for (const r of editor.map.regions) {
@@ -166,6 +167,58 @@ export function App() {
     setSelectedRegionId(regionId === selectedRegionId ? "" : regionId);
   };
 
+  /** How many of this stack the current faction can still move this phase. */
+  const movableCount = (regionId: string, entry: StackEntry): number => {
+    if (!MOVEMENT_PHASES.includes(phase) || entry.faction_id !== faction.toLowerCase()) {
+      return 0;
+    }
+    return entry.instance_id
+      ? state.hasInstanceMoved(entry.instance_id)
+        ? 0
+        : 1
+      : state.movableStackCount(faction, regionId, entry.unit_type_id);
+  };
+
+  // Which of land, air or sea each unit type is, for grouping stacks on the map.
+  const unitCategories = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const id of Object.keys(state.unit_types)) {
+      out[id] = String(state.unit_types[id].category);
+    }
+    return out;
+  }, [state]);
+
+  /** A unit type picked in the drawer (the start of a drag): selected, never toggled off. */
+  const pickStack = (regionId: string, entry: StackEntry) => {
+    const max = movableCount(regionId, entry);
+    setSelectedRegionId(regionId);
+    setSelection(
+      max <= 0
+        ? null
+        : { kind: "stack", regionId, key: stackKey(entry), unitTypeId: entry.unit_type_id, instanceId: entry.instance_id ?? "", max, count: max },
+    );
+  };
+
+  /** A unit type dragged out of the drawer and dropped on `target`: the same order a click on it would give. */
+  const dropStack = (regionId: string, entry: StackEntry, target: string) => {
+    const max = movableCount(regionId, entry);
+    const legal =
+      max > 0 ? session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "") : [];
+    if (!legal.includes(target)) {
+      setSelection(null);
+      return;
+    }
+    const unit: Record<string, unknown> = { unit_type_id: entry.unit_type_id, count: max };
+    if (entry.instance_id) {
+      unit.instance_id = entry.instance_id;
+    }
+    const result = game.send("move_units", { moves: [{ from_region_id: regionId, to_region_id: target, units: [unit] }] });
+    if (result.result_type === "ok") {
+      setSelection(null);
+      setSelectedRegionId(target);
+    }
+  };
+
   const selectStack = (regionId: string, entry: StackEntry) => {
     const key = stackKey(entry);
     if (selection?.kind === "stack" && selection.regionId === regionId && selection.key === key) {
@@ -173,15 +226,7 @@ export function App() {
       return;
     }
     setSelectedRegionId(regionId);
-    if (!MOVEMENT_PHASES.includes(phase) || entry.faction_id !== faction.toLowerCase()) {
-      setSelection(null);
-      return;
-    }
-    const max = entry.instance_id
-      ? state.hasInstanceMoved(entry.instance_id)
-        ? 0
-        : 1
-      : state.movableStackCount(faction, regionId, entry.unit_type_id);
+    const max = movableCount(regionId, entry);
     if (max <= 0) {
       setSelection(null);
       return;
@@ -233,7 +278,7 @@ export function App() {
           land={land}
           landError={landError}
           owners={editing ? editorOwners : owners}
-          stacks={editing ? NO_STACKS : stacks}
+          stacks={editing ? editorStacks : stacks}
           selectedRegionId={editing ? (editor.selected?.id ?? "") : selectedRegionId}
           selectedStack={!editing && selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
           highlight={editing ? NO_HIGHLIGHT : highlight}
@@ -242,6 +287,18 @@ export function App() {
           onRegionClick={onRegionClick}
           onRegionHover={setHoverRegionId}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
+          unitCategories={unitCategories}
+          activeFactionId={faction}
+          isLoaded={(entry) => {
+            const iid = entry.instance_id ?? "";
+            if (iid === "") {
+              return false;
+            }
+            const cargo = state.transport_instances[iid]?.cargo;
+            return Array.isArray(cargo) && cargo.length > 0;
+          }}
+          onStackPick={pickStack}
+          onStackDrop={dropStack}
           editor={editing ? editor.binding : undefined}
         >
           {editing && <EditorToolbar editor={editor} />}

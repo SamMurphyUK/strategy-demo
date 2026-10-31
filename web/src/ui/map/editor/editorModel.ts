@@ -1,7 +1,18 @@
 // The map editor's data model and edit operations. Pure and immutable: every operation returns a new
 // EditorMap, which is what makes undo a stack of snapshots.
 import type { Dict } from "../../../engine/model/types";
-import { buildMapGeometry, type MapGeometry, pointInPolygon, type Vec2 } from "../geometry";
+import {
+  buildMapGeometry,
+  defaultAirAnchor,
+  defaultFacilityAnchor,
+  factorySizeOf,
+  type MapGeometry,
+  pointFromPair,
+  pointInPolygon,
+  pointsFromPairs,
+  UNIT_SLOT_MAX,
+  type Vec2,
+} from "../geometry";
 import { WORLD_COORD_SPACE } from "../map_space";
 import type { RegionClipper } from "../regionClip";
 import { type Pair, sharedVertexCount } from "./adjacency";
@@ -34,8 +45,11 @@ export interface StartingUnit {
 export const UNIT_TYPE_OPTIONS = [
   "infantry",
   "artillery",
+  "mech_infantry",
   "tank",
   "fighter",
+  "tactical_bomber",
+  "strategic_bomber",
   "battleship",
   "cruiser",
   "destroyer",
@@ -65,6 +79,29 @@ export interface EditorRegion {
   /** Unit stack anchor, also where the region's links attach. */
   cx: number;
   cy: number;
+  /** Land only. Absent means false. Written to the file only when true. */
+  has_airbase?: boolean;
+  has_harbour?: boolean;
+  /** Where the facility badge sits. Absent means the default, `[cx, cy + 16]`, which follows the unit anchor. */
+  facility_anchor?: [number, number];
+  /** Where air units stack. Absent means the default, `[cx + 14, cy - 10]`, which follows the unit anchor. */
+  air_anchor?: [number, number];
+  /** Up to six hand-placed unit token slots, world units. Absent means the map generates them. */
+  unit_slots?: [number, number][];
+}
+
+/** The region's facility anchor, or the default below its unit anchor. */
+export function facilityAnchorOfRegion(region: EditorRegion): Vec2 {
+  return region.facility_anchor
+    ? { x: region.facility_anchor[0], y: region.facility_anchor[1] }
+    : defaultFacilityAnchor({ x: region.cx, y: region.cy });
+}
+
+/** The region's air anchor, or the default up and right of its unit anchor. */
+export function airAnchorOfRegion(region: EditorRegion): Vec2 {
+  return region.air_anchor
+    ? { x: region.air_anchor[0], y: region.air_anchor[1] }
+    : defaultAirAnchor({ x: region.cx, y: region.cy });
 }
 
 export interface EditorMap {
@@ -734,6 +771,110 @@ export function applySplitMany(
   return { map: next, newIds: fresh.map((f) => f.id) };
 }
 
+export type AnchorKind = "anchor" | "facility" | "air";
+
+/** The anchors a region can show handles for: land has all three, a sea zone has the unit and air anchors. */
+export function anchorPoints(region: EditorRegion): { kind: AnchorKind; at: Vec2 }[] {
+  return [
+    { kind: "anchor", at: { x: region.cx, y: region.cy } },
+    ...(region.is_sea ? [] : [{ kind: "facility" as const, at: facilityAnchorOfRegion(region) }]),
+    { kind: "air", at: airAnchorOfRegion(region) },
+  ];
+}
+
+/** A handle under the pointer: one of the anchors, or unit slot `index` (S1 is index 0). */
+export type AnchorHit = { kind: AnchorKind; regionId: string } | { kind: "slot"; regionId: string; index: number };
+
+/**
+ * The handle under `world` within `tol`: the nearest one, the unit anchor on a tie. `slots` are the region's
+ * unit slots in world units (hand-placed or generated); a slot only wins when it is strictly nearer, so the
+ * anchors keep the ground they had before slots had handles.
+ */
+export function anchorHandleAt(region: EditorRegion, world: Vec2, tol: number, slots: Vec2[] = []): AnchorHit | null {
+  let best: AnchorKind | null = null;
+  let bestDist = tol;
+  for (const { kind, at } of anchorPoints(region)) {
+    const d = Math.hypot(world.x - at.x, world.y - at.y);
+    if (d <= bestDist && (best === null || d < bestDist)) {
+      best = kind;
+      bestDist = d;
+    }
+  }
+  let slot = -1;
+  slots.forEach((at, index) => {
+    const d = Math.hypot(world.x - at.x, world.y - at.y);
+    if (d <= tol && d < bestDist) {
+      slot = index;
+      bestDist = d;
+    }
+  });
+  if (slot >= 0) {
+    return { kind: "slot", regionId: region.id, index: slot };
+  }
+  return best === null ? null : { kind: best, regionId: region.id };
+}
+
+/** The unit slots after dragging slot `index` to `to`. The others stay where they are. */
+export function moveSlot(slots: Vec2[], index: number, to: Vec2): [number, number][] {
+  return slots.map((p, i): [number, number] => (i === index ? [to.x, to.y] : [p.x, p.y]));
+}
+
+// ---------------------------------------------------------------
+// Sample garrisons, for trying a territory out
+// ---------------------------------------------------------------
+
+/** Six unit types a land territory can hold at once, with their counts: three land, three air. */
+export const SAMPLE_LAND_GARRISON: readonly { unit_type_id: string; count: number }[] = [
+  { unit_type_id: "infantry", count: 3 },
+  { unit_type_id: "artillery", count: 2 },
+  { unit_type_id: "tank", count: 2 },
+  { unit_type_id: "mech_infantry", count: 1 },
+  { unit_type_id: "fighter", count: 2 },
+  { unit_type_id: "strategic_bomber", count: 1 },
+];
+
+/** Six ship types for a sea zone. */
+export const SAMPLE_SEA_GARRISON: readonly { unit_type_id: string; count: number }[] = [
+  { unit_type_id: "battleship", count: 1 },
+  { unit_type_id: "carrier", count: 1 },
+  { unit_type_id: "cruiser", count: 2 },
+  { unit_type_id: "destroyer", count: 2 },
+  { unit_type_id: "submarine", count: 4 },
+  { unit_type_id: "transport", count: 1 },
+];
+
+/** A garrison with six distinct unit types for `factionId`, ready for setStartingUnits. */
+export function sampleGarrison(isSea: boolean, factionId: string): Omit<StartingUnit, "region_id">[] {
+  return (isSea ? SAMPLE_SEA_GARRISON : SAMPLE_LAND_GARRISON).map((u) => ({ faction_id: factionId, ...u }));
+}
+
+/** Every region's starting units as display stacks (one per unit type and faction), for the editor's preview. */
+export function startingStacks(map: EditorMap): Record<string, { unit_type_id: string; faction_id: string; count: number }[]> {
+  const out: Record<string, { unit_type_id: string; faction_id: string; count: number }[]> = {};
+  for (const u of unitList(map.meta)) {
+    if (!u || typeof u !== "object" || Math.trunc(Number(u.count)) <= 0) {
+      continue;
+    }
+    const list = (out[u.region_id] ??= []);
+    const faction = String(u.faction_id).toLowerCase();
+    const existing = list.find((e) => e.unit_type_id === u.unit_type_id && e.faction_id === faction);
+    if (existing) {
+      existing.count += Math.trunc(Number(u.count));
+    } else {
+      list.push({ unit_type_id: u.unit_type_id, faction_id: faction, count: Math.trunc(Number(u.count)) });
+    }
+  }
+  return out;
+}
+
+/** An airbase or harbour on any merged region survives. Only the keys that are true, so the file stays unchanged otherwise. */
+function mergedPorts(regions: EditorRegion[]): Pick<EditorRegion, "has_airbase" | "has_harbour"> {
+  return {
+    ...(regions.some((r) => r.has_airbase) ? { has_airbase: true } : {}),
+    ...(regions.some((r) => r.has_harbour) ? { has_harbour: true } : {}),
+  };
+}
+
 /**
  * Replaces region A with the weld of A and B, then removes B. A keeps its id and settings (a capital or
  * factory on either one survives); B's neighbor links, starting units and any manual link overrides move to A.
@@ -761,7 +902,15 @@ export function applyMerge(
     .filter((r) => r.id !== bId)
     .map((r) =>
       r.id === aId
-        ? { ...r, polygon: merged.polygon.map((p) => ({ ...p })), cx: merged.cx, cy: merged.cy, capital: a.capital || b.capital, factory }
+        ? {
+            ...r,
+            polygon: merged.polygon.map((p) => ({ ...p })),
+            cx: merged.cx,
+            cy: merged.cy,
+            capital: a.capital || b.capital,
+            factory,
+            ...mergedPorts([a, b]),
+          }
         : r,
     );
   const next: EditorMap = {
@@ -818,6 +967,7 @@ export function applyMergeMany(
         cy: merged.cy,
         capital: all.some((x) => x.capital),
         factory,
+        ...mergedPorts(all),
       };
     });
   const next: EditorMap = {
@@ -840,6 +990,11 @@ export function isUnconfiguredLand(map: EditorMap, region: EditorRegion): boolea
     region.starting_owner.toLowerCase() === "neutral" &&
     region.ipc_value <= 1 &&
     region.factory === "none" &&
+    !region.has_airbase &&
+    !region.has_harbour &&
+    !region.facility_anchor &&
+    !region.air_anchor &&
+    !region.unit_slots &&
     !region.capital &&
     (region.extra ?? []).length === 0 &&
     startingUnitsOf(map, region.id).length === 0
@@ -1006,10 +1161,24 @@ function uniquePairs(list: Pair[]): Pair[] {
 
 /** Older files only say `factory: true`; those become major. */
 function factoryLevelOf(meta: Dict): FactoryLevel {
-  if (!meta.factory) {
-    return "none";
-  }
-  return meta.factory_size === "minor" ? "minor" : "major";
+  return factorySizeOf(meta);
+}
+
+/**
+ * The optional facility fields of a region's metadata. Only what the file actually sets. Facilities and
+ * their anchor are land only; a sea zone can still hold aircraft, so its air anchor is kept.
+ */
+function facilityFieldsOf(meta: Dict, isSea: boolean): Partial<EditorRegion> {
+  const facility = isSea ? null : pointFromPair(meta.facility_anchor);
+  const air = pointFromPair(meta.air_anchor);
+  const slots = pointsFromPairs(meta.unit_slots);
+  return {
+    ...(slots.length > 0 ? { unit_slots: slots.map((p) => [p.x, p.y] as [number, number]) } : {}),
+    ...(!isSea && meta.has_airbase === true ? { has_airbase: true } : {}),
+    ...(!isSea && meta.has_harbour === true ? { has_harbour: true } : {}),
+    ...(facility ? { facility_anchor: [facility.x, facility.y] as [number, number] } : {}),
+    ...(air ? { air_anchor: [air.x, air.y] as [number, number] } : {}),
+  };
 }
 
 /** `mapJson` must already be in world space (see projectMapJson). */
@@ -1037,6 +1206,7 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
       ...(shape.extra && shape.extra.length > 0 ? { extra: shape.extra.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
       cx: shape.anchor.x,
       cy: shape.anchor.y,
+      ...facilityFieldsOf(meta, shape.type === "sea"),
     });
   }
 
@@ -1110,6 +1280,13 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         faction: region.starting_owner,
         factory: region.factory !== "none",
         ...(region.factory === "none" ? {} : { factory_size: region.factory }),
+        ...(region.has_airbase ? { has_airbase: true } : {}),
+        ...(region.has_harbour ? { has_harbour: true } : {}),
+        ...(region.facility_anchor ? { facility_anchor: [r(region.facility_anchor[0]), r(region.facility_anchor[1])] } : {}),
+        ...(region.air_anchor ? { air_anchor: [r(region.air_anchor[0]), r(region.air_anchor[1])] } : {}),
+        ...(region.unit_slots && region.unit_slots.length > 0
+          ? { unit_slots: region.unit_slots.slice(0, UNIT_SLOT_MAX).map(([x, y]) => [r(x), r(y)]) }
+          : {}),
         ipc: region.ipc_value,
         victory: region.capital,
         type: region.is_sea ? "sea" : "land",

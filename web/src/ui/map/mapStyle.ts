@@ -1,5 +1,5 @@
 // Colours for the layered map. Pure, so the highlight rules are testable.
-import { factionPalette } from "../theme/factionPalette";
+import { type FactionKey, factionPalette, resolveFaction } from "../theme/factionPalette";
 import type { HighlightMode } from "./geometry";
 
 export const OCEAN_COLOR = "#b3c6c3";
@@ -73,4 +73,74 @@ export function seaFill(regionId: string, mode: HighlightMode): string {
     return rgba(SEA_TARGET, regionId === mode.hover ? 0.55 : 0.4);
   }
   return rgba([255, 255, 255], 0.1);
+}
+
+// ---------------------------------------------------------------
+// War-room parchment pass: the baked base map (see mapBake.ts)
+// ---------------------------------------------------------------
+
+/** Muted maritime slate-blue the grain is blended into. */
+export const SEA_BASE_COLOR = "#B6C4CC";
+/** Thin pale rules between sea zones. */
+export const SEA_SEAM_COLOR = "rgba(235, 245, 250, 0.75)";
+export const SEA_SEAM_WIDTH = 1;
+/** Soft shadow that lifts the land off the water. Blur and offset are in map units. */
+export const COAST_SHADOW = { color: "rgba(20, 30, 35, 0.35)", blur: 5, offset: 2 } as const;
+
+/** Desaturated vintage tints, one per faction. Unowned and neutral land is sun-bleached parchment. */
+export const FACTION_TINT: Record<FactionKey, string> = {
+  JAP: "#C8BE9E",
+  USSR: "#B59482",
+  GER: "#98A4A6",
+  UK: "#CEBE98",
+  US: "#9EB092",
+  NEUTRAL: "#D8D2C5",
+};
+
+/** The base tint of land held by `owner` (any faction id the scenario uses; "" is neutral). */
+export function landTint(owner: string): string {
+  return FACTION_TINT[resolveFaction(owner)];
+}
+
+/**
+ * Neutral and decorative land: a fine 45-degree dark-sepia hatch over the parchment, under the grain. Width and
+ * spacing are in map units, so it scales with the map like the rest of the printed sheet.
+ */
+export const NEUTRAL_HATCH = { color: "rgba(78, 54, 28, 0.24)", width: 0.5, spacing: 3 } as const;
+
+/** Aged inner border: a wide pass and a tight pass, stroked along the inside of each territory. */
+export const BURN_PASSES = [
+  { color: "rgba(35, 28, 18, 0.18)", width: 8 },
+  { color: "rgba(35, 28, 18, 0.15)", width: 4 },
+] as const;
+
+/** Airbrushed territory borders: a wide sepia smudge, then a sharp charcoal line. */
+export const BORDER_PASSES = [
+  { color: "rgba(45, 38, 28, 0.25)", width: 4 },
+  { color: "#2B2620", width: 1.2 },
+] as const;
+
+export const COAST_INK = { color: "#1A1815", width: 1.6 } as const;
+
+/** Fades land that a move or mobilize highlight does not offer, over the baked fills. */
+export const LAND_WASH = "rgba(216, 210, 197, 0.55)";
+/** Fades the land layer while the editor works on the sea layer. */
+export const EDITOR_LAND_DIM = "rgba(182, 196, 204, 0.7)";
+
+/** Fill for a land region under a move or mobilize highlight, or null when the baked tint should show. */
+export function highlightLandFill(regionId: string, owner: string, mode: HighlightMode): string | null {
+  if (mode.kind === "none") {
+    return null;
+  }
+  const picked = mode.kind === "move" ? regionId === mode.from || mode.legal.includes(regionId) : mode.legal.includes(regionId);
+  return picked ? landFill(regionId, owner, mode) : null;
+}
+
+/** Fill for a sea zone under a highlight, or null when it is not part of one. */
+export function highlightSeaFill(regionId: string, mode: HighlightMode): string | null {
+  if (mode.kind === "none") {
+    return null;
+  }
+  const picked = mode.kind === "move" ? regionId === mode.from || mode.legal.includes(regionId) : mode.legal.includes(regionId);
+  return picked ? seaFill(regionId, mode) : null;
 }

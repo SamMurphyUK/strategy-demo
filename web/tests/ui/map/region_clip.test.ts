@@ -143,7 +143,11 @@ describe("demomap01 against the land SVG", () => {
     expect(multiPolygonArea(left)).toBeLessThanOrEqual(multiPolygonArea(land) + 1e-6);
     for (const r of lands) {
       // Clipping a coast-shaped outline against the coast changes nothing, and none is a canvas-sized box.
-      const outline = ringArea(r.points.map((p) => [p.x, p.y] as [number, number]));
+      // A multi-island territory keeps its other islands in `extra`, so the outline is every ring together.
+      const outline = [r.points, ...(r.extra ?? [])].reduce(
+        (sum, ring) => sum + ringArea(ring.map((p) => [p.x, p.y] as [number, number])),
+        0,
+      );
       expect(Math.abs(multiPolygonArea(clipped.get(r.id)!) - outline), r.id).toBeLessThan(0.5 + outline * 0.002);
       expect(r.bounds.w, r.id).toBeLessThan(700);
     }

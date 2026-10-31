@@ -43,6 +43,21 @@ export function projectMapJson(mapJson: Dict): Dict {
         return { ...a, x, y };
       });
     }
+    if (region.metadata && typeof region.metadata === "object") {
+      const meta: Dict = { ...region.metadata };
+      for (const key of ["facility_anchor", "air_anchor"]) {
+        const p = meta[key];
+        if (Array.isArray(p) && p.length >= 2) {
+          meta[key] = legacyToWorld(Number(p[0]), Number(p[1]));
+        }
+      }
+      if (Array.isArray(meta.unit_slots)) {
+        meta.unit_slots = meta.unit_slots.map((p: unknown) =>
+          Array.isArray(p) && p.length >= 2 ? legacyToWorld(Number(p[0]), Number(p[1])) : p,
+        );
+      }
+      next.metadata = meta;
+    }
     return next;
   });
   out.coord_space = WORLD_COORD_SPACE;

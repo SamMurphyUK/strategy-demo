@@ -1,19 +1,35 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
-import type { HighlightMode, MapGeometry, Rect, StackEntry, Vec2 } from "./geometry";
-import { buildCutterPaths, buildRegionPaths, pickCounter, pickRegion } from "./hitTest";
+import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
+import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
+import { buildCutterPaths, buildRegionPaths, pickBubble, pickCounter, pickRegion } from "./hitTest";
 import {
   drawEditorOverlay,
+  drawEditorUnits,
   drawGameOverlay,
   drawTerrain,
   type EditorOverlay,
   layoutRegions,
-  setImageLoadListener,
   type TerrainScene,
+  TOKEN_PX,
 } from "./mapRenderer";
+import { TerrainBake } from "./mapBake";
+import { UnitDrawer } from "./UnitDrawer";
+import type { UnitDomain } from "./unitStacks";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
-import { fitView, panBy, screenToWorld, tokenZoomScale, type View, worldToScreen, zoomAt } from "./viewMath";
+import {
+  fitView,
+  panBy,
+  screenToWorld,
+  type View,
+  visibleCopies,
+  worldTokenPx,
+  worldToScreen,
+  wrapView,
+  wrapWorldX,
+  zoomAt,
+} from "./viewMath";
 
 export interface CombatMarker {
   regionId: string;
@@ -54,6 +70,16 @@ export interface MapViewProps {
   onRegionClick(regionId: string): void;
   onRegionHover(regionId: string): void;
   onStackClick(regionId: string, entry: StackEntry, key: string): void;
+  /** Unit type id to land, air or sea, from the scenario data. Without it the standard unit ids decide. */
+  unitCategories?: Record<string, string>;
+  /** The faction whose turn it is: its count pills are gold. */
+  activeFactionId?: string;
+  /** A transport with cargo aboard gets a dot on its token. */
+  isLoaded?(entry: StackEntry): boolean;
+  /** A unit type was picked in the drawer (the start of a drag): select it without toggling. */
+  onStackPick?(regionId: string, entry: StackEntry): void;
+  /** A unit type was dragged out of the drawer and dropped on a region: order the move. */
+  onStackDrop?(regionId: string, entry: StackEntry, targetRegionId: string): void;
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -65,7 +91,8 @@ const STROKE_START_PX = 6;
 const STROKE_STEP_PX = 3;
 export const SNAP_PX = 8;
 const HANDLE_PX = 10;
-const COUNTER_HIT_PX = 18;
+/** Header and padding of the unit drawer, plus 38 px a row, is how tall it gets. Decides above or below. */
+const DRAWER_ESTIMATED_PX = 48;
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
 
 type Drag =
@@ -80,7 +107,6 @@ export function MapView(props: MapViewProps) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
-  const [, redraw] = useState(0);
   useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint once their art loads
 
   const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
@@ -97,12 +123,54 @@ export function MapView(props: MapViewProps) {
   const exact = clipped !== null;
   /** In the editor only the chosen layer (land or sea) can be hovered or clicked, and the other is faded. */
   const only = editor ? editor.overlay.layer : null;
-  const unitScale = tokenZoomScale(view.k, fitK);
-  const layouts = layoutRegions(geometry.regions, props.stacks, view, unitScale);
+  // Tokens are a fixed size in the world, so they scale with the map and hold their formation at every zoom;
+  // only the extremes are clamped (see worldTokenPx).
+  const unitScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
+  const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
+  /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
+  const slotsFor = (region: (typeof geometry.regions)[number]) =>
+    effectiveUnitSlots(region, clipped?.get(region.id) ?? roughShape(region));
+  // The game world wraps sideways: the base map is blitted once per visible copy, and units and shields are
+  // laid out for each. The editor edits a single copy, so its coordinates stay true.
+  const wrap = !editor;
+  const copies = visibleCopies(view, size.w, bounds, wrap);
+  const layouts = copies.flatMap((dx) =>
+    layoutRegions(geometry.regions, props.stacks, { ...view, x: view.x - dx }, unitScale, {
+      slotsFor,
+      categories: props.unitCategories,
+      copyDx: dx,
+    }),
+  );
+  /** The collapsed bubble whose drawer is open. Cleared by a click elsewhere, Escape, or the bubble expanding. */
+  const [drawer, setDrawer] = useState<{ regionId: string; domain: UnitDomain; copyDx: number } | null>(null);
+  const drawerLayout = drawer
+    ? (layouts.find((l) => l.region.id === drawer.regionId && l.copyDx === drawer.copyDx) ??
+      layouts.find((l) => l.region.id === drawer.regionId))
+    : undefined;
+  const drawerCluster = drawerLayout?.clusters.find((c) => c.collapsed && c.domain === drawer?.domain);
+  useEffect(() => {
+    if (drawer && !drawerCluster) {
+      setDrawer(null);
+    }
+  }, [drawer, drawerCluster]);
+  useEffect(() => {
+    if (!drawer) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDrawer(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer]);
+  const bakeRef = useRef<TerrainBake | null>(null);
+  bakeRef.current ??= new TerrainBake();
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only };
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, drawer, tokenHitPx });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, drawer, tokenHitPx };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -124,11 +192,6 @@ export function MapView(props: MapViewProps) {
   }, [size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
 
   useEffect(() => {
-    setImageLoadListener(() => redraw((n) => n + 1));
-    return () => setImageLoadListener(null);
-  }, []);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || size.w === 0) {
@@ -143,7 +206,15 @@ export function MapView(props: MapViewProps) {
     }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
+    // The cached base map: rebuilt only when the geometry, an owner or the needed resolution changes.
+    const baked = bakeRef.current!.ensure(
+      { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
+      view.k * dpr,
+    );
     const scene: TerrainScene = {
+      baked,
+      bounds,
+      copies,
       width: size.w,
       height: size.h,
       dpr,
@@ -159,19 +230,28 @@ export function MapView(props: MapViewProps) {
       dim: only === null ? null : only === "land" ? "sea" : "land",
     };
     drawTerrain(ctx, scene);
+    const overlay = {
+      layouts,
+      owners: props.owners,
+      selectedStack: props.selectedStack,
+      isUnmoved: props.isUnmoved,
+      combatMarkers: props.combatMarkers,
+      unitScale,
+      openDrawer: drawer,
+      activeFactionId: props.activeFactionId ?? "",
+      isLoaded: props.isLoaded,
+      categories: props.unitCategories,
+    };
     if (editor) {
+      drawEditorUnits(ctx, scene, overlay);
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
     } else {
-      drawGameOverlay(ctx, scene, {
-        layouts,
-        owners: props.owners,
-        selectedStack: props.selectedStack,
-        isUnmoved: props.isUnmoved,
-        combatMarkers: props.combatMarkers,
-        unitScale,
-      });
+      drawGameOverlay(ctx, scene, overlay);
     }
   });
+
+  /** A pointer's world point folded onto the primary copy of the wrapped world, for picking regions. */
+  const pickWorld = (w: Vec2): Vec2 => (live.current.wrap ? { x: wrapWorldX(w.x, live.current.bounds), y: w.y } : w);
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -189,7 +269,10 @@ export function MapView(props: MapViewProps) {
       const { fitK } = live.current;
       const rect = canvas.getBoundingClientRect();
       const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      setView((v) => zoomAt(v, p, e.deltaY > 0 ? 1 / 1.15 : 1.15, fitK));
+      setView((v) => {
+        const zoomed = zoomAt(v, p, e.deltaY > 0 ? 1 / 1.15 : 1.15, fitK);
+        return live.current.wrap ? wrapView(zoomed, live.current.size.w, live.current.bounds) : zoomed;
+      });
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
@@ -217,7 +300,7 @@ export function MapView(props: MapViewProps) {
 
   const onPointerMove = (e: React.PointerEvent) => {
     const sp = pointer(e);
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit } = live.current;
     const world = screenToWorld(v, sp);
     const d = drag.current;
     if (d?.kind === "handle") {
@@ -249,18 +332,21 @@ export function MapView(props: MapViewProps) {
       }
       d.moved = true;
       userMoved.current = true;
-      setView(panBy(d.view, dx, dy));
+      const panned = panBy(d.view, dx, dy);
+      setView(live.current.wrap ? wrapView(panned, live.current.size.w, live.current.bounds) : panned);
       return;
     }
     if (p.editor) {
       p.editor.onHover(world, SNAP_PX / v.k);
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex, layer);
+    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer);
     setHoverId((prev) => (prev === id ? prev : id));
     if (!p.editor) {
       p.onRegionHover(id);
     }
-    const overCounter = !p.editor && pickCounter(ls, sp, COUNTER_HIT_PX * tokenZoomScale(v.k, live.current.fitK)) !== null;
+    const overCounter =
+      !p.editor &&
+      (pickBubble(ls, sp) !== null || pickCounter(ls, sp, hit) !== null);
     const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw";
     canvasRef.current!.style.cursor = aiming ? "crosshair" : overCounter || id !== "" ? "pointer" : "default";
   };
@@ -288,7 +374,7 @@ export function MapView(props: MapViewProps) {
     if (d.kind === "swipe") {
       // Not dragged far enough: a plain click.
       const world = screenToWorld(v, pointer(e));
-      p.editor?.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
+      p.editor?.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
       return;
     }
     if (d.moved) {
@@ -301,17 +387,47 @@ export function MapView(props: MapViewProps) {
     const sp = pointer(e);
     const world = screenToWorld(v, sp);
     if (p.editor) {
-      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, world, ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
+      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
       return;
     }
-    const counter = pickCounter(ls, sp, COUNTER_HIT_PX * tokenZoomScale(v.k, live.current.fitK));
+    // A collapsed bubble opens its drawer (or closes it, on a second click).
+    const bubble = pickBubble(ls, sp);
+    if (bubble) {
+      const { drawer: open } = live.current;
+      const same =
+        open?.regionId === bubble.layout.region.id && open.domain === bubble.cluster.domain && open.copyDx === bubble.layout.copyDx;
+      setDrawer(same ? null : { regionId: bubble.layout.region.id, domain: bubble.cluster.domain, copyDx: bubble.layout.copyDx });
+      return;
+    }
+    // Any other click closes the drawer, and does what it always did.
+    setDrawer(null);
+    const counter = pickCounter(ls, sp, live.current.tokenHitPx);
     if (counter) {
       p.onStackClick(counter.regionId, counter.slot.entry, counter.slot.key);
       return;
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, world, ex);
+    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
     if (id !== "") {
       p.onRegionClick(id);
+    }
+  };
+
+  /** A unit type dragged out of the drawer and released at this client point. */
+  const dropFromDrawer = (regionId: string, entry: StackEntry, clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    const { view: v, paths: ps, props: p, exact: ex } = live.current;
+    if (!canvas) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return;
+    }
+    const world = screenToWorld(v, { x: clientX - rect.left, y: clientY - rect.top });
+    const target = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
+    setDrawer(null);
+    if (target !== "" && target !== regionId) {
+      p.onStackDrop?.(regionId, entry, target);
     }
   };
 
@@ -350,6 +466,29 @@ export function MapView(props: MapViewProps) {
         </button>
       </div>
       {props.children}
+      {!editor &&
+        drawer &&
+        drawerCluster &&
+        (() => {
+          const room = DRAWER_ESTIMATED_PX + drawerCluster.group.entries.length * 38;
+          const above = drawerCluster.y - drawerCluster.bubbleRadius - 12 >= room;
+          const x = Math.min(Math.max(drawerCluster.x, 110), Math.max(size.w - 110, 110));
+          const y = above ? drawerCluster.y - drawerCluster.bubbleRadius - 12 : drawerCluster.y + drawerCluster.bubbleRadius + 22;
+          const regionId = drawer.regionId;
+          return (
+            <UnitDrawer
+              group={drawerCluster.group}
+              x={x}
+              y={y}
+              placement={above ? "above" : "below"}
+              selectedKey={props.selectedStack?.regionId === regionId ? props.selectedStack.key : null}
+              isUnmoved={(entry) => props.isUnmoved(regionId, entry)}
+              onSelect={(entry, key) => props.onStackClick(regionId, entry, key)}
+              onDragStart={(entry) => props.onStackPick?.(regionId, entry)}
+              onDragEnd={(entry, _key, cx, cy) => dropFromDrawer(regionId, entry, cx, cy)}
+            />
+          );
+        })()}
       {editor?.prunePrompt &&
         (() => {
           const { box, count, confirm, cancel } = editor.prunePrompt;

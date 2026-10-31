@@ -22,11 +22,92 @@ export interface Rgba {
   a: number;
 }
 
+/** `none` has no factory. Minor and major differ in the badge (one or two chimneys). */
+export type FactorySize = "none" | "minor" | "major";
+
+/** Default Facility Anchor: below the unit anchor, in world units. */
+export const FACILITY_ANCHOR_OFFSET: Vec2 = { x: 0, y: 16 };
+/** Default Air Anchor: up and to the right of the unit anchor, in world units. */
+export const AIR_ANCHOR_OFFSET: Vec2 = { x: 14, y: -10 };
+
+/** A territory shows at most this many unit tokens in their own slots; past that, a domain collapses. */
+export const UNIT_SLOT_MAX = 6;
+
+/** The `[x, y]` pairs of `metadata.unit_slots`: well-formed pairs only, at most UNIT_SLOT_MAX. Empty when unset. */
+export function pointsFromPairs(raw: unknown): Vec2[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: Vec2[] = [];
+  for (const pair of raw) {
+    const p = pointFromPair(pair);
+    if (p) {
+      out.push(p);
+    }
+  }
+  return out.slice(0, UNIT_SLOT_MAX);
+}
+
+export function defaultFacilityAnchor(unit: Vec2): Vec2 {
+  return { x: unit.x + FACILITY_ANCHOR_OFFSET.x, y: unit.y + FACILITY_ANCHOR_OFFSET.y };
+}
+
+export function defaultAirAnchor(unit: Vec2): Vec2 {
+  return { x: unit.x + AIR_ANCHOR_OFFSET.x, y: unit.y + AIR_ANCHOR_OFFSET.y };
+}
+
+/**
+ * The factory size a region's metadata describes. `factory_size` wins when it says minor or major; a bare
+ * `factory: true` (every older file) is a major factory; anything else is none.
+ */
+export function factorySizeOf(meta: Dict): FactorySize {
+  const size = meta.factory_size;
+  if (size === "minor" || size === "major") {
+    return size;
+  }
+  return meta.factory ? "major" : "none";
+}
+
+/** A `[x, y]` pair from JSON, or null when absent or malformed. */
+export function pointFromPair(raw: unknown): Vec2 | null {
+  if (Array.isArray(raw) && raw.length >= 2) {
+    const x = Number(raw[0]);
+    const y = Number(raw[1]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      return { x, y };
+    }
+  }
+  return null;
+}
+
 export interface RegionShape {
   id: string;
   type: "land" | "sea";
   ipc: number;
   hasFactory: boolean;
+  /**
+   * The facility fields below are always filled in by buildMapGeometry. They are optional in the type so a
+   * hand-built shape (tests, tools) can leave them out; read them through the helpers (facilitiesOf,
+   * facilityAnchorOf, airAnchorOf), which fall back to the defaults.
+   */
+  /** none, minor or major. `hasFactory` is true for minor and major. */
+  factorySize?: FactorySize;
+  hasAirbase?: boolean;
+  hasHarbour?: boolean;
+  /** Where the facility badge is drawn: `metadata.facility_anchor`, or the default below the unit anchor. */
+  facilityAnchor?: Vec2;
+  /** True when the map file gives the facility anchor, so layout must not nudge it. */
+  facilityAnchorSet?: boolean;
+  /** Where air units stack: `metadata.air_anchor`, or the default up and right of the unit anchor. */
+  airAnchor?: Vec2;
+  airAnchorSet?: boolean;
+  /**
+   * Hand-placed unit slots (`metadata.unit_slots`), at most UNIT_SLOT_MAX, in world units. Absent means the
+   * map generates them (see unitSlots.ts), so they follow the territory's shape and unit anchor.
+   */
+  unitSlots?: Vec2[];
+  /** A capital (`metadata.victory`): its IPC shield carries an emblem. */
+  capital?: boolean;
   points: Vec2[];
   /** The other islands of a multi-island territory (`extra_polygons`). Absent for an ordinary region. */
   extra?: Vec2[][];
@@ -34,6 +115,29 @@ export interface RegionShape {
   centroid: Vec2;
   /** Where unit icons are laid out around. */
   anchor: Vec2;
+}
+
+export interface Facilities {
+  factory: FactorySize;
+  airbase: boolean;
+  harbour: boolean;
+}
+
+/** The facilities of a region. A shape without the new fields falls back to `hasFactory` (a major factory). */
+export function facilitiesOf(region: RegionShape): Facilities {
+  return {
+    factory: region.factorySize ?? (region.hasFactory ? "major" : "none"),
+    airbase: region.hasAirbase ?? false,
+    harbour: region.hasHarbour ?? false,
+  };
+}
+
+export function facilityAnchorOf(region: RegionShape): Vec2 {
+  return region.facilityAnchor ?? defaultFacilityAnchor(region.anchor);
+}
+
+export function airAnchorOf(region: RegionShape): Vec2 {
+  return region.airAnchor ?? defaultAirAnchor(region.anchor);
 }
 
 export interface MapGeometry {
@@ -72,16 +176,33 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
       .filter((ring: Vec2[]) => ring.length >= 3);
     // Bounds cover every island, so unit stacks clamp to the whole territory.
     const bounds = polygonBounds(extra.length > 0 ? [...points, ...extra.flat()] : points);
+    const type = inferRegionType(id, meta, ipc);
+    const anchor = unitAnchor(regionDict, points, bounds);
+    const factorySize = factorySizeOf(meta);
+    // Facilities are land things. A sea zone never shows a badge or a facility handle.
+    const land = type === "land";
+    const facilityAt = land ? pointFromPair(meta.facility_anchor) : null;
+    const airAt = pointFromPair(meta.air_anchor);
+    const slots = pointsFromPairs(meta.unit_slots);
     regions.push({
       id,
-      type: inferRegionType(id, meta, ipc),
+      type,
       ipc,
-      hasFactory: Boolean(meta.factory ?? false),
+      hasFactory: Boolean(meta.factory ?? false) || factorySize !== "none",
+      factorySize: land ? factorySize : "none",
+      hasAirbase: land && Boolean(meta.has_airbase ?? false),
+      hasHarbour: land && Boolean(meta.has_harbour ?? false),
+      facilityAnchor: facilityAt ?? defaultFacilityAnchor(anchor),
+      facilityAnchorSet: facilityAt !== null,
+      airAnchor: airAt ?? defaultAirAnchor(anchor),
+      airAnchorSet: airAt !== null,
+      ...(slots.length > 0 ? { unitSlots: slots } : {}),
+      capital: Boolean(meta.victory ?? false),
       points,
       ...(extra.length > 0 ? { extra } : {}),
       bounds,
       centroid: polygonCentroid(points),
-      anchor: unitAnchor(regionDict, points, bounds),
+      anchor,
     });
   }
   return {

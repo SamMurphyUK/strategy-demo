@@ -18,6 +18,8 @@ signal unit_clicked(unit_icon: UnitIcon)
 const UNIT_ICON_SIZE := 48
 const CLICK_DRAG_THRESHOLD := 8.0
 const UNMOVED_OUTLINE_GAP := 3.0
+## How far an icon's on-screen size may drift from its size at zoom 1.
+const ZOOM_SIZE_LIMIT := 0.1
 
 var unit_type_id: String = ""
 var faction_id: String = ""
@@ -169,6 +171,19 @@ func get_texture_base_scale() -> float:
 	if w <= 0.0:
 		return 1.0
 	return UnitIcon.UNIT_ICON_SIZE / w
+
+
+## On-screen size relative to zoom 1. Zooming out shrinks it, zooming in grows it, each by at most 10%.
+static func screen_zoom_factor(zoom: float) -> float:
+	return clampf(zoom, 1.0 - ZOOM_SIZE_LIMIT, 1.0 + ZOOM_SIZE_LIMIT)
+
+
+## `inherits_map_zoom` is true for icons parented under MapRoot, which is already scaled by `zoom`.
+func scale_for_zoom(zoom: float, inherits_map_zoom: bool) -> Vector2:
+	var fitted := get_texture_base_scale() * UnitIcon.screen_zoom_factor(zoom)
+	if inherits_map_zoom:
+		fitted /= maxf(zoom, 0.001)
+	return Vector2(fitted, fitted)
 
 
 func _apply_texture() -> void:
