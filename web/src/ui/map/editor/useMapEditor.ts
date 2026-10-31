@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dict } from "../../../engine/model/types";
 import { type MapGeometry, pointInPolygon, type Vec2 } from "../geometry";
-import { effectiveUnitSlots } from "../unitSlots";
+import { effectiveUnitSlots, generatedSlotsOf } from "../unitSlots";
 import { isLandAt } from "../hitTest";
 import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
@@ -28,6 +28,9 @@ import {
   editorToMapJson,
   anchorHandleAt,
   moveSlot,
+  facilityAnchorAfterPlace,
+  slotsAfterAdd,
+  slotsAfterRemoveLast,
   findRegion,
   formatMapJson,
   labelPoint,
@@ -80,14 +83,13 @@ const MIN_BATCH_ROUGHEN_LENGTH = 16;
 export const DEFAULT_PRUNE_AREA = 25;
 
 /**
- * `anchor` is the unit anchor; `facility` and `air` are the Facility Anchor and Air Anchor. A `slot` is unit slot
- * `index` (S1 is 0); `from` is every slot as it was when the drag began, so a generated set becomes hand-placed.
+ * `anchor` is the unit anchor and `facility` is the Facility Anchor. A `slot` is unit slot `index` (S1 is 0);
+ * `from` is every slot as it was when the drag began, so a generated set becomes hand-placed.
  */
 type Handle =
   | { kind: "vertex"; regionId: string; group: VertexRef[] }
   | { kind: "anchor"; regionId: string }
   | { kind: "facility"; regionId: string }
-  | { kind: "air"; regionId: string }
   | { kind: "slot"; regionId: string; index: number; from: Vec2[] };
 
 const STORAGE_KEY = "strategy-demo.map-editor.v3";
@@ -143,6 +145,8 @@ export interface MapEditor {
   drawSea: boolean;
   draft: Vec2[];
   selected: EditorRegion | null;
+  /** How many unit slots the selected region is showing, hand-placed or generated. */
+  slotCount: number;
   /** The first other region picked for a merge, or null. */
   second: EditorRegion | null;
   /** Every other region picked for the pending merge (Shift-click), in the order picked. */
@@ -161,6 +165,14 @@ export interface MapEditor {
   undoVertex(): void;
   select(id: string): void;
   patchSelected(patch: Partial<EditorRegion>): void;
+  /** Writes one more unit slot, keeping the ones already on the map. One undo step. Does nothing at the cap. */
+  addUnitSlot(): void;
+  /** Drops the last unit slot, keeping the rest. One undo step. */
+  removeLastUnitSlot(): void;
+  /** Writes the generated slots into the region, so they can be dragged. One undo step. */
+  seedUnitSlots(): void;
+  /** Writes the one facility anchor (factory, airbase, and harbour) below the unit anchor. One undo step. */
+  placeFacilityAnchor(): void;
   setUnits(rows: Omit<StartingUnit, "region_id">[]): void;
   rename(newId: string): string;
   removeSelected(): void;
@@ -523,6 +535,56 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     },
     [commit],
   );
+
+  const addUnitSlot = useCallback(() => {
+    const id = live.current.selectedId;
+    const region = findRegion(docRef.current.map, id);
+    if (!region) {
+      return;
+    }
+    const next = slotsAfterAdd(region, slotsOf(id));
+    if (!next) {
+      return;
+    }
+    commit(updateRegion(docRef.current.map, id, { unit_slots: next }));
+  }, [commit, slotsOf]);
+
+  const removeLastUnitSlot = useCallback(() => {
+    const id = live.current.selectedId;
+    const region = findRegion(docRef.current.map, id);
+    if (!region) {
+      return;
+    }
+    const next = slotsAfterRemoveLast(region, slotsOf(id));
+    if (next === undefined && !(region.unit_slots && region.unit_slots.length > 0)) {
+      return;
+    }
+    commit(updateRegion(docRef.current.map, id, { unit_slots: next }));
+  }, [commit, slotsOf]);
+
+  const seedUnitSlots = useCallback(() => {
+    const id = live.current.selectedId;
+    const region = findRegion(docRef.current.map, id);
+    const shape = geometryRef.current.regions.find((r) => r.id === id);
+    if (!region || !shape) {
+      return;
+    }
+    const slots = generatedSlotsOf(shape, shapeOf(region)).slots;
+    commit(updateRegion(docRef.current.map, id, { unit_slots: slots.map((p): [number, number] => [p.x, p.y]) }));
+  }, [commit, shapeOf]);
+
+  const placeFacilityAnchor = useCallback(() => {
+    const id = live.current.selectedId;
+    const region = findRegion(docRef.current.map, id);
+    if (!region) {
+      return;
+    }
+    const at = facilityAnchorAfterPlace(region);
+    if (!at) {
+      return;
+    }
+    commit(updateRegion(docRef.current.map, id, { facility_anchor: at }));
+  }, [commit]);
 
   const setUnits = useCallback(
     (rows: Omit<StartingUnit, "region_id">[]) => {
@@ -1174,10 +1236,6 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
           apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { facility_anchor: [world.x, world.y] }) });
           return;
         }
-        if (handle.kind === "air") {
-          apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { air_anchor: [world.x, world.y] }) });
-          return;
-        }
         if (handle.kind === "slot") {
           apply({ ...docRef.current, map: updateRegion(base, handle.regionId, { unit_slots: moveSlot(handle.from, handle.index, world) }) });
           return;
@@ -1226,6 +1284,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     drawSea,
     draft,
     selected,
+    slotCount: selectedSlots.length,
     second,
     mergeWith,
     selectedUnits,
@@ -1242,6 +1301,10 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     undoVertex,
     select,
     patchSelected,
+    addUnitSlot,
+    removeLastUnitSlot,
+    seedUnitSlots,
+    placeFacilityAnchor,
     setUnits,
     rename,
     removeSelected,

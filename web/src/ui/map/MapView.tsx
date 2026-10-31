@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalSt
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
 import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
-import { buildCutterPaths, buildRegionPaths, pickBubble, pickCounter, pickRegion } from "./hitTest";
+import { buildCutterPaths, buildRegionPaths, pickCounter, pickPlus, pickRegion } from "./hitTest";
 import {
   drawEditorOverlay,
   drawEditorUnits,
@@ -14,8 +14,6 @@ import {
   TOKEN_PX,
 } from "./mapRenderer";
 import { TerrainBake } from "./mapBake";
-import { UnitDrawer } from "./UnitDrawer";
-import type { UnitDomain } from "./unitStacks";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
 import {
@@ -76,10 +74,10 @@ export interface MapViewProps {
   activeFactionId?: string;
   /** A transport with cargo aboard gets a dot on its token. */
   isLoaded?(entry: StackEntry): boolean;
-  /** A unit type was picked in the drawer (the start of a drag): select it without toggling. */
-  onStackPick?(regionId: string, entry: StackEntry): void;
-  /** A unit type was dragged out of the drawer and dropped on a region: order the move. */
-  onStackDrop?(regionId: string, entry: StackEntry, targetRegionId: string): void;
+  /** A capped fan or its [+] was clicked: select the region and open the inspector. */
+  onOpenInspector?(regionId: string): void;
+  /** Registers the function that turns a screen point into the region under it, for a drag out of the inspector. */
+  registerDropResolver?(resolve: (clientX: number, clientY: number) => string): void;
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -91,8 +89,6 @@ const STROKE_START_PX = 6;
 const STROKE_STEP_PX = 3;
 export const SNAP_PX = 8;
 const HANDLE_PX = 10;
-/** Header and padding of the unit drawer, plus 38 px a row, is how tall it gets. Decides above or below. */
-const DRAWER_ESTIMATED_PX = 48;
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
 
 type Drag =
@@ -107,7 +103,8 @@ export function MapView(props: MapViewProps) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
-  useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint once their art loads
+  const [hoverStack, setHoverStack] = useState<{ regionId: string; key: string; copyDx: number } | null>(null);
+  useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
 
   const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
@@ -127,6 +124,7 @@ export function MapView(props: MapViewProps) {
   // only the extremes are clamped (see worldTokenPx).
   const unitScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
   const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
+  const plusHitPx = Math.max(4, TOKEN_PX * unitScale * 0.22);
   /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
   const slotsFor = (region: (typeof geometry.regions)[number]) =>
     effectiveUnitSlots(region, clipped?.get(region.id) ?? roughShape(region));
@@ -141,36 +139,12 @@ export function MapView(props: MapViewProps) {
       copyDx: dx,
     }),
   );
-  /** The collapsed bubble whose drawer is open. Cleared by a click elsewhere, Escape, or the bubble expanding. */
-  const [drawer, setDrawer] = useState<{ regionId: string; domain: UnitDomain; copyDx: number } | null>(null);
-  const drawerLayout = drawer
-    ? (layouts.find((l) => l.region.id === drawer.regionId && l.copyDx === drawer.copyDx) ??
-      layouts.find((l) => l.region.id === drawer.regionId))
-    : undefined;
-  const drawerCluster = drawerLayout?.clusters.find((c) => c.collapsed && c.domain === drawer?.domain);
-  useEffect(() => {
-    if (drawer && !drawerCluster) {
-      setDrawer(null);
-    }
-  }, [drawer, drawerCluster]);
-  useEffect(() => {
-    if (!drawer) {
-      return;
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setDrawer(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer]);
   const bakeRef = useRef<TerrainBake | null>(null);
   bakeRef.current ??= new TerrainBake();
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, drawer, tokenHitPx });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, drawer, tokenHitPx };
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -237,7 +211,7 @@ export function MapView(props: MapViewProps) {
       isUnmoved: props.isUnmoved,
       combatMarkers: props.combatMarkers,
       unitScale,
-      openDrawer: drawer,
+      hoverStack,
       activeFactionId: props.activeFactionId ?? "",
       isLoaded: props.isLoaded,
       categories: props.unitCategories,
@@ -344,11 +318,16 @@ export function MapView(props: MapViewProps) {
     if (!p.editor) {
       p.onRegionHover(id);
     }
-    const overCounter =
-      !p.editor &&
-      (pickBubble(ls, sp) !== null || pickCounter(ls, sp, hit) !== null);
+    const picked = pickCounter(ls, sp, hit);
+    const overPlus = pickPlus(ls, sp, live.current.plusHitPx) !== null;
+    const nextHover = picked
+      ? { regionId: picked.counter.regionId, key: picked.counter.slot.key, copyDx: picked.layout.copyDx }
+      : null;
+    setHoverStack((prev) =>
+      prev?.regionId === nextHover?.regionId && prev?.key === nextHover?.key && prev?.copyDx === nextHover?.copyDx ? prev : nextHover,
+    );
     const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw";
-    canvasRef.current!.style.cursor = aiming ? "crosshair" : overCounter || id !== "" ? "pointer" : "default";
+    canvasRef.current!.style.cursor = aiming ? "crosshair" : overPlus || picked !== null || id !== "" ? "pointer" : "default";
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -357,7 +336,7 @@ export function MapView(props: MapViewProps) {
     if (!d) {
       return;
     }
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
     if (d.kind === "handle") {
       p.editor?.onDragEnd(d.handle);
       return;
@@ -390,20 +369,19 @@ export function MapView(props: MapViewProps) {
       p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
       return;
     }
-    // A collapsed bubble opens its drawer (or closes it, on a second click).
-    const bubble = pickBubble(ls, sp);
-    if (bubble) {
-      const { drawer: open } = live.current;
-      const same =
-        open?.regionId === bubble.layout.region.id && open.domain === bubble.cluster.domain && open.copyDx === bubble.layout.copyDx;
-      setDrawer(same ? null : { regionId: bubble.layout.region.id, domain: bubble.cluster.domain, copyDx: bubble.layout.copyDx });
+    // The [+] and a capped fan both open the region inspector instead of picking one stack.
+    const plus = pickPlus(ls, sp, plusHit);
+    if (plus) {
+      p.onOpenInspector?.(plus.region.id);
       return;
     }
-    // Any other click closes the drawer, and does what it always did.
-    setDrawer(null);
-    const counter = pickCounter(ls, sp, live.current.tokenHitPx);
-    if (counter) {
-      p.onStackClick(counter.regionId, counter.slot.entry, counter.slot.key);
+    const picked = pickCounter(ls, sp, hit);
+    if (picked) {
+      if (picked.layout.capped) {
+        p.onOpenInspector?.(picked.counter.regionId);
+        return;
+      }
+      p.onStackClick(picked.counter.regionId, picked.counter.slot.entry, picked.counter.slot.key);
       return;
     }
     const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
@@ -412,24 +390,21 @@ export function MapView(props: MapViewProps) {
     }
   };
 
-  /** A unit type dragged out of the drawer and released at this client point. */
-  const dropFromDrawer = (regionId: string, entry: StackEntry, clientX: number, clientY: number) => {
-    const canvas = canvasRef.current;
-    const { view: v, paths: ps, props: p, exact: ex } = live.current;
-    if (!canvas) {
-      return;
-    }
-    const rect = canvas.getBoundingClientRect();
-    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-      return;
-    }
-    const world = screenToWorld(v, { x: clientX - rect.left, y: clientY - rect.top });
-    const target = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
-    setDrawer(null);
-    if (target !== "" && target !== regionId) {
-      p.onStackDrop?.(regionId, entry, target);
-    }
-  };
+  useEffect(() => {
+    props.registerDropResolver?.((clientX, clientY) => {
+      const canvas = canvasRef.current;
+      const { view: v, paths: ps, props: p, exact: ex } = live.current;
+      if (!canvas) {
+        return "";
+      }
+      const rect = canvas.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        return "";
+      }
+      const world = screenToWorld(v, { x: clientX - rect.left, y: clientY - rect.top });
+      return pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
+    });
+  }, [props.registerDropResolver]);
 
   const onDoubleClick = (e: React.MouseEvent) => {
     const { view: v, props: p } = live.current;
@@ -438,6 +413,7 @@ export function MapView(props: MapViewProps) {
 
   const onPointerLeave = () => {
     setHoverId("");
+    setHoverStack(null);
     live.current.props.onRegionHover("");
     live.current.props.editor?.onHover(null, 0);
   };
@@ -466,29 +442,6 @@ export function MapView(props: MapViewProps) {
         </button>
       </div>
       {props.children}
-      {!editor &&
-        drawer &&
-        drawerCluster &&
-        (() => {
-          const room = DRAWER_ESTIMATED_PX + drawerCluster.group.entries.length * 38;
-          const above = drawerCluster.y - drawerCluster.bubbleRadius - 12 >= room;
-          const x = Math.min(Math.max(drawerCluster.x, 110), Math.max(size.w - 110, 110));
-          const y = above ? drawerCluster.y - drawerCluster.bubbleRadius - 12 : drawerCluster.y + drawerCluster.bubbleRadius + 22;
-          const regionId = drawer.regionId;
-          return (
-            <UnitDrawer
-              group={drawerCluster.group}
-              x={x}
-              y={y}
-              placement={above ? "above" : "below"}
-              selectedKey={props.selectedStack?.regionId === regionId ? props.selectedStack.key : null}
-              isUnmoved={(entry) => props.isUnmoved(regionId, entry)}
-              onSelect={(entry, key) => props.onStackClick(regionId, entry, key)}
-              onDragStart={(entry) => props.onStackPick?.(regionId, entry)}
-              onDragEnd={(entry, _key, cx, cy) => dropFromDrawer(regionId, entry, cx, cy)}
-            />
-          );
-        })()}
       {editor?.prunePrompt &&
         (() => {
           const { box, count, confirm, cancel } = editor.prunePrompt;

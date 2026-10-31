@@ -23,8 +23,8 @@ export function tokenZoomScale(viewK: number, fitK: number): number {
 }
 
 /** A unit token never draws smaller or larger than this on screen, however far the camera is in or out. */
-export const TOKEN_MIN_PX = 8;
-export const TOKEN_MAX_PX = 64;
+export const TOKEN_MIN_PX = 4;
+export const TOKEN_MAX_PX = 32;
 
 /**
  * On-screen diameter of a unit token: its world diameter times the zoom, so tokens grow and shrink with the

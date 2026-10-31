@@ -30,11 +30,20 @@ export const FACILITY_ANCHOR_OFFSET: Vec2 = { x: 0, y: 16 };
 /** Default Air Anchor: up and to the right of the unit anchor, in world units. */
 export const AIR_ANCHOR_OFFSET: Vec2 = { x: 14, y: -10 };
 
-/** A territory shows at most this many unit tokens in their own slots; past that, a domain collapses. */
-export const UNIT_SLOT_MAX = 6;
+/** Hand-placed unit slots on a land region. Past that, extras arc around them. */
+export const UNIT_SLOT_MAX_LAND = 8;
+/** Hand-placed unit slots on a sea zone, and the most the generator will pack. */
+export const UNIT_SLOT_MAX_SEA = 6;
+/** How many slots the generator tries to place. Manual land slots go up to UNIT_SLOT_MAX_LAND. */
+export const UNIT_SLOT_MAX = UNIT_SLOT_MAX_SEA;
 
-/** The `[x, y]` pairs of `metadata.unit_slots`: well-formed pairs only, at most UNIT_SLOT_MAX. Empty when unset. */
-export function pointsFromPairs(raw: unknown): Vec2[] {
+/** The manual slot cap: 8 on land, 6 at sea. */
+export function unitSlotMax(isSea: boolean): number {
+  return isSea ? UNIT_SLOT_MAX_SEA : UNIT_SLOT_MAX_LAND;
+}
+
+/** The `[x, y]` pairs of `metadata.unit_slots`: well-formed pairs only, at most `max`. Empty when unset. */
+export function pointsFromPairs(raw: unknown, max = UNIT_SLOT_MAX_LAND): Vec2[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -45,7 +54,7 @@ export function pointsFromPairs(raw: unknown): Vec2[] {
       out.push(p);
     }
   }
-  return out.slice(0, UNIT_SLOT_MAX);
+  return out.slice(0, max);
 }
 
 export function defaultFacilityAnchor(unit: Vec2): Vec2 {
@@ -102,8 +111,8 @@ export interface RegionShape {
   airAnchor?: Vec2;
   airAnchorSet?: boolean;
   /**
-   * Hand-placed unit slots (`metadata.unit_slots`), at most UNIT_SLOT_MAX, in world units. Absent means the
-   * map generates them (see unitSlots.ts), so they follow the territory's shape and unit anchor.
+   * Hand-placed unit slots (`metadata.unit_slots`), at most 8 on land and 6 at sea, in world units. Absent
+   * means the map generates them (see unitSlots.ts), so they follow the territory's shape and unit anchor.
    */
   unitSlots?: Vec2[];
   /** A capital (`metadata.victory`): its IPC shield carries an emblem. */
@@ -183,7 +192,7 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
     const land = type === "land";
     const facilityAt = land ? pointFromPair(meta.facility_anchor) : null;
     const airAt = pointFromPair(meta.air_anchor);
-    const slots = pointsFromPairs(meta.unit_slots);
+    const slots = pointsFromPairs(meta.unit_slots, unitSlotMax(!land));
     regions.push({
       id,
       type,

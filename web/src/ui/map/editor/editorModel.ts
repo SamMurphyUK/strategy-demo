@@ -10,7 +10,7 @@ import {
   pointFromPair,
   pointInPolygon,
   pointsFromPairs,
-  UNIT_SLOT_MAX,
+  unitSlotMax,
   type Vec2,
 } from "../geometry";
 import { WORLD_COORD_SPACE } from "../map_space";
@@ -44,17 +44,18 @@ export interface StartingUnit {
 
 export const UNIT_TYPE_OPTIONS = [
   "infantry",
-  "artillery",
   "mech_infantry",
+  "artillery",
   "tank",
+  "aa",
   "fighter",
   "tactical_bomber",
   "strategic_bomber",
+  "carrier",
   "battleship",
   "cruiser",
   "destroyer",
   "submarine",
-  "carrier",
   "transport",
 ] as const;
 
@@ -771,14 +772,13 @@ export function applySplitMany(
   return { map: next, newIds: fresh.map((f) => f.id) };
 }
 
-export type AnchorKind = "anchor" | "facility" | "air";
+export type AnchorKind = "anchor" | "facility";
 
-/** The anchors a region can show handles for: land has all three, a sea zone has the unit and air anchors. */
+/** The anchors a region shows handles for: the unit diamond, and on land the facility trapezoid. */
 export function anchorPoints(region: EditorRegion): { kind: AnchorKind; at: Vec2 }[] {
   return [
     { kind: "anchor", at: { x: region.cx, y: region.cy } },
     ...(region.is_sea ? [] : [{ kind: "facility" as const, at: facilityAnchorOfRegion(region) }]),
-    { kind: "air", at: airAnchorOfRegion(region) },
   ];
 }
 
@@ -819,31 +819,88 @@ export function moveSlot(slots: Vec2[], index: number, to: Vec2): [number, numbe
   return slots.map((p, i): [number, number] => (i === index ? [to.x, to.y] : [p.x, p.y]));
 }
 
+/**
+ * The slots the add and remove buttons edit. Hand-placed slots win. Otherwise `generated` is the set already
+ * drawn on the map, so adding one does not throw those away and start over at the unit anchor.
+ */
+function slotsBeingEdited(region: EditorRegion, generated: Vec2[]): [number, number][] {
+  if (region.unit_slots && region.unit_slots.length > 0) {
+    return region.unit_slots.map((p) => [p[0], p[1]]);
+  }
+  return generated.map((p) => [p.x, p.y]);
+}
+
+/**
+ * The slots after adding one. Keeps every slot already on the map, then steps the new one to the right of
+ * the last. The first slot of an empty region sits on the unit anchor. Null at the cap: 8 on land, 6 at sea.
+ */
+export function slotsAfterAdd(region: EditorRegion, generated: Vec2[] = []): [number, number][] | null {
+  const current = slotsBeingEdited(region, generated);
+  if (current.length >= unitSlotMax(region.is_sea)) {
+    return null;
+  }
+  const last = current[current.length - 1];
+  const next: [number, number] = last ? [last[0] + 12, last[1]] : [region.cx, region.cy];
+  return [...current, next];
+}
+
+/**
+ * The facility anchor a Place click writes: the default below the unit anchor. Null on a sea zone, and null
+ * when one is already placed, so a second click is not a second anchor.
+ */
+export function facilityAnchorAfterPlace(region: EditorRegion): [number, number] | null {
+  if (region.is_sea || region.facility_anchor) {
+    return null;
+  }
+  const at = defaultFacilityAnchor({ x: region.cx, y: region.cy });
+  return [at.x, at.y];
+}
+
+/**
+ * The slots after dropping the last one, keeping the rest. Undefined when none remain, so the generator
+ * takes over. `generated` is used when the region has not been placed by hand yet.
+ */
+export function slotsAfterRemoveLast(region: EditorRegion, generated: Vec2[] = []): [number, number][] | undefined {
+  const current = slotsBeingEdited(region, generated);
+  if (current.length === 0) {
+    return undefined;
+  }
+  const next = current.slice(0, -1);
+  return next.length > 0 ? next : undefined;
+}
+
 // ---------------------------------------------------------------
 // Sample garrisons, for trying a territory out
 // ---------------------------------------------------------------
 
-/** Six unit types a land territory can hold at once, with their counts: three land, three air. */
+/**
+ * A full land garrison: the five land types and the three aircraft. `tank` is armor and `aa` is anti-aircraft.
+ * Eight types is more than one slot can show with its arc, so a small territory grows a [+].
+ */
 export const SAMPLE_LAND_GARRISON: readonly { unit_type_id: string; count: number }[] = [
-  { unit_type_id: "infantry", count: 3 },
-  { unit_type_id: "artillery", count: 2 },
   { unit_type_id: "tank", count: 2 },
   { unit_type_id: "mech_infantry", count: 1 },
-  { unit_type_id: "fighter", count: 2 },
+  { unit_type_id: "artillery", count: 2 },
+  { unit_type_id: "infantry", count: 3 },
   { unit_type_id: "strategic_bomber", count: 1 },
+  { unit_type_id: "tactical_bomber", count: 1 },
+  { unit_type_id: "fighter", count: 2 },
+  { unit_type_id: "aa", count: 1 },
 ];
 
-/** Six ship types for a sea zone. */
+/** The six ships plus the aircraft that can sit on a carrier. `submarine` is the sub. */
 export const SAMPLE_SEA_GARRISON: readonly { unit_type_id: string; count: number }[] = [
-  { unit_type_id: "battleship", count: 1 },
   { unit_type_id: "carrier", count: 1 },
+  { unit_type_id: "battleship", count: 1 },
   { unit_type_id: "cruiser", count: 2 },
   { unit_type_id: "destroyer", count: 2 },
   { unit_type_id: "submarine", count: 4 },
+  { unit_type_id: "fighter", count: 1 },
+  { unit_type_id: "tactical_bomber", count: 1 },
   { unit_type_id: "transport", count: 1 },
 ];
 
-/** A garrison with six distinct unit types for `factionId`, ready for setStartingUnits. */
+/** A sample garrison for `factionId`, ready for setStartingUnits. */
 export function sampleGarrison(isSea: boolean, factionId: string): Omit<StartingUnit, "region_id">[] {
   return (isSea ? SAMPLE_SEA_GARRISON : SAMPLE_LAND_GARRISON).map((u) => ({ faction_id: factionId, ...u }));
 }
@@ -1171,7 +1228,7 @@ function factoryLevelOf(meta: Dict): FactoryLevel {
 function facilityFieldsOf(meta: Dict, isSea: boolean): Partial<EditorRegion> {
   const facility = isSea ? null : pointFromPair(meta.facility_anchor);
   const air = pointFromPair(meta.air_anchor);
-  const slots = pointsFromPairs(meta.unit_slots);
+  const slots = pointsFromPairs(meta.unit_slots, unitSlotMax(isSea));
   return {
     ...(slots.length > 0 ? { unit_slots: slots.map((p) => [p.x, p.y] as [number, number]) } : {}),
     ...(!isSea && meta.has_airbase === true ? { has_airbase: true } : {}),
@@ -1285,7 +1342,7 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         ...(region.facility_anchor ? { facility_anchor: [r(region.facility_anchor[0]), r(region.facility_anchor[1])] } : {}),
         ...(region.air_anchor ? { air_anchor: [r(region.air_anchor[0]), r(region.air_anchor[1])] } : {}),
         ...(region.unit_slots && region.unit_slots.length > 0
-          ? { unit_slots: region.unit_slots.slice(0, UNIT_SLOT_MAX).map(([x, y]) => [r(x), r(y)]) }
+          ? { unit_slots: region.unit_slots.slice(0, unitSlotMax(region.is_sea)).map(([x, y]) => [r(x), r(y)]) }
           : {}),
         ipc: region.ipc_value,
         victory: region.capital,

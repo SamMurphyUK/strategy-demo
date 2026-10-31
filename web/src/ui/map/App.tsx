@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH } from "../../content/game_scene_session_builder";
 import { loadJson } from "../../engine/content/res";
 import type { ActiveBattle } from "../../engine/model/battle";
@@ -55,6 +55,12 @@ export function App() {
   }, [editor.map]);
 
   const [selectedRegionId, setSelectedRegionId] = useState("");
+  /** Bumped when a capped fan opens the region inspector, so the panel can take focus. */
+  const [inspectorFocus, setInspectorFocus] = useState(0);
+  const resolveDrop = useRef<(clientX: number, clientY: number) => string>(() => "");
+  const registerDropResolver = useCallback((fn: (clientX: number, clientY: number) => string) => {
+    resolveDrop.current = fn;
+  }, []);
   const [hoverRegionId, setHoverRegionId] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
   // The engine's open battle, kept on screen after it finishes until the player leaves the board.
@@ -188,7 +194,7 @@ export function App() {
     return out;
   }, [state]);
 
-  /** A unit type picked in the drawer (the start of a drag): selected, never toggled off. */
+  /** A stack picked in the region inspector (the start of a drag): selected, never toggled off. */
   const pickStack = (regionId: string, entry: StackEntry) => {
     const max = movableCount(regionId, entry);
     setSelectedRegionId(regionId);
@@ -199,7 +205,7 @@ export function App() {
     );
   };
 
-  /** A unit type dragged out of the drawer and dropped on `target`: the same order a click on it would give. */
+  /** A stack dragged out of the inspector and dropped on `target`: the same order a click on it would give. */
   const dropStack = (regionId: string, entry: StackEntry, target: string) => {
     const max = movableCount(regionId, entry);
     const legal =
@@ -287,6 +293,11 @@ export function App() {
           onRegionClick={onRegionClick}
           onRegionHover={setHoverRegionId}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
+          onOpenInspector={(regionId) => {
+            setSelectedRegionId(regionId);
+            setInspectorFocus((n) => n + 1);
+          }}
+          registerDropResolver={registerDropResolver}
           unitCategories={unitCategories}
           activeFactionId={faction}
           isLoaded={(entry) => {
@@ -297,8 +308,6 @@ export function App() {
             const cargo = state.transport_instances[iid]?.cargo;
             return Array.isArray(cargo) && cargo.length > 0;
           }}
-          onStackPick={pickStack}
-          onStackDrop={dropStack}
           editor={editing ? editor.binding : undefined}
         >
           {editing && <EditorToolbar editor={editor} />}
@@ -319,7 +328,15 @@ export function App() {
                 game={game}
                 regionId={selectedRegionId}
                 selection={selection}
+                focusNonce={inspectorFocus}
                 onSelectStack={selectStack}
+                onDragStart={(entry) => pickStack(selectedRegionId, entry)}
+                onDragEnd={(entry, clientX, clientY) => {
+                  const target = resolveDrop.current(clientX, clientY);
+                  if (target !== "" && target !== selectedRegionId) {
+                    dropStack(selectedRegionId, entry, target);
+                  }
+                }}
               />
               <EventLog log={game.log} />
             </>

@@ -1,4 +1,4 @@
-// Facility fields, the three anchors, the Tri-Wedge badge and domain-separated collapsible stacks.
+// Facility fields, the anchors, the Tri-Wedge badge, and the three-stage unit layout.
 import { describe, expect, it } from "vitest";
 import {
   airAnchorOfRegion,
@@ -7,10 +7,13 @@ import {
   applyMerge,
   editorFromMapJson,
   editorToMapJson,
+  facilityAnchorAfterPlace,
   facilityAnchorOfRegion,
   findRegion,
   isUnconfiguredLand,
   moveSlot,
+  slotsAfterAdd,
+  slotsAfterRemoveLast,
   SAMPLE_LAND_GARRISON,
   SAMPLE_SEA_GARRISON,
   sampleGarrison,
@@ -37,11 +40,13 @@ import {
   type RegionShape,
   type StackEntry,
   UNIT_SLOT_MAX,
+  UNIT_SLOT_MAX_LAND,
+  UNIT_SLOT_MAX_SEA,
   type Vec2,
 } from "../../../src/ui/map/geometry";
 import { hatchSegments, isHatchedOwner } from "../../../src/ui/map/hatch";
 import { legacyToWorld, projectMapJson, WORLD_COORD_SPACE } from "../../../src/ui/map/map_space";
-import { CARGO_DOT, isActiveFaction, navalLetter, pillColors, tokenDisc } from "../../../src/ui/map/tokenStyle";
+import { CARGO_DOT, isActiveFaction, navalLetter, pillColors, pillRadius, PILL_OFFSET, tokenDisc, TOKEN_INK, unitSilhouette } from "../../../src/ui/map/tokenStyle";
 import {
   effectiveUnitSlots,
   ELONGATION_RATIO,
@@ -53,14 +58,22 @@ import {
   TOKEN_WORLD,
 } from "../../../src/ui/map/unitSlots";
 import {
+  ARC_RADIUS_RATIO,
+  ARC_SATELLITE_MAX,
+  arcAngles,
+  arcOffset,
+  assignStacks,
+  canonicalUnit,
   clearOf,
-  drawerRows,
-  groupByDomain,
+  frontMostIndex,
+  LAND_ROSTER,
   layoutRegionVisuals,
-  planCollapse,
+  orderStacks,
+  plusOffset,
+  ROSTER,
+  SEA_ROSTER,
   unitDomain,
   unitLabel,
-  unitPriority,
 } from "../../../src/ui/map/unitStacks";
 import { worldTokenPx, TOKEN_MAX_PX, TOKEN_MIN_PX } from "../../../src/ui/map/viewMath";
 
@@ -231,19 +244,16 @@ describe("facility schema: defaults and compatibility", () => {
     expect(meta.unit_slots).toEqual([legacyToWorld(10, 20), legacyToWorld(30, 40)]);
   });
 
-  it("reads up to six hand-placed unit_slots and ignores a malformed pair", () => {
-    const slots = [
-      [10, 20],
-      [30, 40],
-      [50, 60],
-      [70, 80],
-      [90, 100],
-      [110, 120],
-      [130, 140],
-    ];
-    const [r] = buildMapGeometry(mapOf(regionJson("S", { unit_slots: [...slots, [1]] }))).regions;
-    expect(r.unitSlots).toEqual(slots.slice(0, UNIT_SLOT_MAX).map(([x, y]) => ({ x, y })));
-    expect(hasHandPlacedSlots(r)).toBe(true);
+  it("reads eight hand-placed land slots and six sea slots, and ignores a malformed pair", () => {
+    const pairs = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => [10 + i * 10, 20 + i * 10]);
+    const [land] = buildMapGeometry(mapOf(regionJson("L", { unit_slots: [...pairs, [1]] }))).regions;
+    expect(land.unitSlots).toEqual(pairs.slice(0, UNIT_SLOT_MAX_LAND).map(([x, y]) => ({ x, y })));
+    expect(hasHandPlacedSlots(land)).toBe(true);
+    const [sea] = buildMapGeometry(
+      mapOf(regionJson("Sea Zone 9", { type: "sea", ipc: 0, unit_slots: [...pairs, [1]] })),
+    ).regions;
+    expect(sea.type).toBe("sea");
+    expect(sea.unitSlots).toEqual(pairs.slice(0, UNIT_SLOT_MAX_SEA).map(([x, y]) => ({ x, y })));
   });
 
   it("a region without unit_slots has none, so the generator will fill them in", () => {
@@ -407,16 +417,15 @@ describe("editor: anchor handles", () => {
   const sea = () =>
     findRegion(editorFromMapJson(mapOf(regionJson("Sea Zone 1", { type: "sea", ipc: 0 }, 0, [50, 50]))), "Sea Zone 1")!;
 
-  it("a land region has unit, facility and air handles at the defaults", () => {
+  it("a land region has the unit diamond and the facility trapezoid, and no air handle", () => {
     expect(anchorPoints(land())).toEqual([
       { kind: "anchor", at: { x: 50, y: 50 } },
       { kind: "facility", at: { x: 50, y: 66 } },
-      { kind: "air", at: { x: 64, y: 40 } },
     ]);
   });
 
   it("a sea zone has no facility handle", () => {
-    expect(anchorPoints(sea()).map((p) => p.kind)).toEqual(["anchor", "air"]);
+    expect(anchorPoints(sea()).map((p) => p.kind)).toEqual(["anchor"]);
     expect(anchorHandleAt(sea(), { x: 50, y: 66 }, 2)).toBeNull();
   });
 
@@ -424,14 +433,13 @@ describe("editor: anchor handles", () => {
     const r = land();
     expect(anchorHandleAt(r, { x: 50.5, y: 50 }, 3)).toEqual({ kind: "anchor", regionId: "L" });
     expect(anchorHandleAt(r, { x: 50, y: 65 }, 3)).toEqual({ kind: "facility", regionId: "L" });
-    expect(anchorHandleAt(r, { x: 65, y: 41 }, 3)).toEqual({ kind: "air", regionId: "L" });
+    expect(anchorHandleAt(r, { x: 64, y: 40 }, 3)).toBeNull();
     expect(anchorHandleAt(r, { x: 0, y: 0 }, 3)).toBeNull();
   });
 
   it("when handles overlap the nearest wins, and the unit anchor wins a tie", () => {
-    const r = updateRegion(editorFromMapJson(mapOf(regionJson("L", {}))), "L", { air_anchor: [52, 50], facility_anchor: [50, 50] });
+    const r = updateRegion(editorFromMapJson(mapOf(regionJson("L", {}))), "L", { facility_anchor: [50, 50] });
     const region = findRegion(r, "L")!;
-    expect(anchorHandleAt(region, { x: 52, y: 50 }, 5)?.kind).toBe("air");
     expect(anchorHandleAt(region, { x: 50, y: 50 }, 5)?.kind).toBe("anchor");
   });
 
@@ -452,6 +460,68 @@ describe("editor: anchor handles", () => {
       [1, 2],
       [9, 8],
     ]);
+  });
+
+  it("adds and removes hand-placed slots as their own lists, and writes them into the map", () => {
+    const base = editorFromMapJson(mapOf(regionJson("L", {}, 0, [50, 50])));
+    const region = findRegion(base, "L")!;
+    expect(slotsAfterAdd(region)).toEqual([[50, 50]]);
+    const added = updateRegion(base, "L", { unit_slots: slotsAfterAdd(region)! });
+    expect(slotsAfterAdd(findRegion(added, "L")!)).toEqual([
+      [50, 50],
+      [62, 50],
+    ]);
+    const file = editorToMapJson(added, { round: false }) as { regions: { metadata: { unit_slots?: [number, number][] } }[] };
+    expect(file.regions[0].metadata.unit_slots).toEqual([[50, 50]]);
+    expect(slotsAfterRemoveLast(findRegion(added, "L")!)).toBeUndefined();
+    const six: [number, number][] = [
+      [1, 1],
+      [2, 2],
+      [3, 3],
+      [4, 4],
+      [5, 5],
+      [6, 6],
+    ];
+    const landSix = findRegion(updateRegion(base, "L", { unit_slots: six }), "L")!;
+    expect(slotsAfterAdd(landSix)).toHaveLength(7);
+    const eight: [number, number][] = [...six, [7, 7], [8, 8]];
+    expect(slotsAfterAdd(findRegion(updateRegion(base, "L", { unit_slots: eight }), "L")!)).toBeNull();
+    const sea = editorFromMapJson(mapOf(regionJson("Sea Zone 1", { type: "sea", ipc: 0 }, 0, [50, 50])));
+    expect(slotsAfterAdd(findRegion(updateRegion(sea, "Sea Zone 1", { unit_slots: six }), "Sea Zone 1")!)).toBeNull();
+    expect(slotsAfterAdd(findRegion(updateRegion(sea, "Sea Zone 1", { unit_slots: six.slice(0, 5) }), "Sea Zone 1")!)).toHaveLength(6);
+  });
+
+  it("keeps the generated slots when adding or removing one", () => {
+    const region = findRegion(editorFromMapJson(mapOf(regionJson("L", {}, 0, [50, 50]))), "L")!;
+    const generated = [
+      { x: 10, y: 20 },
+      { x: 30, y: 20 },
+      { x: 50, y: 40 },
+    ];
+    expect(slotsAfterAdd(region, generated)).toEqual([
+      [10, 20],
+      [30, 20],
+      [50, 40],
+      [62, 40],
+    ]);
+    expect(slotsAfterRemoveLast(region, generated)).toEqual([
+      [10, 20],
+      [30, 20],
+    ]);
+    const placed = findRegion(updateRegion(editorFromMapJson(mapOf(regionJson("L", {}, 0, [50, 50]))), "L", { unit_slots: [[1, 1]] }), "L")!;
+    expect(slotsAfterAdd(placed, generated)).toEqual([
+      [1, 1],
+      [13, 1],
+    ]);
+  });
+
+  it("places one facility anchor on land, and none on a sea zone or a region that already has one", () => {
+    const land = findRegion(editorFromMapJson(mapOf(regionJson("L", {}, 0, [50, 50]))), "L")!;
+    expect(facilityAnchorAfterPlace(land)).toEqual([50, 66]);
+    const placed = updateRegion(editorFromMapJson(mapOf(regionJson("L", {}, 0, [50, 50]))), "L", { facility_anchor: [1, 2] });
+    expect(facilityAnchorAfterPlace(findRegion(placed, "L")!)).toBeNull();
+    const sea = findRegion(editorFromMapJson(mapOf(regionJson("Sea Zone 1", { type: "sea", ipc: 0 }))), "Sea Zone 1")!;
+    expect(facilityAnchorAfterPlace(sea)).toBeNull();
   });
 
   it("the default anchors follow the unit anchor, and explicit ones stay put", () => {
@@ -566,18 +636,18 @@ describe("Tri-Wedge facility badge", () => {
 });
 
 // ---------------------------------------------------------------
-// Domains and collapse
+// One roster, one pool of slots
 // ---------------------------------------------------------------
 
 describe("unit domains", () => {
-  it("classifies the standard units", () => {
-    for (const id of ["infantry", "artillery", "tank", "mech_infantry", "aa"]) {
+  it("classifies the standard units, aliases included", () => {
+    for (const id of ["infantry", "artillery", "tank", "armor", "mech_infantry", "aa", "aaa"]) {
       expect(unitDomain(id)).toBe("land");
     }
-    for (const id of ["fighter", "tactical_bomber", "strategic_bomber"]) {
+    for (const id of ["fighter", "tactical_bomber", "strategic_bomber", "bomber"]) {
       expect(unitDomain(id)).toBe("air");
     }
-    for (const id of ["destroyer", "cruiser", "battleship", "carrier", "submarine", "transport"]) {
+    for (const id of ["destroyer", "cruiser", "battleship", "carrier", "submarine", "sub", "transport"]) {
       expect(unitDomain(id)).toBe("sea");
     }
   });
@@ -591,86 +661,74 @@ describe("unit domains", () => {
 
   it("labels unit types", () => {
     expect(unitLabel("strategic_bomber")).toBe("Strategic bomber");
-    expect(unitLabel("aa")).toBe("Aa");
+    expect(unitLabel("tank")).toBe("Armor");
+    expect(unitLabel("aa")).toBe("AA");
   });
 });
 
-describe("groupByDomain", () => {
-  it("splits land, sea and air, in that order, with totals and a lead unit", () => {
-    const groups = groupByDomain([
-      unit("fighter", 2),
-      unit("infantry", 5),
-      unit("tank", 5),
-      unit("destroyer", 1),
-      unit("artillery", 1),
-    ]);
-    expect(groups.map((g) => g.domain)).toEqual(["land", "sea", "air"]);
-    const land = groups[0];
-    expect(land.total).toBe(11);
-    expect(land.typeCount).toBe(3);
-    // 5 infantry and 5 tanks tie; the tank is the heavier piece.
-    expect(land.lead.unit_type_id).toBe("tank");
-    expect(groups[2].total).toBe(2);
+describe("unified roster order", () => {
+  it("sorts a land territory as one list, armor first and aa last", () => {
+    const ordered = orderStacks(
+      ["aa", "fighter", "infantry", "tank", "mech_infantry", "artillery", "strategic_bomber", "tactical_bomber"].map((id) => unit(id)),
+      false,
+    );
+    expect(ordered.map((e) => canonicalUnit(e.unit_type_id))).toEqual([...LAND_ROSTER]);
   });
 
-  it("drops empty stacks and empty domains", () => {
-    expect(groupByDomain([unit("infantry", 0)])).toEqual([]);
-    expect(groupByDomain([])).toEqual([]);
+  it("sorts a sea zone with the carrier first and the transport last", () => {
+    const ordered = orderStacks(
+      ["transport", "tactical_bomber", "fighter", "submarine", "destroyer", "cruiser", "battleship", "carrier"].map((id) => unit(id)),
+      true,
+    );
+    expect(ordered.map((e) => canonicalUnit(e.unit_type_id))).toEqual([...SEA_ROSTER]);
   });
 
-  it("counts distinct unit types, not stacks, so two factions of one type are one type", () => {
-    const [g] = groupByDomain([unit("infantry", 2, "ger"), unit("infantry", 3, "uk")]);
-    expect(g.entries).toHaveLength(2);
-    expect(g.typeCount).toBe(1);
-    expect(g.total).toBe(5);
-  });
-
-  it("the lead is the highest threat, not the biggest stack", () => {
-    const [g] = groupByDomain([unit("tank", 1), unit("infantry", 7)]);
-    expect(g.lead.unit_type_id).toBe("tank");
-    expect(unitPriority("tank")).toBeGreaterThan(unitPriority("artillery"));
-    expect(unitPriority("artillery")).toBeGreaterThan(unitPriority("infantry"));
-    expect(unitPriority("infantry")).toBeGreaterThan(unitPriority("aa"));
-    expect(unitPriority("strategic_bomber")).toBeGreaterThan(unitPriority("fighter"));
-    expect(unitPriority("carrier")).toBeGreaterThan(unitPriority("battleship"));
-    expect(unitPriority("battleship")).toBeGreaterThan(unitPriority("cruiser"));
-    expect(unitPriority("destroyer")).toBeGreaterThan(unitPriority("submarine"));
-    expect(unitPriority("submarine")).toBeGreaterThan(unitPriority("transport"));
+  it("drops an empty stack and keeps two factions of one type", () => {
+    expect(orderStacks([unit("infantry", 0)], false)).toEqual([]);
+    const both = orderStacks([unit("infantry", 2, "uk"), unit("infantry", 3, "ger")], false);
+    expect(both).toHaveLength(2);
+    expect(both.map((e) => e.faction_id)).toEqual(["ger", "uk"]);
   });
 });
 
-describe("overflow-only collapse", () => {
-  const groups = (...types: string[]) => groupByDomain(types.map((t) => unit(t, 2)));
+describe("circular arc", () => {
+  const d = 20;
 
-  it("never collapses while every stack has a non-colliding slot", () => {
-    expect(planCollapse(groups("infantry", "artillery", "tank"), 6)).toEqual([]);
-    expect(planCollapse(groups("infantry", "artillery", "tank", "fighter", "strategic_bomber"), 6)).toEqual([]);
+  it("folds satellites onto the upper crescent, clear of the count-pill quadrant", () => {
+    expect(ARC_RADIUS_RATIO).toBe(0.72);
+    expect(ARC_SATELLITE_MAX).toBe(3);
+    expect(arcAngles(3)).toEqual([-145, -100, -55]);
+    for (const deg of arcAngles(3)) {
+      expect(deg).toBeLessThan(0);
+      expect(deg >= 20 && deg <= 80).toBe(false);
+    }
+    const offsets = [0, 1, 2].map((i) => arcOffset(i, 3, d));
+    offsets.forEach((off, i) => {
+      const rad = (arcAngles(3)[i] * Math.PI) / 180;
+      expect(off.x).toBeCloseTo(Math.cos(rad) * 0.72 * d, 6);
+      expect(off.y).toBeCloseTo(Math.sin(rad) * 0.72 * d, 6);
+      expect(Math.hypot(off.x, off.y)).toBeCloseTo(0.72 * d, 6);
+    });
+    // Not a straight line: the two steps from the first satellite are not parallel.
+    const ab = { x: offsets[1].x - offsets[0].x, y: offsets[1].y - offsets[0].y };
+    const ac = { x: offsets[2].x - offsets[0].x, y: offsets[2].y - offsets[0].y };
+    expect(Math.abs(ab.x * ac.y - ab.y * ac.x)).toBeGreaterThan(1);
   });
 
-  it("collapses only when there are more stacks than slots", () => {
-    expect(planCollapse(groups("infantry", "artillery", "tank"), 2)).toEqual(["land"]);
+  it("puts one primary on each slot and deals the overflow around them, three deep", () => {
+    const stacks = ["tank", "mech_infantry", "artillery", "infantry", "fighter"].map((id) => unit(id));
+    const open = assignStacks(stacks.slice(0, 2), 3);
+    expect(open.capped).toBe(false);
+    expect(open.groups.map((g) => g.map((e) => e.unit_type_id))).toEqual([["tank"], ["mech_infantry"], []]);
+    const folded = assignStacks(stacks, 1);
+    expect(folded.capped).toBe(true);
+    expect(folded.groups[0].map((e) => e.unit_type_id)).toEqual(["tank", "mech_infantry", "artillery", "infantry"]);
   });
 
-  it("a single stack never collapses, even with no slots", () => {
-    expect(planCollapse(groups("infantry"), 0)).toEqual([]);
-  });
-
-  it("does not collapse because of how many types there are, or how far the camera is zoomed out", () => {
-    // Six types still expand when six slots fit.
-    expect(planCollapse(groups("infantry", "artillery", "tank", "fighter", "tactical_bomber", "strategic_bomber"), 6)).toEqual([]);
-  });
-
-  it("collapses the domain with the most stacks first, air before land on a tie", () => {
-    const mixed = groupByDomain([unit("infantry"), unit("artillery"), unit("tank"), unit("fighter"), unit("strategic_bomber")]);
-    expect(planCollapse(mixed, 4)).toEqual(["land"]);
-    const tied = groupByDomain([unit("infantry"), unit("tank"), unit("fighter"), unit("strategic_bomber")]);
-    expect(planCollapse(tied, 3)).toEqual(["air"]);
-  });
-
-  it("an air bubble whose air anchor was placed by hand does not take a slot", () => {
-    const mixed = groupByDomain([unit("infantry"), unit("tank"), unit("fighter"), unit("strategic_bomber")]);
-    // Two land and an air bubble on the placed air anchor: 2 <= 2.
-    expect(planCollapse(mixed, 2, true)).toEqual(["air"]);
+  it("puts the [+] up and to the right of the lead token", () => {
+    const off = plusOffset(d);
+    expect(off.x).toBeGreaterThan(0);
+    expect(off.y).toBeLessThan(0);
   });
 });
 
@@ -680,94 +738,146 @@ describe("overflow-only collapse", () => {
 
 describe("layoutRegionVisuals", () => {
   const view = { x: 0, y: 0, k: 4 };
-  const params = (slots: Vec2[] = sixSlots()) => ({ view, tokenPx: 32, badgeSide: 30, slots });
+  const params = (slots: Vec2[] = sixSlots()) => ({ view, tokenPx: 32, badgeSide: 30, slots, tokenWorld: 8 });
   const landRegion = (over: Partial<RegionShape> = {}) =>
     bareShape({
       bounds: { x: 0, y: 0, w: 100, h: 100 },
       anchor: { x: 50, y: 50 },
       ...over,
     });
+  /** Back to front, so the last token is the lead. */
+  const leadOf = <T extends { entry: StackEntry }>(tokens: T[]): T => tokens[tokens.length - 1];
 
-  it("places one token per stack at the region's world-space slots, land then air, highest threat first", () => {
+  it("gives every unit type its own slot when the centres are a diameter apart", () => {
     const slots = [
       { x: 10, y: 20 },
       { x: 30, y: 20 },
       { x: 50, y: 20 },
     ];
-    const { clusters } = layoutRegionVisuals(landRegion(), [unit("infantry", 3), unit("tank", 2), unit("fighter", 1)], params(slots));
-    const land = clusters.find((c) => c.domain === "land")!;
-    const air = clusters.find((c) => c.domain === "air")!;
-    expect(land.collapsed).toBe(false);
-    expect(air.collapsed).toBe(false);
-    expect(land.slots.map((s) => s.slot.entry.unit_type_id)).toEqual(["tank", "infantry"]);
-    expect(land.slots.map((s) => [s.x, s.y])).toEqual([
+    const { tokens, stage, capped, plus } = layoutRegionVisuals(
+      landRegion(),
+      [unit("infantry", 3), unit("tank", 2), unit("fighter", 1)],
+      params(slots),
+    );
+    expect(stage).toBe("open");
+    expect(capped).toBe(false);
+    expect(plus).toBeNull();
+    // armor (tank), then infantry, then the fighter. Air is not kept back for its own anchor.
+    const front = [...tokens].reverse();
+    expect(front.map((t) => t.entry.unit_type_id)).toEqual(["tank", "infantry", "fighter"]);
+    expect(front.map((t) => [t.x, t.y])).toEqual([
       [40, 80],
       [120, 80],
+      [200, 80],
     ]);
-    expect(air.slots.map((s) => [s.x, s.y])).toEqual([[200, 80]]);
+    for (let i = 1; i < front.length; i++) {
+      const dist = Math.hypot(front[i].x - front[i - 1].x, front[i].y - front[i - 1].y);
+      expect(dist).toBeGreaterThanOrEqual(32);
+    }
   });
 
-  it("puts ships in the same slots as land, in a sea zone", () => {
+  it("puts a tank on any free slot, including one an aircraft would have used", () => {
+    const slots = [
+      { x: 10, y: 20 },
+      { x: 40, y: 20 },
+    ];
+    const { tokens, stage } = layoutRegionVisuals(landRegion(), [unit("mech_infantry", 1), unit("tank", 1)], params(slots));
+    expect(stage).toBe("open");
+    expect([...tokens].reverse().map((t) => t.entry.unit_type_id)).toEqual(["tank", "mech_infantry"]);
+  });
+
+  it("puts ships and aircraft in the same slots, carrier first", () => {
     const slots = [
       { x: 10, y: 20 },
       { x: 30, y: 20 },
+      { x: 50, y: 20 },
     ];
-    const { clusters } = layoutRegionVisuals(landRegion({ type: "sea" }), [unit("destroyer", 2), unit("transport", 1)], params(slots));
-    expect(clusters).toHaveLength(1);
-    expect(clusters[0].domain).toBe("sea");
-    expect(clusters[0].collapsed).toBe(false);
-    expect(clusters[0].slots).toHaveLength(2);
+    const { tokens, stage } = layoutRegionVisuals(
+      landRegion({ type: "sea" }),
+      [unit("transport", 1), unit("fighter", 1), unit("destroyer", 2)],
+      params(slots),
+    );
+    expect(stage).toBe("open");
+    expect([...tokens].reverse().map((t) => canonicalUnit(t.entry.unit_type_id))).toEqual(["destroyer", "fighter", "transport"]);
   });
 
-  it("a collapsed domain is one bubble with the lead unit and a total, and no counters", () => {
-    const region = landRegion();
-    const { clusters } = layoutRegionVisuals(region, [unit("infantry", 6), unit("artillery", 4), unit("tank", 2)], params([{ x: 50, y: 70 }]));
-    expect(clusters).toHaveLength(1);
-    const [c] = clusters;
-    expect(c.collapsed).toBe(true);
-    expect(c.slots).toEqual([]);
-    expect(c.bubbleRadius).toBeGreaterThan(0);
-    expect(c.group.total).toBe(12);
-    expect(c.group.lead.unit_type_id).toBe("tank");
+  it("sits every stack on its slot when there are enough slots, however close those slots are", () => {
+    const slots = [
+      { x: 10, y: 20 },
+      { x: 11, y: 20 },
+    ];
+    const { tokens, stage, capped, plus } = layoutRegionVisuals(
+      landRegion(),
+      [unit("infantry", 4), unit("tank", 1)],
+      { view: { x: 0, y: 0, k: 1 }, tokenPx: 20, badgeSide: 16, slots },
+    );
+    expect(stage).toBe("open");
+    expect(capped).toBe(false);
+    expect(plus).toBeNull();
+    const front = [...tokens].reverse();
+    expect(front.map((t) => t.entry.unit_type_id)).toEqual(["tank", "infantry"]);
+    expect(front.map((t) => [t.x, t.y])).toEqual([
+      [10, 20],
+      [11, 20],
+    ]);
   });
 
-  it("an expanded domain has one counter per stack, even with more than two types", () => {
-    const stacks = [unit("infantry", 6), unit("artillery", 2), unit("tank", 2)];
-    const { clusters } = layoutRegionVisuals(landRegion(), stacks, params());
-    expect(clusters[0].collapsed).toBe(false);
-    expect(clusters[0].slots).toHaveLength(3);
-    expect(clusters[0].bubbleRadius).toBe(0);
+  it("folds the overflow into a circular arc around the primary, not a straight line", () => {
+    const diameter = 20;
+    const slot = { x: 40, y: 18 };
+    const visual = layoutRegionVisuals(landRegion(), [unit("infantry"), unit("artillery"), unit("tank")], {
+      view: { x: 0, y: 0, k: 1 },
+      tokenPx: diameter,
+      badgeSide: 16,
+      slots: [slot],
+    });
+    expect(visual.stage).toBe("arc");
+    expect(visual.capped).toBe(false);
+    expect(visual.tokens).toHaveLength(3);
+    const lead = leadOf(visual.tokens);
+    expect(lead.entry.unit_type_id).toBe("tank");
+    expect([lead.x, lead.y]).toEqual([slot.x, slot.y]);
+    expect(lead.z).toBeGreaterThan(visual.tokens[0].z);
+    const sats = visual.tokens.slice(0, -1);
+    const angles = arcAngles(sats.length);
+    sats.forEach((sat, i) => {
+      const off = arcOffset(i, sats.length, diameter);
+      expect(sat.x).toBeCloseTo(slot.x + off.x, 6);
+      expect(sat.y).toBeCloseTo(slot.y + off.y, 6);
+      expect(angles[i]).toBeLessThan(0);
+    });
+    const ab = { x: sats[1].x - sats[0].x, y: sats[1].y - sats[0].y };
+    const ap = { x: lead.x - sats[0].x, y: lead.y - sats[0].y };
+    expect(Math.abs(ab.x * ap.y - ab.y * ap.x)).toBeGreaterThan(1);
   });
 
-  it("collapses only when the slots cannot hold the stacks, never because of zoom", () => {
-    const stacks = [unit("infantry", 6), unit("tank", 2)];
-    expect(layoutRegionVisuals(landRegion(), stacks, params([{ x: 50, y: 70 }])).clusters[0].collapsed).toBe(true);
-    expect(layoutRegionVisuals(landRegion(), stacks, { ...params(), view: { x: 0, y: 0, k: 0.4 } }).clusters[0].collapsed).toBe(false);
-    expect(layoutRegionVisuals(landRegion(), stacks, params()).clusters[0].collapsed).toBe(false);
-  });
-
-  it("a hand-placed air anchor is the air bubble's exact seat", () => {
-    // Three air types and one land, one slot: air overflows, land keeps the slot, the bubble sits on the air anchor.
-    const stacks = [unit("infantry", 3), unit("fighter", 2), unit("tactical_bomber", 1), unit("strategic_bomber", 1)];
-    const placed = layoutRegionVisuals(
-      landRegion({ airAnchor: { x: 80, y: 20 }, airAnchorSet: true }),
-      stacks,
-      params([{ x: 10, y: 70 }]),
-    ).clusters;
-    const air = placed.find((c) => c.domain === "air")!;
-    expect(air.collapsed).toBe(true);
-    expect([air.x, air.y]).toEqual([320, 80]);
+  it("caps a slot after three satellites and parks the [+] on the primary's upper right", () => {
+    const stacks = ["tank", "mech_infantry", "artillery", "infantry", "fighter", "aa"].map((id) => unit(id));
+    const slot = { x: 14, y: 14 };
+    const visual = layoutRegionVisuals(landRegion({ bounds: { x: 0, y: 0, w: 28, h: 28 } }), stacks, {
+      view: { x: 0, y: 0, k: 1 },
+      tokenPx: 20,
+      badgeSide: 16,
+      slots: [slot],
+    });
+    expect(visual.capped).toBe(true);
+    expect(visual.stage).toBe("capped");
+    expect(visual.tokens).toHaveLength(1 + ARC_SATELLITE_MAX);
+    const lead = leadOf(visual.tokens);
+    expect(lead.entry.unit_type_id).toBe("tank");
+    expect([lead.x, lead.y]).toEqual([slot.x, slot.y]);
+    expect(visual.plus).not.toBeNull();
+    expect(visual.plus!.x).toBeGreaterThan(lead.x);
+    expect(visual.plus!.y).toBeLessThan(lead.y);
   });
 
   it("keeps a default badge off the unit tokens", () => {
     const region = landRegion({ factorySize: "major", hasAirbase: true, hasHarbour: true, hasFactory: true });
-    const { badge, clusters } = layoutRegionVisuals(region, [unit("infantry", 6), unit("artillery", 4), unit("tank", 2)], params());
+    const { badge, tokens } = layoutRegionVisuals(region, [unit("infantry", 6), unit("artillery", 4), unit("tank", 2)], params());
     expect(badge).not.toBeNull();
-    for (const c of clusters) {
-      for (const s of c.slots) {
-        const overlap = Math.abs(badge!.x - s.x) < badge!.hw + 16 && Math.abs(badge!.y - s.y) < badge!.hh + 16;
-        expect(overlap).toBe(false);
-      }
+    for (const s of tokens) {
+      const overlap = Math.abs(badge!.x - s.x) < badge!.hw + 16 && Math.abs(badge!.y - s.y) < badge!.hh + 16;
+      expect(overlap).toBe(false);
     }
   });
 
@@ -780,8 +890,8 @@ describe("layoutRegionVisuals", () => {
   it("no facility means no badge, and facilities are not listed among the stacks", () => {
     expect(layoutRegionVisuals(landRegion(), [unit("infantry")], params()).badge).toBeNull();
     const withFacilities = landRegion({ factorySize: "major", hasFactory: true, hasAirbase: true });
-    const { clusters } = layoutRegionVisuals(withFacilities, [], params());
-    expect(clusters).toEqual([]);
+    const { tokens } = layoutRegionVisuals(withFacilities, [], params());
+    expect(tokens).toEqual([]);
   });
 
   it("puts the combat marker below whatever sits under the unit anchor", () => {
@@ -790,10 +900,46 @@ describe("layoutRegionVisuals", () => {
     const near = (x: number, hw: number) => Math.abs(x - 200) < hw + 24;
     const bottom = Math.max(
       200,
-      ...v.clusters.flatMap((c) => c.slots.filter((s) => near(s.x, 16)).map((s) => s.y + 16)),
+      ...v.tokens.filter((s) => near(s.x, 16)).map((s) => s.y + 16),
       v.badge && near(v.badge.x, v.badge.hw) ? v.badge.y + v.badge.hh : 200,
     );
     expect(v.markerY).toBeGreaterThanOrEqual(bottom);
+  });
+});
+
+describe("hit testing a curved arc", () => {
+  it("the front token wins a point on the overlap, and a tucked token wins its own centre", () => {
+    const visual = layoutRegionVisuals(
+      bareShape({ bounds: { x: 0, y: 0, w: 80, h: 36 }, anchor: { x: 40, y: 18 } }),
+      [unit("infantry"), unit("artillery"), unit("tank")],
+      { view: { x: 0, y: 0, k: 1 }, tokenPx: 20, badgeSide: 16, slots: [{ x: 40, y: 18 }], tokenWorld: 20 },
+    );
+    const rear = visual.tokens[visual.tokens.length - 2];
+    const front = visual.tokens[visual.tokens.length - 1];
+    const mid = { x: (rear.x + front.x) / 2, y: (rear.y + front.y) / 2 };
+    expect(visual.tokens[frontMostIndex(visual.tokens, mid, 12)].entry.unit_type_id).toBe("tank");
+    expect(visual.tokens[frontMostIndex(visual.tokens, rear, 10)].entry.unit_type_id).toBe(rear.entry.unit_type_id);
+    expect(frontMostIndex(visual.tokens, { x: -100, y: -100 }, 10)).toBe(-1);
+  });
+});
+
+describe("the fourteen silhouettes", () => {
+  it("draws a distinct white vector for every roster piece", () => {
+    expect(ROSTER).toHaveLength(14);
+    expect(TOKEN_INK).toBe("#1A1815");
+    const prints = ROSTER.map((id) => JSON.stringify(unitSilhouette(id)));
+    expect(new Set(prints).size).toBe(14);
+    expect(JSON.stringify(unitSilhouette("mech_infantry"))).not.toBe(JSON.stringify(unitSilhouette("infantry")));
+    expect(JSON.stringify(unitSilhouette("tactical_bomber"))).not.toBe(JSON.stringify(unitSilhouette("strategic_bomber")));
+    expect(JSON.stringify(unitSilhouette("tank"))).toBe(JSON.stringify(unitSilhouette("armor")));
+    expect(JSON.stringify(unitSilhouette("submarine"))).toBe(JSON.stringify(unitSilhouette("sub")));
+    expect(navalLetter("battleship")).toBe("B");
+    expect(navalLetter("carrier")).toBe("A");
+    expect(navalLetter("cruiser")).toBe("C");
+    expect(navalLetter("destroyer")).toBe("D");
+    expect(navalLetter("sub")).toBe("S");
+    expect(navalLetter("submarine")).toBe("S");
+    expect(navalLetter("transport")).toBe("T");
   });
 });
 
@@ -817,21 +963,6 @@ describe("clearOf", () => {
     const moved = clearOf(fixed, { x: 0, y: 0, hw: 10, hh: 10 }, { x: 0, y: 1 }, 0);
     expect(moved.x).toBeCloseTo(0, 9);
     expect(moved.y).toBeCloseTo(20, 9);
-  });
-});
-
-describe("drawer rows", () => {
-  it("lists every unit type and count in the domain, biggest first", () => {
-    const [g] = groupByDomain([unit("infantry", 7), unit("artillery", 2), unit("tank", 7), unit("mech_infantry", 1)]);
-    const rows = drawerRows(g);
-    expect(rows.map((r) => [r.label, r.count])).toEqual([
-      ["Infantry", 7],
-      ["Tank", 7],
-      ["Artillery", 2],
-      ["Mech infantry", 1],
-    ]);
-    expect(rows.reduce((n, r) => n + r.count, 0)).toBe(g.total);
-    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
   });
 });
 
@@ -947,11 +1078,11 @@ describe("neutral hatch", () => {
 });
 
 describe("sample garrison", () => {
-  it("puts six distinct land types, or six ship types, on a territory", () => {
-    expect(SAMPLE_LAND_GARRISON).toHaveLength(6);
-    expect(new Set(SAMPLE_LAND_GARRISON.map((u) => u.unit_type_id)).size).toBe(6);
-    expect(SAMPLE_SEA_GARRISON).toHaveLength(6);
-    expect(new Set(SAMPLE_SEA_GARRISON.map((u) => u.unit_type_id)).size).toBe(6);
+  it("puts the land roster and the sea roster on a territory", () => {
+    expect(SAMPLE_LAND_GARRISON).toHaveLength(8);
+    expect(new Set(SAMPLE_LAND_GARRISON.map((u) => u.unit_type_id)).size).toBe(8);
+    expect(SAMPLE_SEA_GARRISON).toHaveLength(8);
+    expect(new Set(SAMPLE_SEA_GARRISON.map((u) => u.unit_type_id)).size).toBe(8);
     const land = sampleGarrison(false, "ussr");
     expect(land.every((u) => u.faction_id === "ussr")).toBe(true);
     expect(land.map((u) => u.unit_type_id)).toEqual(SAMPLE_LAND_GARRISON.map((u) => u.unit_type_id));
@@ -961,16 +1092,22 @@ describe("sample garrison", () => {
   it("startingStacks groups the scenario's starting_units by region", () => {
     const map = editorFromMapJson(mapOf(regionJson("R", {})));
     const filled = { ...map, meta: { ...map.meta, starting_units: sampleGarrison(false, "ger").map((u) => ({ ...u, region_id: "R" })) } };
-    expect(startingStacks(filled).R).toHaveLength(6);
+    expect(startingStacks(filled).R).toHaveLength(8);
   });
 });
 
 describe("world-space token scale", () => {
-  it("is the token's world diameter times the zoom, clamped at the extremes", () => {
+  it("is half the old diameter, and the count pill stays a small share of that", () => {
+    expect(PILL_OFFSET).toBeCloseTo(0.36);
+    expect(pillRadius(16)).toBeCloseTo(0.27 * 16);
+    expect(pillRadius(1)).toBe(3.25);
+    expect(TOKEN_WORLD).toBe(10);
     expect(worldTokenPx(1, TOKEN_WORLD)).toBe(TOKEN_WORLD);
-    expect(worldTokenPx(2, TOKEN_WORLD)).toBe(40);
+    expect(worldTokenPx(2, TOKEN_WORLD)).toBe(20);
     expect(worldTokenPx(0.1, TOKEN_WORLD)).toBe(TOKEN_MIN_PX);
     expect(worldTokenPx(10, TOKEN_WORLD)).toBe(TOKEN_MAX_PX);
+    expect(TOKEN_MIN_PX).toBe(4);
+    expect(TOKEN_MAX_PX).toBe(32);
   });
 });
 

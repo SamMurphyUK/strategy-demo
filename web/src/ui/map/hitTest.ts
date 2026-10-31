@@ -9,8 +9,8 @@
 // region the point is in (when it is available) before testing only those.
 import type { RegionShape, Vec2 } from "./geometry";
 import type { PlacedCounter, RegionLayout } from "./mapRenderer";
+import { frontMostIndex } from "./unitStacks";
 import type { MultiPolygon } from "./regionClip";
-import type { DomainCluster } from "./unitStacks";
 import type { MasterLand } from "./svgLandLoader";
 
 let probe: CanvasRenderingContext2D | null = null;
@@ -111,42 +111,33 @@ export function pickRegion(
   return "";
 }
 
-export interface PickedBubble {
+export interface PickedCounter {
   layout: RegionLayout;
-  cluster: DomainCluster;
+  counter: PlacedCounter;
 }
 
-/** The collapsed domain bubble under a screen point (within `slack` px of its edge), nearest first. */
-export function pickBubble(layouts: RegionLayout[], p: Vec2, slack = 4): PickedBubble | null {
-  let best: PickedBubble | null = null;
-  let bestGap = Infinity;
-  for (const layout of layouts) {
-    for (const cluster of layout.clusters) {
-      if (!cluster.collapsed) {
-        continue;
-      }
-      const gap = Math.hypot(cluster.x - p.x, cluster.y - p.y) - cluster.bubbleRadius;
-      if (gap <= slack && gap < bestGap) {
-        bestGap = gap;
-        best = { layout, cluster };
-      }
+/** The [+] on a capped fan, front-most copy first. */
+export function pickPlus(layouts: RegionLayout[], p: Vec2, radius: number): RegionLayout | null {
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const layout = layouts[i];
+    if (layout.plus && Math.hypot(layout.plus.x - p.x, layout.plus.y - p.y) <= radius) {
+      return layout;
     }
   }
-  return best;
+  return null;
 }
 
-/** The unit counter under a screen point, nearest first. */
-export function pickCounter(layouts: RegionLayout[], p: Vec2, radius: number): PlacedCounter | null {
-  let best: PlacedCounter | null = null;
-  let bestDist = radius;
-  for (const layout of layouts) {
-    for (const counter of layout.counters) {
-      const d = Math.hypot(counter.x - p.x, counter.y - p.y);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = counter;
-      }
+/**
+ * The unit counter under a screen point. Counters are stored back to front, so the walk is reversed and the
+ * front-most token wins, even when a tucked token's centre is closer.
+ */
+export function pickCounter(layouts: RegionLayout[], p: Vec2, radius: number): PickedCounter | null {
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const layout = layouts[i];
+    const at = frontMostIndex(layout.counters, p, radius);
+    if (at >= 0) {
+      return { layout, counter: layout.counters[at] };
     }
   }
-  return best;
+  return null;
 }

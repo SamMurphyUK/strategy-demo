@@ -47,13 +47,16 @@ export function isActiveFaction(factionId: string, activeFactionId: string): boo
 // Pill and token sizes, relative to the token's diameter
 // ---------------------------------------------------------------
 
-/** Radius of the count pill, never smaller than a legible dot. */
+/** The pill's centre, from the token's centre, as a share of the diameter. Bottom-right, clear of the silhouette. */
+export const PILL_OFFSET = 0.36;
+
+/** Radius of the count pill. The floor is half the old 6.5, and the rest stays in proportion to the token. */
 export function pillRadius(tokenPx: number): number {
-  return Math.max(6.5, tokenPx * 0.27);
+  return Math.max(3.25, tokenPx * 0.27);
 }
 
 export function pillFontPx(tokenPx: number): number {
-  return Math.max(8, pillRadius(tokenPx) * 1.15);
+  return Math.max(4, pillRadius(tokenPx) * 1.15);
 }
 
 // ---------------------------------------------------------------
@@ -66,6 +69,7 @@ const NAVAL_LETTERS: Record<string, string> = {
   carrier: "A",
   destroyer: "D",
   submarine: "S",
+  sub: "S",
   transport: "T",
 };
 
@@ -116,45 +120,107 @@ const HULLS: Record<string, Hull> = {
   ],
 };
 
-/** The hull for a sea unit. An unknown ship gets a destroyer's. */
+/** The hull for a sea unit. `sub` is a submarine. An unknown ship gets a destroyer's. */
 export function hullFor(unitTypeId: string): Hull {
-  return HULLS[unitTypeId] ?? HULLS.destroyer;
+  const id = unitTypeId === "sub" ? "submarine" : unitTypeId;
+  return HULLS[id] ?? HULLS.destroyer;
 }
 
 /** Where the cargo dot of a loaded transport sits, from the token's centre, in token diameters. */
 export const CARGO_DOT = { x: -0.3, y: -0.3, r: 0.08 } as const;
 
 // ---------------------------------------------------------------
-// Air units, and the art for land units
+// White vector silhouettes, one per roster piece
 // ---------------------------------------------------------------
 
-/** How much wider (sx) and longer (sy) than the base plane each aircraft is drawn. Fighters are slim, bombers broad. */
-export function planeScale(unitTypeId: string): { sx: number; sy: number } {
+/** Roster id used for the drawing. `tank` is armor, `submarine` is sub, `aaa` is aa. */
+export function silhouetteId(unitTypeId: string): string {
   switch (unitTypeId) {
-    case "fighter":
-      return { sx: 0.7, sy: 1 };
-    case "strategic_bomber":
-      return { sx: 1.3, sy: 1.12 };
+    case "tank":
+      return "armor";
+    case "aaa":
+      return "aa";
+    case "submarine":
+      return "sub";
+    case "bomber":
+      return "tactical_bomber";
     default:
-      return { sx: 1, sy: 0.96 };
+      return unitTypeId;
   }
 }
 
-/** The art file (no extension) whose silhouette stands for a land unit, or null when it is drawn another way. */
-export function landArtFor(unitTypeId: string, allies: boolean): string | null {
-  switch (unitTypeId) {
-    case "infantry":
-    case "mech_infantry":
-      return allies ? "allies_inf_ii" : "axis_inf_ii";
-    case "artillery":
-      return "axis_art";
-    case "tank":
-    case "armor":
-      return "axis_tank";
-    case "aa":
-    case "aaa":
-      return "axis_aa";
-    default:
-      return null;
+/**
+ * White silhouette polygons, in units of the token diameter, centred on the token. y < 0 is up.
+ * Land and air are figures; sea is the hull that sits on the waterline.
+ */
+const SILHOUETTES: Record<string, Hull> = {
+  // A standing rifleman: head, torso, legs, rifle.
+  infantry: [
+    poly([-0.07, -0.34], [-0.02, -0.4], [0.05, -0.34], [0.05, -0.26], [-0.07, -0.26]),
+    poly([-0.09, -0.26], [0.07, -0.26], [0.08, -0.02], [-0.08, -0.02]),
+    poly([-0.08, -0.02], [-0.14, 0.22], [-0.04, 0.22], [0, 0.06], [0.05, 0.22], [0.15, 0.22], [0.08, -0.02]),
+    poly([0.06, -0.16], [0.32, -0.22], [0.34, -0.16], [0.08, -0.1]),
+  ],
+  // A halftrack: cab, bed, track, and a gun over the bed.
+  mech_infantry: [
+    poly([-0.34, -0.16], [-0.06, -0.16], [-0.02, -0.02], [-0.34, -0.02]),
+    poly([-0.04, -0.1], [0.3, -0.1], [0.34, 0.02], [-0.06, 0.02]),
+    poly([-0.38, 0.02], [0.38, 0.02], [0.36, 0.14], [-0.36, 0.14]),
+    poly([-0.28, 0.05], [-0.16, 0.05], [-0.16, 0.11], [-0.28, 0.11]),
+    poly([0.1, 0.05], [0.24, 0.05], [0.24, 0.11], [0.1, 0.11]),
+    poly([0.02, -0.1], [0.36, -0.28], [0.4, -0.22], [0.08, -0.04]),
+  ],
+  // A gun: two wheels, a trail, and a long barrel.
+  artillery: [
+    poly([-0.16, -0.02], [-0.16, 0.14], [-0.02, 0.14], [-0.02, -0.02]),
+    poly([0.06, -0.02], [0.06, 0.14], [0.2, 0.14], [0.2, -0.02]),
+    poly([-0.06, 0.04], [0.22, 0.16], [0.26, 0.1], [0, -0.02]),
+    poly([-0.04, -0.06], [0.4, -0.2], [0.42, -0.14], [-0.02, 0]),
+  ],
+  // A tank: hull, turret, long barrel.
+  armor: [
+    poly([-0.4, -0.02], [0.36, -0.02], [0.4, 0.08], [0.28, 0.16], [-0.32, 0.16], [-0.4, 0.06]),
+    poly([-0.12, -0.16], [0.14, -0.16], [0.16, -0.02], [-0.14, -0.02]),
+    poly([0.1, -0.12], [0.44, -0.16], [0.44, -0.1], [0.12, -0.06]),
+  ],
+  // An anti-aircraft carriage with two barrels in a V.
+  aa: [
+    poly([-0.22, 0.04], [0.22, 0.04], [0.18, 0.16], [-0.18, 0.16]),
+    poly([-0.06, 0.04], [0.06, 0.04], [0.04, -0.06], [-0.04, -0.06]),
+    poly([-0.04, -0.04], [-0.22, -0.34], [-0.14, -0.36], [0.02, -0.06]),
+    poly([0.04, -0.04], [0.22, -0.34], [0.14, -0.36], [-0.02, -0.06]),
+  ],
+  // A slim single-seat fighter: pointed nose, swept wings, one tail.
+  fighter: [
+    poly([0, -0.4], [0.05, -0.08], [0.04, 0.28], [-0.04, 0.28], [-0.05, -0.08]),
+    poly([-0.4, -0.02], [0, -0.14], [0.4, -0.02], [0.28, 0.06], [0, 0], [-0.28, 0.06]),
+    poly([-0.1, 0.2], [0.1, 0.2], [0.08, 0.34], [-0.08, 0.34]),
+  ],
+  // A dive bomber: cranked wings, a bomb underneath, a single tail.
+  tactical_bomber: [
+    poly([0, -0.34], [0.07, -0.06], [0.06, 0.26], [-0.06, 0.26], [-0.07, -0.06]),
+    poly([-0.42, 0.02], [-0.16, -0.08], [0, -0.02], [0.16, -0.08], [0.42, 0.02], [0.16, 0.08], [0, 0.02], [-0.16, 0.08]),
+    poly([-0.05, 0.08], [0.05, 0.08], [0.04, 0.18], [-0.04, 0.18]),
+    poly([-0.12, 0.16], [0.12, 0.16], [0.08, 0.32], [-0.08, 0.32]),
+  ],
+  // A heavy bomber: long straight wings, four engines, a twin tail.
+  strategic_bomber: [
+    poly([0, -0.28], [0.08, -0.04], [0.07, 0.22], [-0.07, 0.22], [-0.08, -0.04]),
+    poly([-0.46, -0.02], [0.46, -0.02], [0.46, 0.06], [-0.46, 0.06]),
+    poly([-0.34, -0.08], [-0.26, -0.08], [-0.26, 0.1], [-0.34, 0.1]),
+    poly([-0.16, -0.08], [-0.08, -0.08], [-0.08, 0.1], [-0.16, 0.1]),
+    poly([0.08, -0.08], [0.16, -0.08], [0.16, 0.1], [0.08, 0.1]),
+    poly([0.26, -0.08], [0.34, -0.08], [0.34, 0.1], [0.26, 0.1]),
+    poly([-0.16, 0.16], [-0.08, 0.16], [-0.1, 0.34], [-0.18, 0.34]),
+    poly([0.08, 0.16], [0.16, 0.16], [0.18, 0.34], [0.1, 0.34]),
+  ],
+};
+
+/** The white silhouette for a unit type. Sea units are their hulls. An unknown type is a small diamond. */
+export function unitSilhouette(unitTypeId: string): Hull {
+  const id = silhouetteId(unitTypeId);
+  if (id === "sub" || id === "destroyer" || id === "cruiser" || id === "battleship" || id === "carrier" || id === "transport") {
+    return hullFor(id);
   }
+  return SILHOUETTES[id] ?? [poly([-0.12, 0], [0, -0.16], [0.12, 0], [0, 0.16])];
 }

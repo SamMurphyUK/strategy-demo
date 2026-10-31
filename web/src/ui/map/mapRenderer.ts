@@ -9,8 +9,7 @@
 //
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { factionPalette } from "../theme/factionPalette";
-import { drawCountPill, drawMapToken, drawTokenFace } from "./mapToken";
-import { isActiveFaction, tokenDisc } from "./tokenStyle";
+import { drawMapToken } from "./mapToken";
 import {
   BADGE_FILL,
   BADGE_INACTIVE_STROKE,
@@ -24,7 +23,6 @@ import {
   silhouetteBox,
 } from "./facilityBadge";
 import {
-  airAnchorOf,
   type Facilities,
   facilitiesOf,
   facilityAnchorOf,
@@ -34,10 +32,9 @@ import {
   SELECTED_OUTLINE_WIDTH,
   type StackEntry,
   type StackSlot,
-  stackKey,
   type Vec2,
 } from "./geometry";
-import { type DomainCluster, layoutRegionVisuals, type PlacedBadge, type UnitDomain } from "./unitStacks";
+import { layoutRegionVisuals, type LayoutStage, type PlacedBadge, type UnitDomain } from "./unitStacks";
 import { TOKEN_WORLD } from "./unitSlots";
 import { type Baked, oceanBackdrop } from "./mapBake";
 import {
@@ -95,16 +92,19 @@ export interface PlacedCounter {
 export interface RegionLayout {
   region: RegionShape;
   anchor: Vec2;
-  /** The expanded stacks of every domain that is not collapsed. */
+  /** Back to front. The last counter is the lead, and it wins a click. */
   counters: PlacedCounter[];
-  /** One cluster per domain with units: expanded counters or a collapsed bubble. */
-  clusters: DomainCluster[];
+  /** open: one slot each. arc: satellites around a primary. capped: the arcs stopped and grew a [+]. */
+  stage: LayoutStage;
+  capped: boolean;
+  /** The [+] on the lead token, when the fan is capped. */
+  plus: Vec2 | null;
   /** The facility badge, or null when the region has no facility. */
   badge: PlacedBadge | null;
   /** Screen y of the IPC shield's centre, and of the combat marker's. */
   shieldY: number;
   markerY: number;
-  /** Half the height of the tallest cluster, in px. */
+  /** Half the height of a token, in px, or 0 when the region has none. */
   halfHeight: number;
   /** The world copy this layout is for: 0 for the primary map, otherwise a multiple of the world width. */
   copyDx: number;
@@ -143,18 +143,24 @@ export function layoutRegions(
       slots: entries.length > 0 ? (options.slotsFor?.(region) ?? [region.anchor]) : [],
       categories: options.categories,
     });
-    const counters = visuals.clusters.flatMap((cluster) =>
-      cluster.slots.map((s) => ({ regionId: region.id, slot: s.slot, domain: cluster.domain, x: s.x, y: s.y })),
-    );
+    const counters = visuals.tokens.map((t) => ({
+      regionId: region.id,
+      slot: { key: t.key, entry: t.entry, offset: { x: t.x - anchor.x, y: t.y - anchor.y } },
+      domain: t.domain,
+      x: t.x,
+      y: t.y,
+    }));
     return {
       region,
       anchor,
       counters,
-      clusters: visuals.clusters,
+      stage: visuals.stage,
+      capped: visuals.capped,
+      plus: visuals.plus,
       badge: visuals.badge,
       shieldY: visuals.shieldY,
       markerY: visuals.markerY,
-      halfHeight: visuals.clusters.reduce((m, c) => Math.max(m, c.hh), 0),
+      halfHeight: visuals.tokens.length > 0 ? tokenPx / 2 : 0,
       copyDx: options.copyDx ?? 0,
     };
   });
@@ -277,8 +283,8 @@ export interface GameOverlay {
   isLoaded?(entry: StackEntry): boolean;
   /** Unit type id to land, air or sea, from the scenario's unit data. */
   categories?: Record<string, string>;
-  /** The collapsed bubble whose drawer is open, if any. */
-  openDrawer?: { regionId: string; domain: UnitDomain; copyDx: number } | null;
+  /** The token under the pointer. Drawn last so a tucked card comes to the front. */
+  hoverStack?: { regionId: string; key: string; copyDx: number } | null;
 }
 
 /** The Tri-Wedge: airbase ▼, factory ▲ and harbour ▼ as one trapezoid. See facilityBadge.ts for the geometry. */
@@ -354,77 +360,25 @@ export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBa
   }
 }
 
-/**
- * A domain collapsed into one bubble: the lead unit by threat priority on a token-sized disc, a second card
- * behind it and a ring around both, with the domain's total on a pill at the bottom right. Clicking it opens
- * the drawer (see UnitDrawer.tsx).
- */
-function drawCollapsedBubble(
-  ctx: CanvasRenderingContext2D,
-  cluster: DomainCluster,
-  copyDx: number,
-  game: GameOverlay,
-  dpr: number,
-): void {
-  const { x, y, bubbleRadius: r, group } = cluster;
-  const s = game.unitScale;
-  const lead = group.lead;
-  const d = r * 2;
-  const paint = {
-    dpr,
-    activeFactionId: game.activeFactionId,
-    categories: game.categories,
-    loaded: game.isLoaded?.(lead) ?? false,
-  };
-
-  // The card behind, offset, so the bubble reads as a pile.
-  ctx.beginPath();
-  ctx.arc(x + 3.5 * s, y + 3.5 * s, r, 0, Math.PI * 2);
-  ctx.fillStyle = tokenDisc(lead.faction_id);
-  ctx.fill();
-  ctx.lineWidth = Math.max(1, 1.5 * s);
-  ctx.strokeStyle = INK;
-  ctx.stroke();
-
-  ctx.save();
-  ctx.shadowColor = "rgba(26, 26, 24, 0.55)";
-  ctx.shadowBlur = 3 * dpr;
-  ctx.shadowOffsetY = 1 * dpr;
+/** The [+] on a capped fan: a paper disc and an ink plus, at the lead token's upper right. */
+function drawPlusBadge(ctx: CanvasRenderingContext2D, x: number, y: number, tokenPx: number): void {
+  const r = Math.max(5, tokenPx * 0.16);
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = tokenDisc(lead.faction_id);
+  ctx.fillStyle = PAPER;
   ctx.fill();
-  ctx.restore();
-  drawTokenFace(ctx, lead, x, y, d, paint);
-
-  // The double ring: a thin paper ring just outside the front card, and the faction's own outside that.
-  ctx.beginPath();
-  ctx.arc(x, y, r + 2 * s, 0, Math.PI * 2);
-  ctx.lineWidth = Math.max(1, 1.5 * s);
-  ctx.strokeStyle = PAPER;
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#1A1815";
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(x, y, r + 3.8 * s, 0, Math.PI * 2);
-  ctx.lineWidth = Math.max(0.8, 1 * s);
-  ctx.strokeStyle = INK;
+  ctx.moveTo(x - r * 0.42, y);
+  ctx.lineTo(x + r * 0.42, y);
+  ctx.moveTo(x, y - r * 0.42);
+  ctx.lineTo(x, y + r * 0.42);
+  ctx.lineWidth = Math.max(1.25, r * 0.28);
+  ctx.lineCap = "butt";
+  ctx.strokeStyle = "#1A1815";
   ctx.stroke();
-
-  const selected = game.selectedStack?.regionId === cluster.regionId && group.entries.some((e) => stackKey(e) === game.selectedStack?.key);
-  const unmoved = group.entries.some((e) => game.isUnmoved(cluster.regionId, e));
-  const open = game.openDrawer?.regionId === cluster.regionId && game.openDrawer.domain === cluster.domain && game.openDrawer.copyDx === copyDx;
-  if (selected || unmoved || open) {
-    ctx.beginPath();
-    ctx.arc(x, y, r + 6 * s, 0, Math.PI * 2);
-    ctx.lineWidth = selected || open ? 3 : 1.5;
-    ctx.strokeStyle = selected || open ? SELECTED_COLOR : "rgba(244, 241, 234, 0.9)";
-    ctx.setLineDash(selected || open ? [] : [4, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // The domain's total, on the same pill a token's count is on.
-  const active = group.entries.some((e) => isActiveFaction(e.faction_id, game.activeFactionId));
-  drawCountPill(ctx, group.total, x, y, d, active);
 }
 
 /** The IPC shield, 20 x 25 px at the base token size. */
@@ -462,18 +416,17 @@ function drawStar(ctx: CanvasRenderingContext2D, x: number, y: number, outer: nu
 }
 
 /**
- * One region's unit tokens and collapsed bubbles, with the rings that mark a selected or unmoved stack. The
- * game draws these for each region; the editor draws them too, so a garrison can be judged while editing.
+ * One region's unit tokens, back to front, with the rings that mark a selected or unmoved stack. A hovered
+ * token is drawn last so a card tucked under the fan comes to the front. A capped fan grows a [+] on the lead.
+ * The game draws these for each region; the editor draws them too, so a garrison can be judged while editing.
  */
 export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLayout, game: GameOverlay, dpr: number): void {
   const { region } = layout;
   const tokenPx = TOKEN_PX * game.unitScale;
-  for (const cluster of layout.clusters) {
-    if (cluster.collapsed) {
-      drawCollapsedBubble(ctx, cluster, layout.copyDx, game, dpr);
-    }
-  }
-  for (const counter of layout.counters) {
+  const hover = game.hoverStack;
+  const hot = (counter: PlacedCounter) =>
+    hover?.regionId === region.id && hover.key === counter.slot.key && hover.copyDx === layout.copyDx;
+  const drawOne = (counter: PlacedCounter) => {
     const { entry } = counter.slot;
     drawMapToken(ctx, entry, counter.x, counter.y, tokenPx, {
       dpr,
@@ -481,7 +434,6 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       categories: game.categories,
       loaded: game.isLoaded?.(entry) ?? false,
     });
-
     const selected = game.selectedStack?.regionId === region.id && game.selectedStack.key === counter.slot.key;
     const unmoved = game.isUnmoved(region.id, entry);
     if (selected || unmoved) {
@@ -493,6 +445,19 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  };
+  for (const counter of layout.counters) {
+    if (!hot(counter)) {
+      drawOne(counter);
+    }
+  }
+  for (const counter of layout.counters) {
+    if (hot(counter)) {
+      drawOne(counter);
+    }
+  }
+  if (layout.plus) {
+    drawPlusBadge(ctx, layout.plus.x, layout.plus.y, tokenPx);
   }
 }
 
@@ -500,7 +465,7 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
 export function drawEditorUnits(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
   setScreenTransform(ctx, scene.dpr);
   for (const layout of game.layouts) {
-    if (layout.clusters.length > 0) {
+    if (layout.counters.length > 0) {
       drawRegionUnits(ctx, layout, game, scene.dpr);
     }
   }
@@ -594,7 +559,7 @@ export interface EditorOverlay {
   /** The Prune Box marquee, in world coordinates, and the regions inside it that would be pruned. */
   pruneBox?: { minX: number; minY: number; maxX: number; maxY: number } | null;
   pruneIds?: string[];
-  /** The selected region's unit slots in world units (hand-placed or generated), drawn as S1..S6 handles. */
+  /** The selected region's unit slots in world units (hand-placed or generated), drawn as S1..S8 handles. */
   slots?: Vec2[];
 }
 
@@ -609,42 +574,41 @@ const MIDPOINT_MIN_PX = 22;
 const KNIFE_PREVIEW_REACH = 4000;
 
 export const FACILITY_HANDLE_COLOR = "#a23b72";
-export const AIR_HANDLE_COLOR = "#1f78c8";
 
-/** Facility Anchor handle: an inverted trapezoid, the silhouette of the facility badge. */
+/**
+ * Facility anchor handle. A filled magenta trapezoid on a paper disc, labeled BASE, so it does not read as
+ * an amber unit diamond or a green S slot. Drawn in screen pixels.
+ */
 function drawFacilityHandle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
-  ctx.moveTo(x - 10, y - 6);
-  ctx.lineTo(x + 10, y - 6);
-  ctx.lineTo(x + 5, y + 6);
-  ctx.lineTo(x - 5, y + 6);
-  ctx.closePath();
-  // Outline only, so the badge preview underneath stays readable.
-  ctx.lineWidth = 2;
+  ctx.arc(x, y, 16, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(244, 241, 234, 0.96)";
+  ctx.fill();
+  ctx.lineWidth = 2.5;
   ctx.strokeStyle = FACILITY_HANDLE_COLOR;
   ctx.stroke();
-}
 
-/** Air Anchor handle: a circle with two small wings. */
-function drawAirHandle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
-  ctx.moveTo(x - 12, y + 2);
-  ctx.lineTo(x - 5, y - 3);
-  ctx.lineTo(x - 5, y + 3);
+  ctx.moveTo(x - 12, y - 8);
+  ctx.lineTo(x + 12, y - 8);
+  ctx.lineTo(x + 6, y + 6);
+  ctx.lineTo(x - 6, y + 6);
   ctx.closePath();
-  ctx.moveTo(x + 12, y + 2);
-  ctx.lineTo(x + 5, y - 3);
-  ctx.lineTo(x + 5, y + 3);
-  ctx.closePath();
-  ctx.fillStyle = AIR_HANDLE_COLOR;
+  ctx.fillStyle = FACILITY_HANDLE_COLOR;
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(31, 120, 200, 0.35)";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = AIR_HANDLE_COLOR;
-  ctx.stroke();
+
+  ctx.fillStyle = PAPER;
+  ctx.font = `700 11px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("F", x, y - 1);
+
+  ctx.font = `700 11px ${MONO}`;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = PAPER;
+  ctx.strokeText("BASE", x, y + 24);
+  ctx.fillStyle = FACILITY_HANDLE_COLOR;
+  ctx.fillText("BASE", x, y + 24);
 }
 
 export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, editor: EditorOverlay): void {
@@ -795,28 +759,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.strokeStyle = HANDLE_COLOR;
     ctx.stroke();
 
-    // The other two anchors, each its own colour and shape, tethered to the unit anchor.
-    const extras: { at: Vec2; kind: "facility" | "air" }[] = [
-      ...(selected.type === "land" ? [{ at: S(facilityAnchorOf(selected)), kind: "facility" as const }] : []),
-      { at: S(airAnchorOf(selected)), kind: "air" as const },
-    ];
-    for (const { at, kind } of extras) {
-      ctx.beginPath();
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(at.x, at.y);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = kind === "facility" ? FACILITY_HANDLE_COLOR : AIR_HANDLE_COLOR;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      if (kind === "facility") {
-        drawFacilityHandle(ctx, at.x, at.y);
-      } else {
-        drawAirHandle(ctx, at.x, at.y);
-      }
-    }
-
-    // The unit slots S1..S6: a dotted ring the size of a token, and a numbered handle in the middle.
+    // The unit slots S1..S8: a dotted ring the size of a token, and a numbered handle in the middle.
     (editor.slots ?? []).forEach((slot, i) => {
       const at = S(slot);
       ctx.beginPath();
@@ -839,6 +782,19 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       ctx.textBaseline = "middle";
       ctx.fillText(`S${i + 1}`, at.x, at.y + 0.5);
     });
+
+    // The facility anchor, on top of the slots. A solid tether back to the unit diamond. Land only.
+    if (selected.type === "land") {
+      const at = S(facilityAnchorOf(selected));
+      ctx.beginPath();
+      ctx.setLineDash([]);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(at.x, at.y);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = FACILITY_HANDLE_COLOR;
+      ctx.stroke();
+      drawFacilityHandle(ctx, at.x, at.y);
+    }
   }
 
   // The knife line, with a faint preview of where its ends run on to.

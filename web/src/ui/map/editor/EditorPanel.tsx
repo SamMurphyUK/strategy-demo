@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { factionIdFromDisplay } from "../../../content/game_scene_session_builder";
+import { unitSlotMax } from "../geometry";
 import { LINK_COLORS } from "../mapRenderer";
+import { unitLabel } from "../unitStacks";
 import {
   FACTORY_LEVELS,
   type FactoryLevel,
@@ -162,11 +164,49 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
               />
             </label>
 
+            {!selected.is_sea && (
+              <div className="field-wide unit-editor">
+                <span className="unit-editor-title">Facility anchor</span>
+                <p className="muted">
+                  {selected.facility_anchor
+                    ? "Placed. Drag the magenta BASE marker. One point for the factory, airbase, and harbour."
+                    : "Not placed. One magenta BASE marker covers the factory, airbase, and harbour."}
+                </p>
+                <button type="button" onClick={editor.placeFacilityAnchor} disabled={Boolean(selected.facility_anchor)}>
+                  Place Facility Anchor
+                </button>
+              </div>
+            )}
+
+            <div className="field-wide unit-editor">
+              <span className="unit-editor-title">Unit slots</span>
+              <p className="muted">
+                {selected.unit_slots?.length
+                  ? `${selected.unit_slots.length} of ${unitSlotMax(selected.is_sea)} placed. Drag S1–S${selected.unit_slots.length}.`
+                  : editor.slotCount
+                    ? `${editor.slotCount} generated. Add or remove keeps these.`
+                    : `Land holds ${unitSlotMax(false)}, sea holds ${unitSlotMax(true)}.`}
+              </p>
+              <button
+                type="button"
+                onClick={editor.addUnitSlot}
+                disabled={editor.slotCount >= unitSlotMax(selected.is_sea)}
+              >
+                + Add Unit Slot
+              </button>
+              <button type="button" onClick={editor.removeLastUnitSlot} disabled={editor.slotCount === 0}>
+                − Remove Last Slot
+              </button>
+              <button type="button" onClick={editor.seedUnitSlots}>
+                Auto-Seed Slots
+              </button>
+            </div>
+
             <button
               type="button"
               className="field-wide"
               disabled={!(selected.facility_anchor || selected.air_anchor || selected.unit_slots)}
-              title="Put the facility anchor, air anchor and unit slots S1 to S6 back to what the map generates, which follows the territory's shape and unit anchor."
+              title="Clear the facility anchor and the placed unit slots, so slots are generated again. A saved air anchor is cleared too."
               onClick={() => editor.patchSelected({ facility_anchor: undefined, air_anchor: undefined, unit_slots: undefined })}
             >
               Reset Anchors / Slots
@@ -195,7 +235,7 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
                   >
                     {withCurrent(UNIT_TYPE_OPTIONS, row.unit_type_id).map((u) => (
                       <option key={u} value={u}>
-                        {u}
+                        {unitLabel(u)}
                       </option>
                     ))}
                   </select>

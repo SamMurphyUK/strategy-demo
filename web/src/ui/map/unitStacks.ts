@@ -1,184 +1,214 @@
-// Domain-separated unit stacks, one token per distinct unit type. Pure: no canvas, no DOM.
+// Unit tokens for a territory: the placed slots first, then a curved arc, then a [+] cap.
 //
-// Every stack (one unit type of one faction) is drawn as its own token in its own world-space slot, whatever
-// the zoom (see unitSlots.ts for the slots). A territory's units are grouped by domain (land, sea, air) only so
-// that a domain can fall back to a bubble when the territory cannot fit them all: a bubble shows the lead unit
-// by threat priority inside a stacked-card double ring, and opens a drawer listing every unit type and count.
+// Every stack in a territory, land, air or sea, shares unit_slots. Nothing is reserved for air.
 //
-// Collapse is an overflow fallback and nothing else. It happens when the stacks present outnumber the slots
-// that fit without colliding, never because of how many types there are or how far the camera is zoomed out.
+//   open     N stacks and K slots with N <= K: stack i sits on slot i, exactly, however close the slots are
+//   arc      N > K: each slot keeps a primary token, and up to three more fold around it on a circular arc
+//   capped   a slot would need a fourth satellite: the extras stop, and a [+] on the lead opens the inspector
 //
-// Facilities (factory, airbase, harbour) are never part of a stack. They have their own badge.
+// The primary token of a slot is drawn last, so its silhouette and bottom-right count pill stay clear.
+// Facilities are never part of the stack.
 import {
-  airAnchorOf,
   facilitiesOf,
   facilityAnchorOf,
   type RegionShape,
   type StackEntry,
-  type StackSlot,
   stackKey,
   type Vec2,
 } from "./geometry";
 import { badgeExtent } from "./facilityBadge";
-import { nonCollidingSlots, TOKEN_WORLD } from "./unitSlots";
 import { type View, worldToScreen } from "./viewMath";
 
 export type UnitDomain = "land" | "air" | "sea";
 
-/** Land first, then sea, then air: the order stacks take slots and the drawer lists them. */
-export const DOMAIN_ORDER: readonly UnitDomain[] = ["land", "sea", "air"];
-
 const AIR_UNITS = new Set(["fighter", "tactical_bomber", "strategic_bomber", "bomber"]);
-const SEA_UNITS = new Set(["submarine", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+const SEA_UNITS = new Set(["sub", "submarine", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+
+/** Engine ids and the names the roster uses for the same piece. */
+const ALIASES: Record<string, string> = {
+  tank: "armor",
+  aaa: "aa",
+  submarine: "sub",
+  bomber: "tactical_bomber",
+};
+
+/** The roster id of a unit type. `tank` is armor, `submarine` is sub, `aaa` is aa. */
+export function canonicalUnit(unitTypeId: string): string {
+  return ALIASES[unitTypeId] ?? unitTypeId;
+}
 
 /**
  * The domain of a unit type. `categories` (unit type id to `land`, `air` or `sea`, from the scenario's unit
- * data) wins; without it the standard unit ids decide, and anything unknown (infantry, artillery, armor, aa)
- * is land.
+ * data) wins; without it the standard unit ids decide, and anything unknown is land.
  */
 export function unitDomain(unitTypeId: string, categories?: Record<string, string>): UnitDomain {
   const declared = categories?.[unitTypeId];
   if (declared === "land" || declared === "air" || declared === "sea") {
     return declared;
   }
-  if (AIR_UNITS.has(unitTypeId)) {
+  const id = canonicalUnit(unitTypeId);
+  if (AIR_UNITS.has(unitTypeId) || AIR_UNITS.has(id)) {
     return "air";
   }
-  if (SEA_UNITS.has(unitTypeId)) {
+  if (SEA_UNITS.has(unitTypeId) || SEA_UNITS.has(id)) {
     return "sea";
   }
   return "land";
 }
 
-/** "strategic_bomber" becomes "Strategic bomber". */
+/** "strategic_bomber" becomes "Strategic bomber". Anti-aircraft is "AA". */
 export function unitLabel(unitTypeId: string): string {
-  const words = unitTypeId.replace(/_/g, " ").trim();
+  const id = canonicalUnit(unitTypeId);
+  if (id === "aa") {
+    return "AA";
+  }
+  const words = id.replace(/_/g, " ").trim();
   return words === "" ? unitTypeId : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-export function domainLabel(domain: UnitDomain): string {
-  return domain === "land" ? "Land" : domain === "air" ? "Air" : "Sea";
+// ---------------------------------------------------------------
+// One list per territory, not one per domain
+// ---------------------------------------------------------------
+
+/** Highest priority first. A land territory. */
+export const LAND_ROSTER: readonly string[] = [
+  "armor",
+  "mech_infantry",
+  "artillery",
+  "infantry",
+  "strategic_bomber",
+  "tactical_bomber",
+  "fighter",
+  "aa",
+];
+
+/** Highest priority first. A sea zone. Aircraft on a carrier sit ahead of the transport. */
+export const SEA_ROSTER: readonly string[] = [
+  "carrier",
+  "battleship",
+  "cruiser",
+  "destroyer",
+  "sub",
+  "fighter",
+  "tactical_bomber",
+  "transport",
+];
+
+/** The full 14-type roster, each piece once. */
+export const ROSTER: readonly string[] = [
+  "infantry",
+  "mech_infantry",
+  "artillery",
+  "armor",
+  "aa",
+  "fighter",
+  "tactical_bomber",
+  "strategic_bomber",
+  "battleship",
+  "carrier",
+  "cruiser",
+  "destroyer",
+  "sub",
+  "transport",
+];
+
+/** Lower is further forward. Unknown units sort after the roster, then by key. */
+export function rosterRank(unitTypeId: string, sea: boolean): number {
+  const list = sea ? SEA_ROSTER : LAND_ROSTER;
+  const at = list.indexOf(canonicalUnit(unitTypeId));
+  return at < 0 ? list.length : at;
 }
 
-/**
- * Threat priority within a domain, higher first. It picks the lead icon of a collapsed bubble and the order
- * stacks take slots:
- *   land  armor > artillery > infantry > aa
- *   air   bomber > fighter
- *   sea   carrier > battleship > cruiser > destroyer > submarine > transport
- * Mechanised infantry ranks between artillery and infantry. Unknown units rank 0.
- */
-const PRIORITY: Record<string, number> = {
-  tank: 90,
-  armor: 90,
-  artillery: 80,
-  mech_infantry: 70,
-  infantry: 60,
-  aa: 50,
-  aaa: 50,
-  strategic_bomber: 90,
-  tactical_bomber: 80,
-  bomber: 80,
-  fighter: 70,
-  carrier: 90,
-  battleship: 80,
-  cruiser: 70,
-  destroyer: 60,
-  submarine: 50,
-  transport: 40,
-};
-
-export function unitPriority(unitTypeId: string): number {
-  return PRIORITY[unitTypeId] ?? 0;
-}
-
-/** Highest threat priority first, then the bigger stack, then by key so the order never flickers. */
-function byPriority(a: StackEntry, b: StackEntry): number {
-  return (
-    unitPriority(b.unit_type_id) - unitPriority(a.unit_type_id) ||
-    b.count - a.count ||
-    stackKey(a).localeCompare(stackKey(b))
-  );
-}
-
-export interface DomainGroup {
-  domain: UnitDomain;
-  /** One entry per stack key (type | faction | instance), sorted by key. */
-  entries: StackEntry[];
-  /** Distinct unit types, regardless of faction. */
-  typeCount: number;
-  /** Every unit in the domain. */
-  total: number;
-  /** The stack shown on a collapsed bubble: the highest threat priority present. */
-  lead: StackEntry;
-}
-
-function leadOf(entries: StackEntry[]): StackEntry {
-  return [...entries].sort(byPriority)[0];
-}
-
-/** A group's stacks in the order they take slots: highest threat priority first. */
-export function orderedEntries(group: DomainGroup): StackEntry[] {
-  return [...group.entries].sort(byPriority);
-}
-
-/** Splits a territory's stacks by domain, in DOMAIN_ORDER. Empty stacks and empty domains are dropped. */
-export function groupByDomain(entries: StackEntry[], categories?: Record<string, string>): DomainGroup[] {
+/** Every stack with a count, highest tactical priority first. The same list whatever the domain. */
+export function orderStacks(entries: StackEntry[], sea: boolean): StackEntry[] {
   const byKey = new Map<string, StackEntry>();
   for (const entry of entries) {
     if (entry.count > 0 && !byKey.has(stackKey(entry))) {
       byKey.set(stackKey(entry), entry);
     }
   }
-  const buckets = new Map<UnitDomain, StackEntry[]>();
-  for (const key of [...byKey.keys()].sort()) {
-    const entry = byKey.get(key)!;
-    const domain = unitDomain(entry.unit_type_id, categories);
-    buckets.set(domain, [...(buckets.get(domain) ?? []), entry]);
-  }
-  return DOMAIN_ORDER.filter((d) => buckets.has(d)).map((domain) => {
-    const list = buckets.get(domain)!;
-    return {
-      domain,
-      entries: list,
-      typeCount: new Set(list.map((e) => e.unit_type_id)).size,
-      total: list.reduce((n, e) => n + e.count, 0),
-      lead: leadOf(list),
-    };
-  });
+  return [...byKey.values()].sort(
+    (a, b) => rosterRank(a.unit_type_id, sea) - rosterRank(b.unit_type_id, sea) || stackKey(a).localeCompare(stackKey(b)),
+  );
 }
 
 // ---------------------------------------------------------------
-// When a domain collapses: overflow only
+// Slots first, then a curved arc
 // ---------------------------------------------------------------
 
+/** How far a satellite sits from its anchor's primary token, in token diameters. */
+export const ARC_RADIUS_RATIO = 0.72;
+/** Satellites folded around one anchor before that anchor grows a [+]. */
+export const ARC_SATELLITE_MAX = 3;
+
+export type LayoutStage = "open" | "arc" | "capped";
+
 /**
- * Which domains collapse into a bubble, given how many non-colliding slots the territory has.
- *
- * Nothing collapses while every stack present has a slot (`presentUnitTypes.length <= slotCount`). Past that,
- * the domain with the most stacks collapses first (the later of land, sea, air on a tie), then the next,
- * until what is left fits. A bubble takes a slot of its own, except an air bubble whose air anchor the map
- * file places. A domain holding a single stack never collapses: a bubble would show no more than the token.
+ * Screen-space degrees for 1, 2 or 3 satellites. 0° is to the right and positive is downward, so these
+ * sit on the upper crescent and stay out of the +20° to +80° quadrant where the primary's count pill is.
  */
-export function planCollapse(groups: DomainGroup[], slotCount: number, airAnchorPlaced = false): UnitDomain[] {
-  const present = groups.reduce((n, g) => n + g.entries.length, 0);
-  if (present <= slotCount) {
-    return [];
+export function arcAngles(count: number): number[] {
+  if (count >= 3) {
+    return [-145, -100, -55];
   }
-  const takesSlot = (g: DomainGroup) => !(g.domain === "air" && airAnchorPlaced);
-  const candidates = groups
-    .filter((g) => g.entries.length > 1)
-    .sort((a, b) => b.entries.length - a.entries.length || DOMAIN_ORDER.indexOf(b.domain) - DOMAIN_ORDER.indexOf(a.domain));
-  const collapsed: UnitDomain[] = [];
-  const used = () =>
-    groups.reduce((n, g) => n + (collapsed.includes(g.domain) ? (takesSlot(g) ? 1 : 0) : g.entries.length), 0);
-  for (const g of candidates) {
-    if (used() <= slotCount) {
-      break;
+  if (count === 2) {
+    return [-145, -55];
+  }
+  if (count === 1) {
+    return [-100];
+  }
+  return [];
+}
+
+/** Where satellite `index` of `count` sits, relative to its primary token. */
+export function arcOffset(index: number, count: number, diameter: number): Vec2 {
+  const deg = arcAngles(count)[index] ?? -100;
+  const rad = (deg * Math.PI) / 180;
+  const reach = ARC_RADIUS_RATIO * diameter;
+  return { x: Math.cos(rad) * reach, y: Math.sin(rad) * reach };
+}
+
+/**
+ * Stacks onto slots. The first `K` stacks, highest priority first, are the primaries. Anything past that is
+ * dealt around the slots, three satellites each. `groups[i][0]` is the primary of slot i.
+ */
+export function assignStacks(ordered: StackEntry[], slotCount: number): { groups: StackEntry[][]; capped: boolean } {
+  const k = Math.max(0, slotCount);
+  if (ordered.length === 0 || k === 0) {
+    return { groups: [], capped: ordered.length > 0 };
+  }
+  const capacity = k * (1 + ARC_SATELLITE_MAX);
+  const shown = Math.min(ordered.length, capacity);
+  const groups: StackEntry[][] = Array.from({ length: k }, () => []);
+  const primaries = Math.min(k, shown);
+  for (let i = 0; i < primaries; i++) {
+    groups[i].push(ordered[i]);
+  }
+  const extra = ordered.slice(primaries, shown);
+  for (let i = 0; i < extra.length; i++) {
+    groups[i % k].push(extra[i]);
+  }
+  return { groups, capped: ordered.length > shown };
+}
+
+/**
+ * Index of the front-most point within `radius` of `p`. `points` is back to front, so the walk starts at the end
+ * and the first hit wins. -1 when none is close enough.
+ */
+export function frontMostIndex(points: Vec2[], p: Vec2, radius: number): number {
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (Math.hypot(points[i].x - p.x, points[i].y - p.y) <= radius) {
+      return i;
     }
-    collapsed.push(g.domain);
   }
-  return collapsed;
+  return -1;
+}
+
+/** Where the [+] sits relative to a token's centre: the rim at about half past one. */
+export function plusOffset(diameter: number): Vec2 {
+  const angle = -Math.PI / 4;
+  const reach = diameter * 0.46;
+  return { x: Math.cos(angle) * reach, y: Math.sin(angle) * reach };
 }
 
 // ---------------------------------------------------------------
@@ -192,70 +222,55 @@ export interface Box {
   hh: number;
 }
 
-export interface PlacedSlot {
-  slot: StackSlot;
-  x: number;
-  y: number;
-}
-
-export interface DomainCluster {
-  regionId: string;
+export interface PlacedToken {
+  entry: StackEntry;
+  key: string;
   domain: UnitDomain;
-  group: DomainGroup;
-  collapsed: boolean;
-  /** Screen centre: the bubble, or the middle of the domain's tokens. */
   x: number;
   y: number;
-  hw: number;
-  hh: number;
-  /** Expanded stacks, one token each. Empty when collapsed. */
-  slots: PlacedSlot[];
-  /** Radius of the collapsed bubble, in px. 0 when expanded. */
-  bubbleRadius: number;
+  /** Higher draws later, so it is in front. The lead is the highest. */
+  z: number;
 }
 
 export interface PlacedBadge extends Box {
   regionId: string;
-  /** Side of one triangle, in px. */
   side: number;
 }
 
 export interface RegionVisuals {
-  clusters: DomainCluster[];
+  /** Back to front. */
+  tokens: PlacedToken[];
+  stage: LayoutStage;
+  capped: boolean;
+  /** The [+] badge, when the arcs are capped. */
+  plus: Vec2 | null;
+  /** Radial offset of a satellite, in screen px. 0 when every stack has its own slot. */
+  stepPx: number;
   badge: PlacedBadge | null;
-  /** Screen y for the centre of the IPC shield: on the anchor, or above any unit that has no room elsewhere. */
   shieldY: number;
-  /** Screen y for the centre of the combat marker, below every token and the badge near the anchor. */
   markerY: number;
-  /** How many stacks the territory has slots for without a collision. */
-  slotCount: number;
 }
 
 export interface LayoutParams {
   view: View;
-  /** Pixel size of a unit token on screen. */
+  /** Drawn token diameter, in screen px. */
   tokenPx: number;
-  /** Side of one badge triangle on screen. */
+  /** Side of one badge triangle, in screen px. */
   badgeSide: number;
-  /** The territory's unit slots in world units (see effectiveUnitSlots). */
+  /** The territory's unit slots, in world units. Each one is used as placed. */
   slots: Vec2[];
-  /** World diameter of a token, which decides whether two slots collide. Defaults to TOKEN_WORLD. */
+  /** Kept so callers can pass a world diameter. Placement trusts the slots and does not use it. */
   tokenWorld?: number;
   categories?: Record<string, string>;
 }
 
-/** Radius of the collapsed bubble relative to the token's diameter: the same disc as a token. */
-export const BUBBLE_RADIUS_RATIO = 0.5;
 const GAP_PX = 4;
 
 function overlaps(a: Box, b: Box, gap = 0): boolean {
   return Math.abs(a.x - b.x) < a.hw + b.hw + gap && Math.abs(a.y - b.y) < a.hh + b.hh + gap;
 }
 
-/**
- * Moves `mover` along `dir` (default `fallback`) just far enough to clear `fixed`. A clear box stays put.
- * Used only for anchors the map file leaves at their default, so a hand-placed anchor is exact.
- */
+/** Moves `mover` along its own direction (or `fallback`) just far enough to clear `fixed`. */
 export function clearOf(fixed: Box, mover: Box, fallback: Vec2, gap = GAP_PX): Box {
   if (!overlaps(fixed, mover, gap)) {
     return mover;
@@ -273,7 +288,6 @@ export function clearOf(fixed: Box, mover: Box, fallback: Vec2, gap = GAP_PX): B
   const h = fixed.hh + mover.hh + gap;
   const rx = mover.x - fixed.x;
   const ry = mover.y - fixed.y;
-  // The distance along d at which the boxes stop overlapping on x, or on y; the nearer one is enough.
   const tx = Math.abs(d.x) < 1e-9 ? Infinity : ((d.x > 0 ? w : -w) - rx) / d.x;
   const ty = Math.abs(d.y) < 1e-9 ? Infinity : ((d.y > 0 ? h : -h) - ry) / d.y;
   const t = Math.max(0, Math.min(tx, ty));
@@ -281,91 +295,55 @@ export function clearOf(fixed: Box, mover: Box, fallback: Vec2, gap = GAP_PX): B
 }
 
 /**
- * A region's tokens or bubbles, facility badge and the y of its shield and combat marker, all in screen px.
- *
- * Stacks take the region's non-colliding slots in order: land first, then sea, then air, highest threat
- * priority first within each. When there are more stacks than slots, planCollapse picks the domains that
- * fold into bubbles, and each bubble takes a slot. Anything still without a slot (a cramped territory) sits
- * just off the anchor, air at the air anchor.
+ * The territory's tokens, back to front, plus its facility badge and the y of the shield and combat marker.
+ * One pool of slots for every unit type. Air has no anchor of its own.
  */
 export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], p: LayoutParams): RegionVisuals {
   const { view, tokenPx } = p;
-  const s = tokenPx / 32;
-  const anchor = worldToScreen(view, region.anchor);
-  const groups = groupByDomain(entries, p.categories);
-  const slotsWorld = nonCollidingSlots(p.slots, p.tokenWorld ?? TOKEN_WORLD);
-  const free = slotsWorld.map((w) => worldToScreen(view, w));
-  const airPlaced = region.airAnchorSet === true;
-  const airAt = worldToScreen(view, airAnchorOf(region));
-  const collapsedDomains = planCollapse(groups, slotsWorld.length, airPlaced);
+  const sea = region.type === "sea";
+  const ordered = orderStacks(entries, sea);
+  const categories = p.categories;
+  const seats = p.slots.length > 0 ? p.slots : ordered.length > 0 ? [region.anchor] : [];
+  const { groups, capped } = assignStacks(ordered, seats.length);
 
-  // Where a stack or bubble goes once the slots are used up.
-  let overflow = 0;
-  const spill = (domain: UnitDomain): Vec2 => {
-    const n = overflow++;
-    const base = domain === "air" ? airAt : { x: anchor.x, y: anchor.y + tokenPx * 0.95 };
-    return { x: base.x + n * tokenPx * 1.05, y: base.y };
-  };
-  const take = (domain: UnitDomain): Vec2 => free.shift() ?? spill(domain);
-
-  const r = tokenPx * BUBBLE_RADIUS_RATIO;
-  const half = tokenPx / 2 + 1;
-  const clusters: DomainCluster[] = [];
-  const occupied: Box[] = [];
-
-  // Bubbles first, so a collapsed domain gets the better slot.
-  const bubbleAt = new Map<UnitDomain, Vec2>();
-  for (const group of groups.filter((g) => collapsedDomains.includes(g.domain))) {
-    bubbleAt.set(group.domain, group.domain === "air" && airPlaced ? airAt : take(group.domain));
-  }
-
-  for (const group of groups) {
-    if (collapsedDomains.includes(group.domain)) {
-      const at = bubbleAt.get(group.domain)!;
-      clusters.push({
-        regionId: region.id,
-        domain: group.domain,
-        group,
-        collapsed: true,
-        x: at.x,
-        y: at.y,
-        hw: r + 4,
-        hh: r + 4,
-        slots: [],
-        bubbleRadius: r,
-      });
-      occupied.push({ x: at.x, y: at.y, hw: r + 3, hh: r + 3 });
+  // Back to front: lower-priority anchors first, and each anchor's satellites before its primary.
+  const placed: { entry: StackEntry; at: Vec2 }[] = [];
+  let arcing = false;
+  for (let g = groups.length - 1; g >= 0; g--) {
+    const group = groups[g];
+    if (group.length === 0) {
       continue;
     }
-    const placed: PlacedSlot[] = orderedEntries(group).map((entry) => {
-      const at = take(group.domain);
-      occupied.push({ x: at.x, y: at.y, hw: half, hh: half });
-      return {
-        slot: { key: stackKey(entry), entry, offset: { x: at.x - anchor.x, y: at.y - anchor.y } },
-        x: at.x,
-        y: at.y,
-      };
+    const origin = worldToScreen(view, seats[g]);
+    const sats = group.slice(1);
+    if (sats.length > 0) {
+      arcing = true;
+    }
+    sats.forEach((entry, s) => {
+      const off = arcOffset(s, sats.length, tokenPx);
+      placed.push({ entry, at: { x: origin.x + off.x, y: origin.y + off.y } });
     });
-    const x0 = Math.min(...placed.map((q) => q.x)) - half;
-    const x1 = Math.max(...placed.map((q) => q.x)) + half;
-    const y0 = Math.min(...placed.map((q) => q.y)) - half;
-    const y1 = Math.max(...placed.map((q) => q.y)) + half;
-    clusters.push({
-      regionId: region.id,
-      domain: group.domain,
-      group,
-      collapsed: false,
-      x: (x0 + x1) / 2,
-      y: (y0 + y1) / 2,
-      hw: (x1 - x0) / 2,
-      hh: (y1 - y0) / 2,
-      slots: placed,
-      bubbleRadius: 0,
-    });
+    placed.push({ entry: group[0], at: origin });
   }
+  const stage: LayoutStage = capped ? "capped" : arcing ? "arc" : "open";
+  const stepPx = arcing ? ARC_RADIUS_RATIO * tokenPx : 0;
 
-  // The IPC shield sits on the anchor. Slots keep clear of it, so it only moves above a token that has no
-  // other place to go, in a territory too small for the hub and its units.
+  const tokens: PlacedToken[] = placed.map((item, i) => ({
+    entry: item.entry,
+    key: stackKey(item.entry),
+    domain: unitDomain(item.entry.unit_type_id, categories),
+    x: item.at.x,
+    y: item.at.y,
+    z: i,
+  }));
+  const lead = placed[placed.length - 1];
+  const plus = capped && lead ? { x: lead.at.x + plusOffset(tokenPx).x, y: lead.at.y + plusOffset(tokenPx).y } : null;
+
+  const s = tokenPx / 32;
+  const anchor = worldToScreen(view, region.anchor);
+  const half = tokenPx / 2 + 1;
+  const occupied: Box[] = tokens.map((t) => ({ x: t.x, y: t.y, hw: half, hh: half }));
+
   const shieldBox = (y: number): Box => ({ x: anchor.x, y: y + 1.5 * s, hw: 10 * s + 1, hh: 12.5 * s + 1 });
   let shieldY = anchor.y;
   for (let i = 0; i < 6; i++) {
@@ -383,7 +361,6 @@ export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], 
     const at = worldToScreen(view, facilityAnchorOf(region));
     let box: Box = { x: at.x, y: at.y, hw: (ext.w * p.badgeSide) / 2, hh: (ext.h * p.badgeSide) / 2 };
     if (!region.facilityAnchorSet) {
-      // A default badge keeps off the tokens and the shield; one the file places is exact.
       for (const obstacle of [shieldBox(shieldY), ...occupied]) {
         box = clearOf(obstacle, box, { x: 0, y: 1 });
       }
@@ -391,32 +368,7 @@ export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], 
     badge = { ...box, regionId: region.id, side: p.badgeSide };
   }
 
-  // The combat marker (44 px wide) goes below whatever sits under it.
   const boxes: Box[] = [...occupied, ...(badge ? [badge] : [])];
   const bottom = Math.max(anchor.y, ...boxes.filter((b) => Math.abs(b.x - anchor.x) < b.hw + 24 * s).map((b) => b.y + b.hh));
-  return {
-    clusters,
-    badge,
-    shieldY,
-    markerY: bottom + 18 * s,
-    slotCount: slotsWorld.length,
-  };
-}
-
-// ---------------------------------------------------------------
-// The expanded drawer
-// ---------------------------------------------------------------
-
-export interface DrawerRow {
-  key: string;
-  entry: StackEntry;
-  label: string;
-  count: number;
-}
-
-/** One row per stack in the domain: biggest first, then by name. */
-export function drawerRows(group: DomainGroup): DrawerRow[] {
-  return group.entries
-    .map((entry) => ({ key: stackKey(entry), entry, label: unitLabel(entry.unit_type_id), count: entry.count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+  return { tokens, stage, capped, plus, stepPx, badge, shieldY, markerY: bottom + 18 * s };
 }

@@ -9,14 +9,15 @@
 //
 // The unit anchor (where the IPC shield sits) and the facility anchor (the Tri-Wedge badge) are the hub, and
 // tokens keep clear of both. A slot's centre stays SLOT_INSET inside the coast or border; its rim may spill
-// over it on a thin island. When even that cannot fit the units a territory holds, a domain collapses into a
-// bubble (see unitStacks.ts).
+// over it on a thin island. Slots are one pool for every unit type. Tokens sit on those slots as placed.
+// Only when there are more unit types than slots do the extras arc around an anchor (see unitStacks.ts).
 import { facilityCount } from "./facilityBadge";
-import { facilitiesOf, facilityAnchorOf, type RegionShape, UNIT_SLOT_MAX, type Vec2 } from "./geometry";
+import { facilitiesOf, facilityAnchorOf, type RegionShape, UNIT_SLOT_MAX, unitSlotMax, type Vec2 } from "./geometry";
 import { type MultiPolygon, type Ring, pointInMultiPolygon } from "./regionClip";
 
 /** Diameter of a unit token in world units. Tokens scale with the map, so slots can be laid out once. */
-export const TOKEN_WORLD = 20;
+/** Half the old 20, so a token sits inside a narrow territory instead of covering its coast. */
+export const TOKEN_WORLD = 10;
 /** A generated slot's centre is at least this far inside the coast or border, in world units. */
 export const SLOT_INSET = 3.5;
 /** A shape this much longer than it is wide (by standard deviation of its area) gets a spine, not an orbit. */
@@ -439,7 +440,7 @@ export function generatedSlotsOf(region: RegionShape, shape: MultiPolygon): Gene
  */
 export function effectiveUnitSlots(region: RegionShape, shape: MultiPolygon): Vec2[] {
   if (hasHandPlacedSlots(region)) {
-    return (region.unitSlots ?? []).slice(0, UNIT_SLOT_MAX);
+    return (region.unitSlots ?? []).slice(0, unitSlotMax(region.type === "sea"));
   }
   return generatedSlotsOf(region, shape).slots;
 }
