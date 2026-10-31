@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { VERSION_NAME_MAX } from "./mapVersions";
 import { factionIdFromDisplay } from "../../../content/game_scene_session_builder";
 import { unitSlotMax } from "../geometry";
 import { LINK_COLORS } from "../mapRenderer";
@@ -311,7 +312,12 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
                 Mark as Decorative (Unplayable)
               </button>
             )}
-            <button type="button" className="field-wide danger" onClick={editor.removeSelected}>
+            <button
+              type="button"
+              className="field-wide danger"
+              title="Give this region's space back to the neighbor it shares a border with, so that border comes off the map. A region with no neighbor leaves a gap; Reset to Master Block fills it."
+              onClick={editor.removeSelected}
+            >
               Delete region
             </button>
           </div>
@@ -352,6 +358,8 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
         )}
       </section>
 
+      <VersionLibrary editor={editor} />
+
       <section className="panel editor-panel">
         <h2>Export</h2>
         <div className="export-buttons">
@@ -366,10 +374,98 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
           </button>
         </div>
         <p className="muted editor-hint">
-          Edits autosave in this browser. Save Directly writes demomap01.json in the repo (dev server only). The running
-          game uses the demo map until that file changes.
+          Edits autosave in this browser. Save Directly writes demomap01.json in the repo (dev server only). New game,
+          in the bar above, can start any named version. Named versions stay in this browser.
         </p>
       </section>
     </>
+  );
+}
+
+function formatVersionTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function VersionLibrary({ editor }: { editor: MapEditor }) {
+  const [name, setName] = useState("");
+  const [pendingDeleteId, setPendingDeleteId] = useState("");
+  const trimmed = name.trim();
+  return (
+    <section className="panel editor-panel">
+      <h2>Versions</h2>
+      <form
+        className="version-save"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const error = editor.saveVersion(name);
+          if (error === "") {
+            setName(trimmed);
+          }
+        }}
+      >
+        <input
+          type="text"
+          value={name}
+          maxLength={VERSION_NAME_MAX}
+          placeholder="Version name"
+          aria-label="Version name"
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button type="submit" className="primary" disabled={trimmed === ""}>
+          Save version
+        </button>
+      </form>
+      {editor.versions.length === 0 ? (
+        <p className="muted editor-hint">No saved versions yet. The map you are editing still autosaves on its own.</p>
+      ) : (
+        <ul className="version-list">
+          {editor.versions.map((version) => (
+            <li key={version.id}>
+              <span className="version-name" title={version.name}>
+                {version.name}
+              </span>
+              <span className="muted version-when mono">
+                {pendingDeleteId === version.id ? "The open map stays." : formatVersionTime(version.savedAt)}
+              </span>
+              <span className="version-actions">
+                {pendingDeleteId === version.id ? (
+                  <>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        editor.deleteVersion(version.id);
+                        setPendingDeleteId("");
+                        if (trimmed === version.name) {
+                          setName("");
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button type="button" onClick={() => setPendingDeleteId("")}>
+                      Keep
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => editor.loadVersion(version.id)}>
+                      Load
+                    </button>
+                    <button type="button" onClick={() => setPendingDeleteId(version.id)}>
+                      Delete
+                    </button>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="muted editor-hint">
+        Saved in this browser. Saving a name that already exists replaces that version. After a load, Undo brings back
+        the map you had open.
+      </p>
+    </section>
   );
 }

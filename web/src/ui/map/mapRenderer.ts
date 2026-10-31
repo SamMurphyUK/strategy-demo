@@ -287,10 +287,15 @@ export interface GameOverlay {
   hoverStack?: { regionId: string; key: string; copyDx: number } | null;
 }
 
+/** Facility icons stay at this opacity. The map shows through, and nothing else (layer, hover) changes it. */
+export const FACILITY_ICON_ALPHA = 0.66;
+
 /** The Tri-Wedge: airbase ▼, factory ▲ and harbour ▼ as one trapezoid. See facilityBadge.ts for the geometry. */
 export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBadge, f: Facilities, dpr = 1): void {
   const s = badge.side;
   const shapes = badgeShapes(f);
+  const previousAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = FACILITY_ICON_ALPHA;
   const trace = (shape: BadgeShape) => {
     ctx.beginPath();
     shape.points.forEach((p, i) => (i === 0 ? ctx.moveTo(badge.x + p.x * s, badge.y + p.y * s) : ctx.lineTo(badge.x + p.x * s, badge.y + p.y * s)));
@@ -358,6 +363,7 @@ export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBa
       ctx.stroke();
     }
   }
+  ctx.globalAlpha = previousAlpha;
 }
 
 /** The [+] on a capped fan: a paper disc and an ink plus, at the lead token's upper right. */

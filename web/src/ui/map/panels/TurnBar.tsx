@@ -1,7 +1,9 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { PHASES } from "../../../engine/turn/turn_engine";
 import { factionPalette } from "../../theme/factionPalette";
+import type { MapVersion } from "../editor/mapVersions";
 import { factionName, phaseName } from "../session/event_text";
+import { DEMO_MAP_ID, demoPlayChoice, playChoiceFromVersion } from "../session/play_map";
 import type { GameSessionHandle } from "../session/use_game_session";
 
 function factionStyle(factionId: string): CSSProperties {
@@ -12,14 +14,25 @@ function factionStyle(factionId: string): CSSProperties {
 interface Props {
   game: GameSessionHandle;
   editing: boolean;
+  versions: MapVersion[];
   onToggleEditing(): void;
 }
 
-export function TurnBar({ game, editing, onToggleEditing }: Props) {
+export function TurnBar({ game, editing, versions, onToggleEditing }: Props) {
   const state = game.session.state;
   const [seedInput, setSeedInput] = useState(String(game.seed));
+  const [mapId, setMapId] = useState(game.mapId);
+  useEffect(() => {
+    setMapId(game.mapId);
+  }, [game.mapId]);
+  useEffect(() => {
+    if (mapId !== game.mapId && mapId !== DEMO_MAP_ID && !versions.some((version) => version.id === mapId)) {
+      setMapId(DEMO_MAP_ID);
+    }
+  }, [versions, mapId, game.mapId]);
   const faction = state.current_faction_id;
   const phaseIndex = PHASES.indexOf(state.current_phase as (typeof PHASES)[number]);
+  const mapListed = mapId === DEMO_MAP_ID || versions.some((version) => version.id === mapId);
 
   return (
     <header className="turn-bar">
@@ -57,9 +70,25 @@ export function TurnBar({ game, editing, onToggleEditing }: Props) {
         onSubmit={(e) => {
           e.preventDefault();
           const n = Math.trunc(Number(seedInput));
-          game.newGame(Number.isFinite(n) ? n : 12345);
+          const version = versions.find((item) => item.id === mapId);
+          game.newGame(Number.isFinite(n) ? n : 12345, version ? playChoiceFromVersion(version) : demoPlayChoice());
+          if (editing) {
+            onToggleEditing();
+          }
         }}
       >
+        <label>
+          Map
+          <select aria-label="Map" value={mapId} onChange={(e) => setMapId(e.target.value)}>
+            <option value={DEMO_MAP_ID}>Demo map</option>
+            {versions.map((version) => (
+              <option key={version.id} value={version.id}>
+                {version.name}
+              </option>
+            ))}
+            {mapId === game.mapId && !mapListed && <option value={mapId}>{game.mapName}</option>}
+          </select>
+        </label>
         <label>
           Seed
           <input

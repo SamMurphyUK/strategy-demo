@@ -9,6 +9,14 @@ import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring } from "../r
 import type { MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
 import {
+  parseVersionLibrary,
+  removeVersion,
+  upsertVersion,
+  versionNameError,
+  VERSIONS_KEY,
+  type MapVersion,
+} from "./mapVersions";
+import {
   addBlocks,
   addRegionFromPolygon,
   applyAutoLinks,
@@ -57,6 +65,7 @@ import {
   anchorFor,
   carveLoop,
   KNIFE_REACH_PX,
+  healDeletedRegion,
   landComponentAt,
   LOOP_CLOSE_PX,
   LOOP_MIN_PX,
@@ -205,6 +214,14 @@ export interface MapEditor {
   exportJson(): void;
   saveToDevServer(): void;
   resetToDemo(): void;
+  /** Named snapshots stored in this browser, newest first. */
+  versions: MapVersion[];
+  /** Saves the open map under `name`. The same name replaces that version. Returns an error, or "". */
+  saveVersion(name: string): string;
+  /** Opens a saved version. Undo returns to the map that was open. */
+  loadVersion(id: string): void;
+  /** Removes a saved version. The open map stays. */
+  deleteVersion(id: string): void;
 }
 
 export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: boolean): MapEditor {
@@ -227,6 +244,15 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   const [status, setStatus] = useState("");
   const dragBase = useRef<EditorMap | null>(null);
   const drawSea = layer === "sea";
+  const [versions, setVersions] = useState<MapVersion[]>(() => {
+    try {
+      return parseVersionLibrary(window.localStorage.getItem(VERSIONS_KEY));
+    } catch {
+      return [];
+    }
+  });
+  const versionsRef = useRef(versions);
+  versionsRef.current = versions;
   const [strokeTolerance, setStrokeTolerance] = useState<StrokeTolerance>("medium");
   const [strokeSmooth, setStrokeSmooth] = useState(true);
   const stroke = useRef({ active: false, ignore: false, raw: [] as Vec2[], scale: 1 });
@@ -617,11 +643,24 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     if (id === "") {
       return;
     }
-    commit(deleteRegion(docRef.current.map, id));
+    const state = docRef.current.map;
+    // A cut leaves its border on the neighbor. Give the space back so that line is gone and a new cut
+    // can cross it. A region that shares no border is removed, and the gap stays unclaimed.
+    const healed = healDeletedRegion(state, id);
+    if (healed) {
+      const host = findRegion(healed.map, healed.into);
+      commit(withAutoLinks(healed.map).map);
+      setSelectedId(healed.into);
+      setSecondId("");
+      setMergeIds([]);
+      setStatus(`Deleted ${id}. ${host?.name ?? healed.into} took that space, so the old border is gone.`);
+      return;
+    }
+    commit(deleteRegion(state, id));
     setSelectedId("");
     setSecondId("");
     setStatus(`Deleted ${id}. "Reset to Master Block" fills the gap.`);
-  }, [commit]);
+  }, [commit, withAutoLinks]);
 
   /** Takes the region out of play: no id, IPC or selection box. The land mask still draws it as plain land. */
   const makeDecorative = useCallback(() => {
@@ -975,6 +1014,75 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     cancelDraft();
     setStatus("Reset to the demo map. Undo brings your work back.");
   }, [cancelDraft, commit, demoJson]);
+
+  const writeVersions = useCallback((next: MapVersion[]): boolean => {
+    try {
+      window.localStorage.setItem(VERSIONS_KEY, JSON.stringify(next));
+    } catch {
+      return false;
+    }
+    versionsRef.current = next;
+    setVersions(next);
+    return true;
+  }, []);
+
+  const saveVersion = useCallback(
+    (name: string): string => {
+      const problem = versionNameError(name);
+      if (problem) {
+        setStatus(problem);
+        return problem;
+      }
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `v-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const next = upsertVersion(versionsRef.current, name, editorToMapJson(docRef.current.map, { round: false }), Date.now(), id);
+      if (!writeVersions(next.versions)) {
+        const full = "This browser could not store that version. Delete an older one and try again.";
+        setStatus(full);
+        return full;
+      }
+      setStatus(next.replaced ? `Replaced "${next.version.name}".` : `Saved "${next.version.name}".`);
+      return "";
+    },
+    [writeVersions],
+  );
+
+  const loadVersion = useCallback(
+    (id: string) => {
+      const version = versionsRef.current.find((v) => v.id === id);
+      if (!version) {
+        setStatus("That version is no longer saved in this browser.");
+        return;
+      }
+      const loaded = editorFromMapJson(version.map);
+      const storedCount = Array.isArray(version.map.regions) ? version.map.regions.length : 0;
+      if (storedCount > 0 && loaded.regions.length === 0) {
+        setStatus(`"${version.name}" could not be read.`);
+        return;
+      }
+      commit(loaded);
+      setSelectedId("");
+      setMergeIds([]);
+      cancelDraft();
+      setStatus(`Loaded "${version.name}". Undo brings back the map you had open.`);
+    },
+    [cancelDraft, commit],
+  );
+
+  const deleteVersion = useCallback(
+    (id: string) => {
+      const gone = versionsRef.current.find((v) => v.id === id);
+      const next = removeVersion(versionsRef.current, id);
+      if (!writeVersions(next)) {
+        setStatus("This browser could not update the saved versions.");
+        return;
+      }
+      setStatus(gone ? `Deleted the saved version "${gone.name}".` : "That version was already gone.");
+    },
+    [writeVersions],
+  );
 
   // Keyboard shortcuts, only while the editor is open.
   useEffect(() => {
@@ -1331,5 +1439,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     exportJson,
     saveToDevServer,
     resetToDemo,
+    versions,
+    saveVersion,
+    loadVersion,
+    deleteVersion,
   };
 }

@@ -1,6 +1,6 @@
 // Port of scripts/GameSceneSessionBuilder.gd: turns editor map JSON (demomap01.json)
 // into map/factions/setup dictionaries. This is content import, not a game rule.
-import type { Dict } from "../engine/model/types";
+import { type Dict, isDict } from "../engine/model/types";
 
 export const NEWMAP_PATH = "res://demomap01.json";
 export const UNITS_PATH = "res://data/scenarios/minimal/units.json";
@@ -77,6 +77,49 @@ export function buildFactionsData(mapJson: Dict = {}): Dict {
       { id: "jap", name: "Japan", color: "#B77958", team: "axis", turn_order: 4, starting_ipc: 16 },
       { id: "usa", name: "United States", color: "#72745C", team: "allies", turn_order: 5, starting_ipc: 17 },
     ],
+  };
+}
+
+/** Land IPC each playable faction owns on this map. Sea zones and neutrals add nothing. */
+export function territoryIncome(mapJson: Dict): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const regionEntry of extractRegions(mapJson)) {
+    const meta: Dict = regionEntry.metadata ?? {};
+    const regionId = String(meta.region_id ?? "");
+    if (regionTypeFromMetadata(meta, regionId) !== "land") {
+      continue;
+    }
+    const owner = ownerFromMetadataFaction(String(meta.faction ?? ""));
+    if (!PLAYABLE_FACTIONS.includes(owner)) {
+      continue;
+    }
+    totals[owner] = (totals[owner] ?? 0) + Math.trunc(Number(meta.ipc ?? 0));
+  }
+  return totals;
+}
+
+/**
+ * A saved editor map ready to boot. Opening treasury is the land that faction owns, and a setup line
+ * whose region is gone is left out. The demo file is not passed through here.
+ */
+export function prepareSavedMap(mapJson: Dict): Dict {
+  const income = territoryIncome(mapJson);
+  const factions = (buildFactionsData(mapJson).factions as Dict[]).map((faction) => ({
+    ...faction,
+    starting_ipc: income[String(faction.id)] ?? 0,
+  }));
+  const known = new Set(
+    extractRegions(mapJson)
+      .map((region) => String((region.metadata ?? {}).region_id ?? ""))
+      .filter((id) => id !== ""),
+  );
+  const units = Array.isArray(mapJson.starting_units) ? mapJson.starting_units : null;
+  return {
+    ...mapJson,
+    factions,
+    ...(units
+      ? { starting_units: units.filter((unit) => isDict(unit) && known.has(String(unit.region_id ?? ""))) }
+      : {}),
   };
 }
 

@@ -39,11 +39,13 @@ export function App() {
   const phase = state.current_phase;
 
   // The map is drawn in the land SVG's coordinates; demomap01.json predates it and is projected on load.
-  const worldMapJson = useMemo(() => projectMapJson(loadJson(NEWMAP_PATH)), []);
-  const geometry = useMemo(() => buildMapGeometry(worldMapJson), [worldMapJson]);
+  // A saved version replaces the board for play. The editor's "Reset to demo map" stays on the file.
+  const demoMapJson = useMemo(() => projectMapJson(loadJson(NEWMAP_PATH)), []);
+  const playMapJson = game.map ?? demoMapJson;
+  const geometry = useMemo(() => buildMapGeometry(playMapJson), [playMapJson]);
   const { land, error: landError } = useMasterLand();
   const [editing, setEditing] = useState(false);
-  const editor = useMapEditor(worldMapJson, land, editing);
+  const editor = useMapEditor(demoMapJson, land, editing);
   const editorStacks = useMemo(() => startingStacks(editor.map), [editor.map]);
   const editorOwners = useMemo(() => {
     const out: Record<string, string> = {};
@@ -74,6 +76,14 @@ export function App() {
   useEffect(() => {
     setSelection(null);
   }, [phase, faction, game.seed]);
+
+  // A new board has different regions, so a selection from the previous map cannot carry over.
+  useEffect(() => {
+    setSelectedRegionId("");
+    setHoverRegionId("");
+    setSelection(null);
+    setBattleOnScreen(null);
+  }, [game.mapId]);
 
   // `state` is mutated in place by the session; `version` is the dependency that changes.
   const owners = useMemo(() => {
@@ -277,7 +287,12 @@ export function App() {
 
   return (
     <div className="campaign">
-      <TurnBar game={game} editing={editing} onToggleEditing={() => setEditing((e) => !e)} />
+      <TurnBar
+        game={game}
+        editing={editing}
+        versions={editor.versions}
+        onToggleEditing={() => setEditing((e) => !e)}
+      />
       <div className="main">
         <MapView
           geometry={editing ? editor.geometry : geometry}

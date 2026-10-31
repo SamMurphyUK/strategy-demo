@@ -17,7 +17,7 @@ import {
   uncoveredLand,
 } from "../regionClip";
 import { pointInPolygon, type Rect, type Vec2 } from "../geometry";
-import { dist, labelPoint } from "./editorModel";
+import { applyMergeMany, dist, type EditorMap, type EditorRegion, findRegion, labelPoint, SAME_VERTEX_EPS } from "./editorModel";
 
 export type SliceResult<T> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -53,6 +53,14 @@ function fromRing(ring: Ring): Vec2[] {
 
 function ringAreaOf(points: Vec2[]): number {
   return ringArea(toRing(points));
+}
+
+function perimeter(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length; i++) {
+    total += dist(points[i], points[(i + 1) % points.length]);
+  }
+  return total;
 }
 
 // ---------------------------------------------------------------
@@ -698,6 +706,101 @@ export function mergeRegions(
   }
   islands.sort((p, q) => ringAreaOf(q) - ringAreaOf(p));
   return { ok: true, polygon: islands[0], extra: islands.slice(1) };
+}
+
+/**
+ * Folds `gone` into `host` where they share a border, and drops any outline of `gone` that touches nothing.
+ * `shared` is the length of border that disappears. A region that only meets `host` at a corner is refused,
+ * so deleting an island does not glue it onto a distant territory.
+ */
+export function absorbInto(
+  host: { polygon: Vec2[]; extra?: Vec2[][] },
+  gone: { polygon: Vec2[]; extra?: Vec2[][] },
+  snapEps: number,
+): SliceResult<{ polygon: Vec2[]; extra: Vec2[][]; shared: number }> {
+  let islands: Vec2[][] = [host.polygon, ...(host.extra ?? [])]
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => ring.map((p) => ({ ...p })));
+  if (islands.length === 0) {
+    return { ok: false, error: "The region has no outline to take the space." };
+  }
+  let shared = 0;
+  let absorbed = 0;
+  for (const ring of [gone.polygon, ...(gone.extra ?? [])]) {
+    if (ring.length < 3) {
+      continue;
+    }
+    let incoming = ring.map((p) => ({ ...p }));
+    let joinedAny = false;
+    for (let again = true; again; ) {
+      again = false;
+      for (let i = 0; i < islands.length; i++) {
+        const joined = mergePolygons(islands[i], incoming, snapEps);
+        if (!joined.ok) {
+          continue;
+        }
+        const lost = (perimeter(islands[i]) + perimeter(incoming) - perimeter(joined.points)) / 2;
+        // A shared corner does not cancel an edge. Only a real border should disappear.
+        if (lost < 1e-3) {
+          continue;
+        }
+        incoming = joined.points;
+        islands = islands.filter((_, k) => k !== i);
+        shared += lost;
+        joinedAny = true;
+        again = true;
+        break;
+      }
+    }
+    if (joinedAny) {
+      islands.push(incoming);
+      absorbed++;
+    }
+  }
+  if (absorbed === 0) {
+    return { ok: false, error: "That region does not share a border with this one." };
+  }
+  islands.sort((p, q) => ringAreaOf(q) - ringAreaOf(p));
+  return { ok: true, polygon: islands[0], extra: islands.slice(1), shared };
+}
+
+/**
+ * Deletes `id` by giving its space to the same-layer neighbor it shares the longest border with. The shared
+ * edge is gone, so a later cut can cross where that border was. Returns null when nothing shares a border;
+ * the caller then removes the region and leaves the gap.
+ */
+export function healDeletedRegion(map: EditorMap, id: string): { map: EditorMap; into: string } | null {
+  const gone = findRegion(map, id);
+  if (!gone) {
+    return null;
+  }
+  let best: { other: EditorRegion; healed: { polygon: Vec2[]; extra: Vec2[][]; shared: number } } | null = null;
+  for (const other of map.regions) {
+    if (other.id === id || other.is_sea !== gone.is_sea) {
+      continue;
+    }
+    const healed = absorbInto(other, gone, SAME_VERTEX_EPS);
+    if (!healed.ok) {
+      continue;
+    }
+    if (!best || healed.shared > best.healed.shared) {
+      best = { other, healed };
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  const centre = { x: best.other.cx, y: best.other.cy };
+  const inside =
+    pointInPolygon(centre, best.healed.polygon) || best.healed.extra.some((ring) => pointInPolygon(centre, ring));
+  const anchor = inside ? centre : labelPoint(best.healed.polygon);
+  const merged = applyMergeMany(map, best.other.id, [id], {
+    polygon: best.healed.polygon,
+    extra: best.healed.extra,
+    cx: anchor.x,
+    cy: anchor.y,
+  });
+  return merged ? { map: merged, into: best.other.id } : null;
 }
 
 /**
