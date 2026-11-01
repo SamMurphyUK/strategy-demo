@@ -34,34 +34,69 @@ export function worldTokenPx(viewK: number, tokenWorld: number): number {
   return Math.min(Math.max(tokenWorld * viewK, TOKEN_MIN_PX), TOKEN_MAX_PX);
 }
 
+/**
+ * How far the camera has tipped toward eye level. Flat at zoom 1.15, fully tipped at 2.2.
+ * World X stays at `zoom`. World Y is drawn at `zoom * (1 - 0.15 * tilt)`.
+ */
+export function tiltFactor(zoom: number): number {
+  if (zoom >= 2.2) {
+    return 1;
+  }
+  if (zoom <= 1.15) {
+    return 0;
+  }
+  return (zoom - 1.15) / (2.2 - 1.15);
+}
+
+/** Screen pixels per world unit. `sx` is the zoom; `sy` is the foreshortened vertical scale. */
+export function projectionScales(zoom: number): { sx: number; sy: number } {
+  const tilt = tiltFactor(zoom);
+  return { sx: zoom, sy: zoom * (1 - 0.15 * tilt) };
+}
+
+/** Coastal cliff drop, relative to the flat map. Full tilt stretches it by 2.6. */
+export function cliffDepthScale(zoom: number): number {
+  return 1 + 1.6 * tiltFactor(zoom);
+}
+
 export function fitView(bounds: Rect, width: number, height: number, padding = 16): View {
   const w = Math.max(1, width - padding * 2);
   const h = Math.max(1, height - padding * 2);
   const k = Math.min(w / Math.max(bounds.w, 1e-6), h / Math.max(bounds.h, 1e-6));
+  const { sx, sy } = projectionScales(k);
   return {
     k,
-    x: bounds.x + bounds.w / 2 - width / 2 / k,
-    y: bounds.y + bounds.h / 2 - height / 2 / k,
+    x: bounds.x + bounds.w / 2 - width / 2 / sx,
+    y: bounds.y + bounds.h / 2 - height / 2 / sy,
   };
 }
 
 export function worldToScreen(view: View, p: Vec2): Vec2 {
-  return { x: (p.x - view.x) * view.k, y: (p.y - view.y) * view.k };
+  const { sx, sy } = projectionScales(view.k);
+  return { x: (p.x - view.x) * sx, y: (p.y - view.y) * sy };
 }
 
 export function screenToWorld(view: View, p: Vec2): Vec2 {
-  return { x: p.x / view.k + view.x, y: p.y / view.k + view.y };
+  const { sx, sy } = projectionScales(view.k);
+  return { x: p.x / sx + view.x, y: p.y / sy + view.y };
 }
 
 export function panBy(view: View, dxPx: number, dyPx: number): View {
   return { ...view, x: view.x - dxPx / view.k, y: view.y - dyPx / view.k };
 }
 
+/** Screen-pixel pan along the tilted scales, so a drag tracks the pixel under the cursor. */
+export function panView(view: View, dxPx: number, dyPx: number): View {
+  const { sx, sy } = projectionScales(view.k);
+  return { ...view, x: view.x - dxPx / sx, y: view.y - dyPx / sy };
+}
+
 /** `factor` > 1 zooms in. The world point under `screenPoint` stays put. */
 export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: number): View {
   const k = Math.min(Math.max(view.k * factor, fitK * MIN_ZOOM_FACTOR), fitK * MAX_ZOOM_FACTOR);
   const anchor = screenToWorld(view, screenPoint);
-  return { k, x: anchor.x - screenPoint.x / k, y: anchor.y - screenPoint.y / k };
+  const { sx, sy } = projectionScales(k);
+  return { k, x: anchor.x - screenPoint.x / sx, y: anchor.y - screenPoint.y / sy };
 }
 
 /** World x folded into [bounds.x, bounds.x + bounds.w): the same spot on the primary copy of a wrapped world. */

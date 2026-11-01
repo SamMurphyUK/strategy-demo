@@ -1,7 +1,7 @@
 // Camera for the approach into a battle. The first fight of a combat phase zooms in.
 // Every fight after that pans, and keeps the zoom the first one arrived at.
 import type { Rect, Vec2 } from "./geometry";
-import { fitView, type View } from "./viewMath";
+import { fitView, projectionScales, screenToWorld, type View } from "./viewMath";
 
 export const COMBAT_ZOOM_MS = 1900;
 export const COMBAT_PAN_MS = 1400;
@@ -32,11 +32,12 @@ export function easeInOutCubic(t: number): number {
 }
 
 export function viewCenter(view: View, width: number, height: number): Vec2 {
-  return { x: view.x + width / 2 / view.k, y: view.y + height / 2 / view.k };
+  return screenToWorld(view, { x: width / 2, y: height / 2 });
 }
 
 export function viewFor(center: Vec2, k: number, width: number, height: number): View {
-  return { k, x: center.x - width / 2 / k, y: center.y - height / 2 / k };
+  const { sx, sy } = projectionScales(k);
+  return { k, x: center.x - width / 2 / sx, y: center.y - height / 2 / sy };
 }
 
 /** `t` is 0 at `from` and 1 at `to`. The world point in the middle of the canvas is what moves. */

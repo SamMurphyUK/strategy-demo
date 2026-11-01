@@ -17,7 +17,7 @@ import {
   type Vec2,
 } from "./geometry";
 import { badgeExtent } from "./facilityBadge";
-import { type View, worldToScreen } from "./viewMath";
+import type { View } from "./viewMath";
 
 export type UnitDomain = "land" | "air" | "sea";
 
@@ -294,9 +294,15 @@ export function clearOf(fixed: Box, mover: Box, fallback: Vec2, gap = GAP_PX): B
   return { ...mover, x: mover.x + d.x * t, y: mover.y + d.y * t };
 }
 
+/** Screen position before the camera's vertical foreshortening. The map applies that in layoutRegions. */
+function layoutScreen(view: View, p: Vec2): Vec2 {
+  return { x: (p.x - view.x) * view.k, y: (p.y - view.y) * view.k };
+}
+
 /**
  * The territory's tokens, back to front, plus its facility badge and the y of the shield and combat marker.
  * One pool of slots for every unit type. Air has no anchor of its own.
+ * Positions are in isotropic screen pixels (`view.k` on both axes). layoutRegions foreshortens Y with the camera.
  */
 export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], p: LayoutParams): RegionVisuals {
   const { view, tokenPx } = p;
@@ -314,7 +320,7 @@ export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], 
     if (group.length === 0) {
       continue;
     }
-    const origin = worldToScreen(view, seats[g]);
+    const origin = layoutScreen(view, seats[g]);
     const sats = group.slice(1);
     if (sats.length > 0) {
       arcing = true;
@@ -340,7 +346,7 @@ export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], 
   const plus = capped && lead ? { x: lead.at.x + plusOffset(tokenPx).x, y: lead.at.y + plusOffset(tokenPx).y } : null;
 
   const s = tokenPx / 32;
-  const anchor = worldToScreen(view, region.anchor);
+  const anchor = layoutScreen(view, region.anchor);
   const half = tokenPx / 2 + 1;
   const occupied: Box[] = tokens.map((t) => ({ x: t.x, y: t.y, hw: half, hh: half }));
 
@@ -358,7 +364,7 @@ export function layoutRegionVisuals(region: RegionShape, entries: StackEntry[], 
   const ext = badgeExtent(facilities);
   let badge: PlacedBadge | null = null;
   if (ext.w > 0) {
-    const at = worldToScreen(view, facilityAnchorOf(region));
+    const at = layoutScreen(view, facilityAnchorOf(region));
     let box: Box = { x: at.x, y: at.y, hw: (ext.w * p.badgeSide) / 2, hh: (ext.h * p.badgeSide) / 2 };
     if (!region.facilityAnchorSet) {
       for (const obstacle of [shieldBox(shieldY), ...occupied]) {

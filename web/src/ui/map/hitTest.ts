@@ -141,3 +141,37 @@ export function pickCounter(layouts: RegionLayout[], p: Vec2, radius: number): P
   }
   return null;
 }
+
+function uprightHits(counter: PlacedCounter, p: Vec2, radius: number, uprightPx: number): boolean {
+  const dx = p.x - counter.x;
+  const dy = p.y - counter.y;
+  if (dx * dx + dy * dy <= radius * radius) {
+    return true;
+  }
+  return uprightPx > 0 && dy <= 2 && dy >= -uprightPx && Math.abs(dx) <= radius;
+}
+
+/**
+ * The upright sprite under a screen point. The front-most figure (largest screen y, drawn last) wins,
+ * matching the LoD 2 painter's pass.
+ */
+export function pickFrontCounter(
+  layouts: RegionLayout[],
+  p: Vec2,
+  radius: number,
+  uprightPx: number,
+): PickedCounter | null {
+  const hits: PickedCounter[] = [];
+  for (const layout of layouts) {
+    for (const counter of layout.counters) {
+      if (uprightHits(counter, p, radius, uprightPx)) {
+        hits.push({ layout, counter });
+      }
+    }
+  }
+  if (hits.length === 0) {
+    return null;
+  }
+  hits.sort((a, b) => b.counter.y - a.counter.y);
+  return hits[0];
+}

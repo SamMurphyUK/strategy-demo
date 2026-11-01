@@ -45,5 +45,12 @@ export async function loadMasterLand(url: string = LAND_SVG_URL): Promise<Master
   if (!response.ok) {
     throw new Error(`Could not load ${url} (${response.status})`);
   }
-  return parseLandSvg(await response.text());
+  const text = await response.text();
+  const head = text.trimStart().slice(0, 64).toLowerCase();
+  if (head.startsWith("<!doctype html") || head.startsWith("<html")) {
+    throw new Error(
+      `Could not load ${url}: the server returned the app page instead of the SVG. The file on disk was not served.`,
+    );
+  }
+  return parseLandSvg(text);
 }

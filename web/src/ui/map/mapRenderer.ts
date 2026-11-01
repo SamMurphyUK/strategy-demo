@@ -9,9 +9,10 @@
 // and `exact` is false, so land regions are clipped to the stencil at draw time instead.
 //
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
-import { factionPalette } from "../theme/factionPalette";
+import { isLandAt } from "./hitTest";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
+import { drawUprightStack } from "./uprightSprites";
 import {
   BADGE_FILL,
   BADGE_INACTIVE_STROKE,
@@ -29,6 +30,7 @@ import {
   facilitiesOf,
   facilityAnchorOf,
   type HighlightMode,
+  pointInPolygon,
   type Rect,
   type RegionShape,
   SELECTED_OUTLINE_WIDTH,
@@ -56,6 +58,7 @@ import {
   ATTACK_WIDTH,
   battleBadgeHalf,
   battleBadgeScale,
+  ARROW_BRASS,
   operationalFill,
   type OperationalOrder,
   type PlannedArrow,
@@ -63,13 +66,24 @@ import {
   shaftClearancePx,
   ARROW_INK,
 } from "./operationalArrows";
-import { type View, screenToWorld, worldToScreen } from "./viewMath";
+import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
+import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
+import {
+  type MapLod,
+  type TerrainStamp,
+  terrainStampAlpha,
+  terrainStamps,
+  uprightDrawOrder,
+} from "./zoomLod";
 
 export const TOKEN_PX = 32;
 const PAPER = "#f4f1ea";
 const INK = "#1a1a18";
+const PLINTH = "#262126";
+const BRASS = "#D9B26F";
+const GOLD_NUM = "#E8C585";
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
-const MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
+const MONO = '"Courier New", "JetBrains Mono", ui-monospace, monospace';
 
 export interface TerrainScene {
   width: number;
@@ -93,6 +107,14 @@ export interface TerrainScene {
   bounds: Rect;
   /** Horizontal offsets of the world copies to draw: -width, 0, +width as they come into view. */
   copies: number[];
+  /** Hostile land borders, in world units. Drawn on every copy. */
+  frontlines?: readonly FrontlineSegment[];
+  /** Craters and the current smoke frame, in world units. Drawn on every copy. */
+  scars?: readonly ScarFrame[];
+  /** 0 strategic, 1 operational stamps, 2 upright sprites. Omitted means strategic. */
+  lod?: MapLod;
+  /** World points stamps must stay clear of, per land region. Hubs and unit slots. */
+  stampAvoid?: Readonly<Record<string, readonly Vec2[]>>;
 }
 
 export interface PlacedCounter {
@@ -148,6 +170,8 @@ export function layoutRegions(
   options: LayoutOptions = {},
 ): RegionLayout[] {
   const tokenPx = TOKEN_PX * tokenScale;
+  const yScale = view.k > 0 ? projectionScales(view.k).sy / view.k : 1;
+  const tiltY = (y: number) => y * yScale;
   return regions.map((region) => {
     const anchor = worldToScreen(view, region.anchor);
     const entries = stacks[region.id] ?? [];
@@ -160,10 +184,10 @@ export function layoutRegions(
     });
     const counters = visuals.tokens.map((t) => ({
       regionId: region.id,
-      slot: { key: t.key, entry: t.entry, offset: { x: t.x - anchor.x, y: t.y - anchor.y } },
+      slot: { key: t.key, entry: t.entry, offset: { x: t.x - anchor.x, y: tiltY(t.y) - anchor.y } },
       domain: t.domain,
       x: t.x,
-      y: t.y,
+      y: tiltY(t.y),
     }));
     return {
       region,
@@ -171,10 +195,10 @@ export function layoutRegions(
       counters,
       stage: visuals.stage,
       capped: visuals.capped,
-      plus: visuals.plus,
-      badge: visuals.badge,
-      shieldY: visuals.shieldY,
-      markerY: visuals.markerY,
+      plus: visuals.plus ? { x: visuals.plus.x, y: tiltY(visuals.plus.y) } : null,
+      badge: visuals.badge ? { ...visuals.badge, y: tiltY(visuals.badge.y) } : null,
+      shieldY: tiltY(visuals.shieldY),
+      markerY: tiltY(visuals.markerY),
       halfHeight: visuals.tokens.length > 0 ? tokenPx / 2 : 0,
       copyDx: options.copyDx ?? 0,
     };
@@ -182,8 +206,10 @@ export function layoutRegions(
 }
 
 function setWorldTransform(ctx: CanvasRenderingContext2D, view: View, dpr: number): void {
-  const s = dpr * view.k;
-  ctx.setTransform(s, 0, 0, s, -view.x * s, -view.y * s);
+  const { sx, sy } = projectionScales(view.k);
+  const xs = dpr * sx;
+  const ys = dpr * sy;
+  ctx.setTransform(xs, 0, 0, ys, -view.x * xs, -view.y * ys);
 }
 
 function setScreenTransform(ctx: CanvasRenderingContext2D, dpr: number): void {
@@ -212,9 +238,54 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     ctx.translate(dx, 0);
     ctx.lineJoin = "round";
     ctx.drawImage(baked.canvas, bounds.x - bleed, bounds.y, bounds.w + bleed * 2, bounds.h);
-    drawDynamicTerrain(ctx, s, px);
+    drawTiltedCliffs(ctx, s, bleed);
+    drawDynamicTerrain(ctx, s, px, dx);
   }
   setWorldTransform(ctx, view, dpr);
+}
+
+/** Southern cliff lip in the water. Depth grows with the camera tilt. The baked land is put back on top. */
+function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed: number): void {
+  const landRegions = s.regions.filter((region) => region.type === "land" && s.paths.has(region.id));
+  if (landRegions.length === 0) {
+    return;
+  }
+  const relief = cliffDepthScale(s.view.k);
+  const extrude = (dy: number, fill: string, stroke: string, width: number) => {
+    ctx.save();
+    ctx.translate(0, dy);
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = width;
+    ctx.lineJoin = "miter";
+    for (const region of landRegions) {
+      const path = s.paths.get(region.id);
+      if (!path) {
+        continue;
+      }
+      ctx.fill(path, "evenodd");
+      ctx.stroke(path);
+    }
+    ctx.restore();
+  };
+  extrude(5 * relief, "rgba(20, 30, 34, 0.65)", "rgba(20, 30, 34, 0.65)", 1);
+  extrude(2.5 * relief, "#2E2723", "#1A1815", 1.5);
+
+  ctx.save();
+  if (s.land) {
+    ctx.clip(s.land.masterLandPath);
+  } else {
+    const cover = new Path2D();
+    for (const region of landRegions) {
+      const path = s.paths.get(region.id);
+      if (path) {
+        cover.addPath(path);
+      }
+    }
+    ctx.clip(cover);
+  }
+  ctx.drawImage(s.baked.canvas, s.bounds.x - bleed, s.bounds.y, s.bounds.w + bleed * 2, s.bounds.h);
+  ctx.restore();
 }
 
 function fillLandWash(ctx: CanvasRenderingContext2D, s: TerrainScene, color: string): void {
@@ -231,7 +302,173 @@ function fillLandWash(ctx: CanvasRenderingContext2D, s: TerrainScene, color: str
   }
 }
 
-function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number): void {
+function drawFrontlines(ctx: CanvasRenderingContext2D, segments: readonly FrontlineSegment[]): void {
+  if (segments.length === 0) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+  ctx.beginPath();
+  for (const segment of segments) {
+    ctx.moveTo(segment.x1, segment.y1);
+    ctx.lineTo(segment.x2, segment.y2);
+  }
+  ctx.strokeStyle = "rgba(184, 37, 32, 0.32)";
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.strokeStyle = "#E86A58";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBattleScars(ctx: CanvasRenderingContext2D, scars: readonly ScarFrame[], px: number, plumes: boolean): void {
+  if (scars.length === 0) {
+    return;
+  }
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  for (const scar of scars) {
+    for (const crater of scar.craters) {
+      ctx.fillStyle = crater.rim;
+      ctx.beginPath();
+      ctx.ellipse(crater.x, crater.y, crater.rx, crater.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = crater.pit;
+      ctx.beginPath();
+      ctx.ellipse(crater.x, crater.y, Math.max(px, crater.rx * 0.42), Math.max(px, crater.ry * 0.42), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (!plumes) {
+      continue;
+    }
+    for (const puff of scar.smoke) {
+      ctx.fillStyle = puff.color;
+      ctx.fillRect(puff.x, puff.y, puff.w, puff.h);
+    }
+    if (scar.ember) {
+      ctx.fillStyle = scar.ember.color;
+      ctx.fillRect(scar.ember.x, scar.ember.y, px, px);
+    }
+  }
+  ctx.restore();
+}
+
+const stampCache = new Map<string, { key: string; stamps: TerrainStamp[] }>();
+
+function inTerritory(region: RegionShape, p: Vec2): boolean {
+  if (pointInPolygon(p, region.points)) {
+    return true;
+  }
+  for (const ring of region.extra ?? []) {
+    if (pointInPolygon(p, ring)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function stampKey(region: RegionShape, avoid: readonly Vec2[], land: boolean): string {
+  let h = region.points.length;
+  for (const point of region.points) {
+    h = Math.imul(h, 31) + Math.round(point.x * 10) + Math.imul(Math.round(point.y * 10), 17);
+  }
+  for (const point of avoid) {
+    h = Math.imul(h, 31) + Math.round(point.x) + Math.imul(Math.round(point.y), 13);
+  }
+  return `${h}:${land ? 1 : 0}`;
+}
+
+function drawPine(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
+  ctx.fillStyle = "#423840";
+  ctx.fillRect(x + 3 * u, y - 5 * v, 2 * u, 5 * v);
+  ctx.fillStyle = "#527A71";
+  ctx.fillRect(x + 3 * u, y - 14 * v, 2 * u, 3 * v);
+  ctx.fillRect(x + 1 * u, y - 11 * v, 6 * u, 4 * v);
+  ctx.fillRect(x - 1 * u, y - 7 * v, 10 * u, 4 * v);
+  ctx.fillRect(x - 2 * u, y - 4 * v, 12 * u, 3 * v);
+}
+
+function drawPineCluster(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number, n: number): void {
+  const start = -((n - 1) * 5 * u) / 2;
+  for (let i = 0; i < n; i++) {
+    drawPine(ctx, x + start + i * 5 * u, y + (i % 2) * 2 * v, u, v);
+  }
+}
+
+function drawRidge(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
+  ctx.fillStyle = "#2E2723";
+  ctx.fillRect(x - 7 * u, y - 1 * v, 16 * u, 2 * v);
+  ctx.fillStyle = "#4A4038";
+  ctx.fillRect(x - 6 * u, y - 3 * v, 5 * u, 2 * v);
+  ctx.fillRect(x - 1 * u, y - 5 * v, 4 * u, 2 * v);
+  ctx.fillRect(x + 3 * u, y - 3 * v, 5 * u, 2 * v);
+  ctx.fillStyle = "#6B5E52";
+  ctx.fillRect(x - 1 * u, y - 6 * v, 2 * u, 2 * v);
+}
+
+function drawWaterDash(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
+  ctx.fillStyle = "#79989E";
+  ctx.fillRect(x, y, 3 * u, v);
+  ctx.fillRect(x + 5 * u, y, 2 * u, v);
+  ctx.fillRect(x + 8 * u, y, 3 * u, v);
+}
+
+function drawPixelStamps(ctx: CanvasRenderingContext2D, s: TerrainScene, dx: number): void {
+  const alpha = terrainStampAlpha(s.view.k);
+  if (alpha <= 0) {
+    return;
+  }
+  const copyView = { ...s.view, x: s.view.x - dx };
+  const { sx, sy } = projectionScales(s.view.k);
+  const u = 1 / sx;
+  const v = 1 / sy;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = alpha;
+  for (const region of s.regions) {
+    if (region.type !== "land" || region.points.length < 3) {
+      continue;
+    }
+    const origin = worldToScreen(copyView, { x: region.bounds.x, y: region.bounds.y });
+    const far = worldToScreen(copyView, { x: region.bounds.x + region.bounds.w, y: region.bounds.y + region.bounds.h });
+    if (far.x < -24 || origin.x > s.width + 24 || far.y < -24 || origin.y > s.height + 24) {
+      continue;
+    }
+    const avoid = s.stampAvoid?.[region.id] ?? [region.anchor, ...(region.unitSlots ?? [])];
+    const key = stampKey(region, avoid, s.land !== null);
+    const cached = stampCache.get(region.id);
+    const stamps =
+      cached && cached.key === key
+        ? cached.stamps
+        : terrainStamps(region.id, [region.points, ...(region.extra ?? [])], avoid, {
+            interior: (p) => inTerritory(region, p) && (s.land ? isLandAt(s.land, p) : true),
+            water: (p) => (s.land ? !isLandAt(s.land, p) : !inTerritory(region, p)),
+          });
+    if (!cached || cached.key !== key) {
+      stampCache.set(region.id, { key, stamps });
+    }
+    for (const stamp of stamps) {
+      const screen = worldToScreen(copyView, stamp);
+      if (screen.x < -24 || screen.y < -24 || screen.x > s.width + 24 || screen.y > s.height + 24) {
+        continue;
+      }
+      if (stamp.kind === "pine") {
+        const trees = 2 + (Math.abs(Math.round(stamp.x * 3 + stamp.y * 5)) % 2);
+        drawPineCluster(ctx, stamp.x, stamp.y, u, v, trees);
+      } else if (stamp.kind === "ridge") {
+        drawRidge(ctx, stamp.x, stamp.y, u, v);
+      } else {
+        drawWaterDash(ctx, stamp.x, stamp.y, u, v);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number, dx: number): void {
   const { land } = s;
 
   // The editor fades the layer it is not working on.
@@ -278,6 +515,13 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
       ctx.stroke(path);
     }
   }
+
+  if ((s.lod ?? 0) === 1) {
+    drawPixelStamps(ctx, s, dx);
+  }
+
+  drawFrontlines(ctx, s.frontlines ?? []);
+  drawBattleScars(ctx, s.scars ?? [], px, (s.lod ?? 0) !== 2);
 }
 
 // ---------------------------------------------------------------
@@ -495,75 +739,239 @@ export function drawEditorUnits(ctx: CanvasRenderingContext2D, scene: TerrainSce
   }
 }
 
-export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
-  const dpr = scene.dpr;
-  const s = game.unitScale;
-  setScreenTransform(ctx, dpr);
-  const markers = new Map(game.combatMarkers.map((m) => [m.regionId, m.count]));
+function scarGroundY(scar: ScarFrame): number {
+  let y = -Infinity;
+  for (const crater of scar.craters) {
+    y = Math.max(y, crater.y);
+  }
+  if (y === -Infinity) {
+    for (const puff of scar.smoke) {
+      y = Math.max(y, puff.y);
+    }
+  }
+  return y;
+}
 
+function paintSmokePlume(ctx: CanvasRenderingContext2D, scene: TerrainScene, dx: number, scar: ScarFrame): void {
+  ctx.save();
+  setWorldTransform(ctx, scene.view, scene.dpr);
+  ctx.translate(dx, 0);
+  ctx.imageSmoothingEnabled = false;
+  const { sx, sy } = projectionScales(scene.view.k);
+  for (const puff of scar.smoke) {
+    ctx.fillStyle = puff.color;
+    ctx.fillRect(puff.x, puff.y, puff.w, puff.h);
+  }
+  if (scar.ember) {
+    ctx.fillStyle = scar.ember.color;
+    ctx.fillRect(scar.ember.x, scar.ember.y, 1 / sx, 1 / sy);
+  }
+  ctx.restore();
+}
+
+/**
+ * LoD 2 painter's pass. Upright plinths, facility badges and smoke plumes draw in ground-Y order,
+ * so a unit closer to the camera covers one standing behind it.
+ */
+function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
+  const tokenPx = TOKEN_PX * game.unitScale;
+  const items: { worldY: number; paint: () => void }[] = [];
   for (const layout of game.layouts) {
-    const { region, anchor } = layout;
-    if (anchor.x < -80 || anchor.y < -80 || anchor.x > scene.width + 80 || anchor.y > scene.height + 80) {
-      continue;
-    }
-    const owner = game.owners[region.id] ?? "";
-    const shieldY = layout.shieldY;
-
-    // The facility badge sits at the facility anchor, apart from the unit tokens.
+    const copyView = { ...scene.view, x: scene.view.x - layout.copyDx };
     if (layout.badge) {
-      drawFacilityBadge(ctx, layout.badge, facilitiesOf(region), dpr);
-    }
-
-    // IPC shield, at the unit anchor, and a capital's star above it.
-    if (region.type === "land" && region.ipc > 0) {
-      shieldPath(ctx, anchor.x, shieldY, s);
-      ctx.fillStyle = PAPER;
-      ctx.fill();
-      ctx.lineWidth = Math.max(1, 2 * s);
-      ctx.strokeStyle = owner === "" ? INK : factionPalette(owner).primary;
-      ctx.stroke();
-      ctx.fillStyle = INK;
-      ctx.font = `700 ${Math.max(8, 12 * s)}px ${MONO}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(region.ipc), anchor.x, shieldY - 1 * s);
-      if (region.capital) {
-        drawStar(ctx, anchor.x, shieldY - 17 * s, Math.max(4, 6.5 * s));
+      const { badge } = layout;
+      if (badge.x >= -80 && badge.y >= -80 && badge.x <= scene.width + 80 && badge.y <= scene.height + 80) {
+        const worldY = screenToWorld(copyView, { x: badge.x, y: badge.y }).y;
+        items.push({
+          worldY,
+          paint: () => {
+            setScreenTransform(ctx, scene.dpr);
+            drawFacilityBadge(ctx, badge, facilitiesOf(layout.region), scene.dpr);
+          },
+        });
       }
     }
-
-    drawRegionUnits(ctx, layout, game, dpr);
-
-    const combat = markers.get(region.id);
-    if (combat !== undefined) {
-      const cy = layout.markerY;
-      ctx.beginPath();
-      ctx.roundRect(anchor.x - 22, cy - 11, 44, 22, 6);
-      ctx.fillStyle = "#9a4e48";
-      ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = PAPER;
-      ctx.stroke();
-      ctx.fillStyle = PAPER;
-      ctx.font = `700 12px ${MONO}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`\u2694 ${combat}`, anchor.x, cy);
+    for (const counter of layout.counters) {
+      if (counter.x < -48 || counter.y < -56 || counter.x > scene.width + 48 || counter.y > scene.height + 48) {
+        continue;
+      }
+      const { entry } = counter.slot;
+      const worldY = screenToWorld(copyView, { x: counter.x, y: counter.y }).y;
+      const selected = game.selectedStack?.regionId === layout.region.id && game.selectedStack.key === counter.slot.key;
+      items.push({
+        worldY,
+        paint: () => {
+          setScreenTransform(ctx, scene.dpr);
+          drawUprightStack(ctx, {
+            unitType: entry.unit_type_id,
+            factionId: entry.faction_id,
+            count: entry.count,
+            x: counter.x,
+            y: counter.y,
+            tokenPx,
+            dpr: scene.dpr,
+            selected,
+            unmoved: game.isUnmoved(layout.region.id, entry),
+            active: isActiveFaction(entry.faction_id, game.activeFactionId),
+            fuel: game.fuelFor?.(layout.region.id, entry) ?? null,
+            loaded: game.isLoaded?.(entry) ?? false,
+          });
+        },
+      });
     }
+  }
+  for (const dx of scene.copies) {
+    const copyView = { ...scene.view, x: scene.view.x - dx };
+    for (const scar of scene.scars ?? []) {
+      if (scar.smoke.length === 0 && !scar.ember) {
+        continue;
+      }
+      const worldY = scarGroundY(scar);
+      const ground = scar.craters[0] ?? scar.smoke[0];
+      if (!ground) {
+        continue;
+      }
+      const at = worldToScreen(copyView, { x: ground.x, y: worldY });
+      if (at.x < -80 || at.y < -120 || at.x > scene.width + 80 || at.y > scene.height + 80) {
+        continue;
+      }
+      items.push({
+        worldY,
+        paint: () => paintSmokePlume(ctx, scene, dx, scar),
+      });
+    }
+  }
+  for (const item of uprightDrawOrder(2, items)) {
+    item.paint();
   }
 }
 
-function fillPolygon(ctx: CanvasRenderingContext2D, points: Vec2[]): void {
-  if (points.length < 3) {
+export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
+  const dpr = scene.dpr;
+  const s = game.unitScale;
+  const lod = scene.lod ?? 0;
+  setScreenTransform(ctx, dpr);
+  const markers = new Map(game.combatMarkers.map((m) => [m.regionId, m.count]));
+  const visible = (layout: RegionLayout) => {
+    const { anchor } = layout;
+    return anchor.x >= -80 && anchor.y >= -80 && anchor.x <= scene.width + 80 && anchor.y <= scene.height + 80;
+  };
+  const drawShield = (layout: RegionLayout) => {
+    const { region, anchor } = layout;
+    if (region.type !== "land" || region.ipc <= 0) {
+      return;
+    }
+    const shieldY = layout.shieldY;
+    shieldPath(ctx, anchor.x, shieldY, s);
+    ctx.fillStyle = PLINTH;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, 1.25 * s);
+    ctx.strokeStyle = BRASS;
+    ctx.stroke();
+    ctx.fillStyle = GOLD_NUM;
+    ctx.font = `700 ${Math.max(8, 12 * s)}px ${MONO}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(region.ipc), anchor.x, shieldY - 1 * s);
+    if (region.capital) {
+      drawStar(ctx, anchor.x, shieldY - 17 * s, Math.max(4, 6.5 * s));
+    }
+  };
+  const drawMarker = (layout: RegionLayout) => {
+    const combat = markers.get(layout.region.id);
+    if (combat === undefined) {
+      return;
+    }
+    const cy = layout.markerY;
+    ctx.beginPath();
+    ctx.roundRect(layout.anchor.x - 22, cy - 11, 44, 22, 6);
+    ctx.fillStyle = PLINTH;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = BRASS;
+    ctx.stroke();
+    ctx.fillStyle = GOLD_NUM;
+    ctx.font = `700 12px ${MONO}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`\u2694 ${combat}`, layout.anchor.x, cy);
+  };
+
+  if (lod < 2) {
+    for (const layout of game.layouts) {
+      if (!visible(layout)) {
+        continue;
+      }
+      if (layout.badge) {
+        drawFacilityBadge(ctx, layout.badge, facilitiesOf(layout.region), dpr);
+      }
+      drawShield(layout);
+      drawRegionUnits(ctx, layout, game, dpr);
+      drawMarker(layout);
+    }
     return;
   }
+
+  for (const layout of game.layouts) {
+    if (visible(layout)) {
+      drawShield(layout);
+    }
+  }
+  drawUprightDepth(ctx, scene, game);
+  setScreenTransform(ctx, dpr);
+  for (const layout of game.layouts) {
+    if (!visible(layout)) {
+      continue;
+    }
+    if (layout.plus) {
+      drawPlusBadge(ctx, layout.plus.x, layout.plus.y, TOKEN_PX * s);
+    }
+    drawMarker(layout);
+  }
+}
+
+function tracePolygon(ctx: CanvasRenderingContext2D, points: Vec2[]): void {
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   for (let i = 1; i < points.length; i++) {
     ctx.lineTo(points[i].x, points[i].y);
   }
   ctx.closePath();
+}
+
+function fillPolygon(ctx: CanvasRenderingContext2D, points: Vec2[]): void {
+  if (points.length < 3) {
+    return;
+  }
+  tracePolygon(ctx, points);
   ctx.fill();
+}
+
+let scanCanvas: HTMLCanvasElement | null = null;
+
+/** Diagonal pixel stripes laid over an attack shaft. */
+function attackScanPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (!scanCanvas) {
+    scanCanvas = document.createElement("canvas");
+    scanCanvas.width = 8;
+    scanCanvas.height = 8;
+    const g = scanCanvas.getContext("2d");
+    if (!g) {
+      return null;
+    }
+    g.imageSmoothingEnabled = false;
+    g.strokeStyle = "rgba(26, 24, 21, 0.7)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(0, 8);
+    g.lineTo(8, 0);
+    g.moveTo(-2, 2);
+    g.lineTo(2, -2);
+    g.moveTo(6, 10);
+    g.lineTo(10, 6);
+    g.stroke();
+  }
+  return ctx.createPattern(scanCanvas, "repeat");
 }
 
 const ATTACK_RING = "#F5C400";
@@ -586,19 +994,19 @@ function drawBattleBadge(ctx: CanvasRenderingContext2D, x: number, y: number, co
   const h = 22 * scale;
   ctx.beginPath();
   ctx.roundRect(x - w / 2, y - h / 2, w, h, 6 * scale);
-  ctx.fillStyle = "#9a4e48";
+  ctx.fillStyle = PLINTH;
   ctx.fill();
   ctx.lineWidth = Math.max(1, 1.25 * scale);
-  ctx.strokeStyle = PAPER;
+  ctx.strokeStyle = BRASS;
   ctx.stroke();
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = GOLD_NUM;
   ctx.font = `700 ${Math.max(1, 12 * scale)}px ${MONO}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(`\u2694 ${count}`, x, y);
 }
 
-const FOOT_BADGE = "#243044";
+const FOOT_BADGE = "#262126";
 
 /** A stomping boot and the number of units ordered into that region. Same stamp as the sword badge. */
 function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, count: number, scale: number): void {
@@ -609,13 +1017,13 @@ function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, coun
   ctx.fillStyle = FOOT_BADGE;
   ctx.fill();
   ctx.lineWidth = Math.max(1, 1.25 * scale);
-  ctx.strokeStyle = PAPER;
+  ctx.strokeStyle = BRASS;
   ctx.stroke();
 
   ctx.save();
   ctx.translate(x - 8 * scale, y);
   ctx.scale(scale, scale);
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = GOLD_NUM;
   ctx.beginPath();
   ctx.moveTo(-8, 6);
   ctx.lineTo(6, 6);
@@ -628,7 +1036,7 @@ function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, coun
   ctx.lineTo(-8, -2);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = PAPER;
+  ctx.strokeStyle = GOLD_NUM;
   ctx.lineWidth = 1.35;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -639,7 +1047,7 @@ function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, coun
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = PAPER;
+  ctx.fillStyle = GOLD_NUM;
   ctx.font = `700 ${Math.max(1, 12 * scale)}px ${MONO}`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -746,6 +1154,39 @@ export function drawOperationalArrows(
     ctx.fillStyle = fill;
     for (const poly of inners) {
       fillPolygon(ctx, poly);
+    }
+    ctx.strokeStyle = ARROW_BRASS;
+    ctx.lineWidth = 1;
+    ctx.lineJoin = "miter";
+    for (const poly of inners) {
+      if (poly.length < 3) {
+        continue;
+      }
+      tracePolygon(ctx, poly);
+      ctx.stroke();
+    }
+    if (phase === "combat_move") {
+      const scan = attackScanPattern(ctx);
+      if (scan) {
+        ctx.save();
+        ctx.beginPath();
+        for (const poly of inners) {
+          if (poly.length < 3) {
+            continue;
+          }
+          ctx.moveTo(poly[0].x, poly[0].y);
+          for (let i = 1; i < poly.length; i++) {
+            ctx.lineTo(poly[i].x, poly[i].y);
+          }
+          ctx.closePath();
+        }
+        ctx.clip();
+        ctx.globalAlpha = 0.38;
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = scan;
+        ctx.fillRect(0, 0, scene.width, scene.height);
+        ctx.restore();
+      }
     }
   }
   drawAttackRings(ctx, rings);

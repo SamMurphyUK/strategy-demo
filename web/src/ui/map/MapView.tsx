@@ -1,9 +1,9 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
-import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
+import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
-import { buildCutterPaths, buildRegionPaths, pickCounter, pickPlus, pickRegion } from "./hitTest";
+import { buildCutterPaths, buildRegionPaths, pickCounter, pickFrontCounter, pickPlus, pickRegion } from "./hitTest";
 import {
   drawBattleIcons,
   drawFootIcons,
@@ -16,6 +16,7 @@ import {
   drawTerrain,
   type EditorOverlay,
   layoutRegions,
+  type RegionLayout,
   type TerrainScene,
   TOKEN_PX,
 } from "./mapRenderer";
@@ -26,10 +27,16 @@ import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
-import { easeInOutCubic, type MapCamera, viewFor } from "./combatCamera";
+import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
+import {
+  battleScarDescriptors,
+  type FrontlineSegment,
+  type ScarTarget,
+  smokeFrame,
+} from "./terrainRelief";
 import {
   fitView,
-  panBy,
+  panView,
   screenToWorld,
   type View,
   visibleCopies,
@@ -39,6 +46,7 @@ import {
   wrapWorldX,
   zoomAt,
 } from "./viewMath";
+import { lodForZoom, type MapLod, UPRIGHT_HIT_PX } from "./zoomLod";
 
 export interface CombatMarker {
   regionId: string;
@@ -109,6 +117,8 @@ export interface MapViewProps {
   movement?: { phase: string; orders: readonly OperationalOrder[]; regionIds: readonly string[] } | null;
   /** Sword badges that stay up through the combat phase, one per battle that is not finished. */
   battleIcons?: readonly { regionId: string; count: number }[];
+  /** Hostile borders and territories carrying battle scars. Empty in the editor. */
+  relief?: { frontlines: readonly FrontlineSegment[]; scars: readonly ScarTarget[] } | null;
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -186,6 +196,7 @@ export function MapView(props: MapViewProps) {
   const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
   const userMoved = useRef(false);
+  const lodHold = useRef<MapLod>(0);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -202,6 +213,11 @@ export function MapView(props: MapViewProps) {
   // Tokens are a fixed size in the world, so they scale with the map and hold their formation at every zoom;
   // only the extremes are clamped (see worldTokenPx).
   const unitScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
+  const mapLod: MapLod = editor ? 0 : lodForZoom(view.k, lodHold.current);
+  if (!editor) {
+    lodHold.current = mapLod;
+  }
+  const uprightReach = mapLod === 2 ? UPRIGHT_HIT_PX : 0;
   const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
   const plusHitPx = Math.max(4, TOKEN_PX * unitScale * 0.22);
   /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
@@ -220,10 +236,21 @@ export function MapView(props: MapViewProps) {
   );
   const bakeRef = useRef<TerrainBake | null>(null);
   bakeRef.current ??= new TerrainBake();
+  const scarCount = props.relief?.scars.length ?? 0;
+  const [scarNow, setScarNow] = useState(0);
+  useEffect(() => {
+    if (scarCount === 0 || props.suspended) {
+      return;
+    }
+    const tick = () => setScarNow(performance.now());
+    tick();
+    const id = window.setInterval(tick, 220);
+    return () => window.clearInterval(id);
+  }, [scarCount > 0, props.suspended]);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx };
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -257,10 +284,7 @@ export function MapView(props: MapViewProps) {
         const fromK = live.current.view.k;
         const w0 = live.current.size.w || 1;
         const h0 = live.current.size.h || 1;
-        const fromCenter = {
-          x: live.current.view.x + w0 / 2 / fromK,
-          y: live.current.view.y + h0 / 2 / fromK,
-        };
+        const fromCenter = viewCenter(live.current.view, w0, h0);
         return new Promise((resolve) => {
           const start = performance.now();
           let raf = 0;
@@ -346,6 +370,28 @@ export function MapView(props: MapViewProps) {
       selectedRegionId: props.selectedRegionId,
       hoverRegionId: hoverId,
       dim: only === null ? null : only === "land" ? "sea" : "land",
+      frontlines: editor ? [] : (props.relief?.frontlines ?? []),
+      lod: mapLod,
+      stampAvoid:
+        mapLod === 1
+          ? Object.fromEntries(
+              geometry.regions
+                .filter((region) => region.type === "land")
+                .map((region) => [region.id, [region.anchor, facilityAnchorOf(region), ...slotsFor(region)]]),
+            )
+          : undefined,
+      scars: editor
+        ? []
+        : (props.relief?.scars ?? []).flatMap((scar) => {
+            const region = geometry.regions.find((item) => item.id === scar.regionId);
+            if (!region || region.type !== "land") {
+              return [];
+            }
+            const frame = smokeFrame(scarNow);
+            return [
+              battleScarDescriptors(region.id, region.anchor, [region.anchor, ...slotsFor(region)], scar.ember)[frame],
+            ];
+          }),
     };
     drawTerrain(ctx, scene);
     const overlay = {
@@ -405,6 +451,11 @@ export function MapView(props: MapViewProps) {
 
   /** A pointer's world point folded onto the primary copy of the wrapped world, for picking regions. */
   const pickWorld = (w: Vec2): Vec2 => (live.current.wrap ? { x: wrapWorldX(w.x, live.current.bounds), y: w.y } : w);
+
+  const pickUnit = (ls: RegionLayout[], sp: Vec2) => {
+    const { tokenHitPx: hit, uprightReach: reach } = live.current;
+    return reach > 0 ? pickFrontCounter(ls, sp, hit, reach) : pickCounter(ls, sp, hit);
+  };
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -483,7 +534,7 @@ export function MapView(props: MapViewProps) {
   /** A press that did not travel: the same as a click before dragging existed. */
   const resolveClick = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
     const sp = pointer(e);
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, plusHitPx: plusHit } = live.current;
     const world = screenToWorld(v, sp);
     if (p.editor) {
       p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, {
@@ -496,7 +547,7 @@ export function MapView(props: MapViewProps) {
       p.onOpenInspector?.(plus.region.id);
       return;
     }
-    const picked = pickCounter(ls, sp, hit);
+    const picked = pickUnit(ls, sp);
     if (picked) {
       if (picked.layout.capped) {
         p.onOpenInspector?.(picked.counter.regionId);
@@ -520,7 +571,7 @@ export function MapView(props: MapViewProps) {
       live.current.props.onDragCancel?.();
     }
     const sp = pointer(e);
-    const { view: v, layouts: ls, props: p, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
+    const { view: v, layouts: ls, props: p, plusHitPx: plusHit } = live.current;
     const ed = p.editor;
     const handle = ed?.pickHandle(screenToWorld(v, sp), HANDLE_PX / v.k) ?? null;
     const from = screenToWorld(v, sp);
@@ -530,7 +581,7 @@ export function MapView(props: MapViewProps) {
       // Knife: dragging draws the cut. Alt-drag still pans.
       drag.current = { kind: "swipe", from, points: [], moved: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
     } else if (!ed && pickPlus(ls, sp, plusHit) === null) {
-      const picked = pickCounter(ls, sp, hit);
+      const picked = pickUnit(ls, sp);
       const max = picked ? (p.movableMax?.(picked.counter.regionId, picked.counter.slot.entry) ?? 0) : 0;
       if (picked && max > 0) {
         const slotWorld = screenToWorld(v, { x: picked.counter.x, y: picked.counter.y });
@@ -567,7 +618,7 @@ export function MapView(props: MapViewProps) {
 
   const onPointerMove = (e: React.PointerEvent) => {
     const sp = pointer(e);
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
     const world = screenToWorld(v, sp);
     const d = drag.current;
     if (d?.kind === "handle") {
@@ -617,7 +668,7 @@ export function MapView(props: MapViewProps) {
       }
       d.moved = true;
       userMoved.current = true;
-      const panned = panBy(d.view, dx, dy);
+      const panned = panView(d.view, dx, dy);
       setView(live.current.wrap ? wrapView(panned, live.current.size.w, live.current.bounds) : panned);
       return;
     }
@@ -629,7 +680,7 @@ export function MapView(props: MapViewProps) {
     if (!p.editor) {
       p.onRegionHover(id);
     }
-    const picked = pickCounter(ls, sp, hit);
+    const picked = pickUnit(ls, sp);
     const overPlus = pickPlus(ls, sp, live.current.plusHitPx) !== null;
     const nextHover = picked
       ? { regionId: picked.counter.regionId, key: picked.counter.slot.key, copyDx: picked.layout.copyDx }

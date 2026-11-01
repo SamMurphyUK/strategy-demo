@@ -129,9 +129,9 @@ export const BORDER_PASSES = [
 export const COAST_INK = { color: "#1A1815", width: 1.6 } as const;
 
 /** Fades land that a move or mobilize highlight does not offer, over the baked fills. */
-export const LAND_WASH = "rgba(216, 210, 197, 0.55)";
+export const LAND_WASH = "rgba(38, 33, 38, 0.55)";
 /** Fades the land layer while the editor works on the sea layer. */
-export const EDITOR_LAND_DIM = "rgba(182, 196, 204, 0.7)";
+export const EDITOR_LAND_DIM = "rgba(38, 33, 38, 0.55)";
 
 /** Fill for a land region under a move or mobilize highlight, or null when the baked tint should show. */
 export function highlightLandFill(regionId: string, owner: string, mode: HighlightMode): string | null {

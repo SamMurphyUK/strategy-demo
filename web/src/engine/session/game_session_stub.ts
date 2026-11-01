@@ -287,6 +287,7 @@ export class GameSessionStub {
     const nextFaction = factions[nextIdx];
     if (nextIdx === 0) {
       this.state.game_round += 1;
+      this.state.clearFoughtThisRound();
     }
     this.state.turn_number += 1;
     this.state.current_faction_id = nextFaction;

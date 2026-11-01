@@ -24,6 +24,7 @@ export class TurnEngine {
     state.current_phase = PHASES[0];
     state.turn_number = 1;
     state.game_round = 1;
+    state.clearFoughtThisRound();
     this.recordFactories();
     return [
       GameEvent.create(
@@ -76,6 +77,7 @@ export class TurnEngine {
     state.turn_number += 1;
     if (nextIdx === 0) {
       state.game_round += 1;
+      state.clearFoughtThisRound();
     }
     state.current_phase = PHASES[0];
     state.clearMovementPhaseTracking();

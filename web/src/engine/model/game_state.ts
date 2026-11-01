@@ -66,6 +66,8 @@ export class GameState {
   air_movement_spent: Record<string, number> = {};
   /** Land taken this turn. Aircraft cannot land there until the next turn. */
   territories_captured_this_turn: Record<string, boolean> = {};
+  /** Territories where a battle was resolved during the current round. Cleared when the round advances. */
+  territories_fought_this_round: Record<string, boolean> = {};
   /** The battle being fought round by round in the combat phase, if any. */
   active_battle: ActiveBattle | null = null;
   /** Orders applied since the current movement phase began. */
@@ -197,6 +199,16 @@ export class GameState {
 
   recordInstanceMoved(instanceId: string): void {
     this.instances_moved_this_phase[instanceId] = true;
+  }
+
+  noteTerritoryFought(regionId: string): void {
+    if (regionId !== "") {
+      this.territories_fought_this_round[regionId] = true;
+    }
+  }
+
+  clearFoughtThisRound(): void {
+    clearInPlace(this.territories_fought_this_round);
   }
 
   clearMovementPhaseTracking(): void {

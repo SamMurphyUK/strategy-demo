@@ -13,7 +13,8 @@ export const JOIN_T_MIN = 0.2;
 export const JOIN_T_MAX = 0.65;
 
 export const ARROW_INK = "#1A1815";
-export const COMBAT_ARROW = "#C82323";
+export const COMBAT_ARROW = "#A82828";
+export const ARROW_BRASS = "#D9B26F";
 export const NONCOMBAT_ARROW = "#E2B53C";
 
 const TAU = Math.PI * 2;

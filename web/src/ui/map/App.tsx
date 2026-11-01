@@ -30,6 +30,7 @@ import { RegionPanel } from "./panels/RegionPanel";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
 import { isActiveFaction } from "./tokenStyle";
+import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
 import { moveUnitsPayload } from "./stackMove";
 import { useGameSession } from "./session/use_game_session";
 
@@ -147,6 +148,20 @@ export function App() {
   }, [game.mapId]);
 
   // `state` is mutated in place by the session; `version` is the dependency that changes.
+  const relief = useMemo(() => {
+    if (editing) {
+      return { frontlines: [], scars: [] };
+    }
+    const box = land?.viewBox ?? geometry.bounds;
+    return {
+      frontlines: extractHostileFrontlineSegments(reliefRegions(geometry.regions), state, {
+        left: box.x,
+        right: box.x + box.w,
+      }),
+      scars: scarTargets(state),
+    };
+  }, [editing, geometry, land, state, version]);
+
   const owners = useMemo(() => {
     const out: Record<string, string> = {};
     for (const id of Object.keys(state.regions)) {
@@ -461,6 +476,7 @@ export function App() {
           highlight={editing ? NO_HIGHLIGHT : highlight}
           combatMarkers={editing ? NO_MARKERS : combatMarkers}
           battleIcons={editing ? undefined : battleIcons}
+          relief={relief}
           isUnmoved={editing ? NEVER : isUnmoved}
           onRegionClick={onRegionClick}
           onRegionHover={setHoverRegionId}

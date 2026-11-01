@@ -572,6 +572,7 @@ export class CombatEngine {
       { region_id: regionId, result, rounds: b.round, ...(retreatTo !== "" ? { retreat_to: retreatTo } : {}) },
       this.nextSeq(),
     );
+    state.noteTerritoryFought(regionId);
     state.active_battle = null;
     return [...events, finished];
   }

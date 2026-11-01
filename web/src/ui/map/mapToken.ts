@@ -9,7 +9,6 @@ import {
   hullFor,
   isActiveFaction,
   navalLetter,
-  pillColors,
   pillFontPx,
   pillRadius,
   PILL_OFFSET,
@@ -22,7 +21,11 @@ import {
 import { unitDomain } from "./unitStacks";
 
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
-const MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
+const MONO = '"Courier New", "JetBrains Mono", ui-monospace, monospace';
+const PLINTH = "#262126";
+const BRASS = "#D9B26F";
+const GOLD_NUM = "#E8C585";
+const TEAL_NUM = "#63C5B8";
 /** The ink ring that separates overlapping tokens. One and a half screen pixels, whatever the zoom. */
 const SEPARATION_RING_PX = 1.5;
 
@@ -127,14 +130,18 @@ export function drawTokenFace(
   } else {
     paintFigure(ctx, entry, x, y, d);
   }
+  ctx.imageSmoothingEnabled = false;
   ctx.beginPath();
-  ctx.arc(x, y, r - SEPARATION_RING_PX / 2, 0, Math.PI * 2);
-  ctx.lineWidth = SEPARATION_RING_PX;
+  ctx.arc(x, y, r - 0.6, 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(1.5, d * 0.06);
   ctx.strokeStyle = TOKEN_INK;
   ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, r - Math.max(2.4, d * 0.09), 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(1, d * 0.035);
+  ctx.strokeStyle = BRASS;
+  ctx.stroke();
 }
-
-const FUEL_FILL = "#C47B2B";
 
 /** Remaining fuel, top-left, so it sits clear of the count pill. */
 export function drawFuelPill(ctx: CanvasRenderingContext2D, fuel: number, x: number, y: number, d: number): void {
@@ -143,12 +150,12 @@ export function drawFuelPill(ctx: CanvasRenderingContext2D, fuel: number, x: num
   const cy = y - d * PILL_OFFSET;
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = FUEL_FILL;
+  ctx.fillStyle = PLINTH;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.2, radius * 0.2);
-  ctx.strokeStyle = TOKEN_INK;
+  ctx.lineWidth = Math.max(1, radius * 0.16);
+  ctx.strokeStyle = BRASS;
   ctx.stroke();
-  ctx.fillStyle = TOKEN_WHITE;
+  ctx.fillStyle = TEAL_NUM;
   ctx.font = `700 ${pillFontPx(d)}px ${MONO}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -164,18 +171,17 @@ export function drawCountPill(
   d: number,
   active: boolean,
 ): void {
-  const colors = pillColors(active);
   const radius = pillRadius(d);
   const cx = x + d * PILL_OFFSET;
   const cy = y + d * PILL_OFFSET;
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = colors.fill;
+  ctx.fillStyle = PLINTH;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.2, radius * 0.2);
-  ctx.strokeStyle = colors.rim;
+  ctx.lineWidth = Math.max(1, radius * 0.16);
+  ctx.strokeStyle = BRASS;
   ctx.stroke();
-  ctx.fillStyle = colors.text;
+  ctx.fillStyle = active ? TEAL_NUM : GOLD_NUM;
   ctx.font = `700 ${pillFontPx(d)}px ${MONO}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -192,6 +198,7 @@ export function drawMapToken(
   paint: TokenPaint,
 ): void {
   ctx.save();
+  ctx.imageSmoothingEnabled = false;
   ctx.shadowColor = "rgba(26, 24, 21, 0.5)";
   ctx.shadowBlur = 3 * paint.dpr;
   ctx.shadowOffsetY = 1 * paint.dpr;

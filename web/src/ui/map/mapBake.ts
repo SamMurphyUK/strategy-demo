@@ -1,9 +1,9 @@
 // The static base map, painted once onto an offscreen canvas and blitted every frame.
 //
-//   Layer 0  muted slate-blue ocean with paper grain, pale seams between sea zones, a soft shadow under the land
-//   Layer 1  desaturated faction tints on the land, with the grain multiplied over them
-//   Layer 2  contour-hugging aged burn along every territory's inside edge
-//   Layer 3  airbrushed double-stroke territory borders and the coastline ink
+//   Layer 0  slate water with cached pixel wave bands, then a shallow shelf and sand edge
+//   Layer 1  muted faction land, a 4×4 dither, and a light paper grain
+//   Layer 2  inner sepia shade along every territory's inside edge
+//   Layer 3  territory borders and the coastline ink
 //
 // Everything here is slow (blur, clip, thousands of segments), so none of it runs per frame. The live
 // renderer only draws the cached bitmap, then the dynamic layers (highlights, units, editor handles) on top.
@@ -13,6 +13,8 @@
 // The world wraps horizontally. Land is cut at the left and right edges, so edges lying on the seam are
 // never inked: a coastline or border drawn there would be a false line through land that carries on in the
 // next copy.
+import type { FactionKey } from "../theme/factionPalette";
+import { resolveFaction } from "../theme/factionPalette";
 import type { Rect, RegionShape } from "./geometry";
 import { hatchSegments, isHatchedOwner } from "./hatch";
 import {
@@ -25,18 +27,12 @@ import {
   ringsOf,
   type Seam,
   sharedEdges,
-  tileMean,
 } from "./mapBakeMath";
 import {
   BORDER_PASSES,
   BURN_PASSES,
   COAST_INK,
-  COAST_SHADOW,
-  FACTION_TINT,
-  landTint,
   NEUTRAL_HATCH,
-  SEA_BASE_COLOR,
-  SEA_SEAM_COLOR,
   SEA_SEAM_WIDTH,
 } from "./mapStyle";
 import type { MultiPolygon } from "./regionClip";
@@ -62,16 +58,32 @@ export interface Baked {
 }
 
 const GRAIN_SIZE = 256;
-/** How strongly the paper grain is multiplied into the ocean. */
-const OCEAN_GRAIN_ALPHA = 0.7;
+/** How strongly the paper grain is multiplied into the land. */
+const LAND_GRAIN_ALPHA = 0.35;
+/** Battle-screen water. The tested `SEA_BASE_COLOR` stays the parchment-era constant. */
+const WATER = "#3E5661";
+const WAVE_DEEP = "#2F434C";
+const WAVE_FOAM = "#79989E";
+const SHELF = "#52727A";
+const SAND = "#C9B58C";
+const INNER_SHADE = "#241F1C";
+/** Muted war-room land. `FACTION_TINT` remains the tested parchment palette. */
+const TACTICAL_LAND: Record<FactionKey, string> = {
+  JAP: "#9E6B43",
+  USSR: "#7A4B47",
+  GER: "#5E6266",
+  UK: "#A8946D",
+  US: "#687A5E",
+  NEUTRAL: "#877E72",
+};
 let tile: HTMLCanvasElement | null = null;
-let tileBrightness = 1;
+let waveCanvas: HTMLCanvasElement | null = null;
+let ditherCanvas: HTMLCanvasElement | null = null;
 
 /** The seamless paper tile, generated once. */
 function parchmentTile(): HTMLCanvasElement {
   if (!tile) {
     const data = grainTile(GRAIN_SIZE) as Uint8ClampedArray<ArrayBuffer>;
-    tileBrightness = tileMean(data);
     tile = document.createElement("canvas");
     tile.width = GRAIN_SIZE;
     tile.height = GRAIN_SIZE;
@@ -80,16 +92,52 @@ function parchmentTile(): HTMLCanvasElement {
   return tile;
 }
 
+/** Horizontal pixel dashes for the ocean, built once and repeated. */
+function waveTile(): HTMLCanvasElement {
+  if (!waveCanvas) {
+    waveCanvas = document.createElement("canvas");
+    waveCanvas.width = 48;
+    waveCanvas.height = 16;
+    const g = waveCanvas.getContext("2d")!;
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = WATER;
+    g.fillRect(0, 0, 48, 16);
+    g.fillStyle = WAVE_DEEP;
+    for (let x = 0; x < 48; x += 6) {
+      g.fillRect(x, 3, 3, 1);
+    }
+    g.fillStyle = WAVE_FOAM;
+    for (let x = 2; x < 48; x += 6) {
+      g.fillRect(x, 11, 3, 1);
+    }
+  }
+  return waveCanvas;
+}
+
+/** A 4×4 pixel grain, painted inside each territory at low opacity. */
+function ditherTile(): HTMLCanvasElement {
+  if (!ditherCanvas) {
+    ditherCanvas = document.createElement("canvas");
+    ditherCanvas.width = 4;
+    ditherCanvas.height = 4;
+    const g = ditherCanvas.getContext("2d")!;
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = INNER_SHADE;
+    g.fillRect(0, 1, 1, 1);
+    g.fillRect(2, 3, 1, 1);
+  }
+  return ditherCanvas;
+}
+
+function tacticalLandTint(owner: string): string {
+  return TACTICAL_LAND[resolveFaction(owner)];
+}
+
 /**
- * The colour the grained ocean averages out to. Painted behind the map, so the water beyond the edges of the
- * baked bitmap (zoomed out, or above and below the world) matches the water on it.
+ * The water behind the baked bitmap, so the area past the world matches the ocean on it.
  */
 export function oceanBackdrop(): string {
-  parchmentTile();
-  const n = Number.parseInt(SEA_BASE_COLOR.slice(1), 16);
-  const shade = 1 - OCEAN_GRAIN_ALPHA * (1 - tileBrightness);
-  const ch = (v: number) => Math.round(v * shade);
-  return `rgb(${ch((n >> 16) & 255)}, ${ch((n >> 8) & 255)}, ${ch(n & 255)})`;
+  return WATER;
 }
 
 function ringPoints(points: { x: number; y: number }[]): Pt[] {
@@ -159,30 +207,46 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   const landRegions = input.regions.filter((r) => r.type === "land" && input.paths.has(r.id));
   const seaRegions = input.regions.filter((r) => r.type === "sea" && input.paths.has(r.id));
 
-  // Layer 0: ocean, grain, and the pale rules where one sea zone meets another.
+  // Layer 0: slate water and cached pixel wave bands. Smoothing stays off so the dashes stay square.
   toPixels();
-  ctx.fillStyle = SEA_BASE_COLOR;
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = WATER;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  grainOver(OCEAN_GRAIN_ALPHA);
+  const waves = ctx.createPattern(waveTile(), "repeat");
+  if (waves) {
+    ctx.fillStyle = waves;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.imageSmoothingEnabled = true;
   toWorld();
   ctx.lineWidth = SEA_SEAM_WIDTH;
-  ctx.strokeStyle = SEA_SEAM_COLOR;
+  ctx.strokeStyle = WAVE_DEEP;
   ctx.stroke(segmentsPath(sharedEdges(seaRegions.map((r) => shapeOf(r, input)), seam, 2)));
 
-  // The land's silhouette, in neutral parchment, casts the drop shadow. Territories are painted over it.
-  if (land) {
+  // Shallow shelf and sand edge, stroked before the land fill so only the seaward half remains.
+  const coast = land
+    ? runsPath(ringsOf(land.polygons).flatMap((ring) => ringRuns(ring, seam)))
+    : landRegions.length > 0
+      ? outlinePath(landRegions.flatMap((region) => shapeOf(region, input)), seam)
+      : null;
+  if (coast) {
     ctx.save();
-    ctx.shadowColor = COAST_SHADOW.color;
-    ctx.shadowBlur = COAST_SHADOW.blur * sx;
-    ctx.shadowOffsetX = COAST_SHADOW.offset * sx;
-    ctx.shadowOffsetY = COAST_SHADOW.offset * sy;
-    ctx.fillStyle = FACTION_TINT.NEUTRAL;
-    ctx.fill(land.masterLandPath);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = SHELF;
+    ctx.lineWidth = 12 / sx;
+    ctx.stroke(coast);
+    ctx.strokeStyle = SAND;
+    ctx.lineWidth = 5 / sx;
+    ctx.stroke(coast);
     ctx.restore();
   }
 
-  // Layer 1: faction tints. Unclaimed (decorative) land keeps the neutral base, hatched. The hatch covers all
-  // the land first and the owned territories are painted over it, so only neutral and decorative land keeps it.
+  // Neutral land under everything, then a hatch on the decorative gaps the territories will cover.
+  if (land) {
+    ctx.fillStyle = TACTICAL_LAND.NEUTRAL;
+    ctx.fill(land.masterLandPath);
+  }
   const hatch = segmentsPath(hatchSegments(bounds, NEUTRAL_HATCH.spacing));
   const strokeHatch = () => {
     ctx.lineWidth = NEUTRAL_HATCH.width;
@@ -197,20 +261,16 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     strokeHatch();
     ctx.restore();
   }
+  // Cliff faces are drawn with the live camera so their depth can follow the tilt.
   ctx.save();
   if (land && !input.exact) {
     ctx.clip(land.masterLandPath);
   }
   for (const region of landRegions) {
     const owner = input.owners[region.id] ?? "";
-    const tint = landTint(owner);
-    if (land && tint === FACTION_TINT.NEUTRAL) {
-      continue;
-    }
-    ctx.fillStyle = tint;
+    ctx.fillStyle = tacticalLandTint(owner);
     ctx.fill(input.paths.get(region.id)!, "evenodd");
     if (!land && isHatchedOwner(owner)) {
-      // Without the land mask there is no decorative land to hatch, only the neutral territories themselves.
       ctx.save();
       ctx.clip(input.paths.get(region.id)!, "evenodd");
       strokeHatch();
@@ -219,7 +279,21 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   }
   ctx.restore();
 
-  // The grain, multiplied over the land so the colours look dyed into the stock.
+  const dither = ctx.createPattern(ditherTile(), "repeat");
+  if (dither) {
+    for (const region of landRegions) {
+      ctx.save();
+      ctx.clip(input.paths.get(region.id)!, "evenodd");
+      ctx.globalAlpha = 0.08;
+      toPixels();
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = dither;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+    toWorld();
+  }
+
   ctx.save();
   if (land) {
     ctx.clip(land.masterLandPath);
@@ -230,11 +304,10 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     }
     ctx.clip(union, "evenodd");
   }
-  grainOver(0.85);
+  grainOver(LAND_GRAIN_ALPHA);
   ctx.restore();
 
-  // Layer 2: the aged burn. Clip to the territory (every island of it), then stroke its outline: only the
-  // inside half of the stroke shows, so it follows every inlet, peninsula and frontier.
+  // Inner shade, clipped so only the landward half of the stroke shows.
   const landShapes: MultiPolygon[] = [];
   for (const region of landRegions) {
     const shape = shapeOf(region, input);
@@ -247,6 +320,9 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
       ctx.strokeStyle = pass.color;
       ctx.stroke(outline);
     }
+    ctx.lineWidth = 4 / sx;
+    ctx.strokeStyle = INNER_SHADE;
+    ctx.stroke(outline);
     ctx.restore();
   }
 
