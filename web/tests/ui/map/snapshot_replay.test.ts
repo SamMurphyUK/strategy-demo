@@ -120,8 +120,10 @@ describe("phase-start snapshot replay", () => {
     expect(stackCount(combatStart!, "a", "tank")).toBe(1);
 
     move(session, "one_step", "a", "b", "infantry", 1);
-    expect(stackCount(session.state, "a", "infantry")).toBe(2);
+    expect(stackCount(session.state, "a", "infantry")).toBe(3);
+    expect(session.state.phase_orders).toHaveLength(1);
     expect(stackCount(combatStart!, "a", "infantry")).toBe(3);
+    expect(combatStart!.phase_orders).toEqual([]);
 
     endPhase(session, "to_combat");
     expect(session.state.current_phase).toBe("combat");
@@ -184,12 +186,12 @@ describe("phase-start snapshot replay", () => {
 
     expect(session.state.phase_start_snapshot).toBe(combatStart);
     expect(stackCount(combatStart!, "a", "tank")).toBe(1);
-    expect(stackCount(session.state, "a", "infantry")).toBe(2);
+    expect(stackCount(session.state, "a", "infantry")).toBe(3);
     expect(stackCount(session.state, "a", "tank")).toBe(1);
     expect(stackCount(session.state, "b", "infantry")).toBe(1);
-    expect(stackCount(session.state, "c", "infantry")).toBe(1);
+    expect(stackCount(session.state, "c", "infantry")).toBe(0);
     expect(stackCount(session.state, "c", "tank")).toBe(0);
-    expect(shipRegion(session.state)).toBe("s2");
+    expect(shipRegion(session.state)).toBe("s1");
 
     expect(session.state.phase_orders.map((order) => [order.unitType, order.fromRegionId, order.toRegionId])).toEqual([
       ["infantry", "a", "b"],
@@ -198,5 +200,31 @@ describe("phase-start snapshot replay", () => {
     ]);
     expect(session.state.phase_orders.map((order) => order.id)).toEqual(["ord_1", "ord_2", "ord_3"]);
     expect(session.state.phase_orders[2].shipInstanceIds).toEqual([transportId]);
+  });
+
+  it("keeps a noncombat move as a cancellable order until the phase ends", () => {
+    const session = boot();
+    enterCombatMove(session);
+    endPhase(session, "to_combat");
+    endPhase(session, "to_noncombat");
+    expect(session.state.current_phase).toBe("noncombat_move");
+
+    move(session, "inf_ab", "a", "b", "infantry", 1);
+    expect(stackCount(session.state, "a", "infantry")).toBe(3);
+    expect(stackCount(session.state, "b", "infantry")).toBe(1);
+    expect(session.state.phase_orders.map((order) => [order.unitType, order.count, order.fromRegionId, order.toRegionId])).toEqual([
+      ["infantry", 1, "a", "b"],
+    ]);
+
+    cancel_phase_order(session.state, session.state.phase_orders[0].id);
+    expect(session.state.phase_orders).toEqual([]);
+    expect(stackCount(session.state, "a", "infantry")).toBe(3);
+    expect(stackCount(session.state, "b", "infantry")).toBe(1);
+
+    move(session, "inf_ab_again", "a", "b", "infantry", 1);
+    endPhase(session, "to_mobilize");
+    expect(session.state.current_phase).toBe("mobilize");
+    expect(stackCount(session.state, "a", "infantry")).toBe(2);
+    expect(stackCount(session.state, "b", "infantry")).toBe(2);
   });
 });

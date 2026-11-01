@@ -26,6 +26,16 @@ describe("combat approach", () => {
     expect(panned.center).toEqual({ x: 415, y: 95 });
   });
 
+  it("keeps the battle icon in the middle when a focus is given", () => {
+    const bounds = { x: 10, y: 20, w: 100, h: 50 };
+    const zoomed = combatGoal({ x: 0, y: 0, k: 1 }, bounds, 800, 600, 1, "zoom", { x: 18, y: 70 });
+    expect(zoomed.center).toEqual({ x: 18, y: 70 });
+    expect(zoomed.k).toBeCloseTo(6.56);
+    const panned = combatGoal({ x: 0, y: 0, k: zoomed.k }, bounds, 800, 600, 1, "pan", { x: 18, y: 70 });
+    expect(panned.center).toEqual({ x: 18, y: 70 });
+    expect(panned.k).toBe(zoomed.k);
+  });
+
   it("still closes in when the territory is most of the map", () => {
     const goal = combatGoal({ x: 0, y: 0, k: 0.05 }, { x: 0, y: 0, w: 10000, h: 5000 }, 800, 600, 0.05, "zoom");
     expect(goal.k).toBeCloseTo(0.05 * 2.6);

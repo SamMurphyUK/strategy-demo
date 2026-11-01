@@ -64,6 +64,8 @@ export class GameState {
   units_attacking_this_phase: Record<string, number> = {};
   /** Air movement already spent this turn, keyed `faction|region|unitType`. Combat move and noncombat share it. */
   air_movement_spent: Record<string, number> = {};
+  /** Land taken this turn. Aircraft cannot land there until the next turn. */
+  territories_captured_this_turn: Record<string, boolean> = {};
   /** The battle being fought round by round in the combat phase, if any. */
   active_battle: ActiveBattle | null = null;
   /** Orders applied since the current movement phase began. */
@@ -203,6 +205,7 @@ export class GameState {
     clearInPlace(this.instances_moved_this_phase);
     clearInPlace(this.units_attacking_this_phase);
     clearInPlace(this.air_movement_spent);
+    clearInPlace(this.territories_captured_this_turn);
   }
 
   // ---------------------------------------------------------

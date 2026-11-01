@@ -35,7 +35,13 @@ function lighten(rgb: [number, number, number], amount: number): [number, number
 }
 
 const REACHABLE: [number, number, number] = [242, 38, 31];
+/** Legal destinations while moving. The red wash stays for a highlight that does not say it is a move. */
+const MOVE_BLUE: [number, number, number] = [36, 112, 210];
 const SEA_TARGET: [number, number, number] = [60, 110, 140];
+
+function moveWash(mode: HighlightMode): [number, number, number] {
+  return mode.kind === "move" && mode.tone === "move" ? MOVE_BLUE : REACHABLE;
+}
 
 /** Fill for a land region, or null to leave the parchment showing (unclaimed land). */
 export function landFill(regionId: string, owner: string, mode: HighlightMode): string | null {
@@ -46,7 +52,7 @@ export function landFill(regionId: string, owner: string, mode: HighlightMode): 
       return base ? rgba(lighten(base, 0.18), OWNED_ALPHA) : rgba([255, 255, 255], 0.35);
     }
     if (mode.legal.includes(regionId)) {
-      return rgba(REACHABLE, regionId === mode.hover ? 0.68 : 0.52);
+      return rgba(moveWash(mode), regionId === mode.hover ? 0.68 : 0.52);
     }
     return base ? rgba(base, DIMMED_ALPHA) : null;
   }
@@ -66,7 +72,7 @@ export function seaFill(regionId: string, mode: HighlightMode): string {
       return rgba([255, 255, 255], 0.3);
     }
     if (mode.legal.includes(regionId)) {
-      return rgba(REACHABLE, regionId === mode.hover ? 0.6 : 0.42);
+      return rgba(moveWash(mode), regionId === mode.hover ? 0.6 : 0.42);
     }
   }
   if (mode.kind === "mobilize" && mode.legal.includes(regionId)) {

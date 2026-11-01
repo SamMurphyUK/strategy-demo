@@ -51,6 +51,7 @@ export function lerpView(from: View, to: View, t: number, width: number, height:
 /**
  * Where the camera should sit on `bounds`. Zoom frames the territory, closer than the whole map
  * and short of the zoom cap. Pan keeps `current.k` and only moves the centre.
+ * `focus` is the battle icon. When it is set, that point stays in the middle of the frame.
  */
 export function combatGoal(
   current: View,
@@ -59,8 +60,9 @@ export function combatGoal(
   canvasH: number,
   fitK: number,
   mode: "zoom" | "pan",
+  focus?: Vec2,
 ): CameraGoal {
-  const center = { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+  const center = focus ?? { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
   if (mode === "pan") {
     return { center, k: current.k };
   }

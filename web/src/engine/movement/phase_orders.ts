@@ -97,36 +97,32 @@ export function recordMoveOrders(state: GameState, command: Command): void {
   }
 }
 
+/** Every move in a movement phase stays an order until that phase ends. */
+function orderIsHeld(state: GameState): boolean {
+  return state.current_phase === "combat_move" || state.current_phase === "noncombat_move";
+}
+
 /**
- * Apply a validated move and record it. A combat move into a hostile region does not enter that
- * region: the units stay where they are and are marked as attacking until the phase ends.
+ * Apply a validated move and record it. A held order does not enter its destination:
+ * the units stay where they are until the phase ends, and can be cancelled one by one.
  */
 export function applyRecordedMove(state: GameState, command: Command, movement: MovementEngine): GameEvent[] {
   const moves = (command.payload.moves ?? []) as unknown[];
   const going: Dict[] = [];
-  if (state.current_phase === "combat_move") {
-    for (const move of moves) {
-      if (!isRecord(move)) {
-        continue;
-      }
-      const toRegion = String(move.to_region_id ?? "");
-      if (state.isRegionHostileTo(toRegion, command.player_id)) {
-        const fromRegion = String(move.from_region_id ?? "");
-        const units = Array.isArray(move.units) ? move.units : [];
-        for (const unit of units) {
-          if (isRecord(unit)) {
-            holdAttack(state, command.player_id, fromRegion, unit);
-          }
-        }
-      } else {
-        going.push(move);
-      }
+  for (const move of moves) {
+    if (!isRecord(move)) {
+      continue;
     }
-  } else {
-    for (const move of moves) {
-      if (isRecord(move)) {
-        going.push(move);
+    if (orderIsHeld(state)) {
+      const fromRegion = String(move.from_region_id ?? "");
+      const units = Array.isArray(move.units) ? move.units : [];
+      for (const unit of units) {
+        if (isRecord(unit)) {
+          holdAttack(state, command.player_id, fromRegion, unit);
+        }
       }
+    } else {
+      going.push(move);
     }
   }
   const events = movement.processMove(commandWithMoves(command, going));
@@ -134,7 +130,7 @@ export function applyRecordedMove(state: GameState, command: Command, movement: 
   const marked = state.phase_orders.length;
   recordMoveOrders(state, command);
   for (const order of state.phase_orders.slice(marked)) {
-    if (state.current_phase === "combat_move" && state.isRegionHostileTo(order.toRegionId, order.faction)) {
+    if (orderIsHeld(state)) {
       continue;
     }
     noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, order.unitType, order.stepsUsed);
@@ -142,14 +138,9 @@ export function applyRecordedMove(state: GameState, command: Command, movement: 
   return events;
 }
 
-/** Walk held attacks into their enemy regions as combat begins, so battles can see the attackers. */
-export function commitCombatAttacks(state: GameState): void {
-  if (state.current_phase !== "combat_move") {
-    return;
-  }
-  const held = state.phase_orders.filter((order) => state.isRegionHostileTo(order.toRegionId, order.faction));
+function commitOrders(state: GameState, orders: readonly MoveOrder[]): void {
   const movement = new MovementEngine(state);
-  for (const order of held) {
+  for (const order of orders) {
     if (!order.shipInstanceIds || order.shipInstanceIds.length === 0) {
       state.releaseAttackHold(order.faction, order.fromRegionId, order.unitType, order.count);
     }
@@ -159,6 +150,22 @@ export function commitCombatAttacks(state: GameState): void {
   for (const key of Object.keys(state.units_attacking_this_phase)) {
     delete state.units_attacking_this_phase[key];
   }
+}
+
+/** Walk every combat-move order onto the board as combat begins. Attacks can then be fought. */
+export function commitCombatAttacks(state: GameState): void {
+  if (state.current_phase !== "combat_move") {
+    return;
+  }
+  commitOrders(state, state.phase_orders);
+}
+
+/** Walk noncombat orders onto the board as that phase ends. */
+export function commitNoncombatMoves(state: GameState): void {
+  if (state.current_phase !== "noncombat_move") {
+    return;
+  }
+  commitOrders(state, state.phase_orders);
 }
 
 /**

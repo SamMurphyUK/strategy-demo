@@ -6,6 +6,8 @@ import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
 import { buildCutterPaths, buildRegionPaths, pickCounter, pickPlus, pickRegion } from "./hitTest";
 import {
   drawBattleIcons,
+  drawFootIcons,
+  drawStandingBattleIcons,
   drawEditorOverlay,
   drawEditorUnits,
   drawGameOverlay,
@@ -105,6 +107,8 @@ export interface MapViewProps {
   unitTitle?(entry: StackEntry): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
   movement?: { phase: string; orders: readonly OperationalOrder[]; regionIds: readonly string[] } | null;
+  /** Sword badges that stay up through the combat phase, one per battle that is not finished. */
+  battleIcons?: readonly { regionId: string; count: number }[];
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -320,9 +324,9 @@ export function MapView(props: MapViewProps) {
       view.k * dpr,
     );
     const dragHighlight: HighlightMode | null = gesture?.moved
-      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId }
+      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId, tone: "move" }
       : split
-        ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target }
+        ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target, tone: "move" }
         : null;
     const scene: TerrainScene = {
       baked,
@@ -387,6 +391,12 @@ export function MapView(props: MapViewProps) {
         }
         if (movement && planned.some((arrow) => arrow.battle)) {
           drawBattleIcons(arrowCtx, scene, planned, movement.orders);
+        }
+        if (movement && planned.some((arrow) => !arrow.battle)) {
+          drawFootIcons(arrowCtx, scene, planned, movement.orders);
+        }
+        if (props.battleIcons && props.battleIcons.length > 0) {
+          drawStandingBattleIcons(arrowCtx, scene, props.battleIcons);
         }
       }
     }

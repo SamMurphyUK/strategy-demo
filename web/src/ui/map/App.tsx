@@ -185,7 +185,7 @@ export function App() {
 
   const highlight: HighlightMode = useMemo(() => {
     if (selection?.kind === "stack") {
-      return { kind: "move", from: selection.regionId, legal: legalTargets, hover: hoverRegionId };
+      return { kind: "move", from: selection.regionId, legal: legalTargets, hover: hoverRegionId, tone: "move" };
     }
     if (selection?.kind === "place") {
       return { kind: "mobilize", legal: legalTargets, hover: hoverRegionId };
@@ -202,6 +202,16 @@ export function App() {
       count: RegionUnitDisplay.combatPoolUnitCount(state, regionId, faction),
     }));
   }, [state, phase, faction, version]);
+
+  const battleIcons = useMemo(() => {
+    if (phase !== "combat" || faction === "") {
+      return [];
+    }
+    return session.getPendingBattles(faction).map((battle) => ({
+      regionId: battle.region_id,
+      count: RegionUnitDisplay.combatPoolUnitCount(state, battle.region_id, faction),
+    }));
+  }, [session, state, phase, faction, version]);
 
   const isUnmoved = useCallback(
     (regionId: string, entry: StackEntry) => {
@@ -390,7 +400,7 @@ export function App() {
         const snap = camera.snapshot();
         if (snap.width > 1 && snap.height > 1 && snap.fitK > 0) {
           const mode = openedCombat.current ? "pan" : "zoom";
-          const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode);
+          const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode, shape.anchor);
           await camera.moveTo(goal, mode === "pan" ? COMBAT_PAN_MS : COMBAT_ZOOM_MS);
           if (ticket !== approachTicket.current) return;
           openedCombat.current = true;
@@ -444,6 +454,7 @@ export function App() {
           selectedStack={!editing && selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
           highlight={editing ? NO_HIGHLIGHT : highlight}
           combatMarkers={editing ? NO_MARKERS : combatMarkers}
+          battleIcons={editing ? undefined : battleIcons}
           isUnmoved={editing ? NEVER : isUnmoved}
           onRegionClick={onRegionClick}
           onRegionHover={setHoverRegionId}

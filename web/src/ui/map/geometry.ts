@@ -396,7 +396,7 @@ export function ownerFill(owner: string): Rgba {
 
 export type HighlightMode =
   | { kind: "none" }
-  | { kind: "move"; from: string; legal: string[]; hover: string }
+  | { kind: "move"; from: string; legal: string[]; hover: string; tone?: "attack" | "move" }
   | { kind: "mobilize"; legal: string[]; hover: string };
 
 export function regionFill(regionId: string, owner: string, mode: HighlightMode): Rgba {

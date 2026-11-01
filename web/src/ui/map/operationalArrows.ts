@@ -446,6 +446,8 @@ export interface ArrowPlanOptions {
   starts?: ReadonlyMap<string, ArrowStart>;
   /** Targets that receive a battle icon. Only those arrows stop short of the anchor. */
   battleTargets?: ReadonlySet<string>;
+  /** Targets that receive a move icon. Those arrows stop short of the anchor too. */
+  badgeTargets?: ReadonlySet<string>;
   /** Screen-pixel half extents of the sword badge, so the tip stops on its edge. */
   badge?: { halfW: number; halfH: number; viewK: number };
 }
@@ -517,8 +519,9 @@ export function planOperationalArrows(
         continue;
       }
       const battle = options?.battleTargets ? options.battleTargets.has(targetId) : false;
-      const badgeInset = battle && options?.badge ? badgeEdgeInset(origin, target, options.badge) : 0;
-      const inset = badgeInset > 0 ? badgeInset : options?.battleTargets ? (battle ? tipInset : 0) : tipInset;
+      const marked = battle || (options?.badgeTargets?.has(targetId) ?? false);
+      const badgeInset = marked && options?.badge ? badgeEdgeInset(origin, target, options.badge) : 0;
+      const inset = badgeInset > 0 ? badgeInset : options?.battleTargets || options?.badgeTargets ? (marked ? tipInset : 0) : tipInset;
       const tip = tipToward(target, origin, inset);
       const spine = spineThrough(
         waypoints(primary.order, regionIds, anchors, tip, options?.starts?.get(primary.order.id)),

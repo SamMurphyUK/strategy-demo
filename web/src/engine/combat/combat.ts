@@ -554,6 +554,9 @@ export class CombatEngine {
     const region = state.regions[regionId];
     if (result === "attacker_won" && region?.isLandRegion() && landSurvivor) {
       const previous = region.owner_faction_id;
+      if (!state.sameTeam(previous, b.attacker_faction_id)) {
+        state.territories_captured_this_turn[regionId] = true;
+      }
       region.owner_faction_id = b.attacker_faction_id;
       events.push(
         GameEvent.create(

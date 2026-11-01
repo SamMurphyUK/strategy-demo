@@ -1,4 +1,4 @@
-import { airCannotStrike, airSteps, canReturnAfter, fuelRemaining, isAirUnit } from "../air/air_fuel";
+import { airCannotStrike, airSteps, canLandAt, canReturnAfter, fuelRemaining, isAirUnit } from "../air/air_fuel";
 import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
@@ -177,6 +177,19 @@ export class MovementValidator {
     } else if (isAirUnit(state, unitTypeId) && state.current_phase === "combat_move" && airCannotStrike(state, factionId, toRegion)) {
       result.errors.push(
         MoveError.of("MOVE_ILLEGAL_DESTINATION", "Aircraft cannot attack submarines unless a friendly destroyer is in the attack"),
+      );
+    } else if (
+      isAirUnit(state, unitTypeId) &&
+      state.current_phase === "noncombat_move" &&
+      !canLandAt(state, factionId, unitTypeId, toRegion)
+    ) {
+      result.errors.push(
+        MoveError.of(
+          "MOVE_ILLEGAL_DESTINATION",
+          state.territories_captured_this_turn[toRegion]
+            ? "Aircraft cannot land in territory captured this turn"
+            : "Aircraft must end on friendly land or a carrier",
+        ),
       );
     } else if (state.movableStackCount(factionId, fromRegion, unitTypeId) < count) {
       result.errors.push(

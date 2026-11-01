@@ -7,7 +7,7 @@ import { type GameEvent, GameEventType, type GameEventTypeValue } from "../model
 import type { GameState } from "../model/game_state";
 import type { PlacementEngine } from "../placement/placement";
 import { scrapUnlandablePlanes } from "../air/air_fuel";
-import { commitCombatAttacks } from "../movement/phase_orders";
+import { commitCombatAttacks, commitNoncombatMoves } from "../movement/phase_orders";
 import type { VictoryEngine } from "../victory/victory";
 import type { TurnEngine } from "./turn_engine";
 
@@ -84,6 +84,7 @@ export function processEndPhase(
     events.push(...syncSeq(placement.checkForfeited(state.current_faction_id)));
     events.push(...syncSeq(turnEngine.advancePhase()));
   } else if (phaseAtRequest === "noncombat_move") {
+    commitNoncombatMoves(state);
     scrapUnlandablePlanes(state, state.current_faction_id);
     events.push(...syncSeq(turnEngine.advancePhase()));
   } else {

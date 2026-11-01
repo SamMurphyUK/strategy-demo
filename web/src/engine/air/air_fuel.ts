@@ -21,6 +21,16 @@ export function airMovement(state: GameState, unitType: string): number {
   return Math.max(0, Math.trunc(Number(state.unit_types[unitType]?.movement ?? 0)));
 }
 
+function orderedCount(state: GameState, factionId: string, regionId: string, unitType: string): number {
+  let total = 0;
+  for (const order of state.phase_orders) {
+    if (order.faction === factionId && order.fromRegionId === regionId && order.unitType === unitType) {
+      total += Math.max(0, order.count);
+    }
+  }
+  return total;
+}
+
 function airKey(factionId: string, regionId: string, unitType: string): string {
   return `${factionId}|${regionId}|${unitType}`;
 }
@@ -56,18 +66,16 @@ export function isFriendlyHeldTerritory(state: GameState, regionId: string, fact
   return !state.isRegionHostileTo(regionId, factionId);
 }
 
-/** Fuel already used, plus a combat-move attack that has not entered the enemy region yet. */
+/** Fuel already used, plus a held order that has not entered its destination yet. */
 export function fuelSpent(state: GameState, factionId: string, regionId: string, unitType: string): number {
   const ledger = Math.trunc(Number(state.air_movement_spent[airKey(factionId, regionId, unitType)] ?? 0));
   let pending = 0;
-  if (state.current_phase === "combat_move") {
+  if (state.current_phase === "combat_move" || state.current_phase === "noncombat_move") {
     for (const order of state.phase_orders) {
       if (order.faction !== factionId || order.unitType !== unitType || order.fromRegionId !== regionId) {
         continue;
       }
-      if (state.isRegionHostileTo(order.toRegionId, order.faction)) {
-        pending += Math.max(0, order.stepsUsed);
-      }
+      pending += Math.max(0, order.stepsUsed);
     }
   }
   return ledger + pending;
@@ -186,6 +194,9 @@ function friendlyLand(state: GameState, factionId: string, regionId: string): bo
   if (region == null || !region.isLandRegion()) {
     return false;
   }
+  if (state.territories_captured_this_turn[regionId]) {
+    return false;
+  }
   const owner = String(region.owner_faction_id);
   return owner !== "" && state.sameTeam(owner, factionId) && !state.isRegionHostileTo(regionId, factionId);
 }
@@ -265,7 +276,7 @@ export function airSteps(state: GameState, from: string, to: string): number {
   return Number.POSITIVE_INFINITY;
 }
 
-function canLandAt(state: GameState, factionId: string, unitType: string, regionId: string): boolean {
+export function canLandAt(state: GameState, factionId: string, unitType: string, regionId: string): boolean {
   if (friendlyLand(state, factionId, regionId)) {
     return true;
   }
@@ -375,7 +386,7 @@ export function strandedPlanes(state: GameState, factionId: string): StrandedPla
         continue;
       }
       const unitType = String(entry.unit_type_id ?? "");
-      const count = stackCount(entry);
+      const count = stackCount(entry) - orderedCount(state, factionId, regionId, unitType);
       if (!isAirUnit(state, unitType) || count <= 0) {
         continue;
       }

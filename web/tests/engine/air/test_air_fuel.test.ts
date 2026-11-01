@@ -181,6 +181,31 @@ describe("air fuel and combat-move targets", () => {
     });
     expect(offeredMoveDestinations(state, "combat_move", "red", "home", "fighter", dests)).toContain("pack");
   });
+
+  it("will not land a plane on territory captured this turn", () => {
+    const builder = new TestStateBuilder();
+    builder.withRegion("home", true, "red").withRegion("taken", true, "red").withAdjacent("home", "taken");
+    builder.withUnitType("fighter", "air", 4);
+    builder.withStackUnit("fighter", "home", "red");
+    builder.withStackUnit("fighter", "taken", "red");
+    const state = builder.buildState();
+    state.current_faction_id = "red";
+    state.current_phase = "noncombat_move";
+    state.territories_captured_this_turn.taken = true;
+
+    expect(isLanded(state, "red", "fighter", "home")).toBe(true);
+    expect(isLanded(state, "red", "fighter", "taken")).toBe(false);
+    const ruleset = new TestStateBuilder().buildRuleset();
+    const validator = new MovementValidator();
+    const fromHome = validator.getLegalDestinationsForStack("home", "fighter", "red", state, ruleset);
+    expect(offeredMoveDestinations(state, "noncombat_move", "red", "home", "fighter", fromHome)).not.toContain("taken");
+    const rejected = validator.validateStackMove("home", "taken", "fighter", "red", 1, state, ruleset);
+    expect(rejected.ok).toBe(false);
+    expect(rejected.errors[0]?.message).toBe("Aircraft cannot land in territory captured this turn");
+
+    const homeward = validator.validateStackMove("taken", "home", "fighter", "red", 1, state, ruleset);
+    expect(homeward.ok).toBe(true);
+  });
 });
 
 function builderEnemyOnOwn(state: GameState): void {

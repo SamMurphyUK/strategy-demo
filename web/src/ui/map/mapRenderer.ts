@@ -598,6 +598,55 @@ function drawBattleBadge(ctx: CanvasRenderingContext2D, x: number, y: number, co
   ctx.fillText(`\u2694 ${count}`, x, y);
 }
 
+const FOOT_BADGE = "#243044";
+
+/** A stomping boot and the number of units ordered into that region. Same stamp as the sword badge. */
+function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, count: number, scale: number): void {
+  const w = 44 * scale;
+  const h = 22 * scale;
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2, y - h / 2, w, h, 6 * scale);
+  ctx.fillStyle = FOOT_BADGE;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, 1.25 * scale);
+  ctx.strokeStyle = PAPER;
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(x - 8 * scale, y);
+  ctx.scale(scale, scale);
+  ctx.fillStyle = PAPER;
+  ctx.beginPath();
+  ctx.moveTo(-8, 6);
+  ctx.lineTo(6, 6);
+  ctx.lineTo(8, 4);
+  ctx.lineTo(8, 2);
+  ctx.quadraticCurveTo(4, 1, 1, -1);
+  ctx.lineTo(-1, -2);
+  ctx.lineTo(-2, -7);
+  ctx.lineTo(-7, -7);
+  ctx.lineTo(-8, -2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = PAPER;
+  ctx.lineWidth = 1.35;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(5, -2);
+  ctx.lineTo(7, -6);
+  ctx.moveTo(8, -1);
+  ctx.lineTo(10, -5);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = PAPER;
+  ctx.font = `700 ${Math.max(1, 12 * scale)}px ${MONO}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(count), x + 2 * scale, y);
+  ctx.textAlign = "center";
+}
+
 function drawAttackRings(ctx: CanvasRenderingContext2D, rings: { x: number; y: number; radius: number }[]): void {
   for (const ring of rings) {
     ctx.beginPath();
@@ -632,15 +681,17 @@ export function drawOperationalArrows(
   }
   const anchors = new Map(scene.regions.map((region) => [region.id, region.anchor]));
   const battleTargets = new Set<string>();
+  const moveTargets = new Set<string>();
   const starts = new Map<string, ArrowStart>();
   const rings: { x: number; y: number; radius: number }[] = [];
   const ringed = new Set<string>();
-  const clearancePx = shaftClearancePx(ATTACK_WIDTH);
   for (const order of orders) {
-    if (!order.attack) {
-      continue;
+    if (order.attack) {
+      battleTargets.add(order.toRegionId);
+    } else {
+      moveTargets.add(order.toRegionId);
     }
-    battleTargets.add(order.toRegionId);
+    const clearancePx = shaftClearancePx(order.attack ? ATTACK_WIDTH : 1);
     let origin: ArrowStart | null = null;
     for (const layout of layouts) {
       if (layout.region.id !== order.fromRegionId) {
@@ -650,10 +701,12 @@ export function drawOperationalArrows(
       if (!counter) {
         continue;
       }
-      const ringKey = `${layout.copyDx}|${layout.region.id}|${counter.slot.key}`;
-      if (!ringed.has(ringKey)) {
-        ringed.add(ringKey);
-        rings.push({ x: counter.x, y: counter.y, radius: layout.halfHeight + 4 });
+      if (order.attack) {
+        const ringKey = `${layout.copyDx}|${layout.region.id}|${counter.slot.key}`;
+        if (!ringed.has(ringKey)) {
+          ringed.add(ringKey);
+          rings.push({ x: counter.x, y: counter.y, radius: layout.halfHeight + 4 });
+        }
       }
       if (!origin) {
         origin = {
@@ -670,6 +723,7 @@ export function drawOperationalArrows(
   const arrows = planOperationalArrows(orders, regionIds, anchors, Math.hypot(badge.halfW, badge.halfH) / scene.view.k, {
     starts,
     battleTargets,
+    badgeTargets: moveTargets,
     badge: { ...badge, viewK: scene.view.k },
   });
   if (arrows.length === 0 && rings.length === 0) {
@@ -698,14 +752,84 @@ export function drawOperationalArrows(
   return arrows;
 }
 
-function attackingCount(orders: readonly OperationalOrder[], targetId: string): number {
+function orderCount(orders: readonly OperationalOrder[], targetId: string, attack: boolean): number {
   let count = 0;
   for (const order of orders) {
-    if (order.attack && order.toRegionId === targetId) {
+    if (Boolean(order.attack) === attack && order.toRegionId === targetId) {
       count += Math.max(0, Math.trunc(order.count ?? 1));
     }
   }
   return count;
+}
+
+function attackingCount(orders: readonly OperationalOrder[], targetId: string): number {
+  return orderCount(orders, targetId, true);
+}
+
+function movingCount(orders: readonly OperationalOrder[], targetId: string): number {
+  return orderCount(orders, targetId, false);
+}
+
+/**
+ * Sword badges for battles that are still waiting, drawn at the same anchor the attack arrow used.
+ * A finished battle is left out of `icons`, so its sword goes away and the others stay.
+ */
+export function drawStandingBattleIcons(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  icons: readonly { regionId: string; count: number }[],
+): void {
+  if (icons.length === 0 || scene.view.k <= 0) {
+    return;
+  }
+  const scale = battleBadgeScale(scene.view.k);
+  const anchors = new Map(scene.regions.map((region) => [region.id, region.anchor]));
+  const margin = Math.hypot(22 * scale, 11 * scale) + 8;
+  setScreenTransform(ctx, scene.dpr);
+  for (const dx of scene.copies) {
+    const view = { ...scene.view, x: scene.view.x - dx };
+    for (const icon of icons) {
+      const atWorld = anchors.get(icon.regionId);
+      if (!atWorld) {
+        continue;
+      }
+      const at = worldToScreen(view, atWorld);
+      if (at.x < -margin || at.y < -margin || at.x > scene.width + margin || at.y > scene.height + margin) {
+        continue;
+      }
+      drawBattleBadge(ctx, at.x, at.y, icon.count, scale);
+    }
+  }
+}
+
+/** Foot badges for move orders, one per destination, with the number of units ordered there. */
+export function drawFootIcons(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  arrows: readonly PlannedArrow[],
+  orders: readonly OperationalOrder[],
+): void {
+  if (scene.view.k <= 0) {
+    return;
+  }
+  const scale = battleBadgeScale(scene.view.k);
+  const margin = Math.hypot(22 * scale, 11 * scale) + 8;
+  setScreenTransform(ctx, scene.dpr);
+  for (const dx of scene.copies) {
+    const view = { ...scene.view, x: scene.view.x - dx };
+    const seen = new Set<string>();
+    for (const arrow of arrows) {
+      if (arrow.battle || seen.has(arrow.targetId)) {
+        continue;
+      }
+      seen.add(arrow.targetId);
+      const at = worldToScreen(view, arrow.target);
+      if (at.x < -margin || at.y < -margin || at.x > scene.width + margin || at.y > scene.height + margin) {
+        continue;
+      }
+      drawFootBadge(ctx, at.x, at.y, movingCount(orders, arrow.targetId), scale);
+    }
+  }
 }
 
 /** Sword badges, painted after arrows and the drag guide so nothing on the map covers them. */

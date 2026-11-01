@@ -231,8 +231,8 @@ it("commits a one-unit drop as move_units without opening the split popover", as
 
   expect(view.container.querySelector("[role=dialog]")).toBeNull();
   expect(chosen).toEqual([]);
-  expect(stackCount(session.state, "a", "tank")).toBe(0);
-  expect(stackCount(session.state, "b", "tank")).toBe(1);
+  expect(stackCount(session.state, "a", "tank")).toBe(1);
+  expect(stackCount(session.state, "b", "tank")).toBe(0);
   expect(stackCount(session.state, "a", "infantry")).toBe(3);
   expect(session.state.phase_orders).toEqual([
     expect.objectContaining({ unitType: "tank", count: 1, fromRegionId: "a", toRegionId: "b" }),
@@ -293,8 +293,8 @@ it("opens the split popover for a larger stack and moves the chosen count", asyn
 
   expect(view.container.querySelector("[role=dialog]")).toBeNull();
   expect(chosen).toEqual([3]);
-  expect(stackCount(session.state, "a", "infantry")).toBe(2);
-  expect(stackCount(session.state, "b", "infantry")).toBe(4);
+  expect(stackCount(session.state, "a", "infantry")).toBe(5);
+  expect(stackCount(session.state, "b", "infantry")).toBe(1);
   expect(session.state.phase_orders).toEqual([
     expect.objectContaining({ unitType: "infantry", count: 3, fromRegionId: "a", toRegionId: "b" }),
   ]);
@@ -308,9 +308,10 @@ it("removes a pending order and restores the board when Cancel is clicked", asyn
   sendMove(session, "mv_tank", "a", { unit_type_id: "tank" }, "c", 1);
   const infantryOrderId = session.state.phase_orders[0]?.id;
   expect(infantryOrderId).toBeTruthy();
-  expect(stackCount(session.state, "a", "infantry")).toBe(2);
-  expect(stackCount(session.state, "b", "infantry")).toBe(2);
-  expect(stackCount(session.state, "c", "tank")).toBe(1);
+  expect(stackCount(session.state, "a", "infantry")).toBe(3);
+  expect(stackCount(session.state, "b", "infantry")).toBe(1);
+  expect(stackCount(session.state, "a", "tank")).toBe(1);
+  expect(stackCount(session.state, "c", "tank")).toBe(0);
 
   let cancelled = 0;
   const view = await render(createElement(OrdersBox, { session, onCancelled: () => (cancelled += 1) }));
@@ -339,8 +340,8 @@ it("removes a pending order and restores the board when Cancel is clicked", asyn
   ]);
   expect(stackCount(session.state, "a", "infantry")).toBe(3);
   expect(stackCount(session.state, "b", "infantry")).toBe(1);
-  expect(stackCount(session.state, "a", "tank")).toBe(0);
-  expect(stackCount(session.state, "c", "tank")).toBe(1);
+  expect(stackCount(session.state, "a", "tank")).toBe(1);
+  expect(stackCount(session.state, "c", "tank")).toBe(0);
   const after = view.container.textContent ?? "";
   expect(after).toContain("1 order");
   expect(after).toContain("1× Tank");
@@ -348,5 +349,42 @@ it("removes a pending order and restores the board when Cancel is clicked", asyn
   expect(Array.from(view.container.querySelectorAll(".order-cancel")).map((button) => (button.textContent ?? "").trim())).toEqual([
     "× Cancel",
   ]);
+  await unmount(view.root, view.container);
+});
+
+it("lists a noncombat order and cancels it without moving the stack", async () => {
+  const session = boot();
+  enterCombatMove(session);
+  for (const commandId of ["to_combat", "to_noncombat"]) {
+    const result = session.applyCommand({
+      command_id: commandId,
+      player_id: session.state.current_faction_id,
+      type: "end_phase",
+      payload: {},
+    });
+    expect(result.result_type).toBe("ok");
+  }
+  expect(session.state.current_phase).toBe("noncombat_move");
+  sendMove(session, "mv_inf", "a", { unit_type_id: "infantry" }, "b", 1);
+  expect(stackCount(session.state, "a", "infantry")).toBe(3);
+  expect(stackCount(session.state, "b", "infantry")).toBe(1);
+
+  let cancelled = 0;
+  const view = await render(createElement(OrdersBox, { session, onCancelled: () => (cancelled += 1) }));
+  const text = view.container.textContent ?? "";
+  expect(text).toContain("Pending orders");
+  expect(text).toContain("Non-Combat Move");
+  expect(text).toContain("1× Infantry");
+  expect(text).toContain("a → b");
+
+  await act(async () => {
+    view.container.querySelector(".order-cancel")!.click();
+  });
+
+  expect(cancelled).toBe(1);
+  expect(session.state.phase_orders).toEqual([]);
+  expect(stackCount(session.state, "a", "infantry")).toBe(3);
+  expect(stackCount(session.state, "b", "infantry")).toBe(1);
+  expect(view.container.textContent ?? "").not.toContain("Pending orders");
   await unmount(view.root, view.container);
 });

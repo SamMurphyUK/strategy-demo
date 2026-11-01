@@ -12,6 +12,7 @@ import {
   Unit,
   type UnitStackEntry,
 } from "../../../src/engine";
+import { isLanded } from "../../../src/engine/air/air_fuel";
 import { campaignSession } from "../campaign_session";
 
 function newState(): GameState {
@@ -135,6 +136,19 @@ describe("core/test_battle", () => {
     expect(state.active_battle).toBeNull();
     expect(state.regions.A.owner_faction_id).toBe("red");
     expect(state.region_units.A).toEqual([stack("red", "infantry", 1)]);
+  });
+
+  it("marks captured land so a plane that won the battle is not landed there", () => {
+    addRegion(state, "A", "land", "blue", [stack("red", "infantry", 1), stack("red", "fighter", 1), stack("blue", "infantry", 1)]);
+    mustOk(combat.startBattle("A", "red"));
+    const battle = state.active_battle!;
+    battle.defenders[0].hp = 0;
+    battle.stage = "awaiting_casualties";
+    battle.attacker_hits_to_take = 0;
+    mustOk(combat.assignAttackerCasualties("red", []));
+    expect(state.regions.A.owner_faction_id).toBe("red");
+    expect(state.territories_captured_this_turn.A).toBe(true);
+    expect(isLanded(state, "red", "fighter", "A")).toBe(false);
   });
 
   it("does not capture land with only aircraft left", () => {
