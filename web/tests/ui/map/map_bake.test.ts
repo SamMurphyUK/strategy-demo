@@ -336,10 +336,16 @@ describe("highlights drawn over the baked map", () => {
     expect(highlightSeaFill("t", { kind: "move", from: "a", legal: ["s"], hover: "" })).toBeNull();
   });
 
-  it("tints a movement destination blue", () => {
+  it("tints a noncombat destination blue", () => {
     const mode = { kind: "move" as const, from: "a", legal: ["b"], hover: "", tone: "move" as const };
     expect(highlightLandFill("b", "", mode)).toContain("36, 112, 210");
     expect(highlightSeaFill("s", { kind: "move", from: "a", legal: ["s"], hover: "", tone: "move" })).toContain("36, 112, 210");
+  });
+
+  it("tints a combat-move destination red", () => {
+    const mode = { kind: "move" as const, from: "a", legal: ["b"], hover: "", tone: "attack" as const };
+    expect(highlightLandFill("b", "", mode)).toContain("242, 38, 31");
+    expect(highlightSeaFill("s", { kind: "move", from: "a", legal: ["s"], hover: "", tone: "attack" })).toContain("242, 38, 31");
   });
 
   it("tints the legal targets of a mobilize", () => {

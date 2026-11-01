@@ -323,10 +323,11 @@ export function MapView(props: MapViewProps) {
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
       view.k * dpr,
     );
+    const moveTone = props.movement?.phase === "noncombat_move" ? "move" : "attack";
     const dragHighlight: HighlightMode | null = gesture?.moved
-      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId, tone: "move" }
+      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId, tone: moveTone }
       : split
-        ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target, tone: "move" }
+        ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target, tone: moveTone }
         : null;
     const scene: TerrainScene = {
       baked,

@@ -185,13 +185,19 @@ export function App() {
 
   const highlight: HighlightMode = useMemo(() => {
     if (selection?.kind === "stack") {
-      return { kind: "move", from: selection.regionId, legal: legalTargets, hover: hoverRegionId, tone: "move" };
+      return {
+        kind: "move",
+        from: selection.regionId,
+        legal: legalTargets,
+        hover: hoverRegionId,
+        tone: phase === "noncombat_move" ? "move" : "attack",
+      };
     }
     if (selection?.kind === "place") {
       return { kind: "mobilize", legal: legalTargets, hover: hoverRegionId };
     }
     return { kind: "none" };
-  }, [selection, legalTargets, hoverRegionId]);
+  }, [selection, legalTargets, hoverRegionId, phase]);
 
   const combatMarkers: CombatMarker[] = useMemo(() => {
     if (phase !== "combat_move" || faction === "") {

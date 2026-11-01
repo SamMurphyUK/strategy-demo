@@ -35,7 +35,7 @@ function lighten(rgb: [number, number, number], amount: number): [number, number
 }
 
 const REACHABLE: [number, number, number] = [242, 38, 31];
-/** Legal destinations while moving. The red wash stays for a highlight that does not say it is a move. */
+/** Noncombat destinations. Combat move keeps the red wash. */
 const MOVE_BLUE: [number, number, number] = [36, 112, 210];
 const SEA_TARGET: [number, number, number] = [60, 110, 140];
 
