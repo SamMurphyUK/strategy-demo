@@ -1,0 +1,1138 @@
+{
+  "id": "unit-reference-anime-twotone",
+  "revision": 1,
+  "last_node_id": 20,
+  "last_link_id": 26,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "CheckpointLoaderSimple",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        360,
+        100
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "slot_index": 0,
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "slot_index": 1,
+          "links": [
+            2,
+            3
+          ]
+        },
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "slot_index": 2,
+          "links": [
+            4,
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CheckpointLoaderSimple"
+      },
+      "widgets_values": [
+        "animagine-xl-4.0-opt.safetensors"
+      ],
+      "title": "1. Animagine XL 4.0 Opt"
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [
+        0,
+        180
+      ],
+      "size": [
+        315,
+        314
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "unit-reference-guides/tank-three-quarter-lineart-1024.png",
+        "image"
+      ],
+      "title": "2. Geometry guide - swap tank / infantry"
+    },
+    {
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [
+        0,
+        540
+      ],
+      "size": [
+        315,
+        314
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "unit-reference-guides/style-reference-unit-twotone-1024.png",
+        "image"
+      ],
+      "title": "3. Isolated two-tone style reference"
+    },
+    {
+      "id": 4,
+      "type": "IPAdapterUnifiedLoader",
+      "pos": [
+        430,
+        0
+      ],
+      "size": [
+        330,
+        90
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 1
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "slot_index": 0,
+          "links": [
+            9
+          ]
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "slot_index": 1,
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapterUnifiedLoader"
+      },
+      "widgets_values": [
+        "PLUS (high strength)"
+      ],
+      "title": "4. Load SDXL IP-Adapter Plus"
+    },
+    {
+      "id": 5,
+      "type": "IPAdapterStyleComposition",
+      "pos": [
+        820,
+        0
+      ],
+      "size": [
+        350,
+        330
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 9
+        },
+        {
+          "name": "ipadapter",
+          "type": "IPADAPTER",
+          "link": 10
+        },
+        {
+          "name": "image_style",
+          "type": "IMAGE",
+          "link": 8
+        },
+        {
+          "name": "image_composition",
+          "type": "IMAGE",
+          "link": 6
+        },
+        {
+          "name": "image_negative",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "attn_mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "slot_index": 0,
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IPAdapterStyleComposition"
+      },
+      "widgets_values": [
+        0.35,
+        0.2,
+        false,
+        "average",
+        0.0,
+        0.75,
+        "V only"
+      ],
+      "title": "5. Low-weight style lock"
+    },
+    {
+      "id": 6,
+      "type": "CLIPTextEncode",
+      "pos": [
+        430,
+        160
+      ],
+      "size": [
+        350,
+        170
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "slot_index": 0,
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "masterpiece, high score, great score, absurdres, solo, a World War II medium tank, fixed three-quarter side profile, facing right, complete vehicle visible, clean anime clip art, cel shading, two-tone posterized shading, hard-edged secondary shadow, clean dark outline, isolated on a plain white background, centered composition, no ground"
+      ],
+      "title": "6. Positive - edit unit description"
+    },
+    {
+      "id": 7,
+      "type": "CLIPTextEncode",
+      "pos": [
+        430,
+        370
+      ],
+      "size": [
+        350,
+        150
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "slot_index": 0,
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        "lowres, worst quality, low quality, blurry, photorealistic, 3d render, glossy, soft shading, gradient shading, front view, rear view, top-down view, extreme perspective, cropped, multiple vehicles, multiple subjects, scenery, landscape, ground plane, smoke, explosion, circle, badge, emblem, frame, border, icon background, text, signature, watermark"
+      ],
+      "title": "7. Negative - keep view and background clean"
+    },
+    {
+      "id": 8,
+      "type": "ControlNetLoader",
+      "pos": [
+        430,
+        580
+      ],
+      "size": [
+        330,
+        60
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CONTROL_NET",
+          "type": "CONTROL_NET",
+          "slot_index": 0,
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "ControlNetLoader"
+      },
+      "widgets_values": [
+        "mistoLine_rank256.safetensors"
+      ],
+      "title": "8. MistoLine SDXL geometry lock"
+    },
+    {
+      "id": 9,
+      "type": "ControlNetApplyAdvanced",
+      "pos": [
+        820,
+        390
+      ],
+      "size": [
+        350,
+        190
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 12
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 13
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": 14
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "slot_index": 0,
+          "links": [
+            15
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "slot_index": 1,
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "ControlNetApplyAdvanced"
+      },
+      "widgets_values": [
+        0.9,
+        0.0,
+        0.85
+      ],
+      "title": "9. Enforce fixed three-quarter silhouette"
+    },
+    {
+      "id": 10,
+      "type": "EmptyLatentImage",
+      "pos": [
+        820,
+        650
+      ],
+      "size": [
+        315,
+        110
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "slot_index": 0,
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        1024,
+        1024,
+        1
+      ],
+      "title": "10. Fixed 1024 generation canvas"
+    },
+    {
+      "id": 11,
+      "type": "KSampler",
+      "pos": [
+        1240,
+        150
+      ],
+      "size": [
+        330,
+        280
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 11
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 15
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 16
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "slot_index": 0,
+          "links": [
+            18
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "KSampler"
+      },
+      "widgets_values": [
+        42,
+        "fixed",
+        30,
+        7.0,
+        "dpmpp_2m_sde",
+        "karras",
+        1.0
+      ],
+      "title": "11. Generate illustrated reference"
+    },
+    {
+      "id": 12,
+      "type": "VAEDecode",
+      "pos": [
+        1240,
+        500
+      ],
+      "size": [
+        260,
+        60
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 18
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            19,
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "VAEDecode"
+      },
+      "widgets_values": [],
+      "title": "12. Decode 1024 illustration"
+    },
+    {
+      "id": 13,
+      "type": "LoadBackgroundRemovalModel",
+      "pos": [
+        1240,
+        650
+      ],
+      "size": [
+        330,
+        60
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "bg_model",
+          "type": "BACKGROUND_REMOVAL",
+          "slot_index": 0,
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadBackgroundRemovalModel"
+      },
+      "widgets_values": [
+        "birefnet.safetensors"
+      ],
+      "title": "13. Native BiRefNet loader"
+    },
+    {
+      "id": 14,
+      "type": "RemoveBackground",
+      "pos": [
+        1610,
+        500
+      ],
+      "size": [
+        300,
+        80
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "bg_removal_model",
+          "type": "BACKGROUND_REMOVAL",
+          "link": 20
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "slot_index": 0,
+          "links": [
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RemoveBackground"
+      },
+      "widgets_values": [],
+      "title": "14. Extract generated unit"
+    },
+    {
+      "id": 15,
+      "type": "UnitReferenceTwoTone",
+      "pos": [
+        1980,
+        430
+      ],
+      "size": [
+        350,
+        190
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 21
+        },
+        {
+          "name": "foreground_mask",
+          "type": "MASK",
+          "link": 22
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transparent_reference",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            23,
+            24,
+            26
+          ]
+        },
+        {
+          "name": "foreground_mask",
+          "type": "MASK",
+          "slot_index": 1,
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UnitReferenceTwoTone"
+      },
+      "widgets_values": [
+        "allies",
+        0.45,
+        8
+      ],
+      "title": "15. Exact Pixel1 two-tone + alpha"
+    },
+    {
+      "id": 16,
+      "type": "SaveImage",
+      "pos": [
+        2400,
+        240
+      ],
+      "size": [
+        360,
+        300
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unit-reference-twotone-1024"
+      ],
+      "title": "16. Save transparent 1024 reference"
+    },
+    {
+      "id": 17,
+      "type": "ImageScale",
+      "pos": [
+        2400,
+        600
+      ],
+      "size": [
+        315,
+        130
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 24
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "ImageScale"
+      },
+      "widgets_values": [
+        "nearest-exact",
+        128,
+        128,
+        "disabled"
+      ],
+      "title": "17. Fixed 128 review copy"
+    },
+    {
+      "id": 18,
+      "type": "SaveImage",
+      "pos": [
+        2780,
+        570
+      ],
+      "size": [
+        360,
+        300
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 25
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unit-reference-twotone-128"
+      ],
+      "title": "18. Save 128 review copy"
+    },
+    {
+      "id": 19,
+      "type": "PreviewImage",
+      "pos": [
+        2400,
+        -100
+      ],
+      "size": [
+        420,
+        300
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.27.0",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "19. Transparent reference preview"
+    },
+    {
+      "id": 20,
+      "type": "Note",
+      "pos": [
+        1610,
+        650
+      ],
+      "size": [
+        650,
+        300
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "GUIDED UNIT REFERENCE GENERATOR\n\nThis is text-driven, but intentionally not prompt-only: MistoLine holds a repeatable three-quarter profile and IP-Adapter supplies low-strength style guidance.\n\nTo switch class, load the infantry guide and replace the unit phrase in Positive. Keep the view/style clauses.\n\nThe diffusion image is generated at native 1024. BiRefNet removes the white background, then UnitReferenceTwoTone guarantees exactly two Pixel1 subject colors plus alpha. The 128 file is a review copy; feed the 1024 transparent result into Unit Sprite - Flat Key 128 for the canonical game layer."
+      ],
+      "title": "How to use"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      4,
+      0,
+      "MODEL"
+    ],
+    [
+      2,
+      1,
+      1,
+      6,
+      0,
+      "CLIP"
+    ],
+    [
+      3,
+      1,
+      1,
+      7,
+      0,
+      "CLIP"
+    ],
+    [
+      4,
+      1,
+      2,
+      9,
+      4,
+      "VAE"
+    ],
+    [
+      5,
+      1,
+      2,
+      12,
+      1,
+      "VAE"
+    ],
+    [
+      6,
+      2,
+      0,
+      5,
+      3,
+      "IMAGE"
+    ],
+    [
+      7,
+      2,
+      0,
+      9,
+      3,
+      "IMAGE"
+    ],
+    [
+      8,
+      3,
+      0,
+      5,
+      2,
+      "IMAGE"
+    ],
+    [
+      9,
+      4,
+      0,
+      5,
+      0,
+      "MODEL"
+    ],
+    [
+      10,
+      4,
+      1,
+      5,
+      1,
+      "IPADAPTER"
+    ],
+    [
+      11,
+      5,
+      0,
+      11,
+      0,
+      "MODEL"
+    ],
+    [
+      12,
+      6,
+      0,
+      9,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      13,
+      7,
+      0,
+      9,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      14,
+      8,
+      0,
+      9,
+      2,
+      "CONTROL_NET"
+    ],
+    [
+      15,
+      9,
+      0,
+      11,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      16,
+      9,
+      1,
+      11,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      17,
+      10,
+      0,
+      11,
+      3,
+      "LATENT"
+    ],
+    [
+      18,
+      11,
+      0,
+      12,
+      0,
+      "LATENT"
+    ],
+    [
+      19,
+      12,
+      0,
+      14,
+      1,
+      "IMAGE"
+    ],
+    [
+      20,
+      13,
+      0,
+      14,
+      0,
+      "BACKGROUND_REMOVAL"
+    ],
+    [
+      21,
+      12,
+      0,
+      15,
+      0,
+      "IMAGE"
+    ],
+    [
+      22,
+      14,
+      0,
+      15,
+      1,
+      "MASK"
+    ],
+    [
+      23,
+      15,
+      0,
+      16,
+      0,
+      "IMAGE"
+    ],
+    [
+      24,
+      15,
+      0,
+      17,
+      0,
+      "IMAGE"
+    ],
+    [
+      25,
+      17,
+      0,
+      18,
+      0,
+      "IMAGE"
+    ],
+    [
+      26,
+      15,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "info": {
+      "name": "Unit Reference - Anime Two Tone",
+      "description": "Guided SDXL three-quarter unit reference with native background removal and exact two-tone Pixel1 postprocess",
+      "generation_size": 1024,
+      "review_size": 128,
+      "view": "fixed three-quarter side profile",
+      "subject_colors": 2
+    }
+  },
+  "version": 0.4
+}

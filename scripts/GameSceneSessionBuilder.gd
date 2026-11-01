@@ -76,6 +76,16 @@ static func build_factions_data() -> Dictionary:
 
 
 static func build_setup_data(map_json: Dictionary) -> Dictionary:
+	# An authored list, including an empty one, is the whole setup. The region_1 fallback is only for
+	# older files that omit the key.
+	if map_json.has("starting_units") and map_json["starting_units"] is Array:
+		var order: Array = map_json.get("turn_order", ["ussr", "ger", "uk", "jap", "usa"])
+		return {
+			"schema_version": "0.5",
+			"turn_order": order,
+			"starting_units": map_json["starting_units"],
+		}
+
 	var starting_units: Array = []
 	for region_entry in _extract_regions(map_json):
 		var meta: Dictionary = region_entry.get("metadata", {})

@@ -1,0 +1,518 @@
+// Map geometry for the playground renderer. Ports the drawing rules of
+// scenes/game_map_root.gd and scripts/unit_layout.gd. No DOM: tests run it under
+// the engine tsconfig.
+import type { Dict } from "../../engine/model/types";
+
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Rgba {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/** `none` has no factory. Minor and major differ in the badge (one or two chimneys). */
+export type FactorySize = "none" | "minor" | "major";
+
+/** Default Facility Anchor: below the unit anchor, in world units. */
+export const FACILITY_ANCHOR_OFFSET: Vec2 = { x: 0, y: 16 };
+/** Default Air Anchor: up and to the right of the unit anchor, in world units. */
+export const AIR_ANCHOR_OFFSET: Vec2 = { x: 14, y: -10 };
+
+/** Hand-placed unit slots on a land region. Past that, extras arc around them. */
+export const UNIT_SLOT_MAX_LAND = 8;
+/** Hand-placed unit slots on a sea zone, and the most the generator will pack. */
+export const UNIT_SLOT_MAX_SEA = 6;
+/** How many slots the generator tries to place. Manual land slots go up to UNIT_SLOT_MAX_LAND. */
+export const UNIT_SLOT_MAX = UNIT_SLOT_MAX_SEA;
+
+/** The manual slot cap: 8 on land, 6 at sea. */
+export function unitSlotMax(isSea: boolean): number {
+  return isSea ? UNIT_SLOT_MAX_SEA : UNIT_SLOT_MAX_LAND;
+}
+
+/** The `[x, y]` pairs of `metadata.unit_slots`: well-formed pairs only, at most `max`. Empty when unset. */
+export function pointsFromPairs(raw: unknown, max = UNIT_SLOT_MAX_LAND): Vec2[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: Vec2[] = [];
+  for (const pair of raw) {
+    const p = pointFromPair(pair);
+    if (p) {
+      out.push(p);
+    }
+  }
+  return out.slice(0, max);
+}
+
+export function defaultFacilityAnchor(unit: Vec2): Vec2 {
+  return { x: unit.x + FACILITY_ANCHOR_OFFSET.x, y: unit.y + FACILITY_ANCHOR_OFFSET.y };
+}
+
+export function defaultAirAnchor(unit: Vec2): Vec2 {
+  return { x: unit.x + AIR_ANCHOR_OFFSET.x, y: unit.y + AIR_ANCHOR_OFFSET.y };
+}
+
+/**
+ * The factory size a region's metadata describes. `factory_size` wins when it says minor or major; a bare
+ * `factory: true` (every older file) is a major factory; anything else is none.
+ */
+export function factorySizeOf(meta: Dict): FactorySize {
+  const size = meta.factory_size;
+  if (size === "minor" || size === "major") {
+    return size;
+  }
+  return meta.factory ? "major" : "none";
+}
+
+/** A `[x, y]` pair from JSON, or null when absent or malformed. */
+export function pointFromPair(raw: unknown): Vec2 | null {
+  if (Array.isArray(raw) && raw.length >= 2) {
+    const x = Number(raw[0]);
+    const y = Number(raw[1]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      return { x, y };
+    }
+  }
+  return null;
+}
+
+export interface RegionShape {
+  id: string;
+  type: "land" | "sea";
+  ipc: number;
+  hasFactory: boolean;
+  /**
+   * The facility fields below are always filled in by buildMapGeometry. They are optional in the type so a
+   * hand-built shape (tests, tools) can leave them out; read them through the helpers (facilitiesOf,
+   * facilityAnchorOf, airAnchorOf), which fall back to the defaults.
+   */
+  /** none, minor or major. `hasFactory` is true for minor and major. */
+  factorySize?: FactorySize;
+  hasAirbase?: boolean;
+  hasHarbour?: boolean;
+  /** Where the facility badge is drawn: `metadata.facility_anchor`, or the default below the unit anchor. */
+  facilityAnchor?: Vec2;
+  /** True when the map file gives the facility anchor, so layout must not nudge it. */
+  facilityAnchorSet?: boolean;
+  /** Where air units stack: `metadata.air_anchor`, or the default up and right of the unit anchor. */
+  airAnchor?: Vec2;
+  airAnchorSet?: boolean;
+  /**
+   * Hand-placed unit slots (`metadata.unit_slots`), at most 8 on land and 6 at sea, in world units. Absent
+   * means the map generates them (see unitSlots.ts), so they follow the territory's shape and unit anchor.
+   */
+  unitSlots?: Vec2[];
+  /** A capital (`metadata.victory`): its IPC shield carries an emblem. */
+  capital?: boolean;
+  points: Vec2[];
+  /** The other islands of a multi-island territory (`extra_polygons`). Absent for an ordinary region. */
+  extra?: Vec2[][];
+  bounds: Rect;
+  centroid: Vec2;
+  /** Where unit icons are laid out around. */
+  anchor: Vec2;
+}
+
+export interface Facilities {
+  factory: FactorySize;
+  airbase: boolean;
+  harbour: boolean;
+}
+
+/** The facilities of a region. A shape without the new fields falls back to `hasFactory` (a major factory). */
+export function facilitiesOf(region: RegionShape): Facilities {
+  return {
+    factory: region.factorySize ?? (region.hasFactory ? "major" : "none"),
+    airbase: region.hasAirbase ?? false,
+    harbour: region.hasHarbour ?? false,
+  };
+}
+
+export function facilityAnchorOf(region: RegionShape): Vec2 {
+  return region.facilityAnchor ?? defaultFacilityAnchor(region.anchor);
+}
+
+export function airAnchorOf(region: RegionShape): Vec2 {
+  return region.airAnchor ?? defaultAirAnchor(region.anchor);
+}
+
+export interface MapGeometry {
+  /** `res://` path of the base map texture, or "" when the map has none. */
+  baseMap: string;
+  regions: RegionShape[];
+  /** Union of all region bounds. */
+  bounds: Rect;
+}
+
+export const UNIT_ICON_SIZE = 48;
+export const ICON_SPACING: Vec2 = { x: 36, y: 36 };
+export const FACTORY_OFFSET: Vec2 = { x: 0, y: -28 };
+export const IPC_LABEL_FONT_SIZE = 16;
+export const SELECTED_OUTLINE: Rgba = { r: 1, g: 1, b: 0, a: 0.8 };
+export const SELECTED_OUTLINE_WIDTH = 4;
+const REACHABLE_HIGHLIGHT: Rgba = { r: 0.95, g: 0.15, b: 0.12, a: 0.55 };
+
+export function buildMapGeometry(mapJson: Dict): MapGeometry {
+  const regions: RegionShape[] = [];
+  const rawRegions: unknown[] = Array.isArray(mapJson.regions) ? mapJson.regions : [];
+  for (const raw of rawRegions) {
+    if (typeof raw !== "object" || raw === null) {
+      continue;
+    }
+    const regionDict = raw as Dict;
+    const meta: Dict = regionDict.metadata ?? {};
+    const id = String(meta.region_id ?? "");
+    if (id === "") {
+      continue;
+    }
+    const ipc = Math.trunc(Number(meta.ipc ?? 0));
+    const points = polygonPoints(regionDict.polygon ?? []);
+    const extra = (Array.isArray(regionDict.extra_polygons) ? regionDict.extra_polygons : [])
+      .map((ring: unknown) => polygonPoints(Array.isArray(ring) ? ring : []))
+      .filter((ring: Vec2[]) => ring.length >= 3);
+    // Bounds cover every island, so unit stacks clamp to the whole territory.
+    const bounds = polygonBounds(extra.length > 0 ? [...points, ...extra.flat()] : points);
+    const type = inferRegionType(id, meta, ipc);
+    const anchor = unitAnchor(regionDict, points, bounds);
+    const factorySize = factorySizeOf(meta);
+    // Facilities are land things. A sea zone never shows a badge or a facility handle.
+    const land = type === "land";
+    const facilityAt = land ? pointFromPair(meta.facility_anchor) : null;
+    const airAt = pointFromPair(meta.air_anchor);
+    const slots = pointsFromPairs(meta.unit_slots, unitSlotMax(!land));
+    regions.push({
+      id,
+      type,
+      ipc,
+      hasFactory: Boolean(meta.factory ?? false) || factorySize !== "none",
+      factorySize: land ? factorySize : "none",
+      hasAirbase: land && Boolean(meta.has_airbase ?? false),
+      hasHarbour: land && Boolean(meta.has_harbour ?? false),
+      facilityAnchor: facilityAt ?? defaultFacilityAnchor(anchor),
+      facilityAnchorSet: facilityAt !== null,
+      airAnchor: airAt ?? defaultAirAnchor(anchor),
+      airAnchorSet: airAt !== null,
+      ...(slots.length > 0 ? { unitSlots: slots } : {}),
+      capital: Boolean(meta.victory ?? false),
+      points,
+      ...(extra.length > 0 ? { extra } : {}),
+      bounds,
+      centroid: polygonCentroid(points),
+      anchor,
+    });
+  }
+  return {
+    baseMap: String(mapJson.base_map ?? ""),
+    regions,
+    bounds: unionBounds(regions.map((r) => r.bounds)),
+  };
+}
+
+/** game_map_root._infer_region_type. Differs from the session builder: no-IPC, no-factory regions draw as sea. */
+export function inferRegionType(regionId: string, meta: Dict, ipc: number): "land" | "sea" {
+  const explicit = String(meta.type ?? meta.region_type ?? "").toLowerCase();
+  if (explicit === "land" || explicit === "sea") {
+    return explicit;
+  }
+  const lower = regionId.toLowerCase();
+  if (lower.includes("sea zone") || lower.startsWith("sea ")) {
+    return "sea";
+  }
+  if (ipc <= 0 && !meta.factory) {
+    return "sea";
+  }
+  return "land";
+}
+
+/** Sprite2D with centered = true at position (0, 1): the image centre sits on the map origin. */
+export function baseMapRect(width: number, height: number): Rect {
+  return { x: -width / 2, y: -height / 2 + 1, w: width, h: height };
+}
+
+export function polygonPath(points: Vec2[]): string {
+  if (points.length === 0) {
+    return "";
+  }
+  return `M${points.map((p) => `${p.x} ${p.y}`).join(" L")} Z`;
+}
+
+/** Geometry2D.is_point_in_polygon (even-odd). */
+export function pointInPolygon(p: Vec2, points: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i];
+    const b = points[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+export function regionAtPoint(map: MapGeometry, p: Vec2): string {
+  for (const region of map.regions) {
+    if (pointInPolygon(p, region.points) || (region.extra ?? []).some((ring) => pointInPolygon(p, ring))) {
+      return region.id;
+    }
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------
+// Unit layout (scripts/unit_layout.gd)
+// ---------------------------------------------------------------
+
+export function layoutPositions(count: number, spacing: Vec2 = ICON_SPACING): Vec2[] {
+  const positions: Vec2[] = [];
+  if (count <= 0) {
+    return positions;
+  }
+  let cols: number;
+  let rows: number;
+  if (count <= 3) {
+    cols = count;
+    rows = 1;
+  } else if (count <= 6) {
+    cols = 3;
+    rows = 2;
+  } else {
+    cols = 3;
+    rows = 3;
+  }
+  const startX = -((cols - 1) * spacing.x) * 0.5;
+  const startY = -((rows - 1) * spacing.y) * 0.5;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      if (positions.length >= count) {
+        return positions;
+      }
+      positions.push({ x: startX + col * spacing.x, y: startY + row * spacing.y });
+    }
+  }
+  return positions;
+}
+
+/** Godot clampf is min(max(x, lo), hi), so an inner rect with negative size pins to its far edge. */
+export function clampPositionsToBounds(positions: Vec2[], anchor: Vec2, bounds: Rect, margin = 20): Vec2[] {
+  if (bounds.w === 0 && bounds.h === 0) {
+    return positions;
+  }
+  const lo = { x: bounds.x + margin, y: bounds.y + margin };
+  const hi = { x: bounds.x + bounds.w - margin, y: bounds.y + bounds.h - margin };
+  return positions.map((offset) => {
+    const wx = Math.min(Math.max(anchor.x + offset.x, lo.x), hi.x);
+    const wy = Math.min(Math.max(anchor.y + offset.y, lo.y), hi.y);
+    return { x: wx - anchor.x, y: wy - anchor.y };
+  });
+}
+
+export interface StackEntry {
+  unit_type_id: string;
+  faction_id: string;
+  count: number;
+  instance_id?: string;
+}
+
+export interface PlacedStack {
+  key: string;
+  entry: StackEntry;
+  position: Vec2;
+}
+
+/** UnitVisualizer.update_region_units: one slot per type|faction[|instance], sorted by key. */
+export function layoutRegionStacks(region: RegionShape, entries: StackEntry[]): PlacedStack[] {
+  const byKey = new Map<string, StackEntry>();
+  for (const entry of entries) {
+    const key = stackKey(entry);
+    if (!byKey.has(key)) {
+      byKey.set(key, entry);
+    }
+  }
+  const keys = [...byKey.keys()].sort();
+  const slots = clampPositionsToBounds(layoutPositions(keys.length), region.anchor, region.bounds);
+  return keys.map((key, i) => ({
+    key,
+    entry: byKey.get(key)!,
+    position: { x: region.anchor.x + slots[i].x, y: region.anchor.y + slots[i].y },
+  }));
+}
+
+/** Screen-pixel gap between unit counters in a region's stack. Counters are drawn at a fixed pixel size. */
+export const STACK_SPACING_PX: Vec2 = { x: 46, y: 40 };
+
+export interface StackSlot {
+  key: string;
+  entry: StackEntry;
+  /** Offset from the region's anchor, in screen pixels. */
+  offset: Vec2;
+}
+
+/** Same slot order as layoutRegionStacks, but offsets are screen pixels so counters never overlap when zoomed out. */
+export function layoutStackSlots(entries: StackEntry[]): StackSlot[] {
+  const byKey = new Map<string, StackEntry>();
+  for (const entry of entries) {
+    const key = stackKey(entry);
+    if (!byKey.has(key)) {
+      byKey.set(key, entry);
+    }
+  }
+  const keys = [...byKey.keys()].sort();
+  const offsets = layoutPositions(keys.length, STACK_SPACING_PX);
+  return keys.map((key, i) => ({ key, entry: byKey.get(key)!, offset: offsets[i] }));
+}
+
+export function stackKey(entry: StackEntry): string {
+  const base = `${entry.unit_type_id}|${entry.faction_id}`;
+  return entry.instance_id ? `${base}|${entry.instance_id}` : base;
+}
+
+// ---------------------------------------------------------------
+// Fills (game_map_root._owner_color and the highlight passes)
+// ---------------------------------------------------------------
+
+export function ownerFill(owner: string): Rgba {
+  switch (owner.toLowerCase()) {
+    case "allies":
+      return { r: 0.5, g: 0.85, b: 0.5, a: 0.5 };
+    case "axis":
+      return { r: 0.6, g: 0.6, b: 0.6, a: 0.5 };
+    default:
+      return { r: 0.5, g: 0.5, b: 0.5, a: 0.35 };
+  }
+}
+
+export type HighlightMode =
+  | { kind: "none" }
+  | { kind: "move"; from: string; legal: string[]; hover: string; tone?: "attack" | "move" }
+  | { kind: "mobilize"; legal: string[]; hover: string };
+
+export function regionFill(regionId: string, owner: string, mode: HighlightMode): Rgba {
+  const base = ownerFill(owner);
+  if (mode.kind === "move") {
+    if (regionId === mode.from) {
+      return lightened(base, 0.12);
+    }
+    if (mode.legal.includes(regionId)) {
+      return { ...REACHABLE_HIGHLIGHT, a: regionId === mode.hover ? 0.68 : 0.52 };
+    }
+    return dimmed(base);
+  }
+  if (mode.kind === "mobilize") {
+    if (mode.legal.includes(regionId)) {
+      return { ...base, a: regionId === mode.hover ? 0.62 : 0.45 };
+    }
+    return dimmed(base);
+  }
+  return base;
+}
+
+export function toCss(c: Rgba): string {
+  const ch = (v: number) => Math.round(Math.min(Math.max(v, 0), 1) * 255);
+  return `rgba(${ch(c.r)}, ${ch(c.g)}, ${ch(c.b)}, ${Math.round(c.a * 1000) / 1000})`;
+}
+
+function lightened(c: Rgba, amount: number): Rgba {
+  return {
+    r: c.r + (1 - c.r) * amount,
+    g: c.g + (1 - c.g) * amount,
+    b: c.b + (1 - c.b) * amount,
+    a: c.a,
+  };
+}
+
+function dimmed(c: Rgba): Rgba {
+  return { r: c.r * 0.55, g: c.g * 0.55, b: c.b * 0.55, a: 0.18 };
+}
+
+// ---------------------------------------------------------------
+// Polygon helpers
+// ---------------------------------------------------------------
+
+function polygonPoints(raw: unknown[]): Vec2[] {
+  const points: Vec2[] = [];
+  for (const p of raw) {
+    if (Array.isArray(p) && p.length >= 2) {
+      points.push({ x: Number(p[0]), y: Number(p[1]) });
+    }
+  }
+  return points;
+}
+
+function polygonBounds(points: Vec2[]): Rect {
+  if (points.length === 0) {
+    return { x: 0, y: 0, w: 0, h: 0 };
+  }
+  let minX = points[0].x;
+  let minY = points[0].y;
+  let maxX = minX;
+  let maxY = minY;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** Vertex average, as _polygon_centroid does. Not the area centroid. */
+function polygonCentroid(points: Vec2[]): Vec2 {
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  let sx = 0;
+  let sy = 0;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+  }
+  return { x: sx / points.length, y: sy / points.length };
+}
+
+function unitAnchor(regionDict: Dict, points: Vec2[], bounds: Rect): Vec2 {
+  const anchors: unknown[] = Array.isArray(regionDict.anchors) ? regionDict.anchors : [];
+  for (const a of anchors) {
+    if (typeof a === "object" && a !== null && String((a as Dict).type ?? "") === "unit") {
+      const anchor = { x: Number((a as Dict).x ?? 0), y: Number((a as Dict).y ?? 0) };
+      if (anchor.x !== 0 || anchor.y !== 0) {
+        return anchor;
+      }
+      break;
+    }
+  }
+  if (bounds.w !== 0 || bounds.h !== 0) {
+    return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 - 10 };
+  }
+  const c = polygonCentroid(points);
+  return { x: c.x, y: c.y - 10 };
+}
+
+function unionBounds(rects: Rect[]): Rect {
+  if (rects.length === 0) {
+    return { x: 0, y: 0, w: 0, h: 0 };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const r of rects) {
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.w);
+    maxY = Math.max(maxY, r.y + r.h);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}

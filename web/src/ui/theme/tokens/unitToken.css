@@ -1,0 +1,13 @@
+.unit-token {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+}
+
+.unit-token > canvas {
+  position: absolute;
+  top: 0;
+  display: block;
+  pointer-events: none;
+}

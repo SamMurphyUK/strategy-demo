@@ -459,9 +459,8 @@ func _finalize_preview(icon: UnitIcon) -> void:
 
 
 func _apply_preview_scale(icon: UnitIcon) -> void:
-	var base_scale := icon.get_texture_base_scale()
-	if base_scale > 0.0:
-		icon.scale = Vector2(base_scale / _current_zoom, base_scale / _current_zoom)
+	# The drag ghost lives on a canvas layer, so it does not inherit MapRoot's zoom.
+	icon.scale = icon.scale_for_zoom(_current_zoom, false)
 
 
 func _clear_preview() -> void:
