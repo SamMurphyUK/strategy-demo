@@ -46,7 +46,7 @@ import {
   wrapWorldX,
   zoomAt,
 } from "./viewMath";
-import { lodForZoom, type MapLod, spriteMix, UPRIGHT_HIT_PX } from "./zoomLod";
+import { lodForZoom, type MapLod, SPRITE_FADE_MS, UPRIGHT_HIT_PX } from "./zoomLod";
 
 export interface CombatMarker {
   regionId: string;
@@ -197,6 +197,9 @@ export function MapView(props: MapViewProps) {
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
   const userMoved = useRef(false);
   const lodHold = useRef<MapLod>(0);
+  const spriteGate = useRef<MapLod | null>(null);
+  const spriteFade = useRef<{ toSprites: boolean; start: number } | null>(null);
+  const [spriteClock, setSpriteClock] = useState(0);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -216,8 +219,26 @@ export function MapView(props: MapViewProps) {
   const mapLod: MapLod = editor ? 0 : lodForZoom(view.k, lodHold.current);
   if (!editor) {
     lodHold.current = mapLod;
+    if (spriteGate.current === null) {
+      spriteGate.current = mapLod;
+    } else if (spriteGate.current !== mapLod) {
+      const wasSprites = spriteGate.current === 2;
+      spriteGate.current = mapLod;
+      if (wasSprites !== (mapLod === 2)) {
+        spriteFade.current = { toSprites: mapLod === 2, start: performance.now() };
+      }
+    }
   }
-  const uprightReach = !editor && spriteMix(view.k) >= 0.5 ? UPRIGHT_HIT_PX : 0;
+  let unitFade = !editor && mapLod === 2 ? 1 : 0;
+  const handoff = editor ? null : spriteFade.current;
+  if (handoff && spriteClock >= 0) {
+    const t = Math.min(1, (performance.now() - handoff.start) / SPRITE_FADE_MS);
+    unitFade = handoff.toSprites ? t : 1 - t;
+    if (t >= 1) {
+      spriteFade.current = null;
+    }
+  }
+  const uprightReach = unitFade >= 0.5 ? UPRIGHT_HIT_PX : 0;
   const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
   const plusHitPx = Math.max(4, TOKEN_PX * unitScale * 0.22);
   /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
@@ -249,6 +270,24 @@ export function MapView(props: MapViewProps) {
     const id = window.setInterval(tick, 220);
     return () => window.clearInterval(id);
   }, [scarCount > 0, props.suspended]);
+
+  useEffect(() => {
+    if (editor || spriteFade.current === null) return;
+    let raf = 0;
+    const step = () => {
+      const fade = spriteFade.current;
+      if (!fade) return;
+      if (performance.now() - fade.start >= SPRITE_FADE_MS) {
+        spriteFade.current = null;
+        setSpriteClock((n) => n + 1);
+        return;
+      }
+      setSpriteClock(performance.now());
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [mapLod, editor]);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
   const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach });
@@ -374,6 +413,7 @@ export function MapView(props: MapViewProps) {
       dim: only === null ? null : only === "land" ? "sea" : "land",
       frontlines: editor ? [] : (props.relief?.frontlines ?? []),
       lod: mapLod,
+      unitFade,
       stampAvoid:
         mapLod >= 1
           ? Object.fromEntries(

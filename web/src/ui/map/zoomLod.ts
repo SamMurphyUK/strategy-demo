@@ -6,17 +6,18 @@ export type MapLod = 0 | 1 | 2;
 
 /** Halfway from a flat zoom to the previous 1.175 mark, so the pixel pop-in is about 50% sooner. */
 const OPERATIONAL = 1.0875;
-/** Icon tokens still own the view at the old 1.75 mark. Sprites dissolve in from here. */
-const TACTICAL_IN = 2.625;
-const TACTICAL_OUT = 2.45;
-/** Stamps finish fading in here and stay. They used to vanish again at the tactical zoom. */
+/** Upright sprites replace the icon tokens at this zoom, then a short timed fade plays. */
+const TACTICAL_IN = 3.8;
+/** Stay on sprites until the zoom drops back through here, so a notch of wheel does not flicker. */
+const TACTICAL_OUT = 3.65;
+/** Stamps finish fading in here and stay. */
 const STAMP_FULL = 1.16;
-/** Upright sprites are fully in, and the icon tokens are gone. */
-const SPRITE_FULL = 3.4;
+/** How long the handoff between icon tokens and upright sprites takes. */
+export const SPRITE_FADE_MS = 300;
 
 /**
- * LoD for `zoom`. Terrain stamps begin at 1.0875. Icon tokens hold through 2.625,
- * then upright sprites dissolve in and stay until the zoom falls below 2.45.
+ * LoD for `zoom`. Terrain stamps begin at 1.0875. Icon tokens hold until 3.8,
+ * where the upright sprites take over. They stay until the zoom falls below 3.65.
  */
 export function lodForZoom(zoom: number, previous: MapLod = 0): MapLod {
   if (zoom >= TACTICAL_IN || (previous === 2 && zoom >= TACTICAL_OUT)) {
@@ -26,20 +27,6 @@ export function lodForZoom(zoom: number, previous: MapLod = 0): MapLod {
     return 1;
   }
   return 0;
-}
-
-/**
- * 0 while the operational icons own the view, then a dissolve into the upright sprites.
- * 1 once the sprites have replaced the tokens.
- */
-export function spriteMix(zoom: number): number {
-  if (zoom <= TACTICAL_IN) {
-    return 0;
-  }
-  if (zoom >= SPRITE_FULL) {
-    return 1;
-  }
-  return (zoom - TACTICAL_IN) / (SPRITE_FULL - TACTICAL_IN);
 }
 
 /** 0 below the operational threshold, then a short fade, then solid for every closer zoom. */

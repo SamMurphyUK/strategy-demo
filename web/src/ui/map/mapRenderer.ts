@@ -72,7 +72,6 @@ import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScr
 import {
   type MapLod,
   type TerrainStamp,
-  spriteMix,
   terrainStampAlpha,
   terrainStamps,
   uprightDrawOrder,
@@ -115,6 +114,8 @@ export interface TerrainScene {
   scars?: readonly ScarFrame[];
   /** 0 strategic, 1 operational stamps, 2 upright sprites. Omitted means strategic. */
   lod?: MapLod;
+  /** 0 icon tokens, 1 upright sprites. A value between is the timed handoff. */
+  unitFade?: number;
   /** World points stamps must stay clear of, per land region. Hubs and unit slots. */
   stampAvoid?: Readonly<Record<string, readonly Vec2[]>>;
 }
@@ -525,7 +526,7 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
   }
 
   drawFrontlines(ctx, s.frontlines ?? []);
-  drawBattleScars(ctx, s.scars ?? [], px, spriteMix(s.view.k) <= 0);
+  drawBattleScars(ctx, s.scars ?? [], px, (s.unitFade ?? 0) <= 0);
 }
 
 // ---------------------------------------------------------------
@@ -933,17 +934,19 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
     }
   };
 
-  const mix = spriteMix(scene.view.k);
-  if (mix <= 0 || lod < 2) {
+  const mix = scene.unitFade ?? (lod >= 2 ? 1 : 0);
+  if (mix <= 0) {
     drawIcons();
     return;
   }
-  if (mix < 1) {
-    ctx.save();
-    ctx.globalAlpha *= 1 - mix;
-    drawIcons();
-    ctx.restore();
+  if (mix >= 1) {
+    drawSprites();
+    return;
   }
+  ctx.save();
+  ctx.globalAlpha *= 1 - mix;
+  drawIcons();
+  ctx.restore();
   ctx.save();
   ctx.globalAlpha *= mix;
   drawSprites();

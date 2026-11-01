@@ -6,7 +6,7 @@ import {
   tiltFactor,
   worldToScreen,
 } from "../../../src/ui/map/viewMath";
-import { lodForZoom, sortByGroundY, spriteMix, squadSpriteCount, terrainStampAlpha, uprightDrawOrder } from "../../../src/ui/map/zoomLod";
+import { lodForZoom, sortByGroundY, SPRITE_FADE_MS, squadSpriteCount, terrainStampAlpha, uprightDrawOrder } from "../../../src/ui/map/zoomLod";
 
 describe("oblique tilt", () => {
   it("round-trips world and screen at a flat zoom and at full tilt", () => {
@@ -30,23 +30,18 @@ describe("oblique tilt", () => {
 });
 
 describe("semantic zoom lod", () => {
-  it("keeps icon tokens at 1.75 and dissolves into upright sprites from 2.625", () => {
+  it("keeps icon tokens until 3.8, then switches to upright sprites", () => {
     expect(lodForZoom(1.08, 0)).toBe(0);
     expect(lodForZoom(1.09, 0)).toBe(1);
-    expect(lodForZoom(1.75, 0)).toBe(1);
     expect(lodForZoom(2.2, 1)).toBe(1);
-    expect(lodForZoom(2.624, 1)).toBe(1);
-    expect(lodForZoom(2.625, 0)).toBe(2);
-    expect(lodForZoom(2.625, 1)).toBe(2);
-    expect(lodForZoom(2.5, 2)).toBe(2);
-    expect(lodForZoom(2.45, 2)).toBe(2);
-    expect(lodForZoom(2.44, 2)).toBe(1);
+    expect(lodForZoom(3.79, 1)).toBe(1);
+    expect(lodForZoom(3.8, 0)).toBe(2);
+    expect(lodForZoom(3.8, 1)).toBe(2);
+    expect(lodForZoom(3.7, 2)).toBe(2);
+    expect(lodForZoom(3.65, 2)).toBe(2);
+    expect(lodForZoom(3.649, 2)).toBe(1);
     expect(lodForZoom(1.08, 2)).toBe(0);
-    expect(spriteMix(1.75)).toBe(0);
-    expect(spriteMix(2.625)).toBe(0);
-    expect(spriteMix(3)).toBeGreaterThan(0);
-    expect(spriteMix(3)).toBeLessThan(1);
-    expect(spriteMix(3.4)).toBe(1);
+    expect(SPRITE_FADE_MS).toBe(300);
     expect(terrainStampAlpha(1.08)).toBe(0);
     expect(terrainStampAlpha(1.09)).toBeGreaterThanOrEqual(0.4);
     expect(terrainStampAlpha(1.16)).toBe(1);
