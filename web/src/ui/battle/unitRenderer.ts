@@ -15,6 +15,7 @@ import {
   CasualtyRecord,
   WaterGeyser,
 } from './combatTypes';
+import { type FlagMotif, ipcLostCaption } from './flagMotif';
 
 /**
  * STRICT 16-COLOR VINTAGE MILITARY PALETTE
@@ -4119,6 +4120,7 @@ export function drawProceduralWavingFlag(
   height: number,
   time: number,
   theater: TheaterId,
+  motif?: FlagMotif,
 ) {
   ctx.save();
 
@@ -4150,9 +4152,11 @@ export function drawProceduralWavingFlag(
       const baseSy = s * stripeH;
       const sy = baseSy + waveY;
 
-      // Color scheme based on victorious theater
+      // Color scheme: the attacker's faction when a motif is given, otherwise the theater.
       let stripeColor: string;
-      if (theater === 'eastern') {
+      if (motif) {
+        stripeColor = motif.stripes[s % motif.stripes.length];
+      } else if (theater === 'eastern') {
         // Red Army Guard: Soviet Crimson field with subtle tone variations
         stripeColor = s % 2 === 0 ? PALETTE.crimson : PALETTE.plum;
       } else if (theater === 'north_africa') {
@@ -4173,11 +4177,11 @@ export function drawProceduralWavingFlag(
     // 2. Draw Canton (Upper Left Section)
     if (colX < cantonW) {
       const cantonSliceH = cantonH + waveY;
-      let cantonColor: string = PALETTE.navalSteel;
+      let cantonColor: string = motif ? motif.canton : PALETTE.navalSteel;
 
-      if (theater === 'eastern') {
+      if (!motif && theater === 'eastern') {
         cantonColor = PALETTE.plum;
-      } else if (theater === 'north_africa') {
+      } else if (!motif && theater === 'north_africa') {
         cantonColor = PALETTE.earthBrown;
       }
 
@@ -4214,13 +4218,7 @@ export function drawProceduralWavingFlag(
     Math.sin(cantonCenterX * 0.011 - time * 3.4) * 24 +
     Math.sin(cantonCenterX * 0.026 - time * 4.6 + 1.2) * 12;
 
-  if (theater === 'eastern') {
-    // Red Army Golden Star & Laurel Wreath in Canton
-    const starX = cantonCenterX;
-    const starY = Math.round(cantonH / 2 + cantonWave);
-    drawGoldStarEmblem(ctx, starX, starY, 32, true);
-  } else {
-    // 5x4 Grid of 5-Point Stars in Canton
+  const drawStarGrid = () => {
     const starCols = 6;
     const starRows = 4;
     const stepX = (cantonW - 40) / (starCols - 1);
@@ -4236,6 +4234,22 @@ export function drawProceduralWavingFlag(
         drawPixelStar(ctx, Math.round(sx), Math.round(sy), 4, PALETTE.sandCream);
       }
     }
+  };
+
+  if (motif) {
+    const cx = cantonCenterX;
+    const cy = Math.round(cantonH / 2 + cantonWave);
+    if (motif.emblem === 'star') drawGoldStarEmblem(ctx, cx, cy, 32, true);
+    else if (motif.emblem === 'cross') drawFlagCross(ctx, cx, cy, 28);
+    else if (motif.emblem === 'disc') drawFlagDisc(ctx, cx, cy, 34);
+    else drawStarGrid();
+  } else if (theater === 'eastern') {
+    // Red Army Golden Star & Laurel Wreath in Canton
+    const starX = cantonCenterX;
+    const starY = Math.round(cantonH / 2 + cantonWave);
+    drawGoldStarEmblem(ctx, starX, starY, 32, true);
+  } else {
+    drawStarGrid();
   }
 
   // 5. Subtle horizontal cloth weave line texture
@@ -4339,7 +4353,7 @@ function drawGoldStarEmblem(
 
 /**
  * Draws the Expanding VICTORY Modal with Regional Banner,
- * Circular Faction Emblems, Dynamic IPC Display, and "RETURN TO COMBAT" Button.
+ * Circular Faction Emblems, IPC lost in the battle, and "RETURN TO COMBAT" Button.
  */
 export function drawVictorySequenceModal(
   ctx: CanvasRenderingContext2D,
@@ -4471,10 +4485,10 @@ export function drawVictorySequenceModal(
     ctx.font = 'bold 11px monospace';
     ctx.fillText('ATTACKER', atkCenterX + 36, emblemsY - 10);
 
-    // Dynamic IPC Value in bold pixel string & font
+    // IPC destroyed on this side in the battle.
     ctx.fillStyle = PALETTE.sandCream;
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText(`${attackerIpc} IPC`, atkCenterX + 36, emblemsY + 10);
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(ipcLostCaption(attackerIpc), atkCenterX + 36, emblemsY + 10);
     ctx.restore();
 
     // DEFENDER EMBLEM (RIGHT SIDE)
@@ -4508,10 +4522,10 @@ export function drawVictorySequenceModal(
     ctx.font = 'bold 11px monospace';
     ctx.fillText('DEFENDER', defCenterX + 36, emblemsY - 10);
 
-    // Dynamic IPC Value in bold font
+    // IPC destroyed on this side in the battle.
     ctx.fillStyle = PALETTE.terracotta;
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText(`${defenderIpc} IPC`, defCenterX + 36, emblemsY + 10);
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(ipcLostCaption(defenderIpc), defCenterX + 36, emblemsY + 10);
     ctx.restore();
   }
 
@@ -4574,4 +4588,142 @@ export function drawVictorySequenceModal(
 
   ctx.restore();
   return {returnButtonRect};
+}
+
+function drawFlagCross(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number) {
+  ctx.save();
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.fillRect(cx - radius, cy - 4, radius * 2, 8);
+  ctx.fillRect(cx - 4, cy - radius, 8, radius * 2);
+  ctx.fillStyle = PALETTE.mustardBrass;
+  ctx.fillRect(cx - 6, cy - 6, 12, 12);
+  ctx.restore();
+}
+
+function drawFlagDisc(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number) {
+  ctx.save();
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.plum;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function pixelLineWidth(text: string, pixelSize: number): number {
+  if (text.length === 0) return 0;
+  return text.length * (3 * pixelSize + pixelSize) - pixelSize;
+}
+
+/**
+ * The attack card, in the same brass frame and pixel lettering as the victory panel.
+ * `lines` joined with spaces are "[FACTION] IS ATTACKING [FACTION] AT [REGION]".
+ */
+export function drawAttackBriefing(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  time: number,
+  flagElapsed: number,
+  lines: readonly string[],
+): {button: {x: number; y: number; w: number; h: number}} {
+  ctx.save();
+
+  const expandDuration = 0.65;
+  const progress = Math.min(1, Math.max(0, (flagElapsed - 0.15) / expandDuration));
+  const ease = 1 - Math.pow(1 - progress, 3);
+
+  const targetW = 760;
+  const targetH = 176;
+  const curW = Math.round(targetW * ease);
+  const curH = Math.round(targetH * ease);
+
+  const centerX = Math.round(width / 2);
+  const centerY = Math.round(height / 2 - 25);
+  const bx = centerX - Math.round(curW / 2);
+  const by = centerY - Math.round(curH / 2);
+
+  const btnW = 270;
+  const btnH = 54;
+  const btnX = centerX - Math.round(btnW / 2);
+  const btnY = centerY + Math.round(targetH / 2) + 26;
+  const button = {x: btnX, y: btnY, w: btnW, h: btnH};
+
+  if (curW > 10 && curH > 10) {
+    ctx.fillStyle = 'rgba(20, 16, 22, 0.85)';
+    ctx.fillRect(bx + 6, by + 6, curW, curH);
+
+    ctx.fillStyle = PALETTE.khakiLeather;
+    ctx.fillRect(bx - 4, by - 4, curW + 8, curH + 8);
+
+    ctx.fillStyle = PALETTE.mustardBrass;
+    ctx.fillRect(bx - 2, by - 2, curW + 4, curH + 4);
+
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(bx, by, curW, curH);
+
+    ctx.fillStyle = PALETTE.sandCream;
+    ctx.fillRect(bx + 4, by + 4, 3, 3);
+    ctx.fillRect(bx + curW - 7, by + 4, 3, 3);
+    ctx.fillRect(bx + 4, by + curH - 7, 3, 3);
+    ctx.fillRect(bx + curW - 7, by + curH - 7, 3, 3);
+  }
+
+  const contentAlpha = Math.min(1, Math.max(0, (progress - 0.65) / 0.35));
+  if (contentAlpha > 0.01) {
+    ctx.globalAlpha = contentAlpha;
+    const sizes = lines.map((line) => (pixelLineWidth(line, 4) <= targetW - 64 ? 4 : 3));
+    const gap = 14;
+    const heights = sizes.map((size) => size * 5);
+    const block = heights.reduce((sum, h) => sum + h, 0) + gap * Math.max(0, lines.length - 1);
+    let y = by + Math.round((curH - block) / 2);
+    lines.forEach((line, i) => {
+      drawPixelString(ctx, line, centerX, y, sizes[i], PALETTE.sandCream, PALETTE.plum);
+      y += heights[i] + gap;
+    });
+  }
+
+  const buttonAlpha = Math.min(1, Math.max(0, (flagElapsed - 0.4) / 0.5));
+  if (buttonAlpha > 0.01) {
+    ctx.globalAlpha = buttonAlpha;
+
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(btnX + 4, btnY + 4, btnW, btnH);
+
+    ctx.fillStyle = PALETTE.crimson;
+    ctx.fillRect(btnX, btnY, btnW, btnH);
+
+    ctx.fillStyle = '#b85f57';
+    ctx.fillRect(btnX, btnY, btnW, 2);
+    ctx.fillRect(btnX, btnY, 2, btnH);
+
+    ctx.fillStyle = PALETTE.plum;
+    ctx.fillRect(btnX, btnY + btnH - 2, btnW, 2);
+    ctx.fillRect(btnX + btnW - 2, btnY, 2, btnH);
+
+    const pulse = (Math.sin(time * 6) + 1) / 2;
+    ctx.strokeStyle = pulse > 0.4 ? PALETTE.sandCream : PALETTE.terracotta;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(btnX + 2, btnY + 2, btnW - 4, btnH - 4);
+
+    ctx.fillStyle = PALETTE.sandCream;
+    ctx.fillRect(btnX + 4, btnY + 4, 2, 2);
+    ctx.fillRect(btnX + btnW - 6, btnY + 4, 2, 2);
+    ctx.fillRect(btnX + 4, btnY + btnH - 6, 2, 2);
+    ctx.fillRect(btnX + btnW - 6, btnY + btnH - 6, 2, 2);
+
+    drawPixelString(ctx, 'BEGIN BATTLE', centerX, btnY + 13, 3, PALETTE.sandCream, PALETTE.plum);
+
+    ctx.fillStyle = PALETTE.sandCream;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('[ CLICK OR SPACE TO ADVANCE ]', centerX, btnY + 40);
+  }
+
+  ctx.restore();
+  return {button};
 }

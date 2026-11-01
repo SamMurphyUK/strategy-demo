@@ -7,6 +7,8 @@ export interface MatchUnit {
   id: string;
   type: UnitType;
   maxHp: number;
+  /** What this piece cost. The outro adds these up for units destroyed in the battle. */
+  cost?: number;
 }
 
 export interface MatchDie {
@@ -35,7 +37,10 @@ export type MatchOutcome = "attacker_wins" | "defender_wins" | "mutual" | "undec
 export interface BattleMatch {
   theater: TheaterId;
   regionName: string;
-  /** Treasuries shown on the victory banner. */
+  /**
+   * Sandbox stand-in for the outro numbers. A map battle ignores these and counts
+   * the IPC of units destroyed in the fight.
+   */
   attackerIpc: number;
   defenderIpc: number;
   attackers: MatchUnit[];

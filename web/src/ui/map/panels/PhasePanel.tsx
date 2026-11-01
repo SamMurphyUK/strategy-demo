@@ -5,6 +5,7 @@ import type { Battle } from "../../../engine/combat/combat";
 import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
+import { playCampaignCue } from "../campaignAudio";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -14,9 +15,11 @@ interface Props {
   setSelection(s: Selection): void;
   legalTargets: string[];
   pending: PurchaseLine[];
+  /** Zoom to the territory, then open the attack card, then the battle. */
+  onFight(regionId: string): void;
 }
 
-export function PhasePanel({ game, selection, setSelection, legalTargets, pending }: Props) {
+export function PhasePanel({ game, selection, setSelection, legalTargets, pending, onFight }: Props) {
   const { session } = game;
   const state = session.state;
   const faction = state.current_faction_id;
@@ -27,7 +30,6 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
   const mustReturn = phase === "noncombat_move" ? planesMustLandMessage(state, faction) : "";
   const mustPlace = phase === "mobilize" ? mustPlaceMessage(state, faction) : "";
   const doomed = stranded.filter((plane) => !plane.canReturn);
-  const fight = (regionId: string) => game.send("start_battle", { region_id: regionId });
 
   return (
     <section className="panel phase-panel">
@@ -41,7 +43,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
         <MoveBody selection={selection} setSelection={setSelection} legalTargets={legalTargets} game={game} />
       )}
 
-      {phase === "combat" && <CombatBody battles={battles} onFight={fight} />}
+      {phase === "combat" && <CombatBody battles={battles} onFight={onFight} />}
 
       {phase === "mobilize" && (
         <MobilizeBody
@@ -61,7 +63,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
 
       <div className="phase-actions">
         {legal.includes("start_battle") && battles.length > 0 && (
-          <button type="button" className="primary" onClick={() => fight(battles[0].region_id)}>
+          <button type="button" className="primary" onClick={() => onFight(battles[0].region_id)}>
             Fight next battle
           </button>
         )}
@@ -109,8 +111,10 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
 
   const total = Object.entries(staged).reduce((sum, [id, n]) => sum + (costs[id] ?? 0) * n, 0);
   const ipc = state.getFactionIpc(faction);
-  const bump = (id: string, d: number) =>
+  const bump = (id: string, d: number) => {
+    if (d > 0) playCampaignCue("pickup");
     setStaged((s) => ({ ...s, [id]: Math.max(0, (s[id] ?? 0) + d) }));
+  };
 
   const confirm = () => {
     const purchases = Object.entries(staged)
@@ -122,6 +126,7 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
     const result = game.send("purchase_units", { purchases });
     if (result.result_type === "ok") {
       setStaged({});
+      playCampaignCue("snap");
     }
   };
 

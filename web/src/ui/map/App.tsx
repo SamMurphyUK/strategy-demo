@@ -6,6 +6,15 @@ import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
 import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
 import { BattleScreen } from "./BattleScreen";
+import { moveCue, playCampaignCue } from "./campaignAudio";
+import { armCampaignMusic, setCampaignBed } from "./campaignMusic";
+import { CombatDarken, CombatIntro } from "./CombatIntro";
+import {
+  COMBAT_PAN_MS,
+  COMBAT_ZOOM_MS,
+  combatGoal,
+  type MapCamera,
+} from "./combatCamera";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import { startingStacks } from "./editor/editorModel";
@@ -28,6 +37,14 @@ export type Selection =
   | { kind: "stack"; regionId: string; key: string; unitTypeId: string; instanceId: string; max: number; count: number }
   | { kind: "place"; unitTypeId: string }
   | null;
+
+interface ApproachPlan {
+  regionId: string;
+  attackerId: string;
+  defenderId: string;
+  regionName: string;
+  stage: "move" | "darken" | "briefing";
+}
 
 const MOVEMENT_PHASES = ["combat_move", "noncombat_move"];
 
@@ -76,11 +93,46 @@ export function App() {
   if (activeBattle && battleOnScreen?.region_id !== activeBattle.region_id) {
     setBattleOnScreen(activeBattle);
   }
+  // The map stays mounted under the battle so the zoom from the first fight is still there for the next.
+  const [approach, setApproach] = useState<ApproachPlan | null>(null);
+  const approachRef = useRef<ApproachPlan | null>(null);
+  approachRef.current = approach;
+  const cameraRef = useRef<MapCamera | null>(null);
+  const bindCamera = useCallback((camera: MapCamera | null) => {
+    cameraRef.current = camera;
+  }, []);
+  const openedCombat = useRef(false);
+  const approachTicket = useRef(0);
 
   // Any phase or faction change invalidates an in-progress move or placement.
   useEffect(() => {
     setSelection(null);
   }, [phase, faction, game.seed]);
+
+  // Strategy march on the map. The combat phase fades across to the battle march.
+  useEffect(() => {
+    setCampaignBed(editing ? "off" : phase === "combat" ? "battle" : "map");
+  }, [editing, phase]);
+
+  useEffect(() => {
+    const arm = () => armCampaignMusic();
+    window.addEventListener("pointerdown", arm);
+    window.addEventListener("keydown", arm);
+    return () => {
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+    };
+  }, []);
+
+  // The first battle of a combat phase zooms in. Later battles pan at that zoom.
+  useEffect(() => {
+    if (phase !== "combat") {
+      openedCombat.current = false;
+      approachTicket.current += 1;
+      approachRef.current = null;
+      setApproach(null);
+    }
+  }, [phase, faction]);
 
   // A new board has different regions, so a selection from the previous map cannot carry over.
   useEffect(() => {
@@ -88,6 +140,10 @@ export function App() {
     setHoverRegionId("");
     setSelection(null);
     setBattleOnScreen(null);
+    approachTicket.current += 1;
+    approachRef.current = null;
+    setApproach(null);
+    openedCombat.current = false;
   }, [game.mapId]);
 
   // `state` is mutated in place by the session; `version` is the dependency that changes.
@@ -174,6 +230,7 @@ export function App() {
       if (result.result_type === "ok") {
         setSelection(null);
         setSelectedRegionId(regionId);
+        playCampaignCue(moveCue(String(state.unit_types[selection.unitTypeId]?.category ?? ""), phase));
       }
       return;
     }
@@ -182,6 +239,7 @@ export function App() {
         placements: [{ region_id: regionId, units: [{ unit_type_id: selection.unitTypeId, count: 1 }] }],
       });
       if (result.result_type === "ok") {
+        playCampaignCue("mobilize");
         const left = (session.state.pending_purchases[faction] ?? []).some(
           (line) => line.unit_type_id === selection.unitTypeId && line.count > 0,
         );
@@ -249,6 +307,7 @@ export function App() {
     if (result.result_type === "ok") {
       setSelection(null);
       setSelectedRegionId(target);
+      playCampaignCue(moveCue(String(state.unit_types[entry.unit_type_id]?.category ?? ""), phase));
     }
   };
 
@@ -259,6 +318,7 @@ export function App() {
 
   const armDrag = (regionId: string, entry: StackEntry, count: number) => {
     const max = movableCount(regionId, entry);
+    if (max > 0) playCampaignCue("pickup");
     setSelectedRegionId(regionId);
     setSelection(
       max <= 0
@@ -287,6 +347,7 @@ export function App() {
       setSelection(null);
       return;
     }
+    playCampaignCue("pickup");
     setSelection({
       kind: "stack",
       regionId,
@@ -308,25 +369,64 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // The battle canvas and the map are never mounted together.
-  if (battleOnScreen) {
-    const regionId = battleOnScreen.region_id;
-    return (
-      <BattleScreen
-        key={regionId}
-        game={game}
-        battle={battleOnScreen}
-        regionName={state.regions[regionId]?.name || regionId}
-        onExit={() => {
-          setBattleOnScreen(null);
-          setSelectedRegionId(regionId);
-        }}
-      />
-    );
-  }
+  const approachBattle = (regionId: string) => {
+    if (approachRef.current || battleOnScreen) return;
+    const battle = session.getPendingBattles(faction).find((item) => item.region_id === regionId);
+    if (!battle) return;
+    const plan: ApproachPlan = {
+      regionId,
+      attackerId: battle.attacker_faction_id || faction,
+      defenderId: battle.defender_faction_id,
+      regionName: state.regions[regionId]?.name || regionId,
+      stage: "move",
+    };
+    const ticket = ++approachTicket.current;
+    approachRef.current = plan;
+    setApproach(plan);
+    void (async () => {
+      const camera = cameraRef.current;
+      const shape = geometry.regions.find((region) => region.id === regionId);
+      if (camera && shape) {
+        const snap = camera.snapshot();
+        if (snap.width > 1 && snap.height > 1 && snap.fitK > 0) {
+          const mode = openedCombat.current ? "pan" : "zoom";
+          const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode);
+          await camera.moveTo(goal, mode === "pan" ? COMBAT_PAN_MS : COMBAT_ZOOM_MS);
+          if (ticket !== approachTicket.current) return;
+          openedCombat.current = true;
+        }
+      }
+      if (ticket !== approachTicket.current) return;
+      const dark: ApproachPlan = { ...plan, stage: "darken" };
+      approachRef.current = dark;
+      setApproach(dark);
+    })();
+  };
+
+  const showBriefing = () => {
+    if (approachRef.current?.stage !== "darken") return;
+    const next = { ...approachRef.current, stage: "briefing" as const };
+    approachRef.current = next;
+    setApproach(next);
+    playCampaignCue("assault");
+  };
+
+  const beginBattle = () => {
+    const plan = approachRef.current;
+    if (!plan) return;
+    approachRef.current = null;
+    setApproach(null);
+    const result = game.send("start_battle", { region_id: plan.regionId });
+    if (result.result_type === "ok" && session.state.active_battle) {
+      setBattleOnScreen(session.state.active_battle);
+    }
+  };
+
+  const covered = approach !== null || battleOnScreen !== null;
 
   return (
-    <div className="campaign">
+    <>
+    <div className="campaign" inert={covered ? true : undefined}>
       <TurnBar
         game={game}
         editing={editing}
@@ -391,6 +491,8 @@ export function App() {
             return Array.isArray(cargo) && cargo.length > 0;
           }}
           editor={editing ? editor.binding : undefined}
+          bindCamera={bindCamera}
+          suspended={approach?.stage === "darken" || approach?.stage === "briefing" || battleOnScreen !== null}
         >
           {editing && <EditorToolbar editor={editor} />}
         </MapView>
@@ -405,6 +507,7 @@ export function App() {
                 setSelection={setSelection}
                 legalTargets={legalTargets}
                 pending={pendingForFaction}
+                onFight={approachBattle}
               />
               <RegionPanel
                 game={game}
@@ -427,5 +530,29 @@ export function App() {
       </div>
       {!editing && <PendingOrders game={game} onCancelled={() => setSelection(null)} />}
     </div>
+    {approach?.stage === "darken" && <CombatDarken onDone={showBriefing} />}
+    {approach?.stage === "briefing" && (
+      <CombatIntro
+        attackerId={approach.attackerId}
+        defenderId={approach.defenderId}
+        regionName={approach.regionName}
+        onBegin={beginBattle}
+      />
+    )}
+    {battleOnScreen && (
+      <div className="combat-cover">
+        <BattleScreen
+          key={battleOnScreen.region_id}
+          game={game}
+          battle={battleOnScreen}
+          regionName={state.regions[battleOnScreen.region_id]?.name || battleOnScreen.region_id}
+          onExit={() => {
+            setBattleOnScreen(null);
+            setSelectedRegionId(battleOnScreen.region_id);
+          }}
+        />
+      </div>
+    )}
+    </>
   );
 }

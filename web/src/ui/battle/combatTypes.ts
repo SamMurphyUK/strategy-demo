@@ -160,6 +160,8 @@ export interface CombatUnit {
   side: 'attacker' | 'defender';
   currentHp: number;
   maxHp: number;
+  /** IPC this piece costs. Absent uses the board type's cost. */
+  cost?: number;
   effectiveRank: number; // 1, 2, 3, or 4
   pairedWithUid?: string;
   hasSynergyBonus: boolean;

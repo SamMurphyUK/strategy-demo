@@ -24,6 +24,7 @@ import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
+import { easeInOutCubic, type MapCamera, viewFor } from "./combatCamera";
 import {
   fitView,
   panBy,
@@ -107,6 +108,10 @@ export interface MapViewProps {
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
+  /** The campaign drives the camera into a battle, then leaves it where it landed. */
+  bindCamera?(camera: MapCamera | null): void;
+  /** Skip painting while a battle covers the map. The camera state stays. */
+  suspended?: boolean;
 }
 
 const DRAG_THRESHOLD_PX = 4;
@@ -177,6 +182,8 @@ export function MapView(props: MapViewProps) {
   const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
   const userMoved = useRef(false);
+  const cameraLock = useRef(false);
+  const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const drag = useRef<Drag | null>(null);
   const suppressClick = useRef(false);
 
@@ -234,6 +241,65 @@ export function MapView(props: MapViewProps) {
   }, [size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
 
   useEffect(() => {
+    const api: MapCamera = {
+      snapshot() {
+        const { view: current, fitK: fitted, size: canvas } = live.current;
+        return { view: { ...current }, fitK: fitted, width: canvas.w, height: canvas.h };
+      },
+      moveTo(goal, ms) {
+        cameraJob.current?.cancel();
+        userMoved.current = true;
+        cameraLock.current = true;
+        const fromK = live.current.view.k;
+        const w0 = live.current.size.w || 1;
+        const h0 = live.current.size.h || 1;
+        const fromCenter = {
+          x: live.current.view.x + w0 / 2 / fromK,
+          y: live.current.view.y + h0 / 2 / fromK,
+        };
+        return new Promise((resolve) => {
+          const start = performance.now();
+          let raf = 0;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            cancelAnimationFrame(raf);
+            cameraLock.current = false;
+            if (cameraJob.current?.cancel === finish) cameraJob.current = null;
+            resolve();
+          };
+          cameraJob.current = { cancel: finish };
+          const step = (now: number) => {
+            if (settled) return;
+            const t = ms <= 0 ? 1 : Math.min(1, (now - start) / ms);
+            const e = easeInOutCubic(t);
+            const w = live.current.size.w || w0;
+            const h = live.current.size.h || h0;
+            const k = fromK + (goal.k - fromK) * e;
+            const cx = fromCenter.x + (goal.center.x - fromCenter.x) * e;
+            const cy = fromCenter.y + (goal.center.y - fromCenter.y) * e;
+            let next = viewFor({ x: cx, y: cy }, k, w, h);
+            if (live.current.wrap) next = wrapView(next, w, live.current.bounds);
+            setView(next);
+            if (t < 1) raf = requestAnimationFrame(step);
+            else finish();
+          };
+          raf = requestAnimationFrame(step);
+        });
+      },
+    };
+    props.bindCamera?.(api);
+    return () => {
+      cameraJob.current?.cancel();
+      props.bindCamera?.(null);
+    };
+  }, [props.bindCamera]);
+
+  useEffect(() => {
+    if (props.suspended) {
+      return;
+    }
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || size.w === 0) {
@@ -341,6 +407,9 @@ export function MapView(props: MapViewProps) {
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (cameraLock.current) {
+        return;
+      }
       const pulling = unitRef.current;
       if (pulling) {
         pulling.wheel += e.deltaY;
@@ -432,7 +501,7 @@ export function MapView(props: MapViewProps) {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) {
+    if (e.button !== 0 || cameraLock.current) {
       return;
     }
     if (splitRef.current && !(e.target as HTMLElement).closest?.(".split-popover")) {

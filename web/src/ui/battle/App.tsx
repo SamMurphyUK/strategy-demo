@@ -1,6 +1,6 @@
 // tslint:disable
 /* eslint-disable */
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {
   Play,
   RotateCw,
@@ -74,6 +74,8 @@ import {
   resolveRanks,
 } from './rules';
 import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
+import {playCampaignCue} from '../map/campaignAudio';
+import {campaignMusicMuted, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
   drawProceduralUnit,
   drawWWIIBattlefield,
@@ -182,6 +184,7 @@ function createUnit(type: UnitType, side: 'attacker' | 'defender', fromMatch?: M
     isPermanentCasualty: false, // (BETA)
     isDestroyed: false,
     status: 'alive',
+    cost: fromMatch?.cost,
     downedTime: 0,
     downedFadeProgress: 0,
     fadeAlpha: 1.0,
@@ -202,6 +205,19 @@ function createUnit(type: UnitType, side: 'attacker' | 'defender', fromMatch?: M
     carrierFloatX: 0,
     carrierFloatState: 'IDLE',
   };
+}
+
+/** IPC of pieces removed in the battle. A hit that only damages a ship is not a loss. */
+function ipcLost(units: CombatUnit[]): number {
+  let total = 0;
+  for (const unit of units) {
+    if (!unit.isDestroyed && unit.status !== 'downed' && unit.status !== 'dead' && !unit.isPermanentCasualty) {
+      continue;
+    }
+    const listed = unit.cost ?? 0;
+    total += listed > 0 ? listed : UNIT_DEFINITIONS[unit.type].cost;
+  }
+  return total;
 }
 
 /** Without `match` this is the standalone sandbox. With it, the engine decides the battle. */
@@ -309,6 +325,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
   const defenderIpcRef = useRef(50);
   attackerIpcRef.current = match ? match.attackerIpc : attackerIpc;
   defenderIpcRef.current = match ? match.defenderIpc : defenderIpc;
+  // Numbers painted on the flag screen: IPC destroyed in this battle.
+  const ipcLostRef = useRef({attacker: 41, defender: 50});
 
   // Attacker Victory Sequence State & Refs
   const [isVictorySequenceActive, setIsVictorySequenceActive] = useState(false);
@@ -338,6 +356,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [sfxMuted, setSfxMuted] = useState(false);
   const [isMusicMuted, setIsMusicMuted] = useState(false);
+  const campaignMuted = useSyncExternalStore(subscribeCampaignMusic, campaignMusicMuted, () => false);
+  const musicMuted = isMatch ? campaignMuted : isMusicMuted;
 
   // Attacker & Defender counts
   const [attackerUnits, setAttackerUnits] = useState<CombatUnit[]>([]);
@@ -1527,17 +1547,24 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     setIsAutoRolling(false);
     setBattlePhase('VICTORY_SEQUENCE');
     setIsVictorySequenceActive(true);
+    ipcLostRef.current = matchRef.current
+      ? {attacker: ipcLost(attackerUnitsRef.current), defender: ipcLost(defenderUnitsRef.current)}
+      : {attacker: attackerIpcRef.current, defender: defenderIpcRef.current};
 
     const scoreGain =
       defenderUnitsRef.current.filter((u) => u.status === 'downed' || u.isDestroyed).length * 150;
     setGameState((prev) => ({...prev, score: prev.score + scoreGain}));
 
-    // Audio cue: victory fanfare, then enthusiastic bugle and soldier shouts chorus!
-    gameAudio.playVictoryFanfare();
-    scheduleSequenceTimeout(() => {
-      gameAudio.playBugleChime();
-      gameAudio.playSoldierCheer();
-    }, 400);
+    // A map battle uses the campaign fanfare. The sandbox keeps the procedural horn and cheer.
+    if (matchRef.current) {
+      playCampaignCue('victory');
+    } else {
+      gameAudio.playVictoryFanfare();
+      scheduleSequenceTimeout(() => {
+        gameAudio.playBugleChime();
+        gameAudio.playSoldierCheer();
+      }, 400);
+    }
 
     const theaterObj = THEATERS[currentTheaterRef.current];
     const regionName = matchRef.current
@@ -4006,8 +4033,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         time,
         victorySeqRef.current.flagElapsed,
         victorySeqRef.current.regionName,
-        attackerIpcRef.current,
-        defenderIpcRef.current,
+        ipcLostRef.current.attacker,
+        ipcLostRef.current.defender,
         matchRef.current ? 'RETURN TO MAP' : 'RETURN TO COMBAT',
       );
       returnButtonRectRef.current = returnButtonRect;
@@ -4650,7 +4677,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
       {/* Ambient War Room March Audio */}
       <BackgroundMusic
-        url={BACKGROUND_MUSIC_URL}
+        url={isMatch ? '' : BACKGROUND_MUSIC_URL}
         isPlaying={isMusicPlaying}
         isMuted={isMusicMuted}
       />
@@ -5141,12 +5168,12 @@ export default function App({match}: {match?: BattleMatch} = {}) {
             {/* Dynamic IPC Configuration */}
             <div className="bg-[#2b242a] p-2.5 rounded border border-[#5E4E54]">
               <div className="font-bold text-[#DFCE91] mb-1.5 text-[11px] flex items-center justify-between">
-                <span>DYNAMIC IPC ECONOMY</span>
-                <span className="text-[9px] text-[#A69C90]">VICTORY VALUES</span>
+                <span>IPC LOST IN THE BATTLE</span>
+                <span className="text-[9px] text-[#A69C90]">OUTRO PREVIEW</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-[#8DA082] font-bold">ATTACKER IPC:</label>
+                  <label className="text-[10px] text-[#8DA082] font-bold">ATTACKER IPC LOST:</label>
                   <input
                     type="number"
                     value={attackerIpc}
@@ -5155,7 +5182,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-[#B77958] font-bold">DEFENDER IPC:</label>
+                  <label className="text-[10px] text-[#B77958] font-bold">DEFENDER IPC LOST:</label>
                   <input
                     type="number"
                     value={defenderIpc}
@@ -5358,10 +5385,13 @@ export default function App({match}: {match?: BattleMatch} = {}) {
                 </button>
 
                 <button
-                  onClick={() => setIsMusicMuted((prev) => !prev)}
+                  onClick={() => {
+                    if (isMatch) setCampaignMusicMuted(!campaignMuted);
+                    else setIsMusicMuted((prev) => !prev);
+                  }}
                   className="min-h-[48px] p-2 bg-[#5E4E54] hover:bg-[#7D6652] text-[#DFCE91] border border-[#7D6652] rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors">
-                  {isMusicMuted ? <VolumeX size={16} className="text-[#9A4E48]" /> : <Volume2 size={16} className="text-[#8DA082]" />}
-                  <span>MUSIC: {isMusicMuted ? 'OFF' : 'ON'}</span>
+                  {musicMuted ? <VolumeX size={16} className="text-[#9A4E48]" /> : <Volume2 size={16} className="text-[#8DA082]" />}
+                  <span>MUSIC: {musicMuted ? 'OFF' : 'ON'}</span>
                 </button>
               </div>
 

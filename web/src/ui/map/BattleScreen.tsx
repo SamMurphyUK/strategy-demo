@@ -5,6 +5,7 @@ import BattleBoard from "../battle/App";
 import type { UnitType } from "../battle/combatTypes";
 import type { BattleMatch, MatchHit, MatchOutcome, MatchRound, MatchUnit } from "../battle/match";
 import "./battleScreen.css";
+import { playCampaignCue } from "./campaignAudio";
 import type { GameSessionHandle } from "./session/use_game_session";
 
 const BOARD_TYPES: Record<string, UnitType> = {
@@ -29,10 +30,15 @@ const OUTCOMES: Record<string, MatchOutcome> = {
   draw: "defender_wins",
 };
 
-function toMatchUnits(units: BattleUnitState[]): MatchUnit[] {
+function toMatchUnits(units: BattleUnitState[], costOf: (unitTypeId: string) => number): MatchUnit[] {
   return units
     .filter((u) => u.hp > 0)
-    .map((u) => ({ id: u.id, type: BOARD_TYPES[u.unit_type_id] ?? "infantry", maxHp: u.max_hp }));
+    .map((u) => ({
+      id: u.id,
+      type: BOARD_TYPES[u.unit_type_id] ?? "infantry",
+      maxHp: u.max_hp,
+      cost: costOf(u.unit_type_id),
+    }));
 }
 
 function toHits(casualties: BattleCasualty[]): MatchHit[] {
@@ -83,8 +89,8 @@ export function BattleScreen({ game, battle, regionName, onExit }: Props) {
       regionName,
       attackerIpc: game.session.state.getFactionIpc(battle.attacker_faction_id),
       defenderIpc: game.session.state.getFactionIpc(battle.defender_faction_id),
-      attackers: toMatchUnits(battle.attackers),
-      defenders: toMatchUnits(battle.defenders),
+      attackers: toMatchUnits(battle.attackers, (id) => Math.trunc(Number(game.session.state.unit_types[id]?.cost ?? 0))),
+      defenders: toMatchUnits(battle.defenders, (id) => Math.trunc(Number(game.session.state.unit_types[id]?.cost ?? 0))),
       rollRound() {
         const result = game.send("battle_roll");
         record(result.events);
@@ -117,6 +123,7 @@ export function BattleScreen({ game, battle, regionName, onExit }: Props) {
   const retreatTo = (regionId: string) => {
     const result = game.send("battle_retreat", { to_region_id: regionId });
     if (result.result_type === "ok") {
+      playCampaignCue("retreat");
       setRetreats(null);
       onExit();
     }

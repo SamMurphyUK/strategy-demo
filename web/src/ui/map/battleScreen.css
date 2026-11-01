@@ -7,6 +7,48 @@
   overflow: hidden;
 }
 
+/* The approach and the battle sit over the map, which stays mounted so the zoom holds. */
+.combat-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #000;
+}
+
+.combat-cover .battle-screen {
+  width: 100%;
+  height: 100%;
+}
+
+.combat-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(100vw, calc(100vh * 1280 / 720));
+  height: auto;
+  max-height: 100%;
+  cursor: pointer;
+}
+
+.combat-darken {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #000;
+  pointer-events: auto;
+  animation: combat-darken 0.75s ease-in forwards;
+}
+
+@keyframes combat-darken {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .retreat-picker {
   position: absolute;
   inset: 0;
