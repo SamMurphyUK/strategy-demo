@@ -56,7 +56,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(26, 26, 24, 0.6);
+  background: rgba(75, 61, 68, 0.6);
 }
 
 .retreat-card {
@@ -65,11 +65,11 @@
   gap: 8px;
   min-width: 260px;
   padding: 18px;
-  background: #f4f1ea;
-  color: #1a1a18;
-  border: 1px solid #85877c;
+  background: #ddcf99;
+  color: #4b3d44;
+  border: 1px solid #7d7b62;
   border-radius: 4px;
-  box-shadow: 0 6px 0 #1a1a18;
+  box-shadow: 0 6px 0 #4b3d44;
 }
 
 .retreat-card h2 {
@@ -79,11 +79,11 @@
 
 .retreat-card button {
   padding: 7px 12px;
-  background: #eae6db;
-  color: #1a1a18;
-  border: 1px solid #85877c;
+  background: #cca87b;
+  color: #4b3d44;
+  border: 1px solid #7d7b62;
   border-radius: 3px;
-  box-shadow: 0 3px 0 #1a1a18;
+  box-shadow: 0 3px 0 #4b3d44;
   font: 600 13px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace;
   text-align: left;
   cursor: pointer;
@@ -95,5 +95,5 @@
 
 .retreat-card button:active {
   transform: translateY(2px);
-  box-shadow: 0 1px 0 #1a1a18;
+  box-shadow: 0 1px 0 #4b3d44;
 }

@@ -4,12 +4,19 @@ import type { Vec2 } from "./geometry";
 /** 0 strategic tokens, 1 operational terrain stamps, 2 tactical upright sprites. */
 export type MapLod = 0 | 1 | 2;
 
-const OPERATIONAL = 1.35;
-const TACTICAL_IN = 1.75;
-const TACTICAL_OUT = 1.65;
+/** Halfway from a flat zoom to the previous 1.175 mark, so the pixel pop-in is about 50% sooner. */
+const OPERATIONAL = 1.0875;
+/** Icon tokens still own the view at the old 1.75 mark. Sprites dissolve in from here. */
+const TACTICAL_IN = 2.625;
+const TACTICAL_OUT = 2.45;
+/** Stamps finish fading in here and stay. They used to vanish again at the tactical zoom. */
+const STAMP_FULL = 1.16;
+/** Upright sprites are fully in, and the icon tokens are gone. */
+const SPRITE_FULL = 3.4;
 
 /**
- * LoD for `zoom`. Enter the upright view at 1.75. Once there, stay until the zoom falls below 1.65.
+ * LoD for `zoom`. Terrain stamps begin at 1.0875. Icon tokens hold through 2.625,
+ * then upright sprites dissolve in and stay until the zoom falls below 2.45.
  */
 export function lodForZoom(zoom: number, previous: MapLod = 0): MapLod {
   if (zoom >= TACTICAL_IN || (previous === 2 && zoom >= TACTICAL_OUT)) {
@@ -21,12 +28,29 @@ export function lodForZoom(zoom: number, previous: MapLod = 0): MapLod {
   return 0;
 }
 
-/** 0 at the operational threshold, 1 as the zoom reaches the upright view. */
-export function terrainStampAlpha(zoom: number): number {
-  if (zoom < OPERATIONAL || zoom >= TACTICAL_IN) {
+/**
+ * 0 while the operational icons own the view, then a dissolve into the upright sprites.
+ * 1 once the sprites have replaced the tokens.
+ */
+export function spriteMix(zoom: number): number {
+  if (zoom <= TACTICAL_IN) {
     return 0;
   }
-  return (zoom - OPERATIONAL) / (TACTICAL_IN - OPERATIONAL);
+  if (zoom >= SPRITE_FULL) {
+    return 1;
+  }
+  return (zoom - TACTICAL_IN) / (SPRITE_FULL - TACTICAL_IN);
+}
+
+/** 0 below the operational threshold, then a short fade, then solid for every closer zoom. */
+export function terrainStampAlpha(zoom: number): number {
+  if (zoom < OPERATIONAL) {
+    return 0;
+  }
+  if (zoom >= STAMP_FULL) {
+    return 1;
+  }
+  return Math.max(0.4, (zoom - OPERATIONAL) / (STAMP_FULL - OPERATIONAL));
 }
 
 /** How far above a plinth centre a click still counts as that sprite, in screen pixels. */
@@ -102,17 +126,6 @@ function hashId(id: string): number {
   return h >>> 0;
 }
 
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 function blocked(x: number, y: number, avoid: readonly Vec2[], existing: readonly TerrainStamp[], clearance: number): boolean {
   const limit = clearance * clearance;
   for (const point of avoid) {
@@ -182,17 +195,27 @@ export function terrainStamps(
     const box = ringBounds(ring);
     const w = box.maxX - box.minX;
     const h = box.maxY - box.minY;
-    if (w < 6 || h < 6) {
+    if (w < 8 || h < 8) {
       continue;
     }
-    const rand = mulberry32(hashId(`${regionId}:${ring.length}:${ring[0].x.toFixed(2)}:${ring[0].y.toFixed(2)}`));
-    for (let attempt = 0; attempt < 18 && placed < plan.length; attempt++) {
-      const x = box.minX + w * (0.18 + rand() * 0.64);
-      const y = box.minY + h * (0.18 + rand() * 0.64);
-      if (!probe.interior({ x, y }) || blocked(x, y, avoid, out, HUB_CLEARANCE)) {
-        continue;
+    const cols = Math.max(1, Math.round(w / 28));
+    const rows = Math.max(1, Math.round(h / 28));
+    const cells: { x: number; y: number }[] = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        cells.push({
+          x: box.minX + ((col + 0.5) / cols) * w,
+          y: box.minY + ((row + 0.5) / rows) * h,
+        });
       }
-      out.push({ kind: plan[placed], x, y });
+    }
+    const open = cells.filter((cell) => probe.interior(cell) && !blocked(cell.x, cell.y, avoid, out, HUB_CLEARANCE));
+    const want = plan.length - placed;
+    const stride = Math.max(1, Math.floor(open.length / want));
+    const start = open.length === 0 ? 0 : hashId(regionId) % open.length;
+    for (let n = 0; n < want && n * stride < open.length; n++) {
+      const cell = open[(start + n * stride) % open.length];
+      out.push({ kind: plan[placed], x: cell.x, y: cell.y });
       placed++;
     }
   }

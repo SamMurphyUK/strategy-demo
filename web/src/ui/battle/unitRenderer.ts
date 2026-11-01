@@ -16,27 +16,28 @@ import {
   WaterGeyser,
 } from './combatTypes';
 import { type FlagMotif, ipcLostCaption } from './flagMotif';
+import { MILITARY } from '../theme/militaryPalette';
 
 /**
  * STRICT 16-COLOR VINTAGE MILITARY PALETTE
  */
 export const PALETTE = {
-  sandCream: '#DFCE91',       // 1. Light Sand / Cream
-  sandTan: '#CAA574',         // 2. Sand Tan
-  terracotta: '#B77958',      // 3. Warm Terracotta / Clay
-  crimson: '#9A4E48',         // 4. Muted Soviet Brick / Crimson
-  plum: '#6F3B4A',            // 5. Deep Wine / Plum
-  bunkerCharcoal: '#423840',  // 6. Dark Bunker Charcoal
-  navalSteel: '#495462',      // 7. Naval Steel / Slate Blue
-  spruceSea: '#527A71',       // 8. Spruce / Sea Green
-  fieldSage: '#8DA082',       // 9. Field Sage / Grass
-  deepTaupe: '#5E4E54',       // 10. Deep Taupe / Trench Dark
-  feldgrau: '#857577',        // 11. Feldgrau / Ash Taupe
-  trenchMudBone: '#A69C90',   // 12. Trench Mud Light / Bone
-  oliveDrab: '#72745C',       // 13. Olive Drab / Uniform Green
-  mustardBrass: '#A1A258',    // 14. Mustard Brass / Ochre
-  earthBrown: '#7D6652',      // 15. Earth Dirt / Brown
-  khakiLeather: '#9E7F55',    // 16. Khaki Leather
+  sandCream: MILITARY.cream,
+  sandTan: MILITARY.tan,
+  terracotta: MILITARY.terracotta,
+  crimson: MILITARY.crimson,
+  plum: MILITARY.plum,
+  bunkerCharcoal: MILITARY.charcoal,
+  navalSteel: MILITARY.steel,
+  spruceSea: MILITARY.spruce,
+  fieldSage: MILITARY.sage,
+  deepTaupe: MILITARY.taupe,
+  feldgrau: MILITARY.feldgrau,
+  trenchMudBone: MILITARY.bone,
+  oliveDrab: MILITARY.olive,
+  mustardBrass: MILITARY.brass,
+  earthBrown: MILITARY.brown,
+  khakiLeather: MILITARY.khaki,
 } as const;
 
 /**
@@ -814,7 +815,7 @@ export function drawOpenOceanBattlefield(
   oceanGrad.addColorStop(0, PALETTE.navalSteel);
   oceanGrad.addColorStop(0.35, PALETTE.spruceSea);
   oceanGrad.addColorStop(0.7, PALETTE.bunkerCharcoal);
-  oceanGrad.addColorStop(1, '#251e24'); // Deep bunker charcoal shadow
+  oceanGrad.addColorStop(1, PALETTE.bunkerCharcoal);
   ctx.fillStyle = oceanGrad;
   ctx.fillRect(0, horizonY, width, height - horizonY);
 
@@ -4545,7 +4546,7 @@ export function drawVictorySequenceModal(
     ctx.fillRect(btnX, btnY, btnW, btnH);
 
     // Bevel light top/left edges
-    ctx.fillStyle = '#b85f57';
+    ctx.fillStyle = PALETTE.terracotta;
     ctx.fillRect(btnX, btnY, btnW, 2);
     ctx.fillRect(btnX, btnY, 2, btnH);
 
@@ -4696,7 +4697,7 @@ export function drawAttackBriefing(
     ctx.fillStyle = PALETTE.crimson;
     ctx.fillRect(btnX, btnY, btnW, btnH);
 
-    ctx.fillStyle = '#b85f57';
+    ctx.fillStyle = PALETTE.terracotta;
     ctx.fillRect(btnX, btnY, btnW, 2);
     ctx.fillRect(btnX, btnY, 2, btnH);
 

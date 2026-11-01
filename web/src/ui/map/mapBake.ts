@@ -14,6 +14,7 @@
 // never inked: a coastline or border drawn there would be a false line through land that carries on in the
 // next copy.
 import type { FactionKey } from "../theme/factionPalette";
+import { MILITARY } from "../theme/militaryPalette";
 import { resolveFaction } from "../theme/factionPalette";
 import type { Rect, RegionShape } from "./geometry";
 import { hatchSegments, isHatchedOwner } from "./hatch";
@@ -60,21 +61,21 @@ export interface Baked {
 const GRAIN_SIZE = 256;
 /** How strongly the paper grain is multiplied into the land. */
 const LAND_GRAIN_ALPHA = 0.35;
-/** Battle-screen water. The tested `SEA_BASE_COLOR` stays the parchment-era constant. */
-const WATER = "#3E5661";
-const WAVE_DEEP = "#2F434C";
-const WAVE_FOAM = "#79989E";
-const SHELF = "#52727A";
-const SAND = "#C9B58C";
-const INNER_SHADE = "#241F1C";
-/** Muted war-room land. `FACTION_TINT` remains the tested parchment palette. */
+/** Ocean from the 16-colour strip. The tested `SEA_BASE_COLOR` stays the parchment-era constant. */
+const WATER = MILITARY.steel;
+const WAVE_DEEP = MILITARY.spruce;
+const WAVE_FOAM = MILITARY.spruce;
+const SHELF = MILITARY.spruce;
+const SAND = MILITARY.tan;
+const INNER_SHADE = MILITARY.charcoal;
+/** Faction land from the strip. `FACTION_TINT` remains the tested parchment palette. */
 const TACTICAL_LAND: Record<FactionKey, string> = {
-  JAP: "#9E6B43",
-  USSR: "#7A4B47",
-  GER: "#5E6266",
-  UK: "#A8946D",
-  US: "#687A5E",
-  NEUTRAL: "#877E72",
+  JAP: MILITARY.terracotta,
+  USSR: MILITARY.crimson,
+  GER: MILITARY.feldgrau,
+  UK: MILITARY.khaki,
+  US: MILITARY.olive,
+  NEUTRAL: MILITARY.bone,
 };
 let tile: HTMLCanvasElement | null = null;
 let waveCanvas: HTMLCanvasElement | null = null;
@@ -250,7 +251,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   const hatch = segmentsPath(hatchSegments(bounds, NEUTRAL_HATCH.spacing));
   const strokeHatch = () => {
     ctx.lineWidth = NEUTRAL_HATCH.width;
-    ctx.strokeStyle = NEUTRAL_HATCH.color;
+    ctx.strokeStyle = "rgba(100, 83, 85, 0.35)";
     ctx.lineCap = "butt";
     ctx.stroke(hatch);
     ctx.lineCap = "round";
@@ -317,7 +318,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     const outline = outlinePath(shape, seam);
     for (const pass of BURN_PASSES) {
       ctx.lineWidth = pass.width;
-      ctx.strokeStyle = pass.color;
+      ctx.strokeStyle = "rgba(100, 83, 85, 0.22)";
       ctx.stroke(outline);
     }
     ctx.lineWidth = 4 / sx;
@@ -334,19 +335,22 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   const borders = segmentsPath(sharedEdges(landShapes, seam, land ? 2 : 1));
   for (const pass of BORDER_PASSES) {
     ctx.lineWidth = pass.width;
-    ctx.strokeStyle = pass.color;
+    ctx.strokeStyle = pass.width > 2 ? "rgba(100, 83, 85, 0.28)" : MILITARY.charcoal;
     ctx.stroke(borders);
   }
   ctx.restore();
 
   if (land) {
     ctx.lineWidth = COAST_INK.width;
-    ctx.strokeStyle = COAST_INK.color;
+    ctx.strokeStyle = MILITARY.charcoal;
     ctx.stroke(runsPath(ringsOf(land.polygons).flatMap((ring) => ringRuns(ring, seam))));
   }
   toPixels();
   return { canvas, scale };
 }
+
+/** Bump when the baked paint changes, so a live view throws away the old bitmap. */
+export const BAKE_PAINT = 2;
 
 /** Owns the cached base map. Create one per map view. */
 export class TerrainBake {

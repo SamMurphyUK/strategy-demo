@@ -9,6 +9,7 @@
 // and `exact` is false, so land regions are clipped to the stencil at draw time instead.
 //
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
+import { MILITARY } from "../theme/militaryPalette";
 import { isLandAt } from "./hitTest";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
@@ -71,17 +72,18 @@ import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScr
 import {
   type MapLod,
   type TerrainStamp,
+  spriteMix,
   terrainStampAlpha,
   terrainStamps,
   uprightDrawOrder,
 } from "./zoomLod";
 
 export const TOKEN_PX = 32;
-const PAPER = "#f4f1ea";
-const INK = "#1a1a18";
-const PLINTH = "#262126";
-const BRASS = "#D9B26F";
-const GOLD_NUM = "#E8C585";
+const PAPER = MILITARY.cream;
+const INK = MILITARY.charcoal;
+const PLINTH = MILITARY.charcoal;
+const BRASS = MILITARY.brass;
+const GOLD_NUM = MILITARY.cream;
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
 const MONO = '"Courier New", "JetBrains Mono", ui-monospace, monospace';
 
@@ -251,6 +253,8 @@ function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed:
     return;
   }
   const relief = cliffDepthScale(s.view.k);
+  // 60% less drop: a small cliff lip, and a thinner shadow just under it.
+  const lip = 0.4;
   const extrude = (dy: number, fill: string, stroke: string, width: number) => {
     ctx.save();
     ctx.translate(0, dy);
@@ -268,8 +272,8 @@ function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed:
     }
     ctx.restore();
   };
-  extrude(5 * relief, "rgba(20, 30, 34, 0.65)", "rgba(20, 30, 34, 0.65)", 1);
-  extrude(2.5 * relief, "#2E2723", "#1A1815", 1.5);
+  extrude(5 * relief * lip, "rgba(75, 61, 68, 0.65)", "rgba(75, 61, 68, 0.65)", 1 * lip);
+  extrude(2.5 * relief * lip, MILITARY.taupe, MILITARY.charcoal, 1.5 * lip);
 
   ctx.save();
   if (s.land) {
@@ -314,10 +318,10 @@ function drawFrontlines(ctx: CanvasRenderingContext2D, segments: readonly Frontl
     ctx.moveTo(segment.x1, segment.y1);
     ctx.lineTo(segment.x2, segment.y2);
   }
-  ctx.strokeStyle = "rgba(184, 37, 32, 0.32)";
+  ctx.strokeStyle = "rgba(156, 82, 78, 0.45)";
   ctx.lineWidth = 6;
   ctx.stroke();
-  ctx.strokeStyle = "#E86A58";
+  ctx.strokeStyle = MILITARY.terracotta;
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 3]);
   ctx.stroke();
@@ -382,9 +386,9 @@ function stampKey(region: RegionShape, avoid: readonly Vec2[], land: boolean): s
 }
 
 function drawPine(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = "#423840";
+  ctx.fillStyle = MILITARY.charcoal;
   ctx.fillRect(x + 3 * u, y - 5 * v, 2 * u, 5 * v);
-  ctx.fillStyle = "#527A71";
+  ctx.fillStyle = MILITARY.spruce;
   ctx.fillRect(x + 3 * u, y - 14 * v, 2 * u, 3 * v);
   ctx.fillRect(x + 1 * u, y - 11 * v, 6 * u, 4 * v);
   ctx.fillRect(x - 1 * u, y - 7 * v, 10 * u, 4 * v);
@@ -399,18 +403,18 @@ function drawPineCluster(ctx: CanvasRenderingContext2D, x: number, y: number, u:
 }
 
 function drawRidge(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = "#2E2723";
+  ctx.fillStyle = MILITARY.charcoal;
   ctx.fillRect(x - 7 * u, y - 1 * v, 16 * u, 2 * v);
-  ctx.fillStyle = "#4A4038";
+  ctx.fillStyle = MILITARY.taupe;
   ctx.fillRect(x - 6 * u, y - 3 * v, 5 * u, 2 * v);
   ctx.fillRect(x - 1 * u, y - 5 * v, 4 * u, 2 * v);
   ctx.fillRect(x + 3 * u, y - 3 * v, 5 * u, 2 * v);
-  ctx.fillStyle = "#6B5E52";
+  ctx.fillStyle = MILITARY.brown;
   ctx.fillRect(x - 1 * u, y - 6 * v, 2 * u, 2 * v);
 }
 
 function drawWaterDash(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = "#79989E";
+  ctx.fillStyle = MILITARY.spruce;
   ctx.fillRect(x, y, 3 * u, v);
   ctx.fillRect(x + 5 * u, y, 2 * u, v);
   ctx.fillRect(x + 8 * u, y, 3 * u, v);
@@ -516,12 +520,12 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
     }
   }
 
-  if ((s.lod ?? 0) === 1) {
+  if ((s.lod ?? 0) >= 1) {
     drawPixelStamps(ctx, s, dx);
   }
 
   drawFrontlines(ctx, s.frontlines ?? []);
-  drawBattleScars(ctx, s.scars ?? [], px, (s.lod ?? 0) !== 2);
+  drawBattleScars(ctx, s.scars ?? [], px, spriteMix(s.view.k) <= 0);
 }
 
 // ---------------------------------------------------------------
@@ -573,7 +577,7 @@ export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBa
     ctx.stroke();
   }
   // Fills, with one soft shadow under the whole badge.
-  ctx.shadowColor = "rgba(26, 24, 21, 0.45)";
+  ctx.shadowColor = "rgba(75, 61, 68, 0.45)";
   ctx.shadowBlur = 3 * dpr;
   ctx.shadowOffsetY = 1 * dpr;
   for (const shape of shapes.filter((x) => x.active)) {
@@ -635,7 +639,7 @@ function drawPlusBadge(ctx: CanvasRenderingContext2D, x: number, y: number, toke
   ctx.fillStyle = PAPER;
   ctx.fill();
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "#1A1815";
+  ctx.strokeStyle = INK;
   ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(x - r * 0.42, y);
@@ -644,7 +648,7 @@ function drawPlusBadge(ctx: CanvasRenderingContext2D, x: number, y: number, toke
   ctx.lineTo(x, y + r * 0.42);
   ctx.lineWidth = Math.max(1.25, r * 0.28);
   ctx.lineCap = "butt";
-  ctx.strokeStyle = "#1A1815";
+  ctx.strokeStyle = INK;
   ctx.stroke();
 }
 
@@ -674,7 +678,7 @@ function drawStar(ctx: CanvasRenderingContext2D, x: number, y: number, outer: nu
     }
   }
   ctx.closePath();
-  ctx.fillStyle = "#E2B53C";
+  ctx.fillStyle = MILITARY.brass;
   ctx.fill();
   ctx.lineWidth = 1;
   ctx.lineJoin = "round";
@@ -708,7 +712,7 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       ctx.beginPath();
       ctx.arc(counter.x, counter.y, tokenPx / 2 + 3 * game.unitScale, 0, Math.PI * 2);
       ctx.lineWidth = selected ? 3 : 1.5;
-      ctx.strokeStyle = selected ? SELECTED_COLOR : "rgba(244, 241, 234, 0.9)";
+      ctx.strokeStyle = selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
       ctx.setLineDash(selected ? [] : [4, 3]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -897,7 +901,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
     ctx.fillText(`\u2694 ${combat}`, layout.anchor.x, cy);
   };
 
-  if (lod < 2) {
+  const drawIcons = () => {
     for (const layout of game.layouts) {
       if (!visible(layout)) {
         continue;
@@ -909,25 +913,41 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
       drawRegionUnits(ctx, layout, game, dpr);
       drawMarker(layout);
     }
+  };
+  const drawSprites = () => {
+    for (const layout of game.layouts) {
+      if (visible(layout)) {
+        drawShield(layout);
+      }
+    }
+    drawUprightDepth(ctx, scene, game);
+    setScreenTransform(ctx, dpr);
+    for (const layout of game.layouts) {
+      if (!visible(layout)) {
+        continue;
+      }
+      if (layout.plus) {
+        drawPlusBadge(ctx, layout.plus.x, layout.plus.y, TOKEN_PX * s);
+      }
+      drawMarker(layout);
+    }
+  };
+
+  const mix = spriteMix(scene.view.k);
+  if (mix <= 0 || lod < 2) {
+    drawIcons();
     return;
   }
-
-  for (const layout of game.layouts) {
-    if (visible(layout)) {
-      drawShield(layout);
-    }
+  if (mix < 1) {
+    ctx.save();
+    ctx.globalAlpha *= 1 - mix;
+    drawIcons();
+    ctx.restore();
   }
-  drawUprightDepth(ctx, scene, game);
-  setScreenTransform(ctx, dpr);
-  for (const layout of game.layouts) {
-    if (!visible(layout)) {
-      continue;
-    }
-    if (layout.plus) {
-      drawPlusBadge(ctx, layout.plus.x, layout.plus.y, TOKEN_PX * s);
-    }
-    drawMarker(layout);
-  }
+  ctx.save();
+  ctx.globalAlpha *= mix;
+  drawSprites();
+  ctx.restore();
 }
 
 function tracePolygon(ctx: CanvasRenderingContext2D, points: Vec2[]): void {
@@ -960,7 +980,7 @@ function attackScanPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null 
       return null;
     }
     g.imageSmoothingEnabled = false;
-    g.strokeStyle = "rgba(26, 24, 21, 0.7)";
+    g.strokeStyle = "rgba(75, 61, 68, 0.7)";
     g.lineWidth = 1;
     g.beginPath();
     g.moveTo(0, 8);
@@ -974,7 +994,7 @@ function attackScanPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null 
   return ctx.createPattern(scanCanvas, "repeat");
 }
 
-const ATTACK_RING = "#F5C400";
+const ATTACK_RING = MILITARY.brass;
 
 function tokenMatches(counter: PlacedCounter, order: OperationalOrder): boolean {
   const entry = counter.slot.entry;
@@ -1006,7 +1026,7 @@ function drawBattleBadge(ctx: CanvasRenderingContext2D, x: number, y: number, co
   ctx.fillText(`\u2694 ${count}`, x, y);
 }
 
-const FOOT_BADGE = "#262126";
+const FOOT_BADGE = MILITARY.charcoal;
 
 /** A stomping boot and the number of units ordered into that region. Same stamp as the sword badge. */
 function drawFootBadge(ctx: CanvasRenderingContext2D, x: number, y: number, count: number, scale: number): void {
@@ -1311,7 +1331,7 @@ export function drawMoveGuide(ctx: CanvasRenderingContext2D, dpr: number, from: 
   ctx.beginPath();
   ctx.moveTo(from.x, from.y);
   ctx.lineTo(to.x, to.y);
-  ctx.strokeStyle = "rgba(26, 26, 24, 0.55)";
+  ctx.strokeStyle = "rgba(75, 61, 68, 0.55)";
   ctx.lineWidth = 4.5;
   ctx.stroke();
   ctx.strokeStyle = color;
@@ -1322,7 +1342,7 @@ export function drawMoveGuide(ctx: CanvasRenderingContext2D, dpr: number, from: 
   ctx.fillStyle = color;
   ctx.fill();
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "rgba(26, 26, 24, 0.75)";
+  ctx.strokeStyle = "rgba(75, 61, 68, 0.75)";
   ctx.stroke();
   ctx.restore();
 }
@@ -1331,7 +1351,7 @@ export function drawMoveGuide(ctx: CanvasRenderingContext2D, dpr: number, from: 
 // Layer 4: editor overlay
 // ---------------------------------------------------------------
 
-export const LINK_COLORS = { land: "#3f6b2a", sea: "#2b5f9a", coastal: "#b5651d" } as const;
+export const LINK_COLORS = { land: MILITARY.olive, sea: MILITARY.steel, coastal: MILITARY.terracotta } as const;
 export type EditorLinkKind = keyof typeof LINK_COLORS;
 
 export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote" | "prune";
@@ -1361,17 +1381,17 @@ export interface EditorOverlay {
   slots?: Vec2[];
 }
 
-export const SLOT_HANDLE_COLOR = "#2e8b3e";
+export const SLOT_HANDLE_COLOR = MILITARY.sage;
 
-const KNIFE_COLOR = "#c0392b";
-const MERGE_COLOR = "#2b6cb0";
-const HANDLE_COLOR = "#e0a000";
+const KNIFE_COLOR = MILITARY.crimson;
+const MERGE_COLOR = MILITARY.steel;
+const HANDLE_COLOR = MILITARY.brass;
 /** Edges shorter than this on screen get no midpoint "+" handle. */
 const MIDPOINT_MIN_PX = 22;
 /** How far the knife preview runs past the line's ends, in world units. */
 const KNIFE_PREVIEW_REACH = 4000;
 
-export const FACILITY_HANDLE_COLOR = "#a23b72";
+export const FACILITY_HANDLE_COLOR = MILITARY.plum;
 
 /**
  * Facility anchor handle. A filled magenta trapezoid on a paper disc, labeled BASE, so it does not read as
@@ -1380,7 +1400,7 @@ export const FACILITY_HANDLE_COLOR = "#a23b72";
 function drawFacilityHandle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
   ctx.arc(x, y, 16, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(244, 241, 234, 0.96)";
+  ctx.fillStyle = "rgba(221, 207, 153, 0.96)";
   ctx.fill();
   ctx.lineWidth = 2.5;
   ctx.strokeStyle = FACILITY_HANDLE_COLOR;
@@ -1419,7 +1439,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   ctx.lineJoin = "round";
   ctx.lineWidth = px;
   ctx.setLineDash([2 * px, 3 * px]);
-  ctx.strokeStyle = "rgba(26, 26, 24, 0.55)";
+  ctx.strokeStyle = "rgba(75, 61, 68, 0.55)";
   for (const region of editor.regions) {
     const path = editor.paths.get(region.id);
     if (path) {
@@ -1435,7 +1455,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     const path = editor.paths.get(id);
     if (path) {
       ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(43, 108, 176, 0.2)";
+      ctx.fillStyle = "rgba(78, 84, 99, 0.2)";
       ctx.fill(path, "evenodd");
       ctx.lineWidth = 2.5 * px;
       ctx.strokeStyle = MERGE_COLOR;
@@ -1475,7 +1495,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.font = `600 11px ${SERIF}`;
     ctx.textBaseline = "top";
     ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(244, 241, 234, 0.9)";
+    ctx.strokeStyle = "rgba(221, 207, 153, 0.9)";
     ctx.strokeText(region.id, a.x, a.y + 7);
     ctx.fillStyle = INK;
     ctx.fillText(region.id, a.x, a.y + 7);
@@ -1551,7 +1571,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.lineTo(a.x, a.y + 9);
     ctx.lineTo(a.x - 9, a.y);
     ctx.closePath();
-    ctx.fillStyle = "rgba(224, 160, 0, 0.35)";
+    ctx.fillStyle = "rgba(170, 162, 93, 0.35)";
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = HANDLE_COLOR;
@@ -1564,12 +1584,12 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       ctx.setLineDash([2, 3]);
       ctx.arc(at.x, at.y, (TOKEN_WORLD * view.k) / 2, 0, Math.PI * 2);
       ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(46, 139, 62, 0.6)";
+      ctx.strokeStyle = "rgba(142, 159, 125, 0.6)";
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.arc(at.x, at.y, 9, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(244, 241, 234, 0.92)";
+      ctx.fillStyle = "rgba(221, 207, 153, 0.92)";
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = SLOT_HANDLE_COLOR;
@@ -1610,7 +1630,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       const lt = Math.hypot(dt.x, dt.y) || 1;
       ctx.setLineDash([6, 6]);
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(192, 57, 43, 0.55)";
+      ctx.strokeStyle = "rgba(156, 82, 78, 0.55)";
       ctx.beginPath();
       const h2 = S({ x: head.x + (dh.x / lh) * KNIFE_PREVIEW_REACH, y: head.y + (dh.y / lh) * KNIFE_PREVIEW_REACH });
       const t2 = S({ x: tail.x + (dt.x / lt) * KNIFE_PREVIEW_REACH, y: tail.y + (dt.y / lt) * KNIFE_PREVIEW_REACH });
@@ -1640,7 +1660,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
 
   // The polygon being drawn.
   if (editor.tool === "draw" && editor.draft.length > 0) {
-    const color = editor.drawSea ? LINK_COLORS.sea : "#7a3e1d";
+    const color = editor.drawSea ? LINK_COLORS.sea : MILITARY.terracotta;
     const pts = editor.draft.map(S);
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
@@ -1658,7 +1678,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       ctx.beginPath();
       pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
       ctx.closePath();
-      ctx.fillStyle = editor.drawSea ? "rgba(43, 95, 154, 0.18)" : "rgba(122, 62, 29, 0.18)";
+      ctx.fillStyle = editor.drawSea ? "rgba(78, 84, 99, 0.18)" : "rgba(185, 122, 96, 0.18)";
       ctx.fill();
     }
     pts.forEach((p, i) => {
@@ -1681,13 +1701,13 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
       if (path) {
         ctx.setLineDash([]);
         ctx.lineWidth = 2 * px;
-        ctx.fillStyle = "rgba(192, 57, 43, 0.3)";
+        ctx.fillStyle = "rgba(156, 82, 78, 0.3)";
         ctx.fill(path, "evenodd");
         ctx.strokeStyle = KNIFE_COLOR;
         ctx.stroke(path);
       }
     }
-    ctx.fillStyle = "rgba(192, 57, 43, 0.12)";
+    ctx.fillStyle = "rgba(156, 82, 78, 0.12)";
     ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
     ctx.setLineDash([5 * px, 4 * px]);
     ctx.lineWidth = 1.5 * px;
@@ -1703,7 +1723,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.beginPath();
     ctx.arc(c.x, c.y, editor.cursor.kind === "free" ? 3 : 7, 0, Math.PI * 2);
     ctx.lineWidth = 2;
-    ctx.strokeStyle = editor.cursor.kind === "vertex" ? "#2e8b3e" : editor.cursor.kind === "edge" ? "#e07a00" : INK;
+    ctx.strokeStyle = editor.cursor.kind === "vertex" ? MILITARY.sage : editor.cursor.kind === "edge" ? MILITARY.tan : INK;
     ctx.stroke();
   }
 }

@@ -28,8 +28,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "US",
     name: "United States",
     side: "allies",
-    primary: "#72745C", // board: Olive Drab
-    ring: "#A8B272", // art
+    primary: "#7D7B62", // olive
+    ring: "#8E9F7D", // sage
     fill: "#FCFAF3", // art
     ink: "#434927", // art
   },
@@ -37,8 +37,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "UK",
     name: "United Kingdom",
     side: "allies",
-    primary: "#9E7F55", // board: Khaki Leather (British Desert Rats)
-    ring: "#CAA574", // board: Sand Tan
+    primary: "#A88A5E", // khaki
+    ring: "#CCA87B", // tan
     fill: "#FBF7EC",
     ink: "#2B2418",
   },
@@ -46,8 +46,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "JAP",
     name: "Japan",
     side: "axis",
-    primary: "#B77958", // board: Terracotta. The board's Imperial Fleet shares Crimson with the Red Army; tokens need them apart.
-    ring: "#C98F6E",
+    primary: "#B97A60", // terracotta
+    ring: "#CCA87B", // tan
     fill: "#FBF5EE",
     ink: "#1F1412",
   },
@@ -55,8 +55,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "GER",
     name: "Germany",
     side: "axis",
-    primary: "#857577", // board: Feldgrau
-    ring: "#8A8C7F", // art
+    primary: "#8C7C79", // feldgrau
+    ring: "#4E5463", // steel
     fill: "#F9F8F6", // art
     ink: "#000000", // art
   },
@@ -64,8 +64,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "USSR",
     name: "Soviet Union",
     side: "allies",
-    primary: "#9A4E48", // board: Soviet Crimson
-    ring: "#B8605A",
+    primary: "#9C524E", // crimson
+    ring: "#774251", // plum
     fill: "#FBF4F1",
     ink: "#2A1415",
   },
@@ -73,8 +73,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "NEUTRAL",
     name: "Neutral",
     side: "neutral",
-    primary: "#A69C90", // board: Trench Mud Light
-    ring: "#A69C90",
+    primary: "#A99C8D", // bone
+    ring: "#8C7C79", // feldgrau
     fill: "#F4F1EA",
     ink: "#1A1A18",
   },

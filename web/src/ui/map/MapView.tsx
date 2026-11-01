@@ -21,7 +21,7 @@ import {
   TOKEN_PX,
 } from "./mapRenderer";
 import type { OperationalOrder } from "./operationalArrows";
-import { TerrainBake } from "./mapBake";
+import { BAKE_PAINT, TerrainBake } from "./mapBake";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
@@ -46,7 +46,7 @@ import {
   wrapWorldX,
   zoomAt,
 } from "./viewMath";
-import { lodForZoom, type MapLod, UPRIGHT_HIT_PX } from "./zoomLod";
+import { lodForZoom, type MapLod, spriteMix, UPRIGHT_HIT_PX } from "./zoomLod";
 
 export interface CombatMarker {
   regionId: string;
@@ -217,7 +217,7 @@ export function MapView(props: MapViewProps) {
   if (!editor) {
     lodHold.current = mapLod;
   }
-  const uprightReach = mapLod === 2 ? UPRIGHT_HIT_PX : 0;
+  const uprightReach = !editor && spriteMix(view.k) >= 0.5 ? UPRIGHT_HIT_PX : 0;
   const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
   const plusHitPx = Math.max(4, TOKEN_PX * unitScale * 0.22);
   /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
@@ -234,8 +234,10 @@ export function MapView(props: MapViewProps) {
       copyDx: dx,
     }),
   );
-  const bakeRef = useRef<TerrainBake | null>(null);
-  bakeRef.current ??= new TerrainBake();
+  const bakeRef = useRef<{ rev: number; bake: TerrainBake } | null>(null);
+  if (bakeRef.current?.rev !== BAKE_PAINT) {
+    bakeRef.current = { rev: BAKE_PAINT, bake: new TerrainBake() };
+  }
   const scarCount = props.relief?.scars.length ?? 0;
   const [scarNow, setScarNow] = useState(0);
   useEffect(() => {
@@ -343,7 +345,7 @@ export function MapView(props: MapViewProps) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     // The cached base map: rebuilt only when the geometry, an owner or the needed resolution changes.
-    const baked = bakeRef.current!.ensure(
+    const baked = bakeRef.current!.bake.ensure(
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
       view.k * dpr,
     );
@@ -373,7 +375,7 @@ export function MapView(props: MapViewProps) {
       frontlines: editor ? [] : (props.relief?.frontlines ?? []),
       lod: mapLod,
       stampAvoid:
-        mapLod === 1
+        mapLod >= 1
           ? Object.fromEntries(
               geometry.regions
                 .filter((region) => region.type === "land")

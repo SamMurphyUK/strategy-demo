@@ -8,11 +8,11 @@ export const COASTLINE_COLOR = "#1a1a18";
 export const COASTLINE_WIDTH_PX = 1.5;
 export const BORDER_COLOR = "rgba(26, 26, 24, 0.72)";
 export const NAVAL_BORDER_COLOR = "rgba(26, 26, 24, 0.5)";
-export const SELECTED_COLOR = "rgba(255, 255, 0, 0.85)";
-export const HOVER_COLOR = "rgba(255, 224, 96, 0.9)";
+export const SELECTED_COLOR = "rgba(170, 162, 93, 0.9)";
+export const HOVER_COLOR = "rgba(204, 168, 123, 0.9)";
 /** Inner tint under the outline, so a hovered or selected region reads as a shape, not only a line. */
-export const SELECTED_TINT = "rgba(255, 214, 51, 0.24)";
-export const HOVER_TINT = "rgba(255, 214, 51, 0.12)";
+export const SELECTED_TINT = "rgba(170, 162, 93, 0.24)";
+export const HOVER_TINT = "rgba(204, 168, 123, 0.16)";
 
 const OWNED_ALPHA = 0.62;
 const DIMMED_ALPHA = 0.25;
@@ -129,9 +129,9 @@ export const BORDER_PASSES = [
 export const COAST_INK = { color: "#1A1815", width: 1.6 } as const;
 
 /** Fades land that a move or mobilize highlight does not offer, over the baked fills. */
-export const LAND_WASH = "rgba(38, 33, 38, 0.55)";
+export const LAND_WASH = "rgba(75, 61, 68, 0.55)";
 /** Fades the land layer while the editor works on the sea layer. */
-export const EDITOR_LAND_DIM = "rgba(38, 33, 38, 0.55)";
+export const EDITOR_LAND_DIM = "rgba(75, 61, 68, 0.55)";
 
 /** Fill for a land region under a move or mobilize highlight, or null when the baked tint should show. */
 export function highlightLandFill(regionId: string, owner: string, mode: HighlightMode): string | null {

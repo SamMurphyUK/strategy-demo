@@ -52,18 +52,18 @@ export interface ScarFrame {
   ember: EmberSpark | null;
 }
 
-export const CRATER_RIM = "#3A3230";
-export const CRATER_PIT = "#1E1918";
-export const SMOKE_SOOT = "#262126";
-export const SMOKE_ASH = "#5C5356";
-export const EMBER = "#D97236";
+export const CRATER_RIM = "#645355";
+export const CRATER_PIT = "#4B3D44";
+export const SMOKE_SOOT = "#4B3D44";
+export const SMOKE_ASH = "#8C7C79";
+export const EMBER = "#B97A60";
 /** Stepped smoke clock. Four frames, about 4.5 per second. */
 export const SMOKE_FRAME_MS = 220;
 /** Craters stay this far from the IPC anchor and from unit slots, in world units. */
 export const SCAR_CLEARANCE = 12;
 
 const KEY_EPS = 1e-3;
-const SMOKE_MID = "#3E373A";
+const SMOKE_MID = "#645355";
 const DRIFT: readonly (readonly [number, number])[] = [
   [0, 0],
   [1, -1],

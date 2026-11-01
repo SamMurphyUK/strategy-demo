@@ -3,6 +3,8 @@
 //   land and air   a solid faction-coloured disc with a white silhouette
 //   sea            a waterline hemisphere: darker lower half, white hull on the midline, a bold letter above
 //   count pill     bottom-right, gold for the faction whose turn it is and black for the rest
+import { factionPalette } from "../theme/factionPalette";
+import { MILITARY } from "../theme/militaryPalette";
 import type { StackEntry } from "./geometry";
 import {
   CARGO_DOT,
@@ -12,20 +14,17 @@ import {
   pillFontPx,
   pillRadius,
   PILL_OFFSET,
-  TOKEN_GOLD,
-  TOKEN_INK,
   TOKEN_WHITE,
-  tokenDisc,
   unitSilhouette,
 } from "./tokenStyle";
 import { unitDomain } from "./unitStacks";
 
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
 const MONO = '"Courier New", "JetBrains Mono", ui-monospace, monospace';
-const PLINTH = "#262126";
-const BRASS = "#D9B26F";
-const GOLD_NUM = "#E8C585";
-const TEAL_NUM = "#63C5B8";
+const PLINTH = MILITARY.charcoal;
+const BRASS = MILITARY.brass;
+const GOLD_NUM = MILITARY.cream;
+const TEAL_NUM = MILITARY.spruce;
 /** The ink ring that separates overlapping tokens. One and a half screen pixels, whatever the zoom. */
 const SEPARATION_RING_PX = 1.5;
 
@@ -74,7 +73,7 @@ function paintSea(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y
   ctx.beginPath();
   ctx.arc(x, y, r - Math.max(0.5, d * 0.02), 0, Math.PI * 2);
   ctx.clip();
-  ctx.fillStyle = "rgba(8, 22, 38, 0.38)";
+  ctx.fillStyle = "rgba(78, 84, 99, 0.55)";
   ctx.fillRect(x - r, y, d, r);
   // The waterline: a short wave across the midline.
   ctx.beginPath();
@@ -102,7 +101,7 @@ function paintSea(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y
   if (loaded && entry.unit_type_id === "transport") {
     ctx.beginPath();
     ctx.arc(x + CARGO_DOT.x * d, y + CARGO_DOT.y * d, Math.max(1.8, CARGO_DOT.r * d), 0, Math.PI * 2);
-    ctx.fillStyle = TOKEN_GOLD;
+    ctx.fillStyle = MILITARY.brass;
     ctx.fill();
     ctx.lineWidth = 1;
     ctx.strokeStyle = TOKEN_WHITE;
@@ -122,7 +121,7 @@ export function drawTokenFace(
   const r = d / 2;
   ctx.beginPath();
   ctx.arc(x, y, r - SEPARATION_RING_PX / 2, 0, Math.PI * 2);
-  ctx.fillStyle = tokenDisc(entry.faction_id);
+  ctx.fillStyle = factionPalette(entry.faction_id).primary;
   ctx.fill();
   const domain = unitDomain(entry.unit_type_id, paint.categories);
   if (domain === "sea") {
@@ -134,7 +133,7 @@ export function drawTokenFace(
   ctx.beginPath();
   ctx.arc(x, y, r - 0.6, 0, Math.PI * 2);
   ctx.lineWidth = Math.max(1.5, d * 0.06);
-  ctx.strokeStyle = TOKEN_INK;
+  ctx.strokeStyle = MILITARY.charcoal;
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(x, y, r - Math.max(2.4, d * 0.09), 0, Math.PI * 2);
@@ -204,7 +203,7 @@ export function drawMapToken(
   ctx.shadowOffsetY = 1 * paint.dpr;
   ctx.beginPath();
   ctx.arc(x, y, d / 2, 0, Math.PI * 2);
-  ctx.fillStyle = tokenDisc(entry.faction_id);
+  ctx.fillStyle = factionPalette(entry.faction_id).primary;
   ctx.fill();
   ctx.restore();
   drawTokenFace(ctx, entry, x, y, d, paint);

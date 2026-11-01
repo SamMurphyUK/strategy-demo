@@ -1,22 +1,22 @@
 // Upright side-profile sprites for LoD 2. Same palette and standing poses as the battle screen,
 // drawn at integer pixels with smoothing off, feet on the plinth centre.
 import { factionPalette } from "../theme/factionPalette";
+import { MILITARY } from "../theme/militaryPalette";
 import { SELECTED_COLOR } from "./mapStyle";
-import { tokenDisc } from "./tokenStyle";
 import { squadOffsets } from "./zoomLod";
 
-const CHARCOAL = "#423840";
-const STEEL = "#495462";
-const SPRUCE = "#527A71";
-const TAUPE = "#5E4E54";
-const CREAM = "#DFCE91";
-const BROWN = "#7D6652";
-const LEATHER = "#9E7F55";
-const BRASS = "#A1A258";
-const PLINTH = "#262126";
-const GOLD = "#D9B26F";
-const GOLD_NUM = "#E8C585";
-const TEAL_NUM = "#63C5B8";
+const CHARCOAL = MILITARY.charcoal;
+const STEEL = MILITARY.steel;
+const SPRUCE = MILITARY.spruce;
+const TAUPE = MILITARY.taupe;
+const CREAM = MILITARY.cream;
+const BROWN = MILITARY.brown;
+const LEATHER = MILITARY.khaki;
+const BRASS = MILITARY.brass;
+const PLINTH = MILITARY.charcoal;
+const GOLD = MILITARY.brass;
+const GOLD_NUM = MILITARY.cream;
+const TEAL_NUM = MILITARY.spruce;
 
 export interface UprightPaint {
   unitType: string;
@@ -244,11 +244,11 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle = "#1A1815";
+  ctx.fillStyle = MILITARY.charcoal;
   ctx.fill();
   ctx.beginPath();
   ctx.ellipse(x, y - ry * 0.08, rx * 0.78, ry * 0.62, 0, 0, Math.PI * 2);
-  ctx.fillStyle = tokenDisc(paint.factionId);
+  ctx.fillStyle = factionPalette(paint.factionId).primary;
   ctx.fill();
   ctx.beginPath();
   ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
@@ -282,7 +282,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     ctx.beginPath();
     ctx.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
     ctx.lineWidth = paint.selected ? 2.5 : 1.5;
-    ctx.strokeStyle = paint.selected ? SELECTED_COLOR : "rgba(244, 241, 234, 0.9)";
+    ctx.strokeStyle = paint.selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
     ctx.setLineDash(paint.selected ? [] : [4, 3]);
     ctx.stroke();
     ctx.setLineDash([]);

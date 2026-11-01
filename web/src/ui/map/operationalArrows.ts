@@ -12,10 +12,10 @@ export const MAX_MASTER_ARROWS = 3;
 export const JOIN_T_MIN = 0.2;
 export const JOIN_T_MAX = 0.65;
 
-export const ARROW_INK = "#1A1815";
-export const COMBAT_ARROW = "#A82828";
-export const ARROW_BRASS = "#D9B26F";
-export const NONCOMBAT_ARROW = "#E2B53C";
+export const ARROW_INK = "#4B3D44";
+export const COMBAT_ARROW = "#9C524E";
+export const ARROW_BRASS = "#AAA25D";
+export const NONCOMBAT_ARROW = "#CCA87B";
 
 const TAU = Math.PI * 2;
 const BASE_NECK_PX = 10;

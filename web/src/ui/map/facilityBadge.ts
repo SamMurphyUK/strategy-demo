@@ -13,13 +13,13 @@ import type { Facilities, Vec2 } from "./geometry";
 export type BadgeSlot = "airbase" | "factory" | "harbour";
 
 export const BADGE_FILL: Record<BadgeSlot, string> = {
-  airbase: "#B87B52",
-  factory: "#B5B5B5",
-  harbour: "#87CEEB",
+  airbase: "#B97A60",
+  factory: "#8C7C79",
+  harbour: "#5B7D73",
 };
-export const BADGE_INK = "#1A1815";
+export const BADGE_INK = "#4B3D44";
 /** The outline of a slot with no facility, drawn only when the badge has two or more. */
-export const BADGE_INACTIVE_STROKE = "rgba(26,24,21,0.18)";
+export const BADGE_INACTIVE_STROKE = "rgba(75, 61, 68, 0.28)";
 
 /** Height of an equilateral triangle with side 1. */
 const H = Math.sqrt(3) / 2;
