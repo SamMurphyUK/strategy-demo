@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH } from "../../content/game_scene_session_builder";
+import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
 import { loadJson } from "../../engine/content/res";
 import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
@@ -19,6 +20,7 @@ import { PhasePanel } from "./panels/PhasePanel";
 import { RegionPanel } from "./panels/RegionPanel";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
+import { isActiveFaction } from "./tokenStyle";
 import { moveUnitsPayload } from "./stackMove";
 import { useGameSession } from "./session/use_game_session";
 
@@ -105,15 +107,25 @@ export function App() {
     return out;
   }, [state, version]);
 
+  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string) =>
+    offeredMoveDestinations(
+      state,
+      phase,
+      faction,
+      regionId,
+      unitTypeId,
+      session.getLegalMoveDestinations(regionId, unitTypeId, faction, instanceId),
+    );
+
   const legalTargets = useMemo(() => {
     if (selection?.kind === "stack") {
-      return session.getLegalMoveDestinations(selection.regionId, selection.unitTypeId, faction, selection.instanceId);
+      return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId);
     }
     if (selection?.kind === "place") {
       return session.getLegalMobilizeRegions(faction, selection.unitTypeId);
     }
     return [];
-  }, [selection, session, faction, version]);
+  }, [selection, session, faction, phase, version]);
 
   const highlight: HighlightMode = useMemo(() => {
     if (selection?.kind === "stack") {
@@ -137,7 +149,7 @@ export function App() {
 
   const isUnmoved = useCallback(
     (regionId: string, entry: StackEntry) => {
-      if (!MOVEMENT_PHASES.includes(phase) || entry.faction_id !== faction.toLowerCase()) {
+      if (!MOVEMENT_PHASES.includes(phase) || !isActiveFaction(entry.faction_id, faction)) {
         return false;
       }
       if (entry.instance_id) {
@@ -188,7 +200,7 @@ export function App() {
 
   /** How many of this stack the current faction can still move this phase. */
   const movableCount = (regionId: string, entry: StackEntry): number => {
-    if (!MOVEMENT_PHASES.includes(phase) || entry.faction_id !== faction.toLowerCase()) {
+    if (!MOVEMENT_PHASES.includes(phase) || !isActiveFaction(entry.faction_id, faction)) {
       return 0;
     }
     return entry.instance_id
@@ -225,7 +237,7 @@ export function App() {
       setSelection(null);
       return;
     }
-    const legal = session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "");
+    const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "");
     if (!legal.includes(target)) {
       setSelection(null);
       return;
@@ -342,16 +354,34 @@ export function App() {
           }}
           registerDropResolver={registerDropResolver}
           movableMax={movableCount}
-          legalMovesFor={(regionId, entry) =>
-            session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "")
-          }
+          legalMovesFor={(regionId, entry) => destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "")}
           onArmDrag={armDrag}
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
           onDragCancel={() => setSelection(null)}
           onDropMove={commitMove}
           unitTitle={(entry) => unitName(entry.unit_type_id, session.state.unit_types)}
+          movement={
+            editing
+              ? null
+              : {
+                  phase,
+                  regionIds: Object.keys(state.regions),
+                  orders: state.phase_orders.map((order) => ({
+                    id: order.id,
+                    faction: order.faction,
+                    fromRegionId: order.fromRegionId,
+                    toRegionId: order.toRegionId,
+                    path: order.path,
+                    unitType: order.unitType,
+                    shipInstanceIds: order.shipInstanceIds,
+                    count: order.count,
+                    attack: phase === "combat_move" && state.isRegionHostileTo(order.toRegionId, order.faction),
+                  })),
+                }
+          }
           unitCategories={unitCategories}
           activeFactionId={faction}
+          fuelFor={(regionId, entry) => fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id)}
           isLoaded={(entry) => {
             const iid = entry.instance_id ?? "";
             if (iid === "") {

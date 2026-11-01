@@ -1,3 +1,4 @@
+import { airSteps, fuelRemaining, isAirUnit } from "../air/air_fuel";
 import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
@@ -23,7 +24,8 @@ export class MovementValidator {
     const moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
 
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
-    const reachable = this.floodFill(start, moveRange, state, seaOnly, String(unit.faction_id ?? ""));
+    const air = isAirUnit(state, unitTypeId);
+    const reachable = this.floodFill(start, moveRange, state, seaOnly, String(unit.faction_id ?? ""), air);
 
     for (const region of reachable) {
       if (ruleset.canUnitEnterRegion(unitTypeId, region, state, state.current_phase)) {
@@ -49,12 +51,17 @@ export class MovementValidator {
     if (state.movableStackCount(factionId, fromRegion, unitTypeId) <= 0) {
       return legal;
     }
-    let moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
-    if (moveRange <= 0) {
+    const air = isAirUnit(state, unitTypeId);
+    let moveRange = air ? fuelRemaining(state, factionId, fromRegion, unitTypeId) : ruleset.getUnitMoveRange(unitTypeId, state);
+    if (air) {
+      if (moveRange <= 0) {
+        return legal;
+      }
+    } else if (moveRange <= 0) {
       moveRange = 1;
     }
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
-    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId)) {
+    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, air)) {
       if (ruleset.canUnitEnterRegion(unitTypeId, dest, state, state.current_phase)) {
         legal.push(dest);
       }
@@ -147,14 +154,16 @@ export class MovementValidator {
     } else if (fromRegion === toRegion) {
       result.errors.push(MoveError.of("MOVE_INVALID", "Cannot move to the same region"));
     } else if (
-      !state.isAdjacent(fromRegion, toRegion) &&
-      !this.floodFill(
-        fromRegion,
-        ruleset.getUnitMoveRange(unitTypeId, state),
-        state,
-        ruleset.isSeaUnit(unitTypeId, state),
-        factionId,
-      ).includes(toRegion)
+      isAirUnit(state, unitTypeId)
+        ? airSteps(state, fromRegion, toRegion) > fuelRemaining(state, factionId, fromRegion, unitTypeId)
+        : !state.isAdjacent(fromRegion, toRegion) &&
+          !this.floodFill(
+            fromRegion,
+            ruleset.getUnitMoveRange(unitTypeId, state),
+            state,
+            ruleset.isSeaUnit(unitTypeId, state),
+            factionId,
+          ).includes(toRegion)
     ) {
       result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Destination is out of movement range"));
     } else if (!ruleset.canUnitEnterRegion(unitTypeId, toRegion, state, state.current_phase)) {
@@ -217,7 +226,7 @@ export class MovementValidator {
     return false;
   }
 
-  floodFill(start: string, range: number, state: GameState, seaOnly = false, factionId = ""): string[] {
+  floodFill(start: string, range: number, state: GameState, seaOnly = false, factionId = "", air = false): string[] {
     const visited: Record<string, boolean> = {};
     const frontier: { region: string; dist: number }[] = [{ region: start, dist: 0 }];
     const result: string[] = [];
@@ -245,7 +254,7 @@ export class MovementValidator {
         result.push(region);
       }
 
-      if (factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
+      if (!air && factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
         continue;
       }
 
@@ -264,9 +273,10 @@ export class MovementValidator {
 
   /**
    * Shortest walk the movement rules allow, including both ends.
-   * A direct border is one step. The same enemy-piece stop as `floodFill` applies past the first region.
+   * A direct border is one step. Land and sea stop on the first enemy-occupied region.
+   * Aircraft fly over enemy pieces, so their path is the real hop count for fuel.
    */
-  shortestPath(from: string, to: string, state: GameState, seaOnly: boolean, factionId: string): string[] {
+  shortestPath(from: string, to: string, state: GameState, seaOnly: boolean, factionId: string, air = false): string[] {
     if (from === "" || to === "") {
       return [];
     }
@@ -307,7 +317,7 @@ export class MovementValidator {
         path.reverse();
         return path;
       }
-      if (factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
+      if (!air && factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
         continue;
       }
       for (const n of state.getAdjacentRegions(region)) {

@@ -60,6 +60,10 @@ export class GameState {
   units_embarked_this_phase: Record<string, number> = {};
   /** Container instances that already spent movement this window. */
   instances_moved_this_phase: Record<string, boolean> = {};
+  /** Stacks that declared a combat-move attack and are still in the region they left from. */
+  units_attacking_this_phase: Record<string, number> = {};
+  /** Air movement already spent this turn, keyed `faction|region|unitType`. Combat move and noncombat share it. */
+  air_movement_spent: Record<string, number> = {};
   /** The battle being fought round by round in the combat phase, if any. */
   active_battle: ActiveBattle | null = null;
   /** Orders applied since the current movement phase began. */
@@ -155,7 +159,8 @@ export class GameState {
     const key = this.movementStackKey(factionId, regionId, unitTypeId);
     const arrived = Math.trunc(Number(this.units_arrived_this_phase[key] ?? 0));
     const embarked = Math.trunc(Number(this.units_embarked_this_phase[key] ?? 0));
-    return Math.max(0, total - arrived - embarked);
+    const attacking = Math.trunc(Number(this.units_attacking_this_phase[key] ?? 0));
+    return Math.max(0, total - arrived - embarked - attacking);
   }
 
   recordStackEmbark(factionId: string, regionId: string, unitTypeId: string, count: number): void {
@@ -166,6 +171,22 @@ export class GameState {
   recordStackArrival(factionId: string, regionId: string, unitTypeId: string, count: number): void {
     const key = this.movementStackKey(factionId, regionId, unitTypeId);
     this.units_arrived_this_phase[key] = (this.units_arrived_this_phase[key] ?? 0) + count;
+  }
+
+  /** Count units that have declared an attack but have not entered the enemy region. */
+  recordAttackHold(factionId: string, regionId: string, unitTypeId: string, count: number): void {
+    const key = this.movementStackKey(factionId, regionId, unitTypeId);
+    this.units_attacking_this_phase[key] = (this.units_attacking_this_phase[key] ?? 0) + count;
+  }
+
+  releaseAttackHold(factionId: string, regionId: string, unitTypeId: string, count: number): void {
+    const key = this.movementStackKey(factionId, regionId, unitTypeId);
+    const next = (this.units_attacking_this_phase[key] ?? 0) - count;
+    if (next <= 0) {
+      delete this.units_attacking_this_phase[key];
+    } else {
+      this.units_attacking_this_phase[key] = next;
+    }
   }
 
   hasInstanceMoved(instanceId: string): boolean {
@@ -180,6 +201,8 @@ export class GameState {
     clearInPlace(this.units_arrived_this_phase);
     clearInPlace(this.units_embarked_this_phase);
     clearInPlace(this.instances_moved_this_phase);
+    clearInPlace(this.units_attacking_this_phase);
+    clearInPlace(this.air_movement_spent);
   }
 
   // ---------------------------------------------------------

@@ -34,6 +34,8 @@ export interface TokenPaint {
   categories?: Record<string, string>;
   /** A transport with cargo aboard gets a dot at the top left. */
   loaded?: boolean;
+  /** Remaining movement for an aircraft. Omit it for land and sea. */
+  fuel?: number | null;
 }
 
 // ---------------------------------------------------------------
@@ -132,6 +134,27 @@ export function drawTokenFace(
   ctx.stroke();
 }
 
+const FUEL_FILL = "#C47B2B";
+
+/** Remaining fuel, top-left, so it sits clear of the count pill. */
+export function drawFuelPill(ctx: CanvasRenderingContext2D, fuel: number, x: number, y: number, d: number): void {
+  const radius = pillRadius(d);
+  const cx = x - d * PILL_OFFSET;
+  const cy = y - d * PILL_OFFSET;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = FUEL_FILL;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.2, radius * 0.2);
+  ctx.strokeStyle = TOKEN_INK;
+  ctx.stroke();
+  ctx.fillStyle = TOKEN_WHITE;
+  ctx.font = `700 ${pillFontPx(d)}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(fuel), cx, cy + 0.5);
+}
+
 /** The count pill at a token's bottom-right. Drawn for every stack, a lone unit included. */
 export function drawCountPill(
   ctx: CanvasRenderingContext2D,
@@ -179,4 +202,7 @@ export function drawMapToken(
   ctx.restore();
   drawTokenFace(ctx, entry, x, y, d, paint);
   drawCountPill(ctx, entry.count, x, y, d, isActiveFaction(entry.faction_id, paint.activeFactionId));
+  if (paint.fuel != null) {
+    drawFuelPill(ctx, paint.fuel, x, y, d);
+  }
 }

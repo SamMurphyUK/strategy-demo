@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { describeStranded, fuelRemaining, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
+import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Battle } from "../../../engine/combat/combat";
 import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
@@ -21,6 +23,10 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
   const phase = state.current_phase;
   const legal = session.getLegalCommands(faction);
   const battles = phase === "combat" ? session.getPendingBattles(faction) : [];
+  const stranded = phase === "noncombat_move" ? strandedPlanes(state, faction) : [];
+  const mustReturn = phase === "noncombat_move" ? planesMustLandMessage(state, faction) : "";
+  const mustPlace = phase === "mobilize" ? mustPlaceMessage(state, faction) : "";
+  const doomed = stranded.filter((plane) => !plane.canReturn);
   const fight = (regionId: string) => game.send("start_battle", { region_id: regionId });
 
   return (
@@ -59,13 +65,25 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
             Fight next battle
           </button>
         )}
+        {mustReturn !== "" && <p className="warn">{mustReturn}</p>}
+        {mustPlace !== "" && <p className="warn">{mustPlace}</p>}
+        {doomed.length > 0 && (
+          <p className="warn">{describeStranded(state, doomed)} will be lost when the phase ends.</p>
+        )}
         {legal.includes("end_phase") && (
           <button
             type="button"
-            className={battles.length > 0 ? "" : "primary"}
+            className={battles.length > 0 || mustReturn !== "" || mustPlace !== "" ? "" : "primary"}
+            disabled={mustReturn !== "" || mustPlace !== ""}
             onClick={() => game.send("end_phase")}
           >
-            {battles.length > 0 ? "Auto-resolve the rest and end phase" : "End phase"}
+            {mustReturn !== ""
+              ? "Fly planes back first"
+              : mustPlace !== ""
+                ? "Place purchased units first"
+                : battles.length > 0
+                  ? "Auto-resolve the rest and end phase"
+                  : "End phase"}
           </button>
         )}
         {legal.includes("end_turn") && (
@@ -98,7 +116,7 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
     const purchases = Object.entries(staged)
       .filter(([, n]) => n > 0)
       .map(([unit_type_id, count]) => ({ unit_type_id, count }));
-    if (purchases.length === 0) {
+    if (purchases.length === 0 || total > ipc) {
       return;
     }
     const result = game.send("purchase_units", { purchases });
@@ -140,7 +158,7 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
         Total <b className="mono">{total}</b> IPC of <b className="mono">{ipc}</b> available
       </p>
       <div className="row">
-        <button type="button" onClick={confirm} disabled={total === 0}>
+        <button type="button" onClick={confirm} disabled={total === 0 || total > ipc}>
           Confirm purchase
         </button>
         <button type="button" onClick={() => setStaged({})} disabled={total === 0}>
@@ -182,6 +200,14 @@ function MoveBody({
       <p>
         Moving <strong>{unitName(selection.unitTypeId, state.unit_types)}</strong> from {selection.regionId}.
       </p>
+      {state.unit_types[selection.unitTypeId]?.category === "air" && (
+        <p>
+          Fuel{" "}
+          <b className="mono">
+            {fuelRemaining(state, state.current_faction_id, selection.regionId, selection.unitTypeId)}
+          </b>
+        </p>
+      )}
       {selection.max > 1 && (
         <div className="row stepper">
           <button

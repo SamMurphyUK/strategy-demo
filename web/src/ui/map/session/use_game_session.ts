@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
+import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import { cancel_phase_order } from "../../../engine/movement/phase_orders";
 import { GameSessionStub, type StubResult } from "../../../engine/session/game_session_stub";
@@ -72,6 +74,28 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
   const send = useCallback(
     (type: string, payload: Dict = {}): StubResult => {
       const session = sessionRef.current!;
+      let lostMessage = "";
+      if (type === "end_phase" && session.state.current_phase === "mobilize") {
+        const message = mustPlaceMessage(session.state, session.state.current_faction_id);
+        if (message !== "") {
+          append([{ kind: "error", text: message }]);
+          setVersion((v) => v + 1);
+          return { result_type: "error", error: { code: "UNITS_UNPLACED", message }, events: [] };
+        }
+      }
+      if (type === "end_phase" && session.state.current_phase === "noncombat_move") {
+        const factionId = session.state.current_faction_id;
+        const message = planesMustLandMessage(session.state, factionId);
+        if (message !== "") {
+          append([{ kind: "error", text: message }]);
+          setVersion((v) => v + 1);
+          return { result_type: "error", error: { code: "PLANES_MUST_LAND", message }, events: [] };
+        }
+        lostMessage = planesLostMessage(
+          session.state,
+          strandedPlanes(session.state, factionId).filter((plane) => !plane.canReturn),
+        );
+      }
       counter.current += 1;
       const result = session.applyCommand({
         command_id: `ui_${String(counter.current).padStart(5, "0")}`,
@@ -81,7 +105,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       });
       const unitTypes = session.state.unit_types;
       if (result.result_type === "ok") {
-        append(result.events.map((evt) => ({ kind: "event" as const, text: describeEvent(evt, unitTypes) })));
+        const lines = result.events.map((evt) => ({ kind: "event" as const, text: describeEvent(evt, unitTypes) }));
+        if (lostMessage !== "") {
+          lines.push({ kind: "event", text: lostMessage });
+        }
+        append(lines);
       } else {
         append([
           ...result.events.map((evt) => ({ kind: "event" as const, text: describeEvent(evt, unitTypes) })),

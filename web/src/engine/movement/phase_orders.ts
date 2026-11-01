@@ -1,7 +1,9 @@
 // Movement phases keep a clone from the moment they begin. Cancelling an order
 // restores that clone and plays the other orders forward again.
+import { isAirUnit, noteAirArrival } from "../air/air_fuel";
 import { Faction } from "../model/faction";
 import { Command, CommandType } from "../model/command";
+import type { GameEvent } from "../model/event";
 import type { GameState } from "../model/game_state";
 import { Region } from "../model/region";
 import type { Dict } from "../model/types";
@@ -33,10 +35,23 @@ function cloneData<T>(value: T): T {
 }
 
 export function beginMovementPhase(state: GameState): void {
+  if (state.current_phase === "noncombat_move") {
+    releaseAirArrivals(state);
+  }
   state.phase_orders = [];
   state.phase_order_seq = 0;
   state.phase_start_snapshot = null;
   state.phase_start_snapshot = cloneData(state);
+}
+
+/** Aircraft move again in noncombat, within whatever fuel the combat move left them. Land and sea stay spent. */
+function releaseAirArrivals(state: GameState): void {
+  for (const key of Object.keys(state.units_arrived_this_phase)) {
+    const unitType = key.slice(key.lastIndexOf("|") + 1);
+    if (isAirUnit(state, unitType)) {
+      delete state.units_arrived_this_phase[key];
+    }
+  }
 }
 
 /** Append one order per unit line of a move that has already been applied. */
@@ -61,7 +76,8 @@ export function recordMoveOrders(state: GameState, command: Command): void {
       const unitType = String(unit.unit_type_id ?? "");
       const instanceId = String(unit.instance_id ?? "");
       const sea = state.unit_types[unitType]?.category === "sea";
-      const walked = validator.shortestPath(fromRegionId, toRegionId, state, sea, command.player_id);
+      const air = state.unit_types[unitType]?.category === "air";
+      const walked = validator.shortestPath(fromRegionId, toRegionId, state, sea, command.player_id, air);
       state.phase_order_seq += 1;
       const order: MoveOrder = {
         id: `ord_${state.phase_order_seq}`,
@@ -78,6 +94,70 @@ export function recordMoveOrders(state: GameState, command: Command): void {
       }
       state.phase_orders.push(order);
     }
+  }
+}
+
+/**
+ * Apply a validated move and record it. A combat move into a hostile region does not enter that
+ * region: the units stay where they are and are marked as attacking until the phase ends.
+ */
+export function applyRecordedMove(state: GameState, command: Command, movement: MovementEngine): GameEvent[] {
+  const moves = (command.payload.moves ?? []) as unknown[];
+  const going: Dict[] = [];
+  if (state.current_phase === "combat_move") {
+    for (const move of moves) {
+      if (!isRecord(move)) {
+        continue;
+      }
+      const toRegion = String(move.to_region_id ?? "");
+      if (state.isRegionHostileTo(toRegion, command.player_id)) {
+        const fromRegion = String(move.from_region_id ?? "");
+        const units = Array.isArray(move.units) ? move.units : [];
+        for (const unit of units) {
+          if (isRecord(unit)) {
+            holdAttack(state, command.player_id, fromRegion, unit);
+          }
+        }
+      } else {
+        going.push(move);
+      }
+    }
+  } else {
+    for (const move of moves) {
+      if (isRecord(move)) {
+        going.push(move);
+      }
+    }
+  }
+  const events = movement.processMove(commandWithMoves(command, going));
+  events[0].payload = { faction_id: command.player_id, moves: command.payload.moves ?? [] };
+  const marked = state.phase_orders.length;
+  recordMoveOrders(state, command);
+  for (const order of state.phase_orders.slice(marked)) {
+    if (state.current_phase === "combat_move" && state.isRegionHostileTo(order.toRegionId, order.faction)) {
+      continue;
+    }
+    noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, order.unitType, order.stepsUsed);
+  }
+  return events;
+}
+
+/** Walk held attacks into their enemy regions as combat begins, so battles can see the attackers. */
+export function commitCombatAttacks(state: GameState): void {
+  if (state.current_phase !== "combat_move") {
+    return;
+  }
+  const held = state.phase_orders.filter((order) => state.isRegionHostileTo(order.toRegionId, order.faction));
+  const movement = new MovementEngine(state);
+  for (const order of held) {
+    if (!order.shipInstanceIds || order.shipInstanceIds.length === 0) {
+      state.releaseAttackHold(order.faction, order.fromRegionId, order.unitType, order.count);
+    }
+    movement.processMove(commandForOrder(order));
+    noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, order.unitType, order.stepsUsed);
+  }
+  for (const key of Object.keys(state.units_attacking_this_phase)) {
+    delete state.units_attacking_this_phase[key];
   }
 }
 
@@ -108,9 +188,27 @@ export function cancel_phase_order(state: GameState, orderId: string): void {
     if (!orderIsLegal(validator, ruleset, state, command)) {
       break;
     }
-    movement.processMove(command);
-    recordMoveOrders(state, command);
+    applyRecordedMove(state, command, movement);
   }
+}
+
+function holdAttack(state: GameState, faction: string, fromRegion: string, unit: Dict): void {
+  const instanceId = String(unit.instance_id ?? "");
+  if (instanceId !== "") {
+    state.recordInstanceMoved(instanceId);
+    return;
+  }
+  state.recordAttackHold(faction, fromRegion, String(unit.unit_type_id ?? ""), Math.trunc(Number(unit.count ?? 1)));
+}
+
+function commandWithMoves(command: Command, moves: Dict[]): Command {
+  return Command.fromDict({
+    command_id: command.command_id,
+    player_id: command.player_id,
+    faction_id: command.faction_id,
+    type: command.type,
+    payload: { ...command.payload, moves },
+  });
 }
 
 function commandForOrder(order: MoveOrder): Command {

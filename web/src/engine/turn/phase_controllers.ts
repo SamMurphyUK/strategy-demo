@@ -6,6 +6,8 @@ import type { EconomyEngine } from "../economy/economy";
 import { type GameEvent, GameEventType, type GameEventTypeValue } from "../model/event";
 import type { GameState } from "../model/game_state";
 import type { PlacementEngine } from "../placement/placement";
+import { scrapUnlandablePlanes } from "../air/air_fuel";
+import { commitCombatAttacks } from "../movement/phase_orders";
 import type { VictoryEngine } from "../victory/victory";
 import type { TurnEngine } from "./turn_engine";
 
@@ -73,12 +75,16 @@ export function processEndPhase(
 ): GameEvent[] {
   const events: GameEvent[] = [];
   if (phaseAtRequest === "combat_move") {
+    commitCombatAttacks(state);
     events.push(...syncSeq(turnEngine.advancePhase()));
   } else if (phaseAtRequest === "combat") {
     events.push(...resolveBattlePhase(state.current_faction_id, amphibious, combat, syncSeq));
     events.push(...syncSeq(turnEngine.advancePhase()));
   } else if (phaseAtRequest === "mobilize") {
     events.push(...syncSeq(placement.checkForfeited(state.current_faction_id)));
+    events.push(...syncSeq(turnEngine.advancePhase()));
+  } else if (phaseAtRequest === "noncombat_move") {
+    scrapUnlandablePlanes(state, state.current_faction_id);
     events.push(...syncSeq(turnEngine.advancePhase()));
   } else {
     events.push(...syncSeq(turnEngine.advancePhase()));

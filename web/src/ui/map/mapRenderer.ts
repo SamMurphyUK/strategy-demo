@@ -1,6 +1,7 @@
 // Layered canvas renderer for the strategic map.
 //
 //   Layers 0-3  the baked war-room base map (mapBake.ts): ocean, faction-tinted land, aged burn, borders and\n//               coastline. Painted once to an offscreen canvas and blitted per visible world copy.\n//   Layer 4     highlight washes, hover and selection: gold tint plus outline on the region's true shape\n//   Layer 5     anchors, IPC shields, unit counters, markers, and the editor overlay
+//   Layer 6     operational arrows on their own canvas, above the map. Battle icons are painted last.
 //
 // `scene.paths` are the regions' true shapes: each cutter polygon boolean-clipped against the land SVG
 // (land regions intersected with it, sea zones differenced from it). Fills and outlines on them follow
@@ -10,6 +11,7 @@
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { factionPalette } from "../theme/factionPalette";
 import { drawMapToken } from "./mapToken";
+import { isActiveFaction } from "./tokenStyle";
 import {
   BADGE_FILL,
   BADGE_INACTIVE_STROKE,
@@ -48,7 +50,20 @@ import {
   SELECTED_TINT,
 } from "./mapStyle";
 import type { MasterLand } from "./svgLandLoader";
-import { type View, worldToScreen } from "./viewMath";
+import {
+  type ArrowStart,
+  arrowPolygons,
+  ATTACK_WIDTH,
+  battleBadgeHalf,
+  battleBadgeScale,
+  operationalFill,
+  type OperationalOrder,
+  type PlannedArrow,
+  planOperationalArrows,
+  shaftClearancePx,
+  ARROW_INK,
+} from "./operationalArrows";
+import { type View, screenToWorld, worldToScreen } from "./viewMath";
 
 export const TOKEN_PX = 32;
 const PAPER = "#f4f1ea";
@@ -279,6 +294,8 @@ export interface GameOverlay {
   unitScale: number;
   /** The faction whose turn it is: its count pills are gold, everyone else's black. */
   activeFactionId: string;
+  /** Remaining fuel drawn on air tokens. Omitted in the editor. */
+  fuelFor?(regionId: string, entry: StackEntry): number | null;
   /** A transport with cargo aboard gets a dot at its token's top left. */
   isLoaded?(entry: StackEntry): boolean;
   /** Unit type id to land, air or sea, from the scenario's unit data. */
@@ -439,6 +456,7 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       activeFactionId: game.activeFactionId,
       categories: game.categories,
       loaded: game.isLoaded?.(entry) ?? false,
+      fuel: game.fuelFor?.(region.id, entry) ?? null,
     });
     const selected = game.selectedStack?.regionId === region.id && game.selectedStack.key === counter.slot.key;
     const unmoved = game.isUnmoved(region.id, entry);
@@ -531,6 +549,191 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(`\u2694 ${combat}`, anchor.x, cy);
+    }
+  }
+}
+
+function fillPolygon(ctx: CanvasRenderingContext2D, points: Vec2[]): void {
+  if (points.length < 3) {
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+const ATTACK_RING = "#F5C400";
+
+function tokenMatches(counter: PlacedCounter, order: OperationalOrder): boolean {
+  const entry = counter.slot.entry;
+  if (!isActiveFaction(entry.faction_id, order.faction)) {
+    return false;
+  }
+  if (order.unitType && entry.unit_type_id !== order.unitType) {
+    return false;
+  }
+  const ship = order.shipInstanceIds?.[0];
+  return ship ? entry.instance_id === ship : true;
+}
+
+/** The combat marker: crossed swords and the attacking unit count, scaled with the map. */
+function drawBattleBadge(ctx: CanvasRenderingContext2D, x: number, y: number, count: number, scale: number): void {
+  const w = 44 * scale;
+  const h = 22 * scale;
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2, y - h / 2, w, h, 6 * scale);
+  ctx.fillStyle = "#9a4e48";
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, 1.25 * scale);
+  ctx.strokeStyle = PAPER;
+  ctx.stroke();
+  ctx.fillStyle = PAPER;
+  ctx.font = `700 ${Math.max(1, 12 * scale)}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`\u2694 ${count}`, x, y);
+}
+
+function drawAttackRings(ctx: CanvasRenderingContext2D, rings: { x: number; y: number; radius: number }[]): void {
+  for (const ring of rings) {
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(2.5, ring.radius * 0.18);
+    ctx.strokeStyle = ARROW_INK;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(1.6, ring.radius * 0.1);
+    ctx.strokeStyle = ATTACK_RING;
+    ctx.stroke();
+  }
+}
+
+/**
+ * Movement orders as converging arrows, one pass per world copy. Ink for the whole cluster is laid down
+ * first, then the fill, so a tributary does not leave a seam across the trunk. Attacking stacks get a
+ * yellow ring. Battle icons are drawn later, after the drag guide, so they stay on top.
+ */
+export function drawOperationalArrows(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  phase: string,
+  orders: readonly OperationalOrder[],
+  regionIds: readonly string[],
+  layouts: readonly RegionLayout[],
+): PlannedArrow[] {
+  const fill = operationalFill(phase);
+  if (!fill || orders.length === 0 || scene.view.k <= 0) {
+    return [];
+  }
+  const anchors = new Map(scene.regions.map((region) => [region.id, region.anchor]));
+  const battleTargets = new Set<string>();
+  const starts = new Map<string, ArrowStart>();
+  const rings: { x: number; y: number; radius: number }[] = [];
+  const ringed = new Set<string>();
+  const clearancePx = shaftClearancePx(ATTACK_WIDTH);
+  for (const order of orders) {
+    if (!order.attack) {
+      continue;
+    }
+    battleTargets.add(order.toRegionId);
+    let origin: ArrowStart | null = null;
+    for (const layout of layouts) {
+      if (layout.region.id !== order.fromRegionId) {
+        continue;
+      }
+      const counter = layout.counters.find((item) => tokenMatches(item, order));
+      if (!counter) {
+        continue;
+      }
+      const ringKey = `${layout.copyDx}|${layout.region.id}|${counter.slot.key}`;
+      if (!ringed.has(ringKey)) {
+        ringed.add(ringKey);
+        rings.push({ x: counter.x, y: counter.y, radius: layout.halfHeight + 4 });
+      }
+      if (!origin) {
+        origin = {
+          at: screenToWorld({ ...scene.view, x: scene.view.x - layout.copyDx }, { x: counter.x, y: counter.y }),
+          clearance: (layout.halfHeight + 4 + clearancePx) / scene.view.k,
+        };
+      }
+    }
+    if (origin) {
+      starts.set(order.id, origin);
+    }
+  }
+  const badge = battleBadgeHalf(scene.view.k);
+  const arrows = planOperationalArrows(orders, regionIds, anchors, Math.hypot(badge.halfW, badge.halfH) / scene.view.k, {
+    starts,
+    battleTargets,
+    badge: { ...badge, viewK: scene.view.k },
+  });
+  if (arrows.length === 0 && rings.length === 0) {
+    return [];
+  }
+  setScreenTransform(ctx, scene.dpr);
+  for (const dx of scene.copies) {
+    const view = { ...scene.view, x: scene.view.x - dx };
+    const casings: Vec2[][] = [];
+    const inners: Vec2[][] = [];
+    for (const arrow of arrows) {
+      const widthScale = arrow.battle ? ATTACK_WIDTH : 1;
+      casings.push(...arrowPolygons(arrow, view, true, widthScale));
+      inners.push(...arrowPolygons(arrow, view, false, widthScale));
+    }
+    ctx.fillStyle = ARROW_INK;
+    for (const poly of casings) {
+      fillPolygon(ctx, poly);
+    }
+    ctx.fillStyle = fill;
+    for (const poly of inners) {
+      fillPolygon(ctx, poly);
+    }
+  }
+  drawAttackRings(ctx, rings);
+  return arrows;
+}
+
+function attackingCount(orders: readonly OperationalOrder[], targetId: string): number {
+  let count = 0;
+  for (const order of orders) {
+    if (order.attack && order.toRegionId === targetId) {
+      count += Math.max(0, Math.trunc(order.count ?? 1));
+    }
+  }
+  return count;
+}
+
+/** Sword badges, painted after arrows and the drag guide so nothing on the map covers them. */
+export function drawBattleIcons(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  arrows: readonly PlannedArrow[],
+  orders: readonly OperationalOrder[],
+): void {
+  if (scene.view.k <= 0) {
+    return;
+  }
+  const scale = battleBadgeScale(scene.view.k);
+  const margin = Math.hypot(22 * scale, 11 * scale) + 8;
+  setScreenTransform(ctx, scene.dpr);
+  for (const dx of scene.copies) {
+    const view = { ...scene.view, x: scene.view.x - dx };
+    const seen = new Set<string>();
+    for (const arrow of arrows) {
+      if (!arrow.battle || seen.has(arrow.targetId)) {
+        continue;
+      }
+      seen.add(arrow.targetId);
+      const at = worldToScreen(view, arrow.target);
+      if (at.x < -margin || at.y < -margin || at.x > scene.width + margin || at.y > scene.height + margin) {
+        continue;
+      }
+      drawBattleBadge(ctx, at.x, at.y, attackingCount(orders, arrow.targetId), scale);
     }
   }
 }

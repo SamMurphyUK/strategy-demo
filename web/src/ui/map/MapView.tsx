@@ -5,16 +5,19 @@ import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, type 
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
 import { buildCutterPaths, buildRegionPaths, pickCounter, pickPlus, pickRegion } from "./hitTest";
 import {
+  drawBattleIcons,
   drawEditorOverlay,
   drawEditorUnits,
   drawGameOverlay,
   drawMoveGuide,
+  drawOperationalArrows,
   drawTerrain,
   type EditorOverlay,
   layoutRegions,
   type TerrainScene,
   TOKEN_PX,
 } from "./mapRenderer";
+import type { OperationalOrder } from "./operationalArrows";
 import { TerrainBake } from "./mapBake";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
@@ -77,6 +80,8 @@ export interface MapViewProps {
   unitCategories?: Record<string, string>;
   /** The faction whose turn it is: its count pills are gold. */
   activeFactionId?: string;
+  /** Remaining fuel for an air token. Null for every other unit. */
+  fuelFor?(regionId: string, entry: StackEntry): number | null;
   /** A transport with cargo aboard gets a dot on its token. */
   isLoaded?(entry: StackEntry): boolean;
   /** A capped fan or its [+] was clicked: select the region and open the inspector. */
@@ -97,6 +102,8 @@ export interface MapViewProps {
   onDropMove?(regionId: string, entry: StackEntry, target: string, count: number): void;
   /** Display name for a stack in the split popover. Falls back to the type id. */
   unitTitle?(entry: StackEntry): string;
+  /** Movement-phase orders drawn as operational arrows. Null in the editor. */
+  movement?: { phase: string; orders: readonly OperationalOrder[]; regionIds: readonly string[] } | null;
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -154,6 +161,7 @@ export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const arrowRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
@@ -282,6 +290,7 @@ export function MapView(props: MapViewProps) {
       unitScale,
       hoverStack,
       activeFactionId: props.activeFactionId ?? "",
+      fuelFor: props.fuelFor,
       isLoaded: props.isLoaded,
       categories: props.unitCategories,
     };
@@ -290,9 +299,29 @@ export function MapView(props: MapViewProps) {
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
     } else {
       drawGameOverlay(ctx, scene, overlay);
-      if (gesture?.moved) {
-        const from = guideOriginScreen(gesture.originWorld, gesture.pointer, view, bounds, true);
-        drawMoveGuide(ctx, dpr, from, gesture.pointer, factionPalette(gesture.entry.faction_id).ring);
+    }
+    const arrows = arrowRef.current;
+    const arrowCtx = arrows?.getContext("2d");
+    if (arrows && arrowCtx) {
+      if (arrows.width !== pixelW || arrows.height !== pixelH) {
+        arrows.width = pixelW;
+        arrows.height = pixelH;
+      }
+      arrowCtx.setTransform(1, 0, 0, 1, 0, 0);
+      arrowCtx.clearRect(0, 0, arrows.width, arrows.height);
+      if (!editor) {
+        const movement = props.movement;
+        const planned =
+          movement && movement.orders.length > 0
+            ? drawOperationalArrows(arrowCtx, scene, movement.phase, movement.orders, movement.regionIds, layouts)
+            : [];
+        if (gesture?.moved) {
+          const from = guideOriginScreen(gesture.originWorld, gesture.pointer, view, bounds, true);
+          drawMoveGuide(arrowCtx, dpr, from, gesture.pointer, factionPalette(gesture.entry.faction_id).ring);
+        }
+        if (movement && planned.some((arrow) => arrow.battle)) {
+          drawBattleIcons(arrowCtx, scene, planned, movement.orders);
+        }
       }
     }
   });
@@ -708,6 +737,7 @@ export function MapView(props: MapViewProps) {
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
       />
+      <canvas ref={arrowRef} className="map-arrows" style={{ width: size.w, height: size.h }} />
       <div className="map-controls">
         <button
           type="button"

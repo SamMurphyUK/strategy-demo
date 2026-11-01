@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { fuelForDisplayEntry } from "../../../engine/air/air_fuel";
 import { RegionUnitDisplay } from "../../../engine/presentation/region_unit_display";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
@@ -73,6 +74,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
               entry.instance_id && RegionUnitDisplay.isContainerUnit(state, entry.unit_type_id)
                 ? RegionUnitDisplay.cargoSummaryLines(state, entry.instance_id).join(", ")
                 : "";
+            const fuel = fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id);
             return (
               <li key={key}>
                 <button
@@ -121,6 +123,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
                   <span className="stack-label">
                     <span className="unit-name">{unitName(entry.unit_type_id, state.unit_types)}</span>
                     <span className="stack-faction">{factionName(entry.faction_id)}</span>
+                    {fuel != null && <span className="stack-fuel mono">fuel {fuel}</span>}
                     {cargo && <span className="stack-cargo">cargo: {cargo}</span>}
                   </span>
                   <b className="stack-count mono">×{entry.count}</b>
