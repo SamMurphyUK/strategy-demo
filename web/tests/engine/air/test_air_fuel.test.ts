@@ -134,6 +134,53 @@ describe("air fuel and combat-move targets", () => {
     expect(offeredMoveDestinations(state, "noncombat_move", "red", "home", "strategic_bomber", dests)).toEqual([]);
     expect(isLanded(state, "red", "fighter", "home")).toBe(true);
   });
+
+  it("lets aircraft attack surface ships when they can still land, and submarines only with a destroyer", () => {
+    const builder = new TestStateBuilder();
+    builder
+      .withRegion("home", true, "red")
+      .withRegion("fleet", false, "")
+      .withRegion("pack", false, "")
+      .withRegion("far", false, "")
+      .withAdjacent("home", "fleet")
+      .withAdjacent("home", "pack")
+      .withAdjacent("fleet", "far");
+    builder.withUnitType("fighter", "air", 2);
+    builder.withUnitType("destroyer", "sea", 2);
+    builder.withUnitType("cruiser", "sea", 2);
+    builder.withUnitType("submarine", "sea", 2);
+    builder.withStackUnit("fighter", "home", "red");
+    builder.withStackUnit("destroyer", "home", "red");
+    builder.withStackUnit("cruiser", "fleet", "blue");
+    builder.withStackUnit("submarine", "pack", "blue");
+    builder.withStackUnit("cruiser", "far", "blue");
+    const state = builder.buildState();
+    state.unit_types.fighter.special = { can_land_on_carrier: true };
+    state.unit_types.destroyer.special = { cancels_submarine_abilities: true };
+    state.unit_types.submarine.special = { requires_destroyer_to_be_hit_by_air: true, cannot_hit_air: true };
+    state.current_faction_id = "red";
+    state.current_phase = "combat_move";
+
+    const ruleset = new TestStateBuilder().buildRuleset();
+    const validator = new MovementValidator();
+    const dests = validator.getLegalDestinationsForStack("home", "fighter", "red", state, ruleset);
+    const offered = offeredMoveDestinations(state, "combat_move", "red", "home", "fighter", dests);
+    expect(offered).toContain("fleet");
+    expect(offered).not.toContain("pack");
+    expect(offered).not.toContain("far");
+
+    state.phase_orders.push({
+      id: "dd",
+      faction: "red",
+      unitType: "destroyer",
+      count: 1,
+      fromRegionId: "home",
+      toRegionId: "pack",
+      path: [],
+      stepsUsed: 1,
+    });
+    expect(offeredMoveDestinations(state, "combat_move", "red", "home", "fighter", dests)).toContain("pack");
+  });
 });
 
 function builderEnemyOnOwn(state: GameState): void {

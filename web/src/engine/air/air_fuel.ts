@@ -280,6 +280,82 @@ function canLandAt(state: GameState, factionId: string, unitType: string, region
   return stats.capacity - carrierAirCount(state, factionId, regionId) >= 1;
 }
 
+function flag(state: GameState, unitType: string, name: string): boolean {
+  return Boolean(state.unit_types[unitType]?.special?.[name]);
+}
+
+function isFriendlyDestroyer(state: GameState, factionId: string, unitType: string, faction: string, count: number): boolean {
+  return count > 0 && state.sameTeam(faction, factionId) && flag(state, unitType, "cancels_submarine_abilities");
+}
+
+/** A friendly destroyer is already in the zone, or already ordered to attack it. */
+export function friendlyDestroyerCommitted(state: GameState, factionId: string, regionId: string): boolean {
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    if (isFriendlyDestroyer(state, factionId, String(entry.unit_type_id ?? ""), String(entry.faction_id ?? ""), stackCount(entry))) {
+      return true;
+    }
+  }
+  for (const order of state.phase_orders) {
+    if (order.toRegionId === regionId && isFriendlyDestroyer(state, factionId, order.unitType, order.faction, order.count)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Aircraft may attack every navy piece. A sea zone whose only enemy ships are submarines
+ * is not a target unless a friendly destroyer is in the attack.
+ */
+export function airCannotStrike(state: GameState, factionId: string, regionId: string): boolean {
+  const region = state.regions[regionId];
+  if (region == null || !region.isSeaRegion()) {
+    return false;
+  }
+  let subs = 0;
+  let others = 0;
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    const faction = String(entry.faction_id ?? "");
+    if (faction === "" || state.sameTeam(faction, factionId)) {
+      continue;
+    }
+    const unitType = String(entry.unit_type_id ?? "");
+    const count = stackCount(entry);
+    if (count <= 0) {
+      continue;
+    }
+    const unit = state.unit_types[unitType];
+    if (unit == null || unit.category === "land") {
+      continue;
+    }
+    if (flag(state, unitType, "requires_destroyer_to_be_hit_by_air")) {
+      subs += count;
+    } else {
+      others += count;
+    }
+  }
+  return subs > 0 && others === 0 && !friendlyDestroyerCommitted(state, factionId, regionId);
+}
+
+/** After flying to `to`, fuel remains to reach a friendly landing spot. */
+export function canReturnAfter(state: GameState, factionId: string, unitType: string, from: string, to: string): boolean {
+  const steps = airSteps(state, from, to);
+  const fuel = fuelRemaining(state, factionId, from, unitType);
+  if (!Number.isFinite(steps) || steps > fuel) {
+    return false;
+  }
+  if (canLandAt(state, factionId, unitType, to)) {
+    return true;
+  }
+  const left = fuel - steps;
+  for (const spot of regionsWithin(state, to, left)) {
+    if (canLandAt(state, factionId, unitType, spot)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function landingRegions(state: GameState, factionId: string, unitType: string, fromRegion: string): string[] {
   const fuel = fuelRemaining(state, factionId, fromRegion, unitType);
   const spots: string[] = [];
@@ -391,7 +467,18 @@ export function offeredMoveDestinations(
   dests: readonly string[],
 ): string[] {
   if (phase === "combat_move") {
-    return dests.filter((regionId) => !isFriendlyHeldTerritory(state, regionId, factionId));
+    return dests.filter((regionId) => {
+      if (isFriendlyHeldTerritory(state, regionId, factionId)) {
+        return false;
+      }
+      if (!isAirUnit(state, unitType)) {
+        return true;
+      }
+      if (!state.isRegionHostileTo(regionId, factionId)) {
+        return false;
+      }
+      return canReturnAfter(state, factionId, unitType, fromRegion, regionId) && !airCannotStrike(state, factionId, regionId);
+    });
   }
   if (phase === "noncombat_move" && isAirUnit(state, unitType)) {
     const spots = new Set(landingRegions(state, factionId, unitType, fromRegion));

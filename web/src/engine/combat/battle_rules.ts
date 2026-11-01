@@ -71,6 +71,89 @@ export function firingRanks(
  * A two-hit unit takes the first hit as damage and stays in the queue, so two hits sink
  * a lone battleship. Returns the plan without changing the units.
  */
+export interface HitBudget {
+  /** Hits that can be taken by any unit. */
+  any: number;
+  /** Submarine fire: cannot be taken by aircraft. */
+  skipAir: number;
+  /** Aircraft fire with no friendly destroyer: cannot be taken by submarines. */
+  skipSub: number;
+}
+
+function isAirPiece(unitTypes: Record<string, Unit>, unit: BattleUnitState): boolean {
+  return unitTypes[unit.unit_type_id]?.category === "air";
+}
+
+function isSubPiece(unitTypes: Record<string, Unit>, unit: BattleUnitState): boolean {
+  return Boolean(unitTypes[unit.unit_type_id]?.special?.requires_destroyer_to_be_hit_by_air);
+}
+
+/**
+ * Spend a mixed volley. Submarine hits skip aircraft, and aircraft hits skip submarines
+ * unless a destroyer already turned those into ordinary hits. Hits with no legal target are lost.
+ */
+export function restrictedCasualties(
+  units: BattleUnitState[],
+  budget: HitBudget,
+  side: BattleSide,
+  unitTypes: Record<string, Unit>,
+  ranks: Map<string, number>,
+): { plan: BattleCasualty[]; used: HitBudget } {
+  const hp = new Map(units.map((u) => [u.id, u.hp]));
+  const order = units.map((u, index) => ({ unit: u, index }));
+  const plan: BattleCasualty[] = [];
+  const used: HitBudget = { any: 0, skipAir: 0, skipSub: 0 };
+  const pull = (kind: keyof HitBudget, ok: (unit: BattleUnitState) => boolean) => {
+    let left = Math.max(0, budget[kind]);
+    while (left > 0) {
+      const living = order.filter(({ unit }) => (hp.get(unit.id) ?? 0) > 0 && ok(unit));
+      if (living.length === 0) {
+        break;
+      }
+      living.sort((a, b) => {
+        const cost = (unitTypes[a.unit.unit_type_id]?.cost ?? 0) - (unitTypes[b.unit.unit_type_id]?.cost ?? 0);
+        if (cost !== 0) return cost;
+        const rank = (ranks.get(a.unit.id) ?? 0) - (ranks.get(b.unit.id) ?? 0);
+        if (rank !== 0) return rank;
+        return a.index - b.index;
+      });
+      const target = living[0].unit;
+      const before = hp.get(target.id)!;
+      const result = resolveHit(before, target.max_hp);
+      hp.set(target.id, result === "damaged" ? before - 1 : 0);
+      plan.push({ unit_id: target.id, side, result });
+      used[kind] += 1;
+      left -= 1;
+    }
+  };
+  pull("skipAir", (unit) => !isAirPiece(unitTypes, unit));
+  pull("skipSub", (unit) => !isSubPiece(unitTypes, unit));
+  pull("any", () => true);
+  return { plan, used };
+}
+
+/** True when `unitId` can take one hit from the budget that is still left. */
+export function casualtyFitsBudget(
+  unit: BattleUnitState,
+  budget: HitBudget,
+  unitTypes: Record<string, Unit>,
+): keyof HitBudget | null {
+  if (isAirPiece(unitTypes, unit)) {
+    if (budget.any > 0) return "any";
+    if (budget.skipSub > 0) return "skipSub";
+    return null;
+  }
+  if (isSubPiece(unitTypes, unit)) {
+    if (budget.any > 0) return "any";
+    if (budget.skipAir > 0) return "skipAir";
+    return null;
+  }
+  if (budget.skipAir > 0) return "skipAir";
+  if (budget.skipSub > 0) return "skipSub";
+  if (budget.any > 0) return "any";
+  return null;
+}
+
 export function cheapestCasualties(
   units: BattleUnitState[],
   hits: number,

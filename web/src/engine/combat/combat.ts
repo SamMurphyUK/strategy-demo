@@ -6,13 +6,15 @@ import { type Dict, deepCopy, type UnitStackEntry } from "../model/types";
 import type { PCG } from "../rng/pcg";
 import {
   battleOutcome,
-  cheapestCasualties,
+  casualtyFitsBudget,
   firingRanks,
+  type HitBudget,
   hitsOn,
   isAlive,
   isCombatUnit,
   maxHpOf,
   resolveHit,
+  restrictedCasualties,
 } from "./battle_rules";
 
 export interface Battle {
@@ -94,6 +96,12 @@ export class CombatEngine {
     );
   }
 
+  /** Transports do not roll, but they are navy and can be attacked. */
+  private isTargetable(entry: UnitStackEntry): boolean {
+    const type = this.state.unit_types[entry.unit_type_id];
+    return isCombatUnit(type) || type?.category === "sea";
+  }
+
   /** Adjacent regions the attacker may fall back to: no enemy units, and friendly land for a land battle. */
   legalRetreats(): string[] {
     const battle = this.state.active_battle;
@@ -168,13 +176,17 @@ export class CombatEngine {
     const b = battle!;
     let plan: BattleCasualty[];
     if (unitIds == null || unitIds.length === 0) {
-      plan = cheapestCasualties(
+      plan = restrictedCasualties(
         b.attackers,
-        b.attacker_hits_to_take,
+        {
+          any: b.attacker_hits_to_take - (b.attacker_hits_skip_air ?? 0) - (b.attacker_hits_skip_sub ?? 0),
+          skipAir: b.attacker_hits_skip_air ?? 0,
+          skipSub: b.attacker_hits_skip_sub ?? 0,
+        },
         "attacker",
         this.state.unit_types,
         firingRanks(b.attackers, "attacker", this.state.unit_types),
-      );
+      ).plan;
     } else {
       const built = this.planChosenHits(b, unitIds);
       if ("error" in built) {
@@ -184,6 +196,8 @@ export class CombatEngine {
     }
     this.applyCasualties(b, plan);
     b.attacker_hits_to_take = 0;
+    b.attacker_hits_skip_air = 0;
+    b.attacker_hits_skip_sub = 0;
     b.last_casualties = plan;
     const events = [
       GameEvent.create(
@@ -265,20 +279,20 @@ export class CombatEngine {
 
   private defenderIn(regionId: string, attackerFactionId: string): string {
     for (const entry of this.state.region_units[regionId] ?? []) {
-      if (
-        !this.state.sameTeam(String(entry.faction_id ?? ""), attackerFactionId) &&
-        isCombatUnit(this.state.unit_types[entry.unit_type_id])
-      ) {
+      if (!this.state.sameTeam(String(entry.faction_id ?? ""), attackerFactionId) && this.isTargetable(entry)) {
         return entry.faction_id;
       }
     }
     return "";
   }
 
-  private expand(regionId: string, factionId: string): BattleUnitState[] {
+  private expand(regionId: string, factionId: string, side: "attacker" | "defender"): BattleUnitState[] {
     const units: BattleUnitState[] = [];
     const counters: Record<string, number> = {};
-    for (const entry of this.getCombatUnits(regionId, factionId)) {
+    const entries = (this.state.region_units[regionId] ?? []).filter(
+      (entry) => entry.faction_id === factionId && (side === "defender" ? this.isTargetable(entry) : isCombatUnit(this.state.unit_types[entry.unit_type_id])),
+    );
+    for (const entry of entries) {
       const maxHp = maxHpOf(this.state.unit_types[entry.unit_type_id]);
       if (entry.instance_id) {
         units.push({
@@ -314,8 +328,8 @@ export class CombatEngine {
       battle_type: battle.battle_type,
       round: 1,
       stage: "awaiting_roll",
-      attackers: this.expand(battle.region_id, battle.attacker_faction_id),
-      defenders: this.expand(battle.region_id, battle.defender_faction_id),
+      attackers: this.expand(battle.region_id, battle.attacker_faction_id, "attacker"),
+      defenders: this.expand(battle.region_id, battle.defender_faction_id, "defender"),
       attacker_hits_to_take: 0,
       last_dice: [],
       last_casualties: [],
@@ -356,6 +370,9 @@ export class CombatEngine {
     const casualties: BattleCasualty[] = [];
     const fired = new Set<string>();
 
+    const attackerDestroyer = b.attackers.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
+    const defenderDestroyer = b.defenders.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
+
     const surprise = (side: BattleSide) => {
       const own = side === "attacker" ? b.attackers : b.defenders;
       const enemy = side === "attacker" ? b.defenders : b.attackers;
@@ -375,42 +392,60 @@ export class CombatEngine {
         if (die.hit) hits += 1;
       }
       const enemySide: BattleSide = side === "attacker" ? "defender" : "attacker";
-      const plan = cheapestCasualties(enemy, hits, enemySide, types, firingRanks(enemy, enemySide, types));
-      this.applyCasualties(b, plan);
-      casualties.push(...plan.map((c) => ({ ...c, surprise: true })));
+      const spent = restrictedCasualties(enemy, { any: 0, skipAir: hits, skipSub: 0 }, enemySide, types, firingRanks(enemy, enemySide, types));
+      this.applyCasualties(b, spent.plan);
+      casualties.push(...spent.plan.map((c) => ({ ...c, surprise: true })));
     };
     surprise("attacker");
     surprise("defender");
 
-    const fire = (side: BattleSide): number => {
+    const fire = (side: BattleSide, destroyer: boolean): HitBudget => {
       const own = side === "attacker" ? b.attackers : b.defenders;
       const ranks = firingRanks(own, side, types);
-      let hits = 0;
+      const budget: HitBudget = { any: 0, skipAir: 0, skipSub: 0 };
       for (const unit of own) {
         if (!isAlive(unit) || fired.has(unit.id)) {
           continue;
         }
         const die = this.rollDie(unit, side, ranks.get(unit.id) ?? 0, false);
         dice.push(die);
-        if (die.hit) hits += 1;
+        if (!die.hit) {
+          continue;
+        }
+        const type = types[unit.unit_type_id];
+        if (type?.special?.cannot_hit_air) {
+          budget.skipAir += 1;
+        } else if (type?.category === "air" && !destroyer) {
+          budget.skipSub += 1;
+        } else {
+          budget.any += 1;
+        }
       }
-      return hits;
+      return budget;
     };
-    const attackerHits = fire("attacker");
-    const defenderHits = fire("defender");
+    const attackerBudget = fire("attacker", attackerDestroyer);
+    const defenderBudget = fire("defender", defenderDestroyer);
 
-    const defenderPlan = cheapestCasualties(
+    const defenderPlan = restrictedCasualties(
       b.defenders,
-      attackerHits,
+      attackerBudget,
       "defender",
       types,
       firingRanks(b.defenders, "defender", types),
     );
-    this.applyCasualties(b, defenderPlan);
-    casualties.push(...defenderPlan);
+    this.applyCasualties(b, defenderPlan.plan);
+    casualties.push(...defenderPlan.plan);
 
-    const attackerHp = b.attackers.reduce((sum, u) => sum + Math.max(0, u.hp), 0);
-    b.attacker_hits_to_take = Math.min(defenderHits, attackerHp);
+    const taken = restrictedCasualties(
+      b.attackers,
+      defenderBudget,
+      "attacker",
+      types,
+      firingRanks(b.attackers, "attacker", types),
+    ).used;
+    b.attacker_hits_to_take = taken.any + taken.skipAir + taken.skipSub;
+    b.attacker_hits_skip_air = taken.skipAir;
+    b.attacker_hits_skip_sub = taken.skipSub;
     b.last_dice = dice;
     b.last_casualties = casualties;
 
@@ -443,6 +478,11 @@ export class CombatEngine {
       return { error: `Assign exactly ${b.attacker_hits_to_take} hits, got ${unitIds.length}` };
     }
     const hp = new Map(b.attackers.map((u) => [u.id, u.hp]));
+    const budget: HitBudget = {
+      any: b.attacker_hits_to_take - (b.attacker_hits_skip_air ?? 0) - (b.attacker_hits_skip_sub ?? 0),
+      skipAir: b.attacker_hits_skip_air ?? 0,
+      skipSub: b.attacker_hits_skip_sub ?? 0,
+    };
     const plan: BattleCasualty[] = [];
     for (const id of unitIds) {
       const unit = b.attackers.find((u) => u.id === id);
@@ -450,6 +490,16 @@ export class CombatEngine {
       if (unit == null || before <= 0) {
         return { error: `${id} cannot take a hit` };
       }
+      const slot = casualtyFitsBudget(unit, budget, this.state.unit_types);
+      if (slot == null) {
+        const air = this.state.unit_types[unit.unit_type_id]?.category === "air";
+        return {
+          error: air
+            ? `${id} cannot take a submarine hit`
+            : `${id} cannot be hit by aircraft without a destroyer`,
+        };
+      }
+      budget[slot] -= 1;
       const result = resolveHit(before, unit.max_hp);
       hp.set(id, result === "damaged" ? before - 1 : 0);
       plan.push({ unit_id: id, side: "attacker", result });
@@ -480,11 +530,14 @@ export class CombatEngine {
   private finish(b: ActiveBattle, result: string, retreatTo = ""): GameEvent[] {
     const state = this.state;
     const regionId = b.region_id;
-    const kept = (state.region_units[regionId] ?? []).filter(
-      (entry) =>
-        (entry.faction_id !== b.attacker_faction_id && entry.faction_id !== b.defender_faction_id) ||
-        !isCombatUnit(state.unit_types[entry.unit_type_id]),
-    );
+    const fought = new Set<string>();
+    for (const unit of [...b.attackers, ...b.defenders]) {
+      fought.add(unit.instance_id ? `i:${unit.instance_id}` : `s:${unit.faction_id}|${unit.unit_type_id}`);
+    }
+    const kept = (state.region_units[regionId] ?? []).filter((entry) => {
+      const key = entry.instance_id ? `i:${entry.instance_id}` : `s:${entry.faction_id}|${entry.unit_type_id}`;
+      return !fought.has(key);
+    });
     const attackerStacks = this.toStacks(b.attackers);
     const defenderStacks = this.toStacks(b.defenders);
     state.region_units[regionId] = [...kept, ...defenderStacks];

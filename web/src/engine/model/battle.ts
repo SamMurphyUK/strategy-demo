@@ -45,6 +45,10 @@ export interface ActiveBattle {
   attackers: BattleUnitState[];
   defenders: BattleUnitState[];
   attacker_hits_to_take: number;
+  /** Of `attacker_hits_to_take`, the ones from submarines. They cannot be assigned to aircraft. */
+  attacker_hits_skip_air?: number;
+  /** Of `attacker_hits_to_take`, the ones from aircraft with no friendly destroyer. They cannot be assigned to submarines. */
+  attacker_hits_skip_sub?: number;
   last_dice: BattleDie[];
   last_casualties: BattleCasualty[];
 }

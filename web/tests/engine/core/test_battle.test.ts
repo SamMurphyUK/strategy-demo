@@ -166,6 +166,46 @@ describe("core/test_battle", () => {
     expect(state.regions.A.owner_faction_id).toBe("blue");
   });
 
+  it("keeps aircraft from hitting submarines unless a destroyer is with them, and keeps submarines from hitting aircraft", () => {
+    state.unit_types.fighter.attack = 6;
+    state.unit_types.fighter.defense = 6;
+    state.unit_types.submarine.attack = 6;
+    state.unit_types.submarine.defense = 6;
+    state.unit_types.destroyer.attack = 6;
+    addRegion(state, "Sea", "sea", "", [stack("red", "fighter", 2), stack("blue", "submarine", 2)]);
+    mustOk(combat.startBattle("Sea", "red"));
+    mustOk(combat.rollRound("red"));
+    const battle = state.active_battle!;
+    expect(battle.last_casualties.filter((c) => c.unit_id.startsWith("blue.submarine"))).toEqual([]);
+    expect(battle.last_casualties.filter((c) => c.unit_id.startsWith("red.fighter"))).toEqual([]);
+    expect(battle.attacker_hits_to_take).toBe(0);
+
+    const covered = newState();
+    covered.unit_types.fighter.attack = 6;
+    covered.unit_types.destroyer.attack = 6;
+    covered.unit_types.submarine.defense = 6;
+    addRegion(covered, "Sea", "sea", "", [
+      stack("red", "fighter", 1),
+      stack("red", "destroyer", 1),
+      stack("blue", "submarine", 1),
+    ]);
+    const engine = new CombatEngine(covered, new PCG(1, 1));
+    mustOk(engine.startBattle("Sea", "red"));
+    mustOk(engine.rollRound("red"));
+    expect(covered.active_battle?.last_casualties.some((c) => c.unit_id === "blue.submarine.1")).toBe(true);
+  });
+
+  it("lets aircraft sink a transport", () => {
+    state.unit_types.fighter.attack = 6;
+    addRegion(state, "Sea", "sea", "", [stack("red", "fighter", 1), stack("blue", "transport", 1)]);
+    mustOk(combat.startBattle("Sea", "red"));
+    expect(state.active_battle?.defenders.map((u) => u.unit_type_id)).toEqual(["transport"]);
+    mustOk(combat.rollRound("red"));
+    const left = (state.region_units.Sea ?? []).filter((entry) => entry.unit_type_id === "transport");
+    expect(left).toEqual([]);
+    expect((state.region_units.Sea ?? []).some((entry) => entry.unit_type_id === "fighter")).toBe(true);
+  });
+
   it("lets submarines strike first unless the enemy has a destroyer", () => {
     addRegion(state, "Sea", "sea", "", [stack("red", "submarine", 2), stack("blue", "battleship", 1)]);
     mustOk(combat.startBattle("Sea", "red"));

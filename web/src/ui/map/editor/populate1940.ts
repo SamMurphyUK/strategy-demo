@@ -100,6 +100,16 @@ const SEAS: Cell[] = [
   { name: "Indian Ocean", faction: "UK", ipc: 0, lon0: 45, lon1: 100, lat0: -25, lat1: 22 },
   { name: "Western Pacific", faction: "JAP", ipc: 0, lon0: 120, lon1: 160, lat0: 8, lat1: 42 },
   { name: "North Pacific", faction: "USA", ipc: 0, lon0: 165, lon1: 230, lat0: 28, lat1: 55 },
+  // These take the leftover open ocean. Neutral so an empty zone is not hostile.
+  { name: "Caribbean Sea", faction: "Neutral", ipc: 0, lon0: -98, lon1: -58, lat0: 8, lat1: 32 },
+  { name: "East Atlantic", faction: "Neutral", ipc: 0, lon0: -12, lon1: 2, lat0: 36, lat1: 51 },
+  { name: "South Atlantic", faction: "Neutral", ipc: 0, lon0: -42, lon1: 18, lat0: -50, lat1: 8 },
+  { name: "Norwegian Sea", faction: "Neutral", ipc: 0, lon0: -15, lon1: 20, lat0: 62, lat1: 76 },
+  { name: "Barents Sea", faction: "Neutral", ipc: 0, lon0: 20, lon1: 65, lat0: 70, lat1: 82 },
+  { name: "South China Sea", faction: "Neutral", ipc: 0, lon0: 100, lon1: 122, lat0: -2, lat1: 24 },
+  { name: "Coral Sea", faction: "Neutral", ipc: 0, lon0: 142, lon1: 175, lat0: -28, lat1: 8 },
+  { name: "South Pacific", faction: "Neutral", ipc: 0, lon0: 160, lon1: 230, lat0: -48, lat1: 28 },
+  { name: "South Indian Ocean", faction: "Neutral", ipc: 0, lon0: 20, lon1: 120, lat0: -55, lat1: -25 },
 ];
 
 const LAND_TROOPS: Record<string, Troop[]> = {
@@ -514,7 +524,7 @@ function garrison(map: EditorMap, regions: EditorRegion[], table: Record<string,
 }
 
 /** Cuts `source` (a cleaned editor map in world space) into a rough 1940 scenario. */
-export function populateWorldMap(source: Dict): Dict {
+export function populateWorldMap(source: Dict, isLand: ((x: number, y: number) => boolean) | null = null): Dict {
   const cleaned = editorFromMapJson(source);
   const landRings: Vec2[][] = [];
   const seaRings: Vec2[][] = [];
@@ -566,7 +576,7 @@ export function populateWorldMap(source: Dict): Dict {
   map = garrison(map, regions, SEA_TROOPS, true);
   const pairs = autoNeighborPairs(
     map.regions.map((r) => ({ id: r.id, polygon: r.polygon, extra: r.extra, is_sea: r.is_sea })),
-    null,
+    isLand,
   );
   map = applyAutoLinks(map, pairs);
   return editorToMapJson(map, { round: false });

@@ -1,4 +1,4 @@
-import { airSteps, fuelRemaining, isAirUnit } from "../air/air_fuel";
+import { airCannotStrike, airSteps, canReturnAfter, fuelRemaining, isAirUnit } from "../air/air_fuel";
 import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
@@ -168,6 +168,16 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Destination is out of movement range"));
     } else if (!ruleset.canUnitEnterRegion(unitTypeId, toRegion, state, state.current_phase)) {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", `Unit cannot enter ${toRegion}`));
+    } else if (
+      isAirUnit(state, unitTypeId) &&
+      state.current_phase === "combat_move" &&
+      !canReturnAfter(state, factionId, unitTypeId, fromRegion, toRegion)
+    ) {
+      result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Not enough fuel to return"));
+    } else if (isAirUnit(state, unitTypeId) && state.current_phase === "combat_move" && airCannotStrike(state, factionId, toRegion)) {
+      result.errors.push(
+        MoveError.of("MOVE_ILLEGAL_DESTINATION", "Aircraft cannot attack submarines unless a friendly destroyer is in the attack"),
+      );
     } else if (state.movableStackCount(factionId, fromRegion, unitTypeId) < count) {
       result.errors.push(
         MoveError.of("MOVE_ALREADY_MOVED", `Units already moved this phase from ${fromRegion}`),
