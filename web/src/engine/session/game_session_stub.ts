@@ -15,6 +15,7 @@ import { GameEvent, GameEventType } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
+import { recordMoveOrders } from "../movement/phase_orders";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
@@ -194,6 +195,7 @@ export class GameSessionStub {
           return moveError;
         }
         events = this.syncSeq(this.movement.processMove(cmd));
+        recordMoveOrders(this.state, cmd);
         break;
       }
 

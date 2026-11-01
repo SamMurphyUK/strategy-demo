@@ -1,5 +1,6 @@
 import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
+import { beginMovementPhase } from "../movement/phase_orders";
 
 export const PHASES = [
   "purchase",
@@ -41,6 +42,9 @@ export class TurnEngine {
     if (idx < PHASES.length - 1) {
       state.current_phase = PHASES[idx + 1];
       this.syncMovementTracking(oldPhase, state.current_phase);
+      if (state.current_phase === "combat_move" || state.current_phase === "noncombat_move") {
+        beginMovementPhase(state);
+      }
       return [
         GameEvent.create(
           GameEventType.PHASE_CHANGED,

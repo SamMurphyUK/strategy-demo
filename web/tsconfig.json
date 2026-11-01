@@ -15,5 +15,5 @@
     "types": []
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts", "vite.config.ts"],
-  "exclude": ["src/ui/**"]
+  "exclude": ["src/ui/**", "tests/ui/map/orders_panel_and_split.test.ts"]
 }

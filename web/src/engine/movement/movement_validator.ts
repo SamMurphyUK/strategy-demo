@@ -261,4 +261,70 @@ export class MovementValidator {
     }
     return result;
   }
+
+  /**
+   * Shortest walk the movement rules allow, including both ends.
+   * A direct border is one step. The same enemy-piece stop as `floodFill` applies past the first region.
+   */
+  shortestPath(from: string, to: string, state: GameState, seaOnly: boolean, factionId: string): string[] {
+    if (from === "" || to === "") {
+      return [];
+    }
+    if (from === to) {
+      return [from];
+    }
+    if (state.isAdjacent(from, to)) {
+      return [from, to];
+    }
+
+    const parent: Record<string, string> = {};
+    const queued: Record<string, boolean> = { [from]: true };
+    const visited: Record<string, boolean> = {};
+    const frontier: { region: string; dist: number }[] = [{ region: from, dist: 0 }];
+
+    while (frontier.length > 0) {
+      const current = frontier.shift()!;
+      const region = current.region;
+      if (visited[region]) {
+        continue;
+      }
+      const regionObj = state.regions[region];
+      if (seaOnly && regionObj != null && !regionObj.isSeaRegion()) {
+        continue;
+      }
+      visited[region] = true;
+      if (region === to) {
+        const path = [to];
+        let cursor = to;
+        while (cursor !== from) {
+          const previous = parent[cursor];
+          if (previous === undefined) {
+            return [from, to];
+          }
+          path.push(previous);
+          cursor = previous;
+        }
+        path.reverse();
+        return path;
+      }
+      if (factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
+        continue;
+      }
+      for (const n of state.getAdjacentRegions(region)) {
+        if (seaOnly) {
+          const neighbor = state.regions[n];
+          if (neighbor == null || !neighbor.isSeaRegion()) {
+            continue;
+          }
+        }
+        if (queued[n]) {
+          continue;
+        }
+        queued[n] = true;
+        parent[n] = region;
+        frontier.push({ region: n, dist: current.dist + 1 });
+      }
+    }
+    return [from, to];
+  }
 }

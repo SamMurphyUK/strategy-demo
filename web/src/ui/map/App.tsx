@@ -14,9 +14,12 @@ import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
+import { PendingOrders } from "./panels/PendingOrders";
 import { PhasePanel } from "./panels/PhasePanel";
 import { RegionPanel } from "./panels/RegionPanel";
 import { TurnBar } from "./panels/TurnBar";
+import { unitName } from "./session/event_text";
+import { moveUnitsPayload } from "./stackMove";
 import { useGameSession } from "./session/use_game_session";
 
 export type Selection =
@@ -215,24 +218,49 @@ export function App() {
     );
   };
 
-  /** A stack dragged out of the inspector and dropped on `target`: the same order a click on it would give. */
-  const dropStack = (regionId: string, entry: StackEntry, target: string) => {
+  /** Move `count` of a stack. The map drag, its split popover, and an inspector drop all come through here. */
+  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number) => {
     const max = movableCount(regionId, entry);
-    const legal =
-      max > 0 ? session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "") : [];
+    if (max <= 0) {
+      setSelection(null);
+      return;
+    }
+    const legal = session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "");
     if (!legal.includes(target)) {
       setSelection(null);
       return;
     }
-    const unit: Record<string, unknown> = { unit_type_id: entry.unit_type_id, count: max };
-    if (entry.instance_id) {
-      unit.instance_id = entry.instance_id;
-    }
-    const result = game.send("move_units", { moves: [{ from_region_id: regionId, to_region_id: target, units: [unit] }] });
+    const result = game.send(
+      "move_units",
+      moveUnitsPayload(regionId, entry, target, Math.min(max, Math.max(1, count))),
+    );
     if (result.result_type === "ok") {
       setSelection(null);
       setSelectedRegionId(target);
     }
+  };
+
+  /** A stack dragged out of the inspector and dropped on `target`: the whole movable stack. */
+  const dropStack = (regionId: string, entry: StackEntry, target: string) => {
+    commitMove(regionId, entry, target, movableCount(regionId, entry));
+  };
+
+  const armDrag = (regionId: string, entry: StackEntry, count: number) => {
+    const max = movableCount(regionId, entry);
+    setSelectedRegionId(regionId);
+    setSelection(
+      max <= 0
+        ? null
+        : {
+            kind: "stack",
+            regionId,
+            key: stackKey(entry),
+            unitTypeId: entry.unit_type_id,
+            instanceId: entry.instance_id ?? "",
+            max,
+            count: Math.min(max, Math.max(1, count)),
+          },
+    );
   };
 
   const selectStack = (regionId: string, entry: StackEntry) => {
@@ -313,6 +341,15 @@ export function App() {
             setInspectorFocus((n) => n + 1);
           }}
           registerDropResolver={registerDropResolver}
+          movableMax={movableCount}
+          legalMovesFor={(regionId, entry) =>
+            session.getLegalMoveDestinations(regionId, entry.unit_type_id, faction, entry.instance_id ?? "")
+          }
+          onArmDrag={armDrag}
+          onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
+          onDragCancel={() => setSelection(null)}
+          onDropMove={commitMove}
+          unitTitle={(entry) => unitName(entry.unit_type_id, session.state.unit_types)}
           unitCategories={unitCategories}
           activeFactionId={faction}
           isLoaded={(entry) => {
@@ -358,6 +395,7 @@ export function App() {
           )}
         </aside>
       </div>
+      {!editing && <PendingOrders game={game} onCancelled={() => setSelection(null)} />}
     </div>
   );
 }

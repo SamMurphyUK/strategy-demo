@@ -1,3 +1,4 @@
+import type { MoveOrder, PhaseStartSnapshot } from "../movement/phase_orders";
 import type { ActiveBattle } from "./battle";
 import { Faction } from "./faction";
 import { Region } from "./region";
@@ -61,6 +62,12 @@ export class GameState {
   instances_moved_this_phase: Record<string, boolean> = {};
   /** The battle being fought round by round in the combat phase, if any. */
   active_battle: ActiveBattle | null = null;
+  /** Orders applied since the current movement phase began. */
+  phase_orders: MoveOrder[] = [];
+  /** Next `phase_orders` id. Reset when the phase snapshot is taken. */
+  phase_order_seq = 0;
+  /** Deep clone of this state at the start of `combat_move` or `noncombat_move`. */
+  phase_start_snapshot: PhaseStartSnapshot | null = null;
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS

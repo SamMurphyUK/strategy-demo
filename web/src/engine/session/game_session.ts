@@ -6,6 +6,7 @@ import type { GameEvent, GameEventDict } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { MovementEngine } from "../movement/movement";
+import { recordMoveOrders } from "../movement/phase_orders";
 import { PlacementEngine } from "../placement/placement";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { processEndPhase, processEndTurn, startTurn } from "../turn/phase_controllers";
@@ -110,6 +111,7 @@ export class GameSession {
 
       case CommandType.MOVE_UNITS:
         events = this.syncSeq(this.movement.processMove(cmd));
+        recordMoveOrders(this.state, cmd);
         break;
 
       case CommandType.LOAD_TRANSPORT:

@@ -535,6 +535,30 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
   }
 }
 
+/** A faction-coloured guide from a unit slot to the cursor. Both points are canvas pixels. */
+export function drawMoveGuide(ctx: CanvasRenderingContext2D, dpr: number, from: Vec2, to: Vec2, color: string): void {
+  setScreenTransform(ctx, dpr);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.strokeStyle = "rgba(26, 26, 24, 0.55)";
+  ctx.lineWidth = 4.5;
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(from.x, from.y, 4.5, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(26, 26, 24, 0.75)";
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------
 // Layer 4: editor overlay
 // ---------------------------------------------------------------

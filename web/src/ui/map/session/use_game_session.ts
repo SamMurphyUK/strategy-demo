@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Dict } from "../../../engine/model/types";
+import { cancel_phase_order } from "../../../engine/movement/phase_orders";
 import { GameSessionStub, type StubResult } from "../../../engine/session/game_session_stub";
-import { describeEvent } from "./event_text";
+import { describeEvent, unitName } from "./event_text";
 import { type PlayChoice, demoPlayChoice, initialPlayChoice, rememberPlayId } from "./play_map";
 
 export interface LogEntry {
@@ -17,6 +18,8 @@ export interface GameSessionHandle {
   seed: number;
   log: LogEntry[];
   send(type: string, payload?: Dict): StubResult;
+  /** Drops one movement order and rebuilds the phase from its start snapshot. */
+  cancelPhaseOrder(orderId: string): void;
   /** Starts a new game on `choice`. Omit it to restart the map already being played. */
   newGame(seed: number, choice?: PlayChoice): void;
   /** `demo`, or the id of the saved version this game was started from. */
@@ -91,6 +94,23 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
     [append],
   );
 
+  const cancelPhaseOrder = useCallback(
+    (orderId: string) => {
+      const session = sessionRef.current!;
+      const order = session.state.phase_orders.find((item) => item.id === orderId);
+      if (!order) {
+        return;
+      }
+      const from = session.state.regions[order.fromRegionId]?.name || order.fromRegionId;
+      const to = session.state.regions[order.toRegionId]?.name || order.toRegionId;
+      const label = unitName(order.unitType, session.state.unit_types);
+      cancel_phase_order(session.state, orderId);
+      append([{ kind: "event", text: `Cancelled ${order.count}× ${label}, ${from} → ${to}.` }]);
+      setVersion((v) => v + 1);
+    },
+    [append],
+  );
+
   const newGame = useCallback((nextSeed: number, nextChoice?: PlayChoice) => {
     const picked = nextChoice ?? choiceRef.current ?? demoPlayChoice();
     sessionRef.current = createSession(nextSeed, picked.map);
@@ -111,11 +131,12 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       seed,
       log,
       send,
+      cancelPhaseOrder,
       newGame,
       mapId: choice.id,
       mapName: choice.name,
       map: choice.map,
     }),
-    [version, seed, log, send, newGame, choice],
+    [version, seed, log, send, cancelPhaseOrder, newGame, choice],
   );
 }

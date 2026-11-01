@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
 import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
@@ -7,6 +8,7 @@ import {
   drawEditorOverlay,
   drawEditorUnits,
   drawGameOverlay,
+  drawMoveGuide,
   drawTerrain,
   type EditorOverlay,
   layoutRegions,
@@ -16,6 +18,9 @@ import {
 import { TerrainBake } from "./mapBake";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
+import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
+import { SplitStackPopover } from "./splitPopover";
+import { unitLabel } from "./unitStacks";
 import {
   fitView,
   panBy,
@@ -78,6 +83,20 @@ export interface MapViewProps {
   onOpenInspector?(regionId: string): void;
   /** Registers the function that turns a screen point into the region under it, for a drag out of the inspector. */
   registerDropResolver?(resolve: (clientX: number, clientY: number) => string): void;
+  /** How many of this stack the current faction can still move. 0 means the token cannot be dragged. */
+  movableMax?(regionId: string, entry: StackEntry): number;
+  /** Legal destinations for a stack, asked once when a drag starts. */
+  legalMovesFor?(regionId: string, entry: StackEntry): string[];
+  /** The drag has crossed the click threshold: select the stack at this count. */
+  onArmDrag?(regionId: string, entry: StackEntry, count: number): void;
+  /** The live count changed while the line is on screen. */
+  onDragCount?(count: number): void;
+  /** The drag or the split popover was dismissed without a move. */
+  onDragCancel?(): void;
+  /** Drop committed: move `count` of the stack onto `target`. */
+  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number): void;
+  /** Display name for a stack in the split popover. Falls back to the type id. */
+  unitTitle?(entry: StackEntry): string;
   editor?: EditorBinding;
   /** Floating controls drawn over the map (the editor toolbar). */
   children?: ReactNode;
@@ -94,7 +113,42 @@ const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
 type Drag =
   | { kind: "pan"; startX: number; startY: number; view: View; moved: boolean }
   | { kind: "handle"; handle: unknown }
+  | { kind: "unit" }
   | { kind: "swipe"; from: Vec2; points: Vec2[]; moved: boolean; startX: number; startY: number; lastX: number; lastY: number };
+
+/** A friendly stack being pulled. `originWorld` is on the primary copy, so the guide can hop wraps. */
+interface UnitGesture {
+  regionId: string;
+  key: string;
+  entry: StackEntry;
+  originWorld: Vec2;
+  max: number;
+  count: number;
+  adjusted: boolean;
+  moved: boolean;
+  armed: boolean;
+  pointer: Vec2;
+  legal: string[];
+  startX: number;
+  startY: number;
+  wheel: number;
+}
+
+/** A drop that still needs a count. `x` and `y` are canvas pixels. */
+interface SplitPrompt {
+  regionId: string;
+  key: string;
+  entry: StackEntry;
+  target: string;
+  max: number;
+  count: number;
+  x: number;
+  y: number;
+  legal: string[];
+}
+
+/** One wheel notch. Smaller trackpad deltas accumulate until they cross this. */
+const WHEEL_STEP = 40;
 
 export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
@@ -104,6 +158,12 @@ export function MapView(props: MapViewProps) {
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
   const [hoverStack, setHoverStack] = useState<{ regionId: string; key: string; copyDx: number } | null>(null);
+  const [gesture, setGesture] = useState<UnitGesture | null>(null);
+  const [split, setSplit] = useState<SplitPrompt | null>(null);
+  const unitRef = useRef<UnitGesture | null>(null);
+  const splitRef = useRef<SplitPrompt | null>(null);
+  splitRef.current = split;
+  const splitPanel = useRef<HTMLDivElement>(null);
   useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
 
   const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
@@ -185,6 +245,11 @@ export function MapView(props: MapViewProps) {
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
       view.k * dpr,
     );
+    const dragHighlight: HighlightMode | null = gesture?.moved
+      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId }
+      : split
+        ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target }
+        : null;
     const scene: TerrainScene = {
       baked,
       bounds,
@@ -198,7 +263,7 @@ export function MapView(props: MapViewProps) {
       paths,
       exact,
       owners: props.owners,
-      highlight: props.highlight,
+      highlight: dragHighlight ?? props.highlight,
       selectedRegionId: props.selectedRegionId,
       hoverRegionId: hoverId,
       dim: only === null ? null : only === "land" ? "sea" : "land",
@@ -207,7 +272,11 @@ export function MapView(props: MapViewProps) {
     const overlay = {
       layouts,
       owners: props.owners,
-      selectedStack: props.selectedStack,
+      selectedStack: gesture?.moved
+        ? { regionId: gesture.regionId, key: gesture.key }
+        : split
+          ? { regionId: split.regionId, key: split.key }
+          : props.selectedStack,
       isUnmoved: props.isUnmoved,
       combatMarkers: props.combatMarkers,
       unitScale,
@@ -221,6 +290,10 @@ export function MapView(props: MapViewProps) {
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
     } else {
       drawGameOverlay(ctx, scene, overlay);
+      if (gesture?.moved) {
+        const from = guideOriginScreen(gesture.originWorld, gesture.pointer, view, bounds, true);
+        drawMoveGuide(ctx, dpr, from, gesture.pointer, factionPalette(gesture.entry.faction_id).ring);
+      }
     }
   });
 
@@ -239,6 +312,31 @@ export function MapView(props: MapViewProps) {
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      const pulling = unitRef.current;
+      if (pulling) {
+        pulling.wheel += e.deltaY;
+        let changed = false;
+        while (pulling.wheel >= WHEEL_STEP) {
+          pulling.wheel -= WHEEL_STEP;
+          const next = clampMoveCount(pulling.count - 1, pulling.max);
+          changed = changed || next !== pulling.count;
+          pulling.count = next;
+        }
+        while (pulling.wheel <= -WHEEL_STEP) {
+          pulling.wheel += WHEEL_STEP;
+          const next = clampMoveCount(pulling.count + 1, pulling.max);
+          changed = changed || next !== pulling.count;
+          pulling.count = next;
+        }
+        if (changed) {
+          pulling.adjusted = true;
+          if (pulling.moved) {
+            setGesture({ ...pulling, pointer: { ...pulling.pointer }, originWorld: { ...pulling.originWorld } });
+            live.current.props.onDragCount?.(pulling.count);
+          }
+        }
+        return;
+      }
       userMoved.current = true;
       const { fitK } = live.current;
       const rect = canvas.getBoundingClientRect();
@@ -252,13 +350,69 @@ export function MapView(props: MapViewProps) {
     return () => canvas.removeEventListener("wheel", onWheel);
   }, []);
 
+  const publishGesture = (g: UnitGesture) => {
+    setGesture({ ...g, pointer: { ...g.pointer }, originWorld: { ...g.originWorld }, legal: g.legal });
+  };
+
+  const clearGesture = () => {
+    unitRef.current = null;
+    if (drag.current?.kind === "unit") {
+      drag.current = null;
+    }
+    setGesture(null);
+  };
+
+  const armGesture = (g: UnitGesture) => {
+    if (g.armed) {
+      return;
+    }
+    g.armed = true;
+    g.moved = true;
+    live.current.props.onArmDrag?.(g.regionId, g.entry, g.count);
+  };
+
+  /** A press that did not travel: the same as a click before dragging existed. */
+  const resolveClick = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
+    const sp = pointer(e);
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
+    const world = screenToWorld(v, sp);
+    if (p.editor) {
+      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, {
+        shift: e.shiftKey ?? false,
+      });
+      return;
+    }
+    const plus = pickPlus(ls, sp, plusHit);
+    if (plus) {
+      p.onOpenInspector?.(plus.region.id);
+      return;
+    }
+    const picked = pickCounter(ls, sp, hit);
+    if (picked) {
+      if (picked.layout.capped) {
+        p.onOpenInspector?.(picked.counter.regionId);
+        return;
+      }
+      p.onStackClick(picked.counter.regionId, picked.counter.slot.entry, picked.counter.slot.key);
+      return;
+    }
+    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
+    if (id !== "") {
+      p.onRegionClick(id);
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) {
       return;
     }
+    if (splitRef.current && !(e.target as HTMLElement).closest?.(".split-popover")) {
+      setSplit(null);
+      live.current.props.onDragCancel?.();
+    }
     const sp = pointer(e);
-    const { view: v } = live.current;
-    const ed = live.current.props.editor;
+    const { view: v, layouts: ls, props: p, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
+    const ed = p.editor;
     const handle = ed?.pickHandle(screenToWorld(v, sp), HANDLE_PX / v.k) ?? null;
     const from = screenToWorld(v, sp);
     if (handle !== null) {
@@ -266,6 +420,36 @@ export function MapView(props: MapViewProps) {
     } else if (ed?.swipeable() && !e.altKey) {
       // Knife: dragging draws the cut. Alt-drag still pans.
       drag.current = { kind: "swipe", from, points: [], moved: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
+    } else if (!ed && pickPlus(ls, sp, plusHit) === null) {
+      const picked = pickCounter(ls, sp, hit);
+      const max = picked ? (p.movableMax?.(picked.counter.regionId, picked.counter.slot.entry) ?? 0) : 0;
+      if (picked && max > 0) {
+        const slotWorld = screenToWorld(v, { x: picked.counter.x, y: picked.counter.y });
+        const originWorld = {
+          x: live.current.wrap ? wrapWorldX(slotWorld.x, live.current.bounds) : slotWorld.x,
+          y: slotWorld.y,
+        };
+        const next: UnitGesture = {
+          regionId: picked.counter.regionId,
+          key: picked.counter.slot.key,
+          entry: picked.counter.slot.entry,
+          originWorld,
+          max,
+          count: max,
+          adjusted: false,
+          moved: false,
+          armed: false,
+          pointer: sp,
+          legal: p.legalMovesFor?.(picked.counter.regionId, picked.counter.slot.entry) ?? [],
+          startX: e.clientX,
+          startY: e.clientY,
+          wheel: 0,
+        };
+        unitRef.current = next;
+        drag.current = { kind: "unit" };
+      } else {
+        drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
+      }
     } else {
       drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
     }
@@ -296,6 +480,24 @@ export function MapView(props: MapViewProps) {
         d.points.push(world);
         p.editor?.onStroke(d.points, 1 / v.k, false);
       }
+      return;
+    }
+    if (d?.kind === "unit") {
+      const g = unitRef.current;
+      if (!g) {
+        return;
+      }
+      g.pointer = sp;
+      if (!g.moved && Math.hypot(e.clientX - g.startX, e.clientY - g.startY) >= DRAG_THRESHOLD_PX) {
+        armGesture(g);
+      }
+      const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer);
+      setHoverId((prev) => (prev === id ? prev : id));
+      p.onRegionHover(id);
+      if (g.moved) {
+        publishGesture(g);
+      }
+      canvasRef.current!.style.cursor = "grabbing";
       return;
     }
     if (d?.kind === "pan") {
@@ -336,7 +538,7 @@ export function MapView(props: MapViewProps) {
     if (!d) {
       return;
     }
-    const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer, tokenHitPx: hit, plusHitPx: plusHit } = live.current;
+    const { view: v, paths: ps, props: p, exact: ex } = live.current;
     if (d.kind === "handle") {
       p.editor?.onDragEnd(d.handle);
       return;
@@ -352,8 +554,44 @@ export function MapView(props: MapViewProps) {
     }
     if (d.kind === "swipe") {
       // Not dragged far enough: a plain click.
-      const world = screenToWorld(v, pointer(e));
-      p.editor?.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
+      resolveClick(e);
+      return;
+    }
+    if (d.kind === "unit") {
+      const g = unitRef.current;
+      const sp = pointer(e);
+      clearGesture();
+      if (!g || !g.moved) {
+        resolveClick(e);
+        return;
+      }
+      const world = screenToWorld(v, sp);
+      const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
+      const result = finishUnitDrag(
+        { regionId: g.regionId, max: g.max, count: g.count, adjusted: g.adjusted, legal: g.legal },
+        id,
+      );
+      if (result.type === "cancel") {
+        if (g.armed) {
+          p.onDragCancel?.();
+        }
+        return;
+      }
+      if (result.type === "commit") {
+        p.onDropMove?.(g.regionId, g.entry, result.target, result.count);
+        return;
+      }
+      setSplit({
+        regionId: g.regionId,
+        key: g.key,
+        entry: g.entry,
+        target: result.target,
+        max: g.max,
+        count: result.count,
+        x: sp.x,
+        y: sp.y,
+        legal: g.legal,
+      });
       return;
     }
     if (d.moved) {
@@ -363,31 +601,7 @@ export function MapView(props: MapViewProps) {
       }, 0);
       return;
     }
-    const sp = pointer(e);
-    const world = screenToWorld(v, sp);
-    if (p.editor) {
-      p.editor.onClick(world, pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer), SNAP_PX / v.k, { shift: e.shiftKey });
-      return;
-    }
-    // The [+] and a capped fan both open the region inspector instead of picking one stack.
-    const plus = pickPlus(ls, sp, plusHit);
-    if (plus) {
-      p.onOpenInspector?.(plus.region.id);
-      return;
-    }
-    const picked = pickCounter(ls, sp, hit);
-    if (picked) {
-      if (picked.layout.capped) {
-        p.onOpenInspector?.(picked.counter.regionId);
-        return;
-      }
-      p.onStackClick(picked.counter.regionId, picked.counter.slot.entry, picked.counter.slot.key);
-      return;
-    }
-    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
-    if (id !== "") {
-      p.onRegionClick(id);
-    }
+    resolveClick(e);
   };
 
   useEffect(() => {
@@ -412,10 +626,74 @@ export function MapView(props: MapViewProps) {
   };
 
   const onPointerLeave = () => {
+    if (unitRef.current) {
+      return;
+    }
     setHoverId("");
     setHoverStack(null);
     live.current.props.onRegionHover("");
     live.current.props.editor?.onHover(null, 0);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      if (e.key === "Escape") {
+        if (splitRef.current) {
+          splitRef.current = null;
+          setSplit(null);
+          live.current.props.onDragCancel?.();
+          return;
+        }
+        if (unitRef.current) {
+          const armed = unitRef.current.armed;
+          clearGesture();
+          if (armed) {
+            live.current.props.onDragCancel?.();
+          }
+        }
+        return;
+      }
+      const g = unitRef.current;
+      if (!g || typing || e.key < "1" || e.key > "9") {
+        return;
+      }
+      e.preventDefault();
+      g.count = clampMoveCount(Number(e.key), g.max);
+      g.adjusted = true;
+      if (g.moved) {
+        publishGesture(g);
+        live.current.props.onDragCount?.(g.count);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    if (split) {
+      splitPanel.current?.focus();
+    }
+  }, [split?.regionId, split?.target, split?.x, split?.y]);
+
+  const confirmSplit = () => {
+    const s = splitRef.current;
+    if (!s) {
+      return;
+    }
+    splitRef.current = null;
+    setSplit(null);
+    live.current.props.onDropMove?.(s.regionId, s.entry, s.target, s.count);
+  };
+
+  const cancelSplit = () => {
+    if (!splitRef.current) {
+      return;
+    }
+    splitRef.current = null;
+    setSplit(null);
+    live.current.props.onDragCancel?.();
   };
 
   return (
@@ -442,6 +720,36 @@ export function MapView(props: MapViewProps) {
         </button>
       </div>
       {props.children}
+      {gesture?.moved && (
+        <div
+          className="move-drag-badge"
+          style={
+            {
+              left: gesture.pointer.x,
+              top: gesture.pointer.y,
+              "--faction": factionPalette(gesture.entry.faction_id).ring,
+            } as CSSProperties
+          }
+          aria-hidden="true"
+        >
+          {gesture.count}
+        </div>
+      )}
+      {split && (
+        <SplitStackPopover
+          panelRef={splitPanel}
+          title={props.unitTitle?.(split.entry) ?? unitLabel(split.entry.unit_type_id)}
+          count={split.count}
+          max={split.max}
+          x={split.x}
+          y={split.y}
+          boundsW={size.w}
+          boundsH={size.h}
+          onCount={(count) => setSplit((s) => (s ? { ...s, count } : s))}
+          onConfirm={confirmSplit}
+          onCancel={cancelSplit}
+        />
+      )}
       {editor?.prunePrompt &&
         (() => {
           const { box, count, confirm, cancel } = editor.prunePrompt;
