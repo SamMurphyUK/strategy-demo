@@ -35,6 +35,7 @@ import { RegionPanel } from "./panels/RegionPanel";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
 import { isActiveFaction } from "./tokenStyle";
+import { nextFacingHold, type FacingHold, type FacingStacks } from "./uprightSprites";
 import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
 import { moveUnitsPayload } from "./stackMove";
 import { useGameSession } from "./session/use_game_session";
@@ -59,12 +60,43 @@ const NO_HIGHLIGHT: HighlightMode = { kind: "none" };
 const NO_MARKERS: CombatMarker[] = [];
 const NEVER = () => false;
 
+/** Piece counts per region, copied so later moves cannot change a combat-move snapshot. */
+function facingStacksFrom(state: { region_units: Record<string, { faction_id?: string; count?: number; instance_id?: string }[]> }): FacingStacks {
+  const out: FacingStacks = {};
+  for (const regionId of Object.keys(state.region_units)) {
+    const rows: { factionId: string; count: number }[] = [];
+    for (const entry of state.region_units[regionId] ?? []) {
+      const factionId = String(entry.faction_id ?? "");
+      const count = Math.max(0, Math.trunc(Number(entry.count ?? (entry.instance_id ? 1 : 0))));
+      if (factionId === "" || count <= 0) continue;
+      const row = rows.find((item) => item.factionId === factionId);
+      if (row) row.count += count;
+      else rows.push({ factionId, count });
+    }
+    if (rows.length > 0) out[regionId] = rows;
+  }
+  return out;
+}
+
 export function App() {
   const game = useGameSession(12345);
   const { session, version } = game;
   const state = session.state;
   const faction = state.current_faction_id;
   const phase = state.current_phase;
+  const facingBag = useRef<{ session: typeof session; hold: FacingHold } | null>(null);
+  const facingKey = `${state.game_round}|${faction}`;
+  const facingPrev = facingBag.current?.session === session ? facingBag.current.hold : null;
+  const facingHold = nextFacingHold(
+    facingPrev,
+    facingPrev != null,
+    phase,
+    facingKey,
+    !facingPrev || (phase === "combat_move" && (!facingPrev.locked || facingPrev.key !== facingKey))
+      ? facingStacksFrom(state)
+      : facingPrev.stacks,
+  );
+  facingBag.current = { session, hold: facingHold };
 
   // The map is drawn in the land SVG's coordinates; demomap01.json predates it and is projected on load.
   // A saved version replaces the board for play. The editor's "Reset to demo map" stays on the file.
@@ -611,8 +643,14 @@ export function App() {
                 }
           }
           unitCategories={unitCategories}
+          sameTeam={(a, b) => state.sameTeam(a, b)}
+          facingStacks={editing ? undefined : facingHold.stacks}
           activeFactionId={faction}
-          fuelFor={(regionId, entry) => fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id)}
+          fuelFor={(regionId, entry) =>
+            isActiveFaction(entry.faction_id, faction)
+              ? fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id)
+              : null
+          }
           isLoaded={(entry) => {
             const iid = entry.instance_id ?? "";
             if (iid === "") {

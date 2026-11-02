@@ -29,6 +29,7 @@ import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
+import type { FacingStacks } from "./uprightSprites";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
   battleScarDescriptors,
@@ -137,6 +138,10 @@ export interface MapViewProps {
   suspended?: boolean;
   /** Battle (or the approach into one) swaps the room tone for the outdoor bed. */
   inBattle?: boolean;
+  /** Factions that share a side. Zoomed-in sprites face the nearest region this rejects. */
+  sameTeam?(a: string, b: string): boolean;
+  /** Piece counts from the start of the current faction's combat move. */
+  facingStacks?: FacingStacks;
 }
 
 const DRAG_THRESHOLD_PX = 4;
@@ -523,6 +528,8 @@ export function MapView(props: MapViewProps) {
       cargoCount: props.cargoCount,
       categories: props.unitCategories,
       idleTime: settled ? performance.now() / 1000 : undefined,
+      sameTeam: props.sameTeam,
+      facingStacks: props.facingStacks,
     };
     if (settled) {
       let hold = terrainHold.current;

@@ -1,8 +1,11 @@
 // Upright side-profile sprites for LoD 2. Same palette and standing poses as the battle screen,
-// drawn at integer pixels with smoothing off, feet on the plinth centre.
+// drawn at integer pixels with smoothing off, feet on the plinth centre. Guns point right; a
+// negative face mirrors the body so the stack looks toward the nearer hostile territory.
 import { factionPalette } from "../theme/factionPalette";
 import { MILITARY } from "../theme/militaryPalette";
+import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
+import { anchorSpan, wrapWorldX } from "./viewMath";
 import { squadOffsets } from "./zoomLod";
 
 const CHARCOAL = MILITARY.charcoal;
@@ -36,6 +39,157 @@ export interface UprightPaint {
   idleTime?: number;
   /** Per-stack offset so neighbours do not rise together. Radians. */
   idlePhase?: number;
+  /** +1 keeps the drawn pose (guns to the right). -1 mirrors the body. Badges stay put. */
+  face?: FaceSign;
+}
+
+/** The guns are drawn toward +x, so +1 faces right and -1 faces left. */
+export type FaceSign = 1 | -1;
+
+export interface FacingStack {
+  factionId: string;
+  count: number;
+}
+
+/** Pieces in each region, copied at the start of a faction's combat move. */
+export type FacingStacks = Record<string, readonly FacingStack[]>;
+
+export interface FacingRegion {
+  id: string;
+  anchor: Vec2;
+  owner: string;
+  /** Factions that have a unit in the region. */
+  factions: readonly string[];
+  /** Pieces present when the combat-move snapshot was taken. Absent means no size weight. */
+  stacks?: readonly FacingStack[];
+}
+
+/** The locked board a faction's combat move started from. Later phases keep it until the next one. */
+export interface FacingHold {
+  key: string;
+  locked: boolean;
+  stacks: FacingStacks;
+}
+
+/**
+ * Opening a game takes the board as it stands. Entering combat move copies it again and holds
+ * that copy through the rest of the turn, so moves and casualties do not turn the sprites around.
+ */
+export function nextFacingHold(
+  previous: FacingHold | null,
+  sameGame: boolean,
+  phase: string,
+  key: string,
+  live: FacingStacks,
+): FacingHold {
+  if (!sameGame || previous == null) {
+    return { key, locked: phase === "combat_move", stacks: live };
+  }
+  if (phase === "combat_move" && (!previous.locked || previous.key !== key)) {
+    return { key, locked: true, stacks: live };
+  }
+  return previous;
+}
+
+/** Campaign sides, used when the map has no session team check to call. */
+export function campaignSameTeam(a: string, b: string): boolean {
+  if (a === "" || b === "") return false;
+  const left = factionPalette(a).side;
+  const right = factionPalette(b).side;
+  return left !== "neutral" && left === right;
+}
+
+/** Short-way horizontal delta. Negative is left. */
+function wrappedDx(from: Vec2, to: Vec2, bounds: Rect, wrap: boolean): number {
+  let dx = to.x - from.x;
+  if (wrap && bounds.w > 0) {
+    dx = wrapWorldX(to.x, bounds) - wrapWorldX(from.x, bounds);
+    const half = bounds.w / 2;
+    if (dx > half) dx -= bounds.w;
+    else if (dx < -half) dx += bounds.w;
+  }
+  return dx;
+}
+
+/** Short-way horizontal sign from `from` to `to`. Straight up or down stays facing right. */
+export function facingSign(from: Vec2, to: Vec2, bounds: Rect, wrap: boolean): FaceSign {
+  return wrappedDx(from, to, bounds, wrap) < -1e-6 ? -1 : 1;
+}
+
+/** Enemy pieces in the region. The heaviest of these wins when a territory sits between two forces. */
+function enemyPieceCount(
+  region: FacingRegion,
+  factionId: string,
+  sameTeam: (a: string, b: string) => boolean,
+): number {
+  let total = 0;
+  for (const stack of region.stacks ?? []) {
+    if (stack.factionId !== "" && stack.count > 0 && !sameTeam(stack.factionId, factionId)) {
+      total += stack.count;
+    }
+  }
+  return total;
+}
+
+/**
+ * Left or right toward the nearest region hostile to `factionId`.
+ * The unit's own region is skipped: an enemy standing in it has no left or right.
+ * No enemy anywhere leaves the sprite facing right.
+ * A territory with an enemy force on both sides faces the heavier one instead.
+ * Equal forces keep the nearer. Straight-up forces do not count as a side.
+ */
+export function nearestEnemyFacing(
+  homeId: string,
+  home: Vec2,
+  factionId: string,
+  regions: readonly FacingRegion[],
+  bounds: Rect,
+  wrap: boolean,
+  sameTeam?: (a: string, b: string) => boolean,
+): FaceSign {
+  if (factionId === "") return 1;
+  const allied = sameTeam ?? campaignSameTeam;
+  let nearestSpan = Infinity;
+  let nearestFace: FaceSign = 1;
+  let heavyCount = -1;
+  let heavySpan = Infinity;
+  let heavyFace: FaceSign = 1;
+  let leftForce = false;
+  let rightForce = false;
+  for (const region of regions) {
+    if (region.id === homeId) continue;
+    const span = anchorSpan(home, region.anchor, bounds, wrap);
+    if (!(span > 0)) continue;
+    if (regionIsHostile(region, factionId, allied) && span < nearestSpan) {
+      nearestSpan = span;
+      nearestFace = facingSign(home, region.anchor, bounds, wrap);
+    }
+    const count = enemyPieceCount(region, factionId, allied);
+    if (count <= 0) continue;
+    const dx = wrappedDx(home, region.anchor, bounds, wrap);
+    if (dx < -1e-6) leftForce = true;
+    else if (dx > 1e-6) rightForce = true;
+    else continue;
+    if (count > heavyCount || (count === heavyCount && span < heavySpan)) {
+      heavyCount = count;
+      heavySpan = span;
+      heavyFace = dx < 0 ? -1 : 1;
+    }
+  }
+  if (leftForce && rightForce) return heavyFace;
+  return nearestFace;
+}
+
+function regionIsHostile(
+  region: FacingRegion,
+  factionId: string,
+  sameTeam: (a: string, b: string) => boolean,
+): boolean {
+  if (region.owner !== "" && !sameTeam(region.owner, factionId)) return true;
+  for (const other of region.factions) {
+    if (other !== "" && !sameTeam(other, factionId)) return true;
+  }
+  return false;
 }
 
 const STILL_UNITS = new Set(["artillery", "aa", "aaa"]);
@@ -83,20 +237,22 @@ function drawHardwareBadge(
   left: number,
   top: number,
   numeral: string,
+  align: "left" | "center" = "left",
 ): void {
   ctx.font = "700 11px Courier New, monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const w = Math.max(16, Math.ceil(ctx.measureText(label).width) + 8);
   const h = 13;
+  const x = align === "center" ? left - w / 2 : left;
   ctx.fillStyle = PLINTH;
-  ctx.fillRect(left, top, w, h);
+  ctx.fillRect(x, top, w, h);
   ctx.strokeStyle = GOLD;
   ctx.lineWidth = 1;
-  ctx.strokeRect(left + 0.5, top + 0.5, w - 1, h - 1);
+  ctx.strokeRect(x + 0.5, top + 0.5, w - 1, h - 1);
   ctx.fillStyle = numeral;
   ctx.textAlign = "center";
-  ctx.fillText(label, left + w / 2, top + h / 2 + 0.5);
+  ctx.fillText(label, x + w / 2, top + h / 2 + 0.5);
 }
 
 function drawInfantry(ctx: CanvasRenderingContext2D, color: string): void {
@@ -294,11 +450,12 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     for (const off of figures) {
       ctx.save();
       ctx.translate(at(x + off.x), at(y + off.y + bob));
+      if ((paint.face ?? 1) < 0) ctx.scale(-1, 1);
       drawUprightBody(ctx, paint.unitType, color);
       ctx.restore();
     }
     if (paint.count > 1) {
-      drawHardwareBadge(ctx, `[${paint.count}]`, at(x + rx * 0.4), at(y + ry * 0.2), GOLD_NUM);
+      drawHardwareBadge(ctx, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
     }
     if (paint.fuel != null) {
       drawHardwareBadge(ctx, String(paint.fuel), at(x - rx - 4) - 20, at(y) - 6, paint.active ? TEAL_NUM : GOLD_NUM);

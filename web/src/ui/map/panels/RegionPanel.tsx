@@ -7,6 +7,7 @@ import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
 import { type StackEntry, stackKey } from "../geometry";
 import { factionName, unitName } from "../session/event_text";
+import { isActiveFaction } from "../tokenStyle";
 import type { GameSessionHandle } from "../session/use_game_session";
 import { orderStacks } from "../unitStacks";
 
@@ -75,7 +76,9 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
               entry.instance_id && RegionUnitDisplay.isContainerUnit(state, entry.unit_type_id)
                 ? transportLoadedLabel(state, entry.instance_id)
                 : "";
-            const fuel = fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id);
+            const fuel = isActiveFaction(entry.faction_id, state.current_faction_id)
+              ? fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id)
+              : null;
             return (
               <li key={key}>
                 <button

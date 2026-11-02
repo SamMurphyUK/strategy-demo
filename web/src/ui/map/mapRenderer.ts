@@ -13,7 +13,14 @@ import { MILITARY } from "../theme/militaryPalette";
 import { isLandAt } from "./hitTest";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
-import { drawUprightStack, idlePhase } from "./uprightSprites";
+import {
+  drawUprightStack,
+  idlePhase,
+  nearestEnemyFacing,
+  type FacingRegion,
+  type FacingStacks,
+  type FaceSign,
+} from "./uprightSprites";
 import {
   BADGE_FILL,
   BADGE_INACTIVE_STROKE,
@@ -555,6 +562,10 @@ export interface GameOverlay {
   hoverStack?: { regionId: string; key: string; copyDx: number } | null;
   /** Seconds for the upright breathe. Omitted below the sprite zoom, so those figures stay still. */
   idleTime?: number;
+  /** Factions that share a side. Upright sprites face the nearest region this rejects. */
+  sameTeam?(a: string, b: string): boolean;
+  /** Piece counts from the start of the current faction's combat move. */
+  facingStacks?: FacingStacks;
 }
 
 /** Facility icons stay at this opacity. The map shows through, and nothing else (layer, hover) changes it. */
@@ -785,6 +796,7 @@ function paintSmokePlume(ctx: CanvasRenderingContext2D, scene: TerrainScene, dx:
  */
 function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
   const tokenPx = TOKEN_PX * game.unitScale;
+  const facing = facingByStack(scene, game);
   const items: { worldY: number; paint: () => void }[] = [];
   for (const layout of game.layouts) {
     const copyView = { ...scene.view, x: scene.view.x - layout.copyDx };
@@ -828,6 +840,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             cargoCount: game.cargoCount?.(entry) ?? 0,
             idleTime: game.idleTime,
             idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
+            face: facing(layout.region.id, entry.faction_id),
           });
         },
       });
@@ -857,6 +870,41 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
   for (const item of uprightDrawOrder(2, items)) {
     item.paint();
   }
+}
+
+/** One left/right answer per region and faction. The campaign map wraps, so the short way around wins. */
+function facingByStack(scene: TerrainScene, game: GameOverlay): (regionId: string, factionId: string) => FaceSign {
+  const factions = new Map<string, string[]>();
+  for (const layout of game.layouts) {
+    let list = factions.get(layout.region.id);
+    if (!list) {
+      list = [];
+      factions.set(layout.region.id, list);
+    }
+    for (const counter of layout.counters) {
+      const id = counter.slot.entry.faction_id;
+      if (id !== "" && !list.includes(id)) list.push(id);
+    }
+  }
+  const regions: FacingRegion[] = scene.regions.map((region) => ({
+    id: region.id,
+    anchor: region.anchor,
+    owner: game.owners[region.id] ?? "",
+    factions: factions.get(region.id) ?? [],
+    stacks: game.facingStacks?.[region.id],
+  }));
+  const cache = new Map<string, FaceSign>();
+  return (regionId, factionId) => {
+    const key = `${regionId}\0${factionId}`;
+    const hit = cache.get(key);
+    if (hit != null) return hit;
+    const home = regions.find((region) => region.id === regionId);
+    const face = home
+      ? nearestEnemyFacing(regionId, home.anchor, factionId, regions, scene.bounds, true, game.sameTeam)
+      : 1;
+    cache.set(key, face);
+    return face;
+  };
 }
 
 export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
