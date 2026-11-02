@@ -13,7 +13,7 @@ import { MILITARY } from "../theme/militaryPalette";
 import { isLandAt } from "./hitTest";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
-import { drawUprightStack } from "./uprightSprites";
+import { drawUprightStack, idlePhase } from "./uprightSprites";
 import {
   BADGE_FILL,
   BADGE_INACTIVE_STROKE,
@@ -553,6 +553,8 @@ export interface GameOverlay {
   categories?: Record<string, string>;
   /** The token under the pointer. Drawn last so a tucked card comes to the front. */
   hoverStack?: { regionId: string; key: string; copyDx: number } | null;
+  /** Seconds for the upright breathe. Omitted below the sprite zoom, so those figures stay still. */
+  idleTime?: number;
 }
 
 /** Facility icons stay at this opacity. The map shows through, and nothing else (layer, hover) changes it. */
@@ -824,6 +826,8 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             fuel: game.fuelFor?.(layout.region.id, entry) ?? null,
             loaded: game.isLoaded?.(entry) ?? false,
             cargoCount: game.cargoCount?.(entry) ?? 0,
+            idleTime: game.idleTime,
+            idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
           });
         },
       });

@@ -16,6 +16,7 @@ import {
   drawOperationalArrows,
   drawTerrain,
   type EditorOverlay,
+  type GameOverlay,
   layoutRegions,
   type RegionLayout,
   type TerrainScene,
@@ -184,6 +185,28 @@ interface SplitPrompt {
 
 /** One wheel notch. Smaller trackpad deltas accumulate until they cross this. */
 const WHEEL_STEP = 40;
+/** Upright figures breathe at this rate. The motion is half a hertz, so twelve frames cover it. */
+const IDLE_BOB_MS = 84;
+
+function strokeWarningRing(
+  ctx: CanvasRenderingContext2D,
+  dpr: number,
+  layouts: readonly RegionLayout[],
+  regionId: string,
+  pulse: number,
+): void {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (const layout of layouts) {
+    if (layout.region.id !== regionId) {
+      continue;
+    }
+    ctx.beginPath();
+    ctx.arc(layout.anchor.x, layout.anchor.y, 34 + 10 * pulse, 0, Math.PI * 2);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = `rgba(180, 48, 36, ${0.35 + 0.5 * pulse})`;
+    ctx.stroke();
+  }
+}
 
 export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
@@ -277,6 +300,15 @@ export function MapView(props: MapViewProps) {
   if (bakeRef.current?.rev !== BAKE_PAINT) {
     bakeRef.current = { rev: BAKE_PAINT, bake: new TerrainBake() };
   }
+  // Terrain without units, kept so the idle tick can redraw the figures and leave the coast alone.
+  const terrainHold = useRef<HTMLCanvasElement | null>(null);
+  const spritesSettled = useRef(false);
+  const spriteFrame = useRef<{
+    scene: TerrainScene;
+    overlay: GameOverlay;
+    warningRegionId: string;
+    warningPulse: number;
+  } | null>(null);
   const scarCount = props.relief?.scars.length ?? 0;
   const [scarNow, setScarNow] = useState(0);
   useEffect(() => {
@@ -389,6 +421,7 @@ export function MapView(props: MapViewProps) {
 
   useEffect(() => {
     if (props.suspended) {
+      spritesSettled.current = false;
       return;
     }
     const canvas = canvasRef.current;
@@ -458,7 +491,9 @@ export function MapView(props: MapViewProps) {
           }),
     };
     drawTerrain(ctx, scene);
-    const overlay = {
+    const settled = !editor && mapLod === 2 && unitFade >= 1;
+    spritesSettled.current = settled;
+    const overlay: GameOverlay = {
       layouts,
       owners: props.owners,
       selectedStack: gesture?.moved
@@ -475,7 +510,30 @@ export function MapView(props: MapViewProps) {
       isLoaded: props.isLoaded,
       cargoCount: props.cargoCount,
       categories: props.unitCategories,
+      idleTime: settled ? performance.now() / 1000 : undefined,
     };
+    if (settled) {
+      let hold = terrainHold.current;
+      if (!hold) {
+        hold = document.createElement("canvas");
+        terrainHold.current = hold;
+      }
+      if (hold.width !== canvas.width || hold.height !== canvas.height) {
+        hold.width = canvas.width;
+        hold.height = canvas.height;
+      }
+      const holdCtx = hold.getContext("2d");
+      if (holdCtx) {
+        holdCtx.setTransform(1, 0, 0, 1, 0, 0);
+        holdCtx.drawImage(canvas, 0, 0);
+      }
+      spriteFrame.current = {
+        scene,
+        overlay,
+        warningRegionId: props.warningRegionId ?? "",
+        warningPulse,
+      };
+    }
     if (editor) {
       drawEditorUnits(ctx, scene, overlay);
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
@@ -483,17 +541,7 @@ export function MapView(props: MapViewProps) {
       drawGameOverlay(ctx, scene, overlay);
       if (props.warningRegionId) {
         const pulse = 0.5 + 0.5 * Math.sin(warningPulse / 2);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        for (const layout of layouts) {
-          if (layout.region.id !== props.warningRegionId) {
-            continue;
-          }
-          ctx.beginPath();
-          ctx.arc(layout.anchor.x, layout.anchor.y, 34 + 10 * pulse, 0, Math.PI * 2);
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = `rgba(180, 48, 36, ${0.35 + 0.5 * pulse})`;
-          ctx.stroke();
-        }
+        strokeWarningRing(ctx, dpr, layouts, props.warningRegionId, pulse);
       }
     }
     const arrows = arrowRef.current;
@@ -527,6 +575,37 @@ export function MapView(props: MapViewProps) {
       }
     }
   });
+
+  // While the upright figures are on screen and the camera is still, blit the held coast and redraw only the sprites.
+  useEffect(() => {
+    if (mapLod !== 2) {
+      return;
+    }
+    const tick = () => {
+      if (document.hidden || !spritesSettled.current || cameraLock.current || drag.current) {
+        return;
+      }
+      const canvas = canvasRef.current;
+      const hold = terrainHold.current;
+      const frame = spriteFrame.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx || !hold || !frame) {
+        return;
+      }
+      if (hold.width !== canvas.width || hold.height !== canvas.height) {
+        return;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(hold, 0, 0);
+      drawGameOverlay(ctx, frame.scene, { ...frame.overlay, idleTime: performance.now() / 1000 });
+      if (frame.warningRegionId) {
+        const pulse = 0.5 + 0.5 * Math.sin(frame.warningPulse / 2);
+        strokeWarningRing(ctx, frame.scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);
+      }
+    };
+    const id = window.setInterval(tick, IDLE_BOB_MS);
+    return () => window.clearInterval(id);
+  }, [mapLod]);
 
   /** A pointer's world point folded onto the primary copy of the wrapped world, for picking regions. */
   const pickWorld = (w: Vec2): Vec2 => (live.current.wrap ? { x: wrapWorldX(w.x, live.current.bounds), y: w.y } : w);

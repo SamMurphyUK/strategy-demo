@@ -32,6 +32,36 @@ export interface UprightPaint {
   fuel: number | null;
   loaded: boolean;
   cargoCount?: number;
+  /** Seconds since the page clock, present only while the upright sprites are settled. */
+  idleTime?: number;
+  /** Per-stack offset so neighbours do not rise together. Radians. */
+  idlePhase?: number;
+}
+
+const STILL_UNITS = new Set(["artillery", "aa", "aaa"]);
+const SEA_UNITS = new Set(["submarine", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+
+/** Stable phase in `[0, 2π)` for one stack. */
+export function idlePhase(regionId: string, unitType: string): number {
+  let hash = 2166136261;
+  const key = `${regionId}\0${unitType}`;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) / 4294967296) * Math.PI * 2;
+}
+
+/**
+ * Vertical breathe in CSS pixels. Guns stay planted. Ships move half as far as the troops.
+ * `time` is seconds, matching the battle board's `sin(time * 3)` idle.
+ */
+export function idleBob(unitType: string, time: number, phase: number): number {
+  if (STILL_UNITS.has(unitType)) {
+    return 0;
+  }
+  const amplitude = SEA_UNITS.has(unitType) ? 0.5 : 1;
+  return Math.sin(time * 3 + phase) * amplitude;
 }
 
 function withCrisp(
@@ -258,11 +288,12 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   ctx.stroke();
 
   const color = factionPalette(paint.factionId).primary;
+  const bob = paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = squadOffsets(paint.count).slice().sort((a, b) => a.y - b.y);
     for (const off of figures) {
       ctx.save();
-      ctx.translate(at(x + off.x), at(y + off.y));
+      ctx.translate(at(x + off.x), at(y + off.y + bob));
       drawUprightBody(ctx, paint.unitType, color);
       ctx.restore();
     }
