@@ -74,8 +74,9 @@ import {
   resolveRanks,
 } from './rules';
 import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
-import {playCampaignCue} from '../map/campaignAudio';
-import {campaignMusicMuted, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
+import {sfxMuted, soundManager, subscribeSfx, toggleSfx} from '../../audio/sound_manager';
+import {battleThemeFor, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
+import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
   drawProceduralUnit,
   drawWWIIBattlefield,
@@ -97,9 +98,6 @@ import {
   drawPixelRankBadge,
   PALETTE,
 } from './unitRenderer';
-
-// Ambient Background Music URL
-const BACKGROUND_MUSIC_URL = 'battle-assets/audio/bgm_war_room_march.mp3';
 
 export type RankStepState = 'READY_TO_FIRE' | 'FIRING' | 'RESOLVED';
 
@@ -354,10 +352,31 @@ export default function App({match}: {match?: BattleMatch} = {}) {
   // Overlay Menu controls
   const [isGameMenuOpen, setIsGameMenuOpen] = useState(false);
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
-  const [sfxMuted, setSfxMuted] = useState(false);
+  const muted = useSyncExternalStore(subscribeSfx, sfxMuted, () => false);
+  useEffect(() => {
+    gameAudio.setMuted(muted);
+  }, [muted]);
   const [isMusicMuted, setIsMusicMuted] = useState(false);
   const campaignMuted = useSyncExternalStore(subscribeCampaignMusic, campaignMusicMuted, () => false);
   const musicMuted = isMatch ? campaignMuted : isMusicMuted;
+  const themeUrl = battleThemeFor(match?.attackerFaction, match?.theater ?? currentTheater);
+  // Faction theme for the battle. Leaving the screen releases strategist 2 where it was parked.
+  useEffect(() => {
+    if (!themeUrl) return;
+    void startBattleTheme(themeUrl);
+    return () => stopBattleTheme();
+  }, [themeUrl]);
+  useEffect(() => {
+    setBattleThemeQuiet(
+      isVictorySequenceActive || isGameMenuOpen || musicMuted || gameState.status !== 'PLAYING',
+    );
+  }, [isVictorySequenceActive, isGameMenuOpen, musicMuted, gameState.status]);
+  // Strategist 3 for the flag. The faction theme stays parked and comes back when the flag is dismissed.
+  useEffect(() => {
+    if (!isVictorySequenceActive) return;
+    beginCampaignVictory();
+    return () => endCampaignVictory();
+  }, [isVictorySequenceActive]);
 
   // Attacker & Defender counts
   const [attackerUnits, setAttackerUnits] = useState<CombatUnit[]>([]);
@@ -1555,17 +1574,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       defenderUnitsRef.current.filter((u) => u.status === 'downed' || u.isDestroyed).length * 150;
     setGameState((prev) => ({...prev, score: prev.score + scoreGain}));
 
-    // A map battle uses the campaign fanfare. The sandbox keeps the procedural horn and cheer.
-    if (matchRef.current) {
-      playCampaignCue('victory');
-    } else {
-      gameAudio.playVictoryFanfare();
-      scheduleSequenceTimeout(() => {
-        gameAudio.playBugleChime();
-        gameAudio.playSoldierCheer();
-      }, 400);
-    }
-
     const theaterObj = THEATERS[currentTheaterRef.current];
     const regionName = matchRef.current
       ? matchRef.current.regionName.toUpperCase()
@@ -1607,7 +1615,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       `Friendly vanguard cheering and advancing across ${regionName}.`,
       ...prev.slice(0, 8),
     ]);
-  }, [clearSequenceTimeouts, scheduleSequenceTimeout]);
+  }, [clearSequenceTimeouts]);
 
   // Debug Auto-Win Handler: eliminates all active defender units and triggers victory march
   const handleInstantKillDefenders = useCallback(() => {
@@ -4660,7 +4668,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const isMusicPlaying = gameState.status === 'PLAYING' && !isGameMenuOpen;
+  const isMusicPlaying = gameState.status === 'PLAYING' && !isGameMenuOpen && !isVictorySequenceActive;
 
   const liveAttackerCount = attackerUnits.filter(isCombatActive).length;
   const liveDefenderCount = defenderUnits.filter(isCombatActive).length;
@@ -4675,9 +4683,9 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         </div>
       )}
 
-      {/* Ambient War Room March Audio */}
+      {/* The faction theme is the battle music. Strategist 2 stays parked until this screen closes. */}
       <BackgroundMusic
-        url={isMatch ? '' : BACKGROUND_MUSIC_URL}
+        url=""
         isPlaying={isMusicPlaying}
         isMuted={isMusicMuted}
       />
@@ -4770,6 +4778,23 @@ export default function App({match}: {match?: BattleMatch} = {}) {
             }`}>
             <FastForward size={12} />
             <span className="hidden sm:inline">{isAutoRolling ? 'HALT AUTO' : 'AUTO-ROLL'}</span>
+          </button>
+
+          <button
+            type="button"
+            aria-pressed={muted}
+            title="Toggle sound (M)"
+            onClick={() => {
+              const turningOn = muted;
+              toggleSfx();
+              if (turningOn) {
+                soundManager.unlock();
+                soundManager.play('ui_button_click');
+              }
+            }}
+            className="px-2 py-1 rounded font-bold text-[10px] tracking-wider border shadow-sm active:scale-95"
+            style={{background: '#3B333A', color: muted ? '#7A684B' : '#F4EFE2', borderColor: '#7A684B'}}>
+            [ SFX: {muted ? 'OFF' : 'ON'} ]
           </button>
 
           {/* Discreet Debug Auto-Win / Kill Enemy Forces Button */}
@@ -5375,13 +5400,10 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => {
-                    const newMuted = gameAudio.toggleMute();
-                    setSfxMuted(newMuted);
-                  }}
+                  onClick={() => toggleSfx()}
                   className="min-h-[48px] p-2 bg-[#5E4E54] hover:bg-[#7D6652] text-[#DFCE91] border border-[#7D6652] rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors">
-                  {sfxMuted ? <VolumeX size={16} className="text-[#9A4E48]" /> : <Volume2 size={16} className="text-[#8DA082]" />}
-                  <span>SFX: {sfxMuted ? 'OFF' : 'ON'}</span>
+                  {muted ? <VolumeX size={16} className="text-[#9A4E48]" /> : <Volume2 size={16} className="text-[#8DA082]" />}
+                  <span>SFX: {muted ? 'OFF' : 'ON'}</span>
                 </button>
 
                 <button

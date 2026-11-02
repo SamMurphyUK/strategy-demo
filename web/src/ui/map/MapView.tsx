@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { DRAG_PITCH_OFFSET, dragPitchStep, soundManager } from "../../audio/sound_manager";
 import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
 import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
@@ -38,10 +39,12 @@ import {
   fitView,
   panView,
   screenToWorld,
+  tiltFactor,
   type View,
   visibleCopies,
   worldTokenPx,
   worldToScreen,
+  anchorSpan,
   wrapView,
   wrapWorldX,
   zoomAt,
@@ -126,6 +129,8 @@ export interface MapViewProps {
   bindCamera?(camera: MapCamera | null): void;
   /** Skip painting while a battle covers the map. The camera state stays. */
   suspended?: boolean;
+  /** Battle (or the approach into one) swaps the room tone for the outdoor bed. */
+  inBattle?: boolean;
 }
 
 const DRAG_THRESHOLD_PX = 4;
@@ -204,6 +209,7 @@ export function MapView(props: MapViewProps) {
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const drag = useRef<Drag | null>(null);
   const suppressClick = useRef(false);
+  const waypointRegion = useRef("");
 
   // True shapes: each cutter boolean-clipped against the land SVG. Cached per cutter, so dragging one
   // vertex re-clips only the regions that share it. Without the land, the rough cutters stand in.
@@ -261,6 +267,10 @@ export function MapView(props: MapViewProps) {
   }
   const scarCount = props.relief?.scars.length ?? 0;
   const [scarNow, setScarNow] = useState(0);
+  useEffect(() => {
+    soundManager.updateAmbience(tiltFactor(view.k), props.inBattle === true);
+  }, [view.k, props.inBattle]);
+
   useEffect(() => {
     if (scarCount === 0 || props.suspended) {
       return;
@@ -532,6 +542,7 @@ export function MapView(props: MapViewProps) {
         }
         if (changed) {
           pulling.adjusted = true;
+          soundManager.play("split_wheel_tick");
           if (pulling.moved) {
             setGesture({ ...pulling, pointer: { ...pulling.pointer }, originWorld: { ...pulling.originWorld } });
             live.current.props.onDragCount?.(pulling.count);
@@ -605,10 +616,12 @@ export function MapView(props: MapViewProps) {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    soundManager.unlock();
     if (e.button !== 0 || cameraLock.current) {
       return;
     }
     if (splitRef.current && !(e.target as HTMLElement).closest?.(".split-popover")) {
+      soundManager.play("order_cancel");
       setSplit(null);
       live.current.props.onDragCancel?.();
     }
@@ -690,10 +703,23 @@ export function MapView(props: MapViewProps) {
         return;
       }
       g.pointer = sp;
+      const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer);
       if (!g.moved && Math.hypot(e.clientX - g.startX, e.clientY - g.startY) >= DRAG_THRESHOLD_PX) {
         armGesture(g);
+        waypointRegion.current = id;
       }
-      const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer);
+      if (g.moved && id !== waypointRegion.current) {
+        const left = waypointRegion.current;
+        waypointRegion.current = id;
+        if (left !== "" && id !== "") {
+          const regions = p.geometry.regions;
+          const origin = regions.find((region) => region.id === g.regionId);
+          const hovered = regions.find((region) => region.id === id);
+          const distance =
+            origin && hovered ? anchorSpan(origin.anchor, hovered.anchor, live.current.bounds, live.current.wrap) : 0;
+          soundManager.play("waypoint_tick", { step: dragPitchStep(distance), stepPitchOffset: DRAG_PITCH_OFFSET });
+        }
+      }
       setHoverId((prev) => (prev === id ? prev : id));
       p.onRegionHover(id);
       if (g.moved) {
@@ -775,6 +801,7 @@ export function MapView(props: MapViewProps) {
       );
       if (result.type === "cancel") {
         if (g.armed) {
+          soundManager.play("order_cancel");
           p.onDragCancel?.();
         }
         return;
@@ -862,7 +889,9 @@ export function MapView(props: MapViewProps) {
         return;
       }
       e.preventDefault();
-      g.count = clampMoveCount(Number(e.key), g.max);
+      const nextCount = clampMoveCount(Number(e.key), g.max);
+      if (nextCount !== g.count) soundManager.play("split_wheel_tick");
+      g.count = nextCount;
       g.adjusted = true;
       if (g.moved) {
         publishGesture(g);
@@ -893,6 +922,7 @@ export function MapView(props: MapViewProps) {
     if (!splitRef.current) {
       return;
     }
+    soundManager.play("order_cancel");
     splitRef.current = null;
     setSplit(null);
     live.current.props.onDragCancel?.();
@@ -948,7 +978,10 @@ export function MapView(props: MapViewProps) {
           y={split.y}
           boundsW={size.w}
           boundsH={size.h}
-          onCount={(count) => setSplit((s) => (s ? { ...s, count } : s))}
+          onCount={(count) => {
+            if (split.count !== count) soundManager.play("split_wheel_tick");
+            setSplit((s) => (s ? { ...s, count } : s));
+          }}
           onConfirm={confirmSplit}
           onCancel={cancelSplit}
         />

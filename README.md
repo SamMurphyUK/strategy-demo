@@ -1,66 +1,62 @@
 # Strategy Demo
 
-[![GUT CI](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml/badge.svg)](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml)
+[![Web CI](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/web-ci.yml/badge.svg)](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/web-ci.yml)
 
-Godot 4 turn-based strategy demo — Axis & Allies–style region control, IPC economy, unit purchase, movement, combat, and mobilization. Authoritative rules live in `res://core/`; Godot UI in `res://scenes/` and `res://scripts/`.
+Turn-based strategy demo — region control, IPC economy, purchase, movement, combat, and mobilization. Development is the Vite app and the Vitest suite in `web/`.
 
-## Quick start
+## Develop
 
-1. Open the project in **Godot 4.3+**.
-2. Run `res://scenes/GameScene.tscn` (F6).
-3. Use purchase, **End Phase**, mobilize drag-place, and region selection to exercise the loop.
-4. Press **F1** to toggle debug HUD / Inspector overlays.
-
-See [docs/DEMO.md](docs/DEMO.md) for factory modes, event schema, and migration notes.
-
-## Running tests locally
-
-Requires Godot 4 on your `PATH` as `godot` (or set `GODOT`).
+From `web/` (or from the repo root, which forwards these scripts):
 
 ```bash
-# Full integration suite + headless smoke
-./tools/run_demo_smoke.sh
-
-# GUT only
-godot --headless --path . -s addons/gut/gut_cmdln.gd \
-  -gdir=res://tests/integration -gexit -ginclude_subdirs
-
-# Smoke runner only (writes JSON result)
-godot --headless --path . -s res://scripts/demo_smoke_runner.gd \
-  -- --seed=12345 --output=/tmp/smoke_result.json
+npm install
+npm run dev       # http://127.0.0.1:5173
+npm test          # vitest run — tests/**/*.test.ts
+npm run build     # vite build
 ```
+
+`npm test` is the check for rules and map behavior. `npm run build` is the check that the app still bundles.
+
+## Where work goes
+
+| Path | Role |
+|------|------|
+| `web/src/engine` | Rules, state, commands, RNG. No React, DOM, canvas, or Web Audio. |
+| `web/src/ui` | Campaign map and battle screen. Displays state and sends commands. |
+| `web/tests` | Vitest. Engine ports live under `web/tests/engine`. Map and UI tests live under `web/tests/ui`. |
+| `data/`, `demomap01.json`, `docs/event_schema.json` | Shared content the engine still loads. One copy. |
+
+The map plays `GameSessionStub`. Godot scenes, scripts, and GUT under `scenes/`, `scripts/`, `tests/`, and `addons/gut/` are the previous game. Do not add features there.
 
 ## CI
 
-Every push/PR runs `.github/workflows/gut-ci.yml`:
+Pull requests and pushes to `main` run `.github/workflows/web-ci.yml`: `npm test` and `npm run build` in `web/`.
 
-- GUT integration tests under `res://tests/integration/`
-- Headless demo smoke via `scripts/demo_smoke_runner.gd`
+GUT (`.github/workflows/gut-ci.yml`) stays available as a manual workflow. It is not part of day-to-day development.
 
-A nightly job runs the smoke script with seed `99999` to catch non-deterministic regressions.
+## Related docs
 
-## Related policy docs
-
-- [DEBUG_RULES.md](DEBUG_RULES.md) — debugging policy (no per-frame prints, F1 overlays)
+- Game invariants below — the contract for `web/src/engine`
+- [DEBUG_RULES.md](DEBUG_RULES.md) — no per-frame logging
 - [docs/event_schema.json](docs/event_schema.json) — event wire shapes
+- [migration/ENGINE_PORT_PLAN.md](migration/ENGINE_PORT_PLAN.md) — the port record, not the backlog
 
 ---
 
 # Game invariants
 
-This section is the authoritative contract for **`res://core/`** (rules, state, commands, events, validators, RNG).
+This section is the authoritative contract for **`web/src/engine`**. The TypeScript uses the same field names as the Godot `core/` it was ported from. Snippets below are that shared shape.
 
-Assume all of this is true when working on engine code, tests, and session adapters.
-
-For Godot presentation (`res://scenes/`, `res://scripts/`, `res://debug/`), see **Presentation layer** below. UI may stage or display differently, but **must not mutate authoritative state except through commands**.
+UI in `web/src/ui` may stage a purchase or a drag, and must commit through a session command. It must not write `GameState` on its own.
 
 ## Scope
 
 | Layer | Path | Strictness |
 |-------|------|------------|
-| **Core (law)** | `res://core/` | Follow every invariant below |
-| **Presentation (pragmatic)** | `res://scenes/`, `res://scripts/`, `res://debug/` | May stage UI state; session is authoritative on confirm |
-| **Policy** | `DEBUG_RULES.md` | Debug overlays and logging only |
+| **Engine (law)** | `web/src/engine` | Follow every invariant below |
+| **Web UI** | `web/src/ui` | May stage input; the session is authoritative on confirm |
+| **Legacy Godot** | `scenes/`, `scripts/`, `core/` | Not the development path |
+| **Policy** | `DEBUG_RULES.md` | Logging only |
 
 **Game type:** Turn-based, region-control, IPC economy, unit purchase, movement, combat, mobilization/placement.
 
@@ -118,6 +114,8 @@ Combat unit: `u.attack > 0 or u.defense > 0`.
 Board presence lives in `state.region_units` entries, not in `Unit` objects.
 
 ## Godot preload rule
+
+Legacy GDScript only. New code is TypeScript in `web/`.
 
 When loading a custom class:
 
@@ -340,9 +338,9 @@ extends RefCounted
 
 Combat currently uses `next_int() % 6 + 1`; both are deterministic if PCG state is preserved.
 
-## Presentation layer (non-core)
+## Presentation layer
 
-These are **allowed** in `scenes/` / `scripts/` but are **not** engine invariants:
+The presentation you work on is `web/src/ui`. It may stage input and must commit through `applyCommand`. The rows below are the old Godot scene, kept so those files stay readable. They are not where new UI goes.
 
 | Pattern | Example | Rule |
 |---------|---------|------|
@@ -370,16 +368,15 @@ These are **allowed** in `scenes/` / `scripts/` but are **not** engine invariant
 - **Sea movement:** sea units traverse sea zones only (no land shortcuts); range from unit type (default 2 for ships).
 - **Transport load:** during `combat_move` / `noncombat_move`, unmoved land units in a region adjacent to a friendly transport's sea zone may load; cargo capacity follows unit container rules (2 slots: 2 infantry or 1 infantry + 1 artillery/tank). Loading counts as using that unit's move for the phase.
 
-### Allow looseness (presentation)
+### Allow looseness (web UI)
 
-- UI layout, camera pan/zoom, drag preview coordinates
+- Layout, camera pan and zoom, drag preview coordinates
 - Staging purchases before confirm
-- Debug overlays and event-based console logging
-- Godot-specific node paths and `CanvasLayer` settings
+- Event-based console logging
 
 ## Drift prevention
 
-1. **Change `core/`** → update this section and add/adjust tests under `res://tests/`.
-2. **Change UI only** → do not change invariants; document in scene comments if needed.
-3. **New event or command type** → add to tables above and to `Command` / `GameEvent` enums.
+1. **Change `web/src/engine`** → update this section and add or adjust a Vitest file under `web/tests`.
+2. **Change `web/src/ui` only** → do not change invariants. Cover the behavior with a UI test when it is testable without a browser.
+3. **New event or command type** → add it here and to the command and event types, and to `docs/event_schema.json` when the wire shape changes.
 4. **New unit identity need** → choose stack vs `instance_id` vs `unit_id: int` explicitly; do not default to global int ids.

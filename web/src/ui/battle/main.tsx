@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { Soundboard } from "../audio/Soundboard";
 import App from "./App";
 import "./battle.css";
 
@@ -8,7 +9,10 @@ import "./battle.css";
 
 // No StrictMode: the original root doesn't use it, and the canvas loop isn't written for double-mounted effects.
 createRoot(document.getElementById("root")!).render(
-  <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
-    <App />
-  </div>,
+  <>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+      <App />
+    </div>
+    <Soundboard />
+  </>,
 );

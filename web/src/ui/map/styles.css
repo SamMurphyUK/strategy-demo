@@ -563,8 +563,29 @@
 .campaign {
   /* ---------- map editor ---------- */
 
-  & .editor-toggle {
+  & button.sfx-toggle {
     margin-left: auto;
+    padding: 4px 10px;
+    background: #3b333a;
+    color: #f4efe2;
+    border: 1px solid #7a684b;
+    font: 600 11px/1.2 var(--mono);
+    letter-spacing: 0.06em;
+  }
+
+  & button.sfx-toggle:hover:not(:disabled),
+  & button.sfx-toggle:active:not(:disabled) {
+    background: #3b333a;
+    border-color: #7a684b;
+    color: #f4efe2;
+  }
+
+  & button.sfx-toggle[aria-pressed="true"] {
+    color: #7a684b;
+  }
+
+  & .editor-toggle {
+    margin-left: 0;
   }
 
   & .editor-toggle + .seed {

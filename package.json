@@ -1,0 +1,10 @@
+{
+  "name": "strategy-demo",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix web",
+    "test": "npm test --prefix web",
+    "build": "npm run build --prefix web",
+    "typecheck": "npm run typecheck --prefix web"
+  }
+}

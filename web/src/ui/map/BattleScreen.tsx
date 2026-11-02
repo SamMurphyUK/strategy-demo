@@ -87,6 +87,7 @@ export function BattleScreen({ game, battle, regionName, onExit }: Props) {
     return {
       theater: battle.battle_type === "naval" ? "navy_test" : "eastern",
       regionName,
+      attackerFaction: battle.attacker_faction_id,
       attackerIpc: game.session.state.getFactionIpc(battle.attacker_faction_id),
       defenderIpc: game.session.state.getFactionIpc(battle.defender_faction_id),
       attackers: toMatchUnits(battle.attackers, (id) => Math.trunc(Number(game.session.state.unit_types[id]?.cost ?? 0))),

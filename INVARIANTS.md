@@ -1,5 +1,5 @@
 # Game invariants
 
-The authoritative invariants document lives in **[README.md](README.md#game-invariants)** (section *Game invariants*).
+The contract for `web/src/engine` lives in **[README.md](README.md#game-invariants)** (section *Game invariants*).
 
-Do not duplicate content here — update README.md when core contracts change.
+Do not duplicate it here. When the engine contract changes, update that section and the Vitest that locks it.

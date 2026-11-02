@@ -6,7 +6,9 @@ import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
 import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
 import { BattleScreen } from "./BattleScreen";
-import { moveCue, playCampaignCue } from "./campaignAudio";
+import { playUiPanelFlick, soundManager } from "../../audio/sound_manager";
+import { Soundboard } from "../audio/Soundboard";
+import { playCampaignCue } from "./campaignAudio";
 import { armCampaignMusic, setCampaignBed } from "./campaignMusic";
 import { CombatDarken, CombatIntro } from "./CombatIntro";
 import {
@@ -110,7 +112,7 @@ export function App() {
     setSelection(null);
   }, [phase, faction, game.seed]);
 
-  // Strategy march on the map. The combat phase fades across to the battle march.
+  // Strategist 1 on the map. The combat phase fades across to strategist 2.
   useEffect(() => {
     setCampaignBed(editing ? "off" : phase === "combat" ? "battle" : "map");
   }, [editing, phase]);
@@ -261,7 +263,7 @@ export function App() {
       if (result.result_type === "ok") {
         setSelection(null);
         setSelectedRegionId(regionId);
-        playCampaignCue(moveCue(String(state.unit_types[selection.unitTypeId]?.category ?? ""), phase));
+        soundManager.play(phase === "combat_move" && state.isRegionHostileTo(regionId, faction) ? "battle_arrow_lock" : "token_drop");
       }
       return;
     }
@@ -338,7 +340,9 @@ export function App() {
     if (result.result_type === "ok") {
       setSelection(null);
       setSelectedRegionId(target);
-      playCampaignCue(moveCue(String(state.unit_types[entry.unit_type_id]?.category ?? ""), phase));
+      soundManager.play(
+        phase === "combat_move" && state.isRegionHostileTo(target, entry.faction_id) ? "battle_arrow_lock" : "token_drop",
+      );
     }
   };
 
@@ -349,7 +353,7 @@ export function App() {
 
   const armDrag = (regionId: string, entry: StackEntry, count: number) => {
     const max = movableCount(regionId, entry);
-    if (max > 0) playCampaignCue("pickup");
+    if (max > 0) soundManager.play("token_pickup");
     setSelectedRegionId(regionId);
     setSelection(
       max <= 0
@@ -378,7 +382,7 @@ export function App() {
       setSelection(null);
       return;
     }
-    playCampaignCue("pickup");
+    soundManager.play("token_pickup");
     setSelection({
       kind: "stack",
       regionId,
@@ -457,7 +461,18 @@ export function App() {
 
   return (
     <>
-    <div className="campaign" inert={covered ? true : undefined}>
+    <div
+      className="campaign"
+      inert={covered ? true : undefined}
+      onClickCapture={(event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const button = target.closest("button");
+        if (!button || button.closest(".sfx-toggle, .region-panel, .pending-orders")) return;
+        if (!button.closest(".phase-panel, .turn-bar, .editor-panel, .editor-toolbar")) return;
+        playUiPanelFlick();
+      }}
+    >
       <TurnBar
         game={game}
         editing={editing}
@@ -526,6 +541,7 @@ export function App() {
           editor={editing ? editor.binding : undefined}
           bindCamera={bindCamera}
           suspended={approach?.stage === "darken" || approach?.stage === "briefing" || battleOnScreen !== null}
+          inBattle={approach !== null || battleOnScreen !== null}
         >
           {editing && <EditorToolbar editor={editor} />}
         </MapView>
@@ -572,6 +588,7 @@ export function App() {
         onBegin={beginBattle}
       />
     )}
+    <Soundboard />
     {battleOnScreen && (
       <div className="combat-cover">
         <BattleScreen

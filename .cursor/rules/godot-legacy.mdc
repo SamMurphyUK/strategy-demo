@@ -1,0 +1,16 @@
+---
+description: Godot scenes and scripts are the previous game. Do not add features here.
+globs: "**/*.{gd,tscn}"
+alwaysApply: false
+---
+
+# Legacy Godot
+
+The playable game and its tests are `web/`. Treat `scenes/`, `scripts/`, and `addons/gut` as the previous client.
+
+If a `.gd` file must change:
+
+- No `get_node()` or `$` to parents, siblings, or distant nodes. Call down into children only.
+- Upward and cross-system calls use typed signals. No EventBus for gameplay.
+- Gameplay code does not call `FileAccess`. Content loading that already does is not a pattern to copy.
+- Do not add a new scene, autoload, or GUT test for a feature that belongs in `web/`.

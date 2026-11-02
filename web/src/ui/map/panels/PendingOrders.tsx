@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { soundManager } from "../../../audio/sound_manager";
 import type { MoveOrder } from "../../../engine/movement/phase_orders";
 import { factionPalette } from "../../theme/factionPalette";
 import { factionName, unitName } from "../session/event_text";
@@ -42,6 +43,7 @@ export function PendingOrders({ game, onCancelled }: Props) {
   }
 
   const cancel = (order: MoveOrder) => {
+    soundManager.play("order_cancel");
     game.cancelPhaseOrder(order.id);
     onCancelled();
   };

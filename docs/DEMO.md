@@ -1,6 +1,6 @@
-# Demo session (controller-driven stub)
+# Demo session
 
-[![GUT CI](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml/badge.svg)](https://github.com/SamMurphyUK/strategy-demo/actions/workflows/gut-ci.yml)
+The demo you run is the Vite app: from `web/`, `npm run dev`. Rules checks are `npm test`. The notes below describe the stub the map still plays (`web/src/engine/session/game_session_stub.ts`). Godot `GameScene` is the previous client.
 
 ## Overview
 

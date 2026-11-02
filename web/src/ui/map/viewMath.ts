@@ -99,6 +99,21 @@ export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: numb
   return { k, x: anchor.x - screenPoint.x / sx, y: anchor.y - screenPoint.y / sy };
 }
 
+/**
+ * Distance between two territory anchors. On a wrapping map the shorter way around wins, so a
+ * neighbour drawn on the other copy is not a trip across the world.
+ */
+export function anchorSpan(from: Vec2, to: Vec2, bounds: Rect, wrap: boolean): number {
+  let dx = to.x - from.x;
+  if (wrap && bounds.w > 0) {
+    dx = wrapWorldX(to.x, bounds) - wrapWorldX(from.x, bounds);
+    const half = bounds.w / 2;
+    if (dx > half) dx -= bounds.w;
+    else if (dx < -half) dx += bounds.w;
+  }
+  return Math.hypot(dx, to.y - from.y);
+}
+
 /** World x folded into [bounds.x, bounds.x + bounds.w): the same spot on the primary copy of a wrapped world. */
 export function wrapWorldX(x: number, bounds: Rect): number {
   if (bounds.w <= 0) {

@@ -1,5 +1,11 @@
 # Engine port plan
 
+This is the record of the port. It is not the backlog.
+
+Ongoing work is the Vite app and the Vitest suite in `web/`. Run `npm test` and `npm run build` from `web/`. The engine now lives at `web/src/engine`, and the tests at `web/tests`. Godot scenes and GUT stay in the tree as the previous game.
+
+The original instruction follows.
+
 Port the rules in `core/` and `rules/` into framework-agnostic TypeScript under `src/engine/`. The Vitest suite is a 1:1 port of the GUT tests that exist today. Do not port scenes, the map editor, UI scripts, or the GUT addon.
 
 No Godot files were changed to produce this plan.

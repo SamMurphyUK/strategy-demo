@@ -1,4 +1,5 @@
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState, useSyncExternalStore } from "react";
+import { playUiPanelFlick, sfxMuted, subscribeSfx, toggleSfx } from "../../../audio/sound_manager";
 import { PHASES } from "../../../engine/turn/turn_engine";
 import { factionPalette } from "../../theme/factionPalette";
 import type { MapVersion } from "../editor/mapVersions";
@@ -30,6 +31,7 @@ export function TurnBar({ game, editing, versions, onToggleEditing }: Props) {
       setMapId(DEMO_MAP_ID);
     }
   }, [versions, mapId, game.mapId]);
+  const muted = useSyncExternalStore(subscribeSfx, sfxMuted, () => false);
   const faction = state.current_faction_id;
   const phaseIndex = PHASES.indexOf(state.current_phase as (typeof PHASES)[number]);
   const mapListed = mapId === DEMO_MAP_ID || versions.some((version) => version.id === mapId);
@@ -62,6 +64,22 @@ export function TurnBar({ game, editing, versions, onToggleEditing }: Props) {
           </span>
         ))}
       </div>
+      <button
+        type="button"
+        className="sfx-toggle"
+        aria-pressed={muted}
+        onClick={() => {
+          if (muted) {
+            toggleSfx();
+            playUiPanelFlick();
+          } else {
+            playUiPanelFlick();
+            toggleSfx();
+          }
+        }}
+      >
+        [ SFX: {muted ? "OFF" : "ON"} ]
+      </button>
       <button type="button" className={editing ? "active editor-toggle" : "editor-toggle"} onClick={onToggleEditing}>
         {editing ? "Back to game" : "Map editor"}
       </button>
