@@ -196,7 +196,9 @@
 				"max_per_type": {
 					"infantry": 2,
 					"artillery": 1,
-					"tank": 1
+					"tank": 1,
+					"mech_infantry": 1,
+					"aa": 1
 				}
 			},
 			"special": {
@@ -206,6 +208,20 @@
 				"cannot_attack": true,
 				"cannot_defend": true,
 				"dies_first": true
+			}
+		},
+		{
+			"id": "aa",
+			"name": "AA Gun",
+			"category": "land",
+			"cost": 5,
+			"attack": 0,
+			"defense": 0,
+			"movement": 1,
+			"container": null,
+			"special": {
+				"is_aa": true,
+				"noncombat_move_only": true
 			}
 		}
 	]

@@ -6,7 +6,9 @@ import type { GameEvent, GameEventDict } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { MovementEngine } from "../movement/movement";
-import { applyRecordedMove } from "../movement/phase_orders";
+import { applyCargoCommand, applyRecordedMove } from "../movement/phase_orders";
+import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
+import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { PlacementEngine } from "../placement/placement";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { processEndPhase, processEndTurn, startTurn } from "../turn/phase_controllers";
@@ -113,23 +115,82 @@ export class GameSession {
         events = this.syncSeq(applyRecordedMove(this.state, cmd, this.movement));
         break;
 
-      case CommandType.LOAD_TRANSPORT:
-        events = this.syncSeq(this.movement.processLoad(cmd));
+      case CommandType.LOAD_TRANSPORT: {
+        const load = new TransportLoadValidator().validateLoad(
+          String(cmd.payload.transport_instance_id ?? ""),
+          String(cmd.payload.from_region_id ?? ""),
+          cmd.payload.units ?? [],
+          cmd.player_id,
+          this.state,
+        );
+        if (!load.ok) {
+          return {
+            result_type: "error",
+            error: { code: "LOAD_INVALID", message: load.errors[0]?.message ?? "Cannot load units onto transport" },
+            events: [],
+            new_state: this.state.toSnapshot(),
+          };
+        }
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
+      }
 
-      case CommandType.UNLOAD_TRANSPORT:
-        events = this.syncSeq(this.movement.processUnload(cmd));
+      case CommandType.UNLOAD_TRANSPORT: {
+        const unload = unloadError(
+          this.state,
+          cmd.player_id,
+          String(cmd.payload.transport_instance_id ?? ""),
+          String(cmd.payload.to_region_id ?? ""),
+          cmd.payload.units ?? [],
+        );
+        if (unload != null) {
+          return {
+            result_type: "error",
+            error: { code: "UNLOAD_INVALID", message: unload },
+            events: [],
+            new_state: this.state.toSnapshot(),
+          };
+        }
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
+      }
 
-      case CommandType.DESIGNATE_AMPHIBIOUS:
-        events = this.syncSeq(this.amphibious.designateAssault(cmd));
+      case CommandType.DESIGNATE_AMPHIBIOUS: {
+        const assault = assaultError(
+          this.state,
+          cmd.player_id,
+          String(cmd.payload.transport_instance_id ?? ""),
+          String(cmd.payload.origin_sea_zone_id ?? ""),
+          String(cmd.payload.target_region_id ?? ""),
+        );
+        if (assault != null) {
+          return {
+            result_type: "error",
+            error: { code: "AMPHIBIOUS_INVALID", message: assault },
+            events: [],
+            new_state: this.state.toSnapshot(),
+          };
+        }
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
+      }
 
       case CommandType.PLACE_UNITS:
         events = this.syncSeq(this.placement.processPlacement(cmd));
         break;
 
-      case CommandType.END_PHASE:
+      case CommandType.END_PHASE: {
+        if (this.state.current_phase === "combat_move") {
+          const cargo = strandedCargoGate(this.state);
+          if (!cargo.advance) {
+            return {
+              result_type: "error",
+              error: { code: "CARGO_STRANDED", message: cargo.warning },
+              events: [],
+              new_state: this.state.toSnapshot(),
+            };
+          }
+        }
         events = processEndPhase(
           this.state.current_phase,
           this.state,
@@ -140,6 +201,7 @@ export class GameSession {
           sync,
         );
         break;
+      }
 
       case CommandType.END_TURN:
         events = processEndTurn(
@@ -194,7 +256,7 @@ export class GameSession {
       case "purchase":
         return ["purchase_units", "end_phase"];
       case "combat_move":
-        return ["move_units", "load_transport", "designate_amphibious", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "end_phase"];
       case "combat":
         return [];
       case "noncombat_move":

@@ -180,19 +180,33 @@ describe("core/test_battle", () => {
     expect(state.regions.A.owner_faction_id).toBe("blue");
   });
 
-  it("keeps aircraft from hitting submarines unless a destroyer is with them, and keeps submarines from hitting aircraft", () => {
-    state.unit_types.fighter.attack = 6;
-    state.unit_types.fighter.defense = 6;
-    state.unit_types.submarine.attack = 6;
-    state.unit_types.submarine.defense = 6;
-    state.unit_types.destroyer.attack = 6;
+  it("lets submarines submerge when only aircraft could fire on them, and keeps them when a destroyer is there", () => {
     addRegion(state, "Sea", "sea", "", [stack("red", "fighter", 2), stack("blue", "submarine", 2)]);
-    mustOk(combat.startBattle("Sea", "red"));
-    mustOk(combat.rollRound("red"));
-    const battle = state.active_battle!;
-    expect(battle.last_casualties.filter((c) => c.unit_id.startsWith("blue.submarine"))).toEqual([]);
-    expect(battle.last_casualties.filter((c) => c.unit_id.startsWith("red.fighter"))).toEqual([]);
-    expect(battle.attacker_hits_to_take).toBe(0);
+    expect(combat.identifyBattles("red")).toEqual([]);
+    expect(combat.startBattle("Sea", "red")).toMatchObject({ ok: false, error: { code: "NO_BATTLE" } });
+    expect(state.region_units.Sea).toEqual([stack("red", "fighter", 2), stack("blue", "submarine", 2)]);
+    combat.resolveAllBattles("red");
+    expect(state.active_battle).toBeNull();
+    expect(state.region_units.Sea).toEqual([stack("red", "fighter", 2), stack("blue", "submarine", 2)]);
+
+    addRegion(state, "Mixed", "sea", "", [
+      stack("red", "fighter", 2),
+      stack("blue", "submarine", 2),
+      stack("blue", "battleship", 1),
+    ]);
+    const started = mustOk(combat.startBattle("Mixed", "red"));
+    expect(started.events[0]?.payload).toMatchObject({ submerged: ["blue.submarine.1", "blue.submarine.2"] });
+    expect(state.active_battle?.defenders.map((u) => u.unit_type_id)).toEqual(["battleship"]);
+    expect(state.active_battle?.attackers.map((u) => u.unit_type_id)).toEqual(["fighter", "fighter"]);
+    const open = state.active_battle!;
+    open.defenders[0].hp = 0;
+    open.stage = "awaiting_casualties";
+    open.attacker_hits_to_take = 0;
+    mustOk(combat.assignAttackerCasualties("red", []));
+    expect(state.active_battle).toBeNull();
+    expect(state.region_units.Mixed.find((entry) => entry.unit_type_id === "submarine")?.count).toBe(2);
+    expect(state.region_units.Mixed.find((entry) => entry.unit_type_id === "fighter")?.count).toBe(2);
+    expect(state.region_units.Mixed.find((entry) => entry.unit_type_id === "battleship")).toBeUndefined();
 
     const covered = newState();
     covered.unit_types.fighter.attack = 6;
@@ -205,8 +219,28 @@ describe("core/test_battle", () => {
     ]);
     const engine = new CombatEngine(covered, new PCG(1, 1));
     mustOk(engine.startBattle("Sea", "red"));
+    expect(covered.active_battle?.defenders.map((u) => u.unit_type_id)).toEqual(["submarine"]);
     mustOk(engine.rollRound("red"));
     expect(covered.active_battle?.last_casualties.some((c) => c.unit_id === "blue.submarine.1")).toBe(true);
+  });
+
+  it("lets a submarine slip away once the ship that could hit it is gone", () => {
+    state.unit_types.fighter.attack = 0;
+    state.unit_types.destroyer.attack = 0;
+    state.unit_types.submarine.defense = 6;
+    addRegion(state, "Sea", "sea", "", [
+      stack("red", "fighter", 1),
+      stack("red", "destroyer", 1),
+      stack("blue", "submarine", 1),
+    ]);
+    mustOk(combat.startBattle("Sea", "red"));
+    mustOk(combat.rollRound("red"));
+    expect(state.active_battle?.stage).toBe("awaiting_casualties");
+    mustOk(combat.assignAttackerCasualties("red"));
+    expect(state.active_battle).toBeNull();
+    expect(state.region_units.Sea.find((entry) => entry.unit_type_id === "submarine")?.count).toBe(1);
+    expect(state.region_units.Sea.find((entry) => entry.unit_type_id === "fighter")?.count).toBe(1);
+    expect(state.region_units.Sea.find((entry) => entry.unit_type_id === "destroyer")).toBeUndefined();
   });
 
   it("lets aircraft sink a transport", () => {

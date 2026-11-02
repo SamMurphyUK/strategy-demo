@@ -21,6 +21,9 @@ export class MovementValidator {
     }
 
     const unitTypeId = String(unit.unit_type_id ?? "");
+    if (this.movesOnlyInNoncombat(unitTypeId, state)) {
+      return preview;
+    }
     const moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
 
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
@@ -49,6 +52,9 @@ export class MovementValidator {
       return legal;
     }
     if (state.movableStackCount(factionId, fromRegion, unitTypeId) <= 0) {
+      return legal;
+    }
+    if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       return legal;
     }
     const air = isAirUnit(state, unitTypeId);
@@ -87,6 +93,9 @@ export class MovementValidator {
     if (unitTypeId === "") {
       return legal;
     }
+    if (this.movesOnlyInNoncombat(unitTypeId, state)) {
+      return legal;
+    }
     let moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
     if (moveRange <= 0) {
       moveRange = 1;
@@ -120,6 +129,8 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_ALREADY_MOVED", "Ship already moved this phase"));
     } else if (this.instanceRegion(instanceId, state) !== fromRegion) {
       result.errors.push(MoveError.of("MOVE_INVALID", `Ship is not in ${fromRegion}`));
+    } else if (this.movesOnlyInNoncombat(unitTypeId, state)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
     } else if (
       !state.isAdjacent(fromRegion, toRegion) &&
       !this.floodFill(
@@ -153,6 +164,8 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_INVALID", "Missing from/to region"));
     } else if (fromRegion === toRegion) {
       result.errors.push(MoveError.of("MOVE_INVALID", "Cannot move to the same region"));
+    } else if (this.movesOnlyInNoncombat(unitTypeId, state)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
     } else if (
       isAirUnit(state, unitTypeId)
         ? airSteps(state, fromRegion, toRegion) > fuelRemaining(state, factionId, fromRegion, unitTypeId)
@@ -221,6 +234,11 @@ export class MovementValidator {
 
   private instanceUnitType(instanceId: string, state: GameState): string {
     return String(state.transport_instances[instanceId]?.unit_type_id ?? "");
+  }
+
+  /** AA guns have a movement of 1, and only during non-combat. */
+  private movesOnlyInNoncombat(unitTypeId: string, state: GameState): boolean {
+    return Boolean(state.unit_types[unitTypeId]?.special?.noncombat_move_only) && state.current_phase !== "noncombat_move";
   }
 
   validateNonCombatMovementBatch(

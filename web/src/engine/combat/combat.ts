@@ -4,15 +4,23 @@ import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import { type Dict, deepCopy, type UnitStackEntry } from "../model/types";
 import type { PCG } from "../rng/pcg";
+import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
 import {
+  assignAaHits,
+  assignBombardHits,
+  attackingAircraft,
   battleOutcome,
   casualtyFitsBudget,
+  defendingAaGuns,
+  escapingSubmarines,
   firingRanks,
+  hasCombatantsAfterEscape,
   type HitBudget,
   hitsOn,
   isAlive,
   isCombatUnit,
   maxHpOf,
+  openingAaShots,
   resolveHit,
   restrictedCasualties,
 } from "./battle_rules";
@@ -73,11 +81,19 @@ export class CombatEngine {
       if (region == null) {
         continue;
       }
-      if (this.getCombatUnits(regionId, attackerFactionId).length === 0) {
+      const landed = state.amphibious_landings.some(
+        (landing) => landing.region_id === regionId && landing.faction_id === attackerFactionId,
+      );
+      if (this.getCombatUnits(regionId, attackerFactionId).length === 0 && !landed) {
         continue;
       }
       const defenderFactionId = this.defenderIn(regionId, attackerFactionId);
       if (defenderFactionId === "") {
+        continue;
+      }
+      const attackers = this.expand(regionId, attackerFactionId, "attacker");
+      const defenders = this.expand(regionId, defenderFactionId, "defender");
+      if (!hasCombatantsAfterEscape(attackers, defenders, state.unit_types) && !landed) {
         continue;
       }
       battles.push({
@@ -96,16 +112,23 @@ export class CombatEngine {
     );
   }
 
-  /** Transports do not roll, but they are navy and can be attacked. */
+  /** Transports do not roll, but they are navy and can be attacked. AA guns fire only their opening volley. */
   private isTargetable(entry: UnitStackEntry): boolean {
     const type = this.state.unit_types[entry.unit_type_id];
-    return isCombatUnit(type) || type?.category === "sea";
+    return isCombatUnit(type) || type?.category === "sea" || Boolean(type?.special?.is_aa);
   }
 
   /** Adjacent regions the attacker may fall back to: no enemy units, and friendly land for a land battle. */
   legalRetreats(): string[] {
     const battle = this.state.active_battle;
     if (battle == null) {
+      return [];
+    }
+    const living = battle.attackers.filter(isAlive);
+    const canFlee = living.some(
+      (unit) => !(unit.amphibious && this.state.unit_types[unit.unit_type_id]?.category === "land"),
+    );
+    if (!canFlee) {
       return [];
     }
     const attacker = battle.attacker_faction_id;
@@ -219,7 +242,31 @@ export class CombatEngine {
     if (!this.legalRetreats().includes(toRegionId)) {
       return fail("INVALID_RETREAT", `Cannot retreat to ${toRegionId}`);
     }
-    return { ok: true, events: this.finish(battle!, "attacker_retreated", toRegionId) };
+    const b = battle!;
+    const staying = b.attackers.filter(
+      (unit) => isAlive(unit) && unit.amphibious && this.state.unit_types[unit.unit_type_id]?.category === "land",
+    );
+    const leaving = b.attackers.filter((unit) => isAlive(unit) && !staying.includes(unit));
+    if (leaving.length === 0) {
+      return fail("INVALID_RETREAT", "Amphibious units cannot retreat");
+    }
+    if (staying.length === 0) {
+      return { ok: true, events: this.finish(b, "attacker_retreated", toRegionId) };
+    }
+    this.mergeInto(toRegionId, this.toStacks(leaving));
+    this.removeStacks(b.region_id, this.toStacks(leaving));
+    const gone = new Set(leaving.map((unit) => unit.id));
+    b.attackers = b.attackers.filter((unit) => !gone.has(unit.id));
+    return {
+      ok: true,
+      events: [
+        GameEvent.create(
+          GameEventType.UNITS_MOVED,
+          { region_id: b.region_id, retreat_to: toRegionId, units: this.toStacks(leaving) },
+          this.nextSeq(),
+        ),
+      ],
+    };
   }
 
   // ---------------------------------------------------------
@@ -334,21 +381,27 @@ export class CombatEngine {
       last_dice: [],
       last_casualties: [],
     };
+    this.stampAmphibious(active);
+    if (active.battle_type === "naval") {
+      this.state.naval_battles_this_turn[active.region_id] = true;
+    }
+    const submerged = this.releaseSubmarines(active);
     this.state.active_battle = active;
-    return [
-      GameEvent.create(
-        GameEventType.BATTLE_STARTED,
-        {
-          region_id: active.region_id,
-          attacker: active.attacker_faction_id,
-          defender: active.defender_faction_id,
-          battle_type: active.battle_type,
-          attackers: deepCopy(active.attackers),
-          defenders: deepCopy(active.defenders),
-        },
-        this.nextSeq(),
-      ),
-    ];
+    const started = GameEvent.create(
+      GameEventType.BATTLE_STARTED,
+      {
+        region_id: active.region_id,
+        attacker: active.attacker_faction_id,
+        defender: active.defender_faction_id,
+        battle_type: active.battle_type,
+        attackers: deepCopy(active.attackers),
+        defenders: deepCopy(active.defenders),
+        ...(submerged.length > 0 ? { submerged } : {}),
+      },
+      this.nextSeq(),
+    );
+    const cleared = this.finishIfClear(active);
+    return cleared ? [started, ...cleared] : [started];
   }
 
   private rollDie(unit: BattleUnitState, side: BattleSide, rank: number, surprise: boolean): BattleDie {
@@ -360,8 +413,131 @@ export class CombatEngine {
     return Boolean(this.state.unit_types[unit.unit_type_id]?.special?.[flag]);
   }
 
-  /** Every living unit fires once. Surviving submarines without an enemy destroyer fire first. */
+  /** Marks cargo that landed from a transport, and adds pieces that do not roll a normal attack. */
+  private stampAmphibious(b: ActiveBattle): void {
+    const budget: Record<string, number> = {};
+    for (const landing of this.state.amphibious_landings) {
+      if (landing.region_id !== b.region_id || landing.faction_id !== b.attacker_faction_id) {
+        continue;
+      }
+      for (const line of landing.cargo) {
+        budget[line.unit_type_id] = (budget[line.unit_type_id] ?? 0) + Math.trunc(Number(line.count ?? 0));
+      }
+    }
+    for (const unit of b.attackers) {
+      if ((budget[unit.unit_type_id] ?? 0) <= 0) {
+        continue;
+      }
+      unit.amphibious = true;
+      budget[unit.unit_type_id] -= 1;
+    }
+    for (const unitType of Object.keys(budget)) {
+      const maxHp = maxHpOf(this.state.unit_types[unitType]);
+      for (let i = 0; i < budget[unitType]; i++) {
+        b.attackers.push({
+          id: `${b.attacker_faction_id}.${unitType}.amphib.${i + 1}`,
+          faction_id: b.attacker_faction_id,
+          unit_type_id: unitType,
+          hp: maxHp,
+          max_hp: maxHp,
+          amphibious: true,
+        });
+      }
+    }
+  }
+
+  /** Battleships hit on 4 and cruisers on 3, one ship per offloaded ground unit. */
+  private shoreBombardment(b: ActiveBattle): { dice: BattleDie[]; casualties: BattleCasualty[] } {
+    const dice: BattleDie[] = [];
+    const casualties: BattleCasualty[] = [];
+    const landing = this.state.amphibious_landings.find(
+      (item) => item.region_id === b.region_id && item.faction_id === b.attacker_faction_id,
+    );
+    if (landing == null || navalBattleBlocksBombardment(this.state, landing.sea_zone_id, b.attacker_faction_id)) {
+      return { dice, casualties };
+    }
+    const ground = b.attackers.filter(
+      (unit) => isAlive(unit) && unit.amphibious && this.state.unit_types[unit.unit_type_id]?.category === "land",
+    ).length;
+    const ships: string[] = [];
+    for (const entry of this.state.region_units[landing.sea_zone_id] ?? []) {
+      if (entry.faction_id !== b.attacker_faction_id) {
+        continue;
+      }
+      const id = String(entry.unit_type_id ?? "");
+      if (id !== "battleship" && id !== "cruiser") {
+        continue;
+      }
+      const count = entry.instance_id ? 1 : Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      for (let i = 0; i < count; i++) {
+        ships.push(id);
+      }
+    }
+    ships.sort((a, c) => (a === "battleship" ? 0 : 1) - (c === "battleship" ? 0 : 1));
+    const shots = Math.min(ground, ships.length);
+    let hits = 0;
+    for (let i = 0; i < shots; i++) {
+      const rank = ships[i] === "battleship" ? 4 : 3;
+      const roll = this.rng.rollD6();
+      const die: BattleDie = {
+        unit_id: `bombard.${ships[i]}.${i + 1}`,
+        side: "attacker",
+        rank,
+        roll,
+        hit: hitsOn(roll, rank),
+        surprise: false,
+        bombard: true,
+      };
+      dice.push(die);
+      if (die.hit) {
+        hits += 1;
+      }
+    }
+    if (hits > 0) {
+      const plan = assignBombardHits(b.defenders, hits, this.state.unit_types);
+      this.applyCasualties(b, plan);
+      casualties.push(...plan);
+    }
+    return { dice, casualties };
+  }
+
+  /**
+   * Submarines the other side cannot hit leave before anyone fires.
+   * They stay in the sea zone. The ids are the boats that just slipped away.
+   */
+  private releaseSubmarines(b: ActiveBattle): string[] {
+    const types = this.state.unit_types;
+    const attackingLeave = new Set(escapingSubmarines(b.attackers, b.defenders, "defender", types).map((unit) => unit.id));
+    const defendingLeave = new Set(escapingSubmarines(b.defenders, b.attackers, "attacker", types).map((unit) => unit.id));
+    const drop = (units: BattleUnitState[], leaving: Set<string>): string[] => {
+      const ids = units.filter((unit) => leaving.has(unit.id)).map((unit) => unit.id);
+      if (ids.length === 0) {
+        return [];
+      }
+      const staying = units.filter((unit) => !leaving.has(unit.id));
+      units.splice(0, units.length, ...staying);
+      return ids;
+    };
+    return [...drop(b.attackers, attackingLeave), ...drop(b.defenders, defendingLeave)];
+  }
+
+  /** Ends the battle when a side has nobody left in it. */
+  private finishIfClear(b: ActiveBattle): GameEvent[] | null {
+    const outcome = battleOutcome(b.attackers.filter(isAlive).length, b.defenders.filter(isAlive).length);
+    if (outcome === "undecided") {
+      return null;
+    }
+    return this.finish(b, outcome);
+  }
+
+  /** Every living unit fires once. AA guns fire at aircraft before round 1, then sit out. */
   private roll(b: ActiveBattle): GameEvent[] {
+    this.releaseSubmarines(b);
+    const cleared = this.finishIfClear(b);
+    if (cleared) {
+      return cleared;
+    }
+    const openingRound = b.stage === "awaiting_roll";
     if (b.stage === "awaiting_decision") {
       b.round += 1;
     }
@@ -369,6 +545,34 @@ export class CombatEngine {
     const dice: BattleDie[] = [];
     const casualties: BattleCasualty[] = [];
     const fired = new Set<string>();
+
+    if (openingRound && b.battle_type === "land") {
+      const guns = defendingAaGuns(b.defenders, types);
+      const planes = attackingAircraft(b.attackers);
+      const shots = openingAaShots(guns.length, planes.length);
+      let aaHits = 0;
+      for (let i = 0; i < shots; i++) {
+        const die = { ...this.rollDie(guns[i % guns.length], "defender", 1, false), aa: true as const };
+        dice.push(die);
+        if (die.hit) aaHits += 1;
+      }
+      if (aaHits > 0) {
+        const plan = assignAaHits(planes, aaHits, types);
+        this.applyCasualties(b, plan);
+        casualties.push(...plan);
+      }
+      const ended = this.finishIfClear(b);
+      if (ended) {
+        return [...this.diceRolled(b, dice, casualties), ...ended];
+      }
+      const bombarded = this.shoreBombardment(b);
+      dice.push(...bombarded.dice);
+      casualties.push(...bombarded.casualties);
+      const afterBombardment = this.finishIfClear(b);
+      if (afterBombardment) {
+        return [...this.diceRolled(b, dice, casualties), ...afterBombardment];
+      }
+    }
 
     const attackerDestroyer = b.attackers.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
     const defenderDestroyer = b.defenders.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
@@ -404,7 +608,7 @@ export class CombatEngine {
       const ranks = firingRanks(own, side, types);
       const budget: HitBudget = { any: 0, skipAir: 0, skipSub: 0 };
       for (const unit of own) {
-        if (!isAlive(unit) || fired.has(unit.id)) {
+        if (!isAlive(unit) || fired.has(unit.id) || this.hasFlag(unit, "is_aa")) {
           continue;
         }
         const die = this.rollDie(unit, side, ranks.get(unit.id) ?? 0, false);
@@ -449,7 +653,20 @@ export class CombatEngine {
     b.last_dice = dice;
     b.last_casualties = casualties;
 
-    const events = [
+    const events = this.diceRolled(b, dice, casualties);
+
+    if (b.attacker_hits_to_take > 0) {
+      b.stage = "awaiting_casualties";
+      return events;
+    }
+    events.push(...this.afterCasualties(b));
+    return events;
+  }
+
+  private diceRolled(b: ActiveBattle, dice: BattleDie[], casualties: BattleCasualty[]): GameEvent[] {
+    b.last_dice = dice;
+    b.last_casualties = casualties;
+    return [
       GameEvent.create(
         GameEventType.DICE_ROLLED,
         {
@@ -464,13 +681,6 @@ export class CombatEngine {
         this.nextSeq(),
       ),
     ];
-
-    if (b.attacker_hits_to_take > 0) {
-      b.stage = "awaiting_casualties";
-      return events;
-    }
-    events.push(...this.afterCasualties(b));
-    return events;
   }
 
   private planChosenHits(b: ActiveBattle, unitIds: string[]): { plan: BattleCasualty[] } | { error: string } {
@@ -518,9 +728,10 @@ export class CombatEngine {
   }
 
   private afterCasualties(b: ActiveBattle): GameEvent[] {
-    const outcome = battleOutcome(b.attackers.filter(isAlive).length, b.defenders.filter(isAlive).length);
-    if (outcome !== "undecided") {
-      return this.finish(b, outcome);
+    this.releaseSubmarines(b);
+    const cleared = this.finishIfClear(b);
+    if (cleared) {
+      return cleared;
     }
     b.stage = "awaiting_decision";
     return [];
@@ -596,6 +807,26 @@ export class CombatEngine {
       }
     }
     return stacks;
+  }
+
+  private removeStacks(regionId: string, stacks: UnitStackEntry[]): void {
+    const units = this.state.region_units[regionId] ?? [];
+    for (const stack of stacks) {
+      let count = Math.trunc(Number(stack.count ?? 0));
+      for (let i = units.length - 1; i >= 0 && count > 0; i--) {
+        const entry = units[i];
+        if (entry.faction_id !== stack.faction_id || entry.unit_type_id !== stack.unit_type_id || entry.instance_id) {
+          continue;
+        }
+        if (entry.count > count) {
+          entry.count -= count;
+          count = 0;
+        } else {
+          count -= entry.count;
+          units.splice(i, 1);
+        }
+      }
+    }
   }
 
   private mergeInto(regionId: string, stacks: UnitStackEntry[]): void {

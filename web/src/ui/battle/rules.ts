@@ -82,7 +82,7 @@ export function resolveRanks(
   const byUid = new Map(resolved.map((rank) => [rank.uid, rank]));
   const active = units.filter((unit) => unit.active);
 
-  const infantry = active.filter((unit) => unit.type === "infantry");
+  const infantry = active.filter((unit) => unit.type === "infantry" || unit.type === "mech_infantry");
   const artillery = active.filter((unit) => unit.type === "artillery");
   const pairs = Math.min(infantry.length, artillery.length);
   for (let i = 0; i < pairs; i++) {

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
+import { strandedCargoGate } from "../../../engine/transport/cargo_rules";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import { cancel_phase_order } from "../../../engine/movement/phase_orders";
@@ -81,6 +82,14 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
           append([{ kind: "error", text: message }]);
           setVersion((v) => v + 1);
           return { result_type: "error", error: { code: "UNITS_UNPLACED", message }, events: [] };
+        }
+      }
+      if (type === "end_phase" && session.state.current_phase === "combat_move") {
+        const cargo = strandedCargoGate(session.state);
+        if (!cargo.advance) {
+          append([{ kind: "error", text: cargo.warning }]);
+          setVersion((v) => v + 1);
+          return { result_type: "error", error: { code: "CARGO_STRANDED", message: cargo.warning }, events: [] };
         }
       }
       if (type === "end_phase" && session.state.current_phase === "noncombat_move") {

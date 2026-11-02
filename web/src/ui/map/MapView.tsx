@@ -98,6 +98,10 @@ export interface MapViewProps {
   fuelFor?(regionId: string, entry: StackEntry): number | null;
   /** A transport with cargo aboard gets a dot on its token. */
   isLoaded?(entry: StackEntry): boolean;
+  /** Pieces aboard, drawn as the cargo pill. */
+  cargoCount?(entry: StackEntry): number;
+  /** Sea zone to ring while combat-move cargo is still aboard. */
+  warningRegionId?: string;
   /** A capped fan or its [+] was clicked: select the region and open the inspector. */
   onOpenInspector?(regionId: string): void;
   /** Registers the function that turns a screen point into the region under it, for a drag out of the inspector. */
@@ -190,6 +194,14 @@ export function MapView(props: MapViewProps) {
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
   const [hoverStack, setHoverStack] = useState<{ regionId: string; key: string; copyDx: number } | null>(null);
+  const [warningPulse, setWarningPulse] = useState(0);
+  useEffect(() => {
+    if (!props.warningRegionId) {
+      return;
+    }
+    const id = window.setInterval(() => setWarningPulse((n) => n + 1), 90);
+    return () => window.clearInterval(id);
+  }, [props.warningRegionId]);
   const [gesture, setGesture] = useState<UnitGesture | null>(null);
   const [split, setSplit] = useState<SplitPrompt | null>(null);
   const unitRef = useRef<UnitGesture | null>(null);
@@ -461,6 +473,7 @@ export function MapView(props: MapViewProps) {
       activeFactionId: props.activeFactionId ?? "",
       fuelFor: props.fuelFor,
       isLoaded: props.isLoaded,
+      cargoCount: props.cargoCount,
       categories: props.unitCategories,
     };
     if (editor) {
@@ -468,6 +481,20 @@ export function MapView(props: MapViewProps) {
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
     } else {
       drawGameOverlay(ctx, scene, overlay);
+      if (props.warningRegionId) {
+        const pulse = 0.5 + 0.5 * Math.sin(warningPulse / 2);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        for (const layout of layouts) {
+          if (layout.region.id !== props.warningRegionId) {
+            continue;
+          }
+          ctx.beginPath();
+          ctx.arc(layout.anchor.x, layout.anchor.y, 34 + 10 * pulse, 0, Math.PI * 2);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = `rgba(180, 48, 36, ${0.35 + 0.5 * pulse})`;
+          ctx.stroke();
+        }
+      }
     }
     const arrows = arrowRef.current;
     const arrowCtx = arrows?.getContext("2d");

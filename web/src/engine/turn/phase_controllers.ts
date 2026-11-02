@@ -60,6 +60,7 @@ export function resolveBattlePhase(
   const events: GameEvent[] = [];
   events.push(...syncSeq(amphibious.resolveAssaults(factionId, combat)));
   events.push(...syncSeq(combat.resolveAllBattles(factionId)));
+  amphibious.state.amphibious_landings = [];
   return events;
 }
 

@@ -8,6 +8,8 @@ export interface BattleUnitState {
   instance_id?: string;
   hp: number;
   max_hp: number;
+  /** Came off a transport this combat. It cannot retreat. */
+  amphibious?: boolean;
 }
 
 export interface BattleDie {
@@ -18,6 +20,10 @@ export interface BattleDie {
   hit: boolean;
   /** Submarine opening shot. Its casualties are removed before anyone else fires. */
   surprise: boolean;
+  /** Anti-aircraft opening shot, before round 1. */
+  aa?: boolean;
+  /** Shore bombardment opening shot, before round 1. */
+  bombard?: boolean;
 }
 
 export interface BattleCasualty {
@@ -26,6 +32,10 @@ export interface BattleCasualty {
   result: "damaged" | "destroyed";
   /** Caused by a submarine opening shot. */
   surprise?: boolean;
+  /** Caused by the defender's anti-aircraft volley. */
+  aa?: boolean;
+  /** Caused by shore bombardment. */
+  bombard?: boolean;
 }
 
 /**

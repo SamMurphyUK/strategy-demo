@@ -9,8 +9,11 @@ import { Region } from "../model/region";
 import type { Dict } from "../model/types";
 import { Unit } from "../model/unit";
 import { Ruleset } from "../rules/ruleset";
+import { AmphibiousEngine, deployPendingAssaults } from "../amphibious/amphibious";
 import { MovementEngine } from "./movement";
 import { MovementValidator } from "./movement_validator";
+import { assaultError, transportSeaZone, unloadError } from "../transport/cargo_rules";
+import { TransportLoadValidator } from "../transport/transport_load_validator";
 
 export interface MoveOrder {
   id: string;
@@ -23,6 +26,10 @@ export interface MoveOrder {
   path: number[];
   stepsUsed: number;
   shipInstanceIds?: string[];
+  /** Absent on a normal move. Cargo orders are applied when they are issued, then skipped at commit. */
+  kind?: "move" | "load_transport" | "unload_transport" | "amphibious_assault";
+  transportInstanceId?: string;
+  cargo?: { unit_type_id: string; count: number }[];
 }
 
 /** `structuredClone` of a `GameState`. Region, unit, and faction prototypes are put back on restore. */
@@ -141,6 +148,9 @@ export function applyRecordedMove(state: GameState, command: Command, movement: 
 function commitOrders(state: GameState, orders: readonly MoveOrder[]): void {
   const movement = new MovementEngine(state);
   for (const order of orders) {
+    if (order.kind != null && order.kind !== "move") {
+      continue;
+    }
     if (!order.shipInstanceIds || order.shipInstanceIds.length === 0) {
       state.releaseAttackHold(order.faction, order.fromRegionId, order.unitType, order.count);
     }
@@ -158,6 +168,7 @@ export function commitCombatAttacks(state: GameState): void {
     return;
   }
   commitOrders(state, state.phase_orders);
+  deployPendingAssaults(state);
 }
 
 /** Walk noncombat orders onto the board as that phase ends. */
@@ -191,12 +202,172 @@ export function cancel_phase_order(state: GameState, orderId: string): void {
   const validator = new MovementValidator();
   const movement = new MovementEngine(state);
   for (const order of remaining) {
+    if (order.kind === "load_transport" || order.kind === "unload_transport" || order.kind === "amphibious_assault") {
+      const command = commandForCargo(order);
+      if (!cargoOrderIsLegal(state, command)) {
+        break;
+      }
+      applyCargoCommand(state, command, movement);
+      continue;
+    }
     const command = commandForOrder(order);
     if (!orderIsLegal(validator, ruleset, state, command)) {
       break;
     }
     applyRecordedMove(state, command, movement);
   }
+}
+
+/** Apply a load, unload, or assault and keep it on the phase order list. */
+export function applyCargoCommand(
+  state: GameState,
+  command: Command,
+  movement: MovementEngine,
+  amphibious?: AmphibiousEngine,
+): GameEvent[] {
+  if (command.type === CommandType.LOAD_TRANSPORT) {
+    const events = movement.processLoad(command);
+    rememberCargo(state, command, "load_transport");
+    return events;
+  }
+  if (command.type === CommandType.UNLOAD_TRANSPORT) {
+    const events = movement.processUnload(command);
+    rememberCargo(state, command, "unload_transport");
+    return events;
+  }
+  if (command.type === CommandType.DESIGNATE_AMPHIBIOUS) {
+    const events = (amphibious ?? new AmphibiousEngine(state)).designateAssault(command);
+    rememberCargo(state, command, "amphibious_assault");
+    return events;
+  }
+  return [];
+}
+
+function rememberCargo(
+  state: GameState,
+  command: Command,
+  kind: "load_transport" | "unload_transport" | "amphibious_assault",
+): void {
+  if (state.phase_start_snapshot == null || !MOVEMENT_PHASES.includes(state.current_phase)) {
+    return;
+  }
+  const transportInstanceId = String(command.payload.transport_instance_id ?? "");
+  const cargo = cargoLines(command, state, kind);
+  const fromRegionId =
+    kind === "load_transport"
+      ? String(command.payload.from_region_id ?? "")
+      : kind === "amphibious_assault"
+        ? String(command.payload.origin_sea_zone_id ?? "")
+        : transportSeaZone(state, transportInstanceId);
+  const toRegionId =
+    kind === "load_transport"
+      ? transportSeaZone(state, transportInstanceId)
+      : kind === "unload_transport"
+        ? String(command.payload.to_region_id ?? "")
+        : String(command.payload.target_region_id ?? "");
+  const indexes = Object.keys(state.regions);
+  state.phase_order_seq += 1;
+  const first = cargo[0];
+  state.phase_orders.push({
+    id: `ord_${state.phase_order_seq}`,
+    faction: command.player_id,
+    unitType: first ? String(first.unit_type_id) : "cargo",
+    count: cargo.reduce((sum, line) => sum + Math.trunc(Number(line.count ?? 0)), 0),
+    fromRegionId,
+    toRegionId,
+    path: [indexes.indexOf(fromRegionId), indexes.indexOf(toRegionId)].filter((index) => index >= 0),
+    stepsUsed: 0,
+    kind,
+    transportInstanceId,
+    cargo,
+  });
+}
+
+function cargoLines(
+  command: Command,
+  state: GameState,
+  kind: "load_transport" | "unload_transport" | "amphibious_assault",
+): { unit_type_id: string; count: number }[] {
+  if (kind === "amphibious_assault") {
+    const last = state.pending_amphibious_assaults[state.pending_amphibious_assaults.length - 1];
+    const cargo = Array.isArray(last?.cargo) ? last.cargo : [];
+    return cargo.map((line: Dict) => ({
+      unit_type_id: String(line.unit_type_id ?? ""),
+      count: Math.trunc(Number(line.count ?? 0)),
+    }));
+  }
+  const units = Array.isArray(command.payload.units) ? command.payload.units : [];
+  return units.filter(isRecord).map((line) => ({
+    unit_type_id: String(line.unit_type_id ?? ""),
+    count: Math.trunc(Number(line.count ?? 1)),
+  }));
+}
+
+function commandForCargo(order: MoveOrder): Command {
+  if (order.kind === "load_transport") {
+    return Command.fromDict({
+      player_id: order.faction,
+      type: CommandType.LOAD_TRANSPORT,
+      payload: {
+        transport_instance_id: order.transportInstanceId,
+        from_region_id: order.fromRegionId,
+        units: order.cargo ?? [],
+      },
+    });
+  }
+  if (order.kind === "unload_transport") {
+    return Command.fromDict({
+      player_id: order.faction,
+      type: CommandType.UNLOAD_TRANSPORT,
+      payload: {
+        transport_instance_id: order.transportInstanceId,
+        to_region_id: order.toRegionId,
+        units: order.cargo ?? [],
+      },
+    });
+  }
+  return Command.fromDict({
+    player_id: order.faction,
+    type: CommandType.DESIGNATE_AMPHIBIOUS,
+    payload: {
+      transport_instance_id: order.transportInstanceId,
+      origin_sea_zone_id: order.fromRegionId,
+      target_region_id: order.toRegionId,
+    },
+  });
+}
+
+function cargoOrderIsLegal(state: GameState, command: Command): boolean {
+  if (command.type === CommandType.LOAD_TRANSPORT) {
+    return new TransportLoadValidator()
+      .validateLoad(
+        String(command.payload.transport_instance_id ?? ""),
+        String(command.payload.from_region_id ?? ""),
+        command.payload.units ?? [],
+        command.player_id,
+        state,
+      ).ok;
+  }
+  if (command.type === CommandType.UNLOAD_TRANSPORT) {
+    return (
+      unloadError(
+        state,
+        command.player_id,
+        String(command.payload.transport_instance_id ?? ""),
+        String(command.payload.to_region_id ?? ""),
+        command.payload.units ?? [],
+      ) == null
+    );
+  }
+  return (
+    assaultError(
+      state,
+      command.player_id,
+      String(command.payload.transport_instance_id ?? ""),
+      String(command.payload.origin_sea_zone_id ?? ""),
+      String(command.payload.target_region_id ?? ""),
+    ) == null
+  );
 }
 
 function holdAttack(state: GameState, faction: string, fromRegion: string, unit: Dict): void {

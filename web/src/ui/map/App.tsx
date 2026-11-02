@@ -16,11 +16,14 @@ import {
   COMBAT_ZOOM_MS,
   combatGoal,
   type MapCamera,
+  panToTerritory,
 } from "./combatCamera";
+import { seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import { startingStacks } from "./editor/editorModel";
 import { useMapEditor } from "./editor/useMapEditor";
+import { factionChrome } from "./factionChrome";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
@@ -89,6 +92,7 @@ export function App() {
     resolveDrop.current = fn;
   }, []);
   const [hoverRegionId, setHoverRegionId] = useState("");
+  const [warningSea, setWarningSea] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
   // The engine's open battle, kept on screen after it finishes until the player leaves the board.
   const [battleOnScreen, setBattleOnScreen] = useState<ActiveBattle | null>(null);
@@ -180,8 +184,8 @@ export function App() {
     return out;
   }, [state, version]);
 
-  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string) =>
-    offeredMoveDestinations(
+  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string) => {
+    const moves = offeredMoveDestinations(
       state,
       phase,
       faction,
@@ -189,6 +193,15 @@ export function App() {
       unitTypeId,
       session.getLegalMoveDestinations(regionId, unitTypeId, faction, instanceId),
     );
+    const extra: string[] = [];
+    if (instanceId === "" && state.unit_types[unitTypeId]?.category === "land") {
+      extra.push(...session.getLegalLoadDestinations(regionId, unitTypeId, faction));
+    }
+    if (instanceId !== "") {
+      extra.push(...session.getLegalUnloadDestinations(instanceId, faction));
+    }
+    return [...new Set([...moves, ...extra])];
+  };
 
   const legalTargets = useMemo(() => {
     if (selection?.kind === "stack") {
@@ -294,11 +307,15 @@ export function App() {
     if (!MOVEMENT_PHASES.includes(phase) || !isActiveFaction(entry.faction_id, faction)) {
       return 0;
     }
-    return entry.instance_id
+    const base = entry.instance_id
       ? state.hasInstanceMoved(entry.instance_id)
         ? 0
         : 1
       : state.movableStackCount(faction, regionId, entry.unit_type_id);
+    if (base > 0 || !entry.instance_id || (phase !== "combat_move" && phase !== "noncombat_move")) {
+      return base;
+    }
+    return session.getLegalUnloadDestinations(entry.instance_id, faction).length > 0 ? 1 : 0;
   };
 
   // Which of land, air or sea each unit type is, for grouping stacks on the map.
@@ -331,6 +348,49 @@ export function App() {
     const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "");
     if (!legal.includes(target)) {
       setSelection(null);
+      return;
+    }
+    const category = state.unit_types[entry.unit_type_id]?.category;
+    if (category === "land" && state.regions[target]?.isSeaRegion()) {
+      const transportId = session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
+      if (transportId === "") {
+        setSelection(null);
+        return;
+      }
+      const loaded = game.send("load_transport", {
+        transport_instance_id: transportId,
+        from_region_id: regionId,
+        units: [{ unit_type_id: entry.unit_type_id, count: Math.min(max, Math.max(1, count)) }],
+      });
+      if (loaded.result_type === "ok") {
+        setSelection(null);
+        setSelectedRegionId(target);
+        soundManager.play("token_drop");
+      }
+      return;
+    }
+    if (entry.instance_id && entry.unit_type_id === "transport" && state.regions[target]?.isLandRegion()) {
+      const transportId = entry.instance_id;
+      const sea = transportSeaZone(state, transportId);
+      const hostile = phase === "combat_move" && state.isRegionHostileTo(target, entry.faction_id);
+      const result = hostile
+        ? game.send("designate_amphibious", {
+            transport_instance_id: transportId,
+            origin_sea_zone_id: sea,
+            target_region_id: target,
+          })
+        : game.send("unload_transport", {
+            transport_instance_id: transportId,
+            to_region_id: target,
+            units: (state.transport_instances[transportId]?.cargo ?? []).filter(
+              (line) => phase !== "combat_move" || !state.unit_types[line.unit_type_id]?.special?.noncombat_move_only && !state.unit_types[line.unit_type_id]?.special?.is_aa,
+            ),
+          });
+      if (result.result_type === "ok") {
+        setSelection(null);
+        setSelectedRegionId(target);
+        soundManager.play(hostile ? "battle_arrow_lock" : "token_drop");
+      }
       return;
     }
     const result = game.send(
@@ -404,6 +464,28 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    if (phase !== "combat_move" || strandedCargoGate(state).advance) {
+      setWarningSea("");
+    }
+  }, [phase, version, state]);
+
+  const focusStrandedTransport = (seaZoneId: string) => {
+    setWarningSea(seaZoneId);
+    soundManager.play("stinger_war_room");
+    const camera = cameraRef.current;
+    const shape = geometry.regions.find((region) => region.id === seaZoneId);
+    if (!camera || !shape) {
+      return;
+    }
+    const snap = camera.snapshot();
+    if (snap.width <= 1 || snap.height <= 1 || snap.fitK <= 0) {
+      return;
+    }
+    const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, "zoom", shape.anchor);
+    void panToTerritory(seaZoneId, goal.k, camera, shape.bounds);
+  };
+
   const approachBattle = (regionId: string) => {
     if (approachRef.current || battleOnScreen) return;
     const battle = session.getPendingBattles(faction).find((item) => item.region_id === regionId);
@@ -463,6 +545,7 @@ export function App() {
     <>
     <div
       className="campaign"
+      style={factionChrome(faction)}
       inert={covered ? true : undefined}
       onClickCapture={(event) => {
         const target = event.target;
@@ -538,6 +621,17 @@ export function App() {
             const cargo = state.transport_instances[iid]?.cargo;
             return Array.isArray(cargo) && cargo.length > 0;
           }}
+          cargoCount={(entry) => {
+            const iid = entry.instance_id ?? "";
+            if (iid === "") {
+              return 0;
+            }
+            return (state.transport_instances[iid]?.cargo ?? []).reduce(
+              (sum, line) => sum + Math.max(0, Math.trunc(Number(line.count ?? 0))),
+              0,
+            );
+          }}
+          warningRegionId={warningSea}
           editor={editing ? editor.binding : undefined}
           bindCamera={bindCamera}
           suspended={approach?.stage === "darken" || approach?.stage === "briefing" || battleOnScreen !== null}
@@ -557,7 +651,11 @@ export function App() {
                 legalTargets={legalTargets}
                 pending={pendingForFaction}
                 onFight={approachBattle}
+                onStrandedCargo={focusStrandedTransport}
               />
+              {hoverRegionId !== "" && seaZoneCargoLabel(state, hoverRegionId) !== "" && (
+                <p className="cargo-hover">{seaZoneCargoLabel(state, hoverRegionId)}</p>
+              )}
               <RegionPanel
                 game={game}
                 regionId={selectedRegionId}

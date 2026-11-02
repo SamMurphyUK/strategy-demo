@@ -397,7 +397,18 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     const active = matchRef.current;
     if (!active) return null;
     if (!matchRoundRef.current) {
-      matchRoundRef.current = active.rollRound();
+      const round = active.rollRound();
+      matchRoundRef.current = round;
+      const shotDown = new Set(round.aaCasualties.filter((hit) => hit.result === "destroyed").map((hit) => hit.unitId));
+      if (shotDown.size > 0) {
+        const next = attackerUnitsRef.current.map((unit) =>
+          shotDown.has(unit.uid)
+            ? { ...unit, currentHp: 0, isDestroyed: true, isPermanentCasualty: true, status: "downed" as const, isPendingCasualty: false }
+            : unit,
+        );
+        attackerUnitsRef.current = next;
+        setAttackerUnits(next);
+      }
     }
     return matchRoundRef.current;
   };

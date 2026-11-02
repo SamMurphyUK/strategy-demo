@@ -2,6 +2,7 @@ import type { GameState } from "../model/game_state";
 import { type CargoLine, type Dict, isDict } from "../model/types";
 import type { Unit } from "../model/unit";
 import { MoveError, ValidationResult } from "../validation/validation_types";
+import { assaultError, cargoFits, movesOnlyInNoncombat, transportSeaZone, unloadError } from "./cargo_rules";
 
 export class TransportLoadValidator {
   getLegalLoadDestinations(fromRegion: string, unitTypeId: string, factionId: string, state: GameState): string[] {
@@ -79,8 +80,11 @@ export class TransportLoadValidator {
     if (td == null || Object.keys(td).length === 0) {
       return false;
     }
-    const seaRegion = String(td.region_id ?? "");
+    const seaRegion = transportSeaZone(state, transportInstanceId);
     if (seaRegion === "" || !state.isAdjacent(fromRegion, seaRegion)) {
+      return false;
+    }
+    if (state.current_phase === "noncombat_move" && state.isRegionHostileTo(seaRegion, factionId)) {
       return false;
     }
     const from = state.regions[fromRegion];
@@ -96,6 +100,8 @@ export class TransportLoadValidator {
     if (transportUnit == null) {
       return false;
     }
+    const projected: CargoLine[] = (td.cargo ?? []).map((line) => ({ ...line }));
+    const stillThere: Record<string, number> = {};
     for (const unitEntry of units) {
       if (!isDict(unitEntry)) {
         return false;
@@ -105,7 +111,11 @@ export class TransportLoadValidator {
       if (count <= 0) {
         return false;
       }
-      if (state.movableStackCount(factionId, fromRegion, utid) < count) {
+      if (state.current_phase === "combat_move" && movesOnlyInNoncombat(state, utid)) {
+        return false;
+      }
+      stillThere[utid] = (stillThere[utid] ?? 0) + count;
+      if (state.movableStackCount(factionId, fromRegion, utid) < stillThere[utid]) {
         return false;
       }
       const cargoUnit = state.unit_types[utid];
@@ -115,15 +125,49 @@ export class TransportLoadValidator {
       if (!this.cargoAllowed(transportUnit, utid, state)) {
         return false;
       }
-      if (!this.hasUnitsInRegion(fromRegion, factionId, utid, count, state)) {
+      if (!this.hasUnitsInRegion(fromRegion, factionId, utid, stillThere[utid], state)) {
         return false;
       }
-      const cargo: CargoLine[] = td.cargo ?? [];
-      if (!this.fitsCargo(transportUnit, cargo, utid, count)) {
+      if (!this.fitsCargo(transportUnit, projected, utid, count)) {
         return false;
+      }
+      const existing = projected.find((line) => line.unit_type_id === utid);
+      if (existing) {
+        existing.count += count;
+      } else {
+        projected.push({ unit_type_id: utid, count });
       }
     }
     return true;
+  }
+
+  getLegalUnloadDestinations(transportInstanceId: string, factionId: string, state: GameState): string[] {
+    const td = state.transport_instances[transportInstanceId];
+    if (td == null || !["combat_move", "noncombat_move"].includes(state.current_phase)) {
+      return [];
+    }
+    if (!this.transportBelongsToFaction(transportInstanceId, factionId, state)) {
+      return [];
+    }
+    const sea = transportSeaZone(state, transportInstanceId);
+    const legal: string[] = [];
+    for (const neighbor of state.getAdjacentRegions(sea)) {
+      const units = (td.cargo ?? []).filter(
+        (line) => state.current_phase !== "combat_move" || !movesOnlyInNoncombat(state, String(line.unit_type_id ?? "")),
+      );
+      if (units.length === 0) {
+        continue;
+      }
+      if (unloadError(state, factionId, transportInstanceId, neighbor, units) == null) {
+        legal.push(neighbor);
+      } else if (
+        state.current_phase === "combat_move" &&
+        assaultError(state, factionId, transportInstanceId, sea, neighbor) == null
+      ) {
+        legal.push(neighbor);
+      }
+    }
+    return legal;
   }
 
   private friendlyTransportIds(seaRegion: string, factionId: string, state: GameState): string[] {
@@ -199,6 +243,7 @@ export class TransportLoadValidator {
         return false;
       }
     }
-    return true;
+    const projected = Object.keys(totals).map((unit_type_id) => ({ unit_type_id, count: totals[unit_type_id] }));
+    return cargoFits(projected);
   }
 }

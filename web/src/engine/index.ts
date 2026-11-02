@@ -33,7 +33,15 @@ export type { CargoLine, Dict, PurchaseLine, TransportInstance, UnitStackEntry }
 export { Unit, type UnitType } from "./model/unit";
 export { MovementEngine } from "./movement/movement";
 export { MovementValidator } from "./movement/movement_validator";
-export { beginMovementPhase, cancel_phase_order, recordMoveOrders, type MoveOrder, type PhaseStartSnapshot } from "./movement/phase_orders";
+export { applyCargoCommand, beginMovementPhase, cancel_phase_order, recordMoveOrders, type MoveOrder, type PhaseStartSnapshot } from "./movement/phase_orders";
+export {
+  cargoFits,
+  combatCargoCommit,
+  STRANDED_CARGO_MESSAGE,
+  strandedCargoGate,
+  transportLoadedLabel,
+  transportSeaZone,
+} from "./transport/cargo_rules";
 export { PlacementEngine } from "./placement/placement";
 export { PlacementValidator } from "./placement/placement_validator";
 export { PurchaseValidator } from "./placement/purchase_validator";

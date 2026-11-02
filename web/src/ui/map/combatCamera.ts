@@ -54,6 +54,18 @@ export function lerpView(from: View, to: View, t: number, width: number, height:
  * and short of the zoom cap. Pan keeps `current.k` and only moves the centre.
  * `focus` is the battle icon. When it is set, that point stays in the middle of the frame.
  */
+/** Pan and zoom so `bounds` — the sea zone `seaZoneId` — sits in the middle of the map. */
+export function panToTerritory(
+  seaZoneId: string,
+  targetZoom: number,
+  camera: MapCamera,
+  bounds: Rect,
+): Promise<void> {
+  void seaZoneId;
+  const center = { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+  return camera.moveTo({ center, k: targetZoom }, COMBAT_PAN_MS);
+}
+
 export function combatGoal(
   current: View,
   bounds: Rect,

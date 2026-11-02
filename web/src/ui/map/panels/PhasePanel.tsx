@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { describeStranded, fuelRemaining, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
+import { combatCargoCommit, strandedCargoGate } from "../../../engine/transport/cargo_rules";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Battle } from "../../../engine/combat/combat";
 import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
 import { playCampaignCue } from "../campaignAudio";
+import { canStageAnother, purchasePhaseAdvance, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -17,9 +19,11 @@ interface Props {
   pending: PurchaseLine[];
   /** Zoom to the territory, then open the attack card, then the battle. */
   onFight(regionId: string): void;
+  /** Combat-move cargo still aboard: pan the camera to that sea zone. */
+  onStrandedCargo?(seaZoneId: string): void;
 }
 
-export function PhasePanel({ game, selection, setSelection, legalTargets, pending, onFight }: Props) {
+export function PhasePanel({ game, selection, setSelection, legalTargets, pending, onFight, onStrandedCargo }: Props) {
   const { session } = game;
   const state = session.state;
   const faction = state.current_faction_id;
@@ -30,6 +34,13 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
   const mustReturn = phase === "noncombat_move" ? planesMustLandMessage(state, faction) : "";
   const mustPlace = phase === "mobilize" ? mustPlaceMessage(state, faction) : "";
   const doomed = stranded.filter((plane) => !plane.canReturn);
+  const [stagedIpc, setStagedIpc] = useState(0);
+  const [basketWarning, setBasketWarning] = useState(false);
+  const noteStaged = useCallback((total: number) => {
+    setStagedIpc((prev) => (prev === total ? prev : total));
+  }, []);
+  const purchaseGate = purchasePhaseAdvance(phase === "purchase" ? stagedIpc : 0);
+  const cargoGate = phase === "combat_move" ? strandedCargoGate(state) : { advance: true, seaZoneId: "", warning: "" };
 
   return (
     <section className="panel phase-panel">
@@ -37,7 +48,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
         {factionName(faction)}: {phaseName(phase)}
       </h2>
 
-      {phase === "purchase" && <PurchaseBody game={game} pending={pending} />}
+      {phase === "purchase" && <PurchaseBody game={game} pending={pending} onStagedTotal={noteStaged} />}
 
       {(phase === "combat_move" || phase === "noncombat_move") && (
         <MoveBody selection={selection} setSelection={setSelection} legalTargets={legalTargets} game={game} />
@@ -68,6 +79,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
           </button>
         )}
         {mustReturn !== "" && <p className="warn">{mustReturn}</p>}
+        {cargoGate.warning !== "" && <p className="warn">{cargoGate.warning}</p>}
         {mustPlace !== "" && <p className="warn">{mustPlace}</p>}
         {doomed.length > 0 && (
           <p className="warn">{describeStranded(state, doomed)} will be lost when the phase ends.</p>
@@ -77,7 +89,18 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
             type="button"
             className={battles.length > 0 || mustReturn !== "" || mustPlace !== "" ? "" : "primary"}
             disabled={mustReturn !== "" || mustPlace !== ""}
-            onClick={() => game.send("end_phase")}
+            onClick={() => {
+              if (!purchaseGate.advance) {
+                setBasketWarning(true);
+                return;
+              }
+              const cargo = combatCargoCommit(state, onStrandedCargo);
+              if (!cargo.advance) {
+                return;
+              }
+              setBasketWarning(false);
+              game.send("end_phase");
+            }}
           >
             {mustReturn !== ""
               ? "Fly planes back first"
@@ -87,6 +110,14 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
                   ? "Auto-resolve the rest and end phase"
                   : "End phase"}
           </button>
+        )}
+        {basketWarning && purchaseGate.warning && (
+          <div className="basket-block" role="dialog" aria-label="Unconfirmed purchase">
+            <p>{UNCONFIRMED_BASKET_MESSAGE}</p>
+            <button type="button" onClick={() => setBasketWarning(false)}>
+              Back to shop
+            </button>
+          </div>
         )}
         {legal.includes("end_turn") && (
           <button type="button" className="primary" onClick={() => game.send("end_turn")}>
@@ -98,7 +129,15 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
   );
 }
 
-function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: PurchaseLine[] }) {
+function PurchaseBody({
+  game,
+  pending,
+  onStagedTotal,
+}: {
+  game: GameSessionHandle;
+  pending: PurchaseLine[];
+  onStagedTotal(total: number): void;
+}) {
   const { session } = game;
   const state = session.state;
   const faction = state.current_faction_id;
@@ -111,7 +150,12 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
 
   const total = Object.entries(staged).reduce((sum, [id, n]) => sum + (costs[id] ?? 0) * n, 0);
   const ipc = state.getFactionIpc(faction);
+  useEffect(() => {
+    onStagedTotal(total);
+  }, [total, onStagedTotal]);
   const bump = (id: string, d: number) => {
+    const cost = costs[id] ?? 0;
+    if (d > 0 && !canStageAnother(cost, ipc, total)) return;
     if (d > 0) playCampaignCue("pickup");
     setStaged((s) => ({ ...s, [id]: Math.max(0, (s[id] ?? 0) + d) }));
   };
@@ -151,7 +195,12 @@ function PurchaseBody({ game, pending }: { game: GameSessionHandle; pending: Pur
                   −
                 </button>
                 <span className="mono">{count}</span>
-                <button type="button" onClick={() => bump(id, 1)} aria-label="Add one">
+                <button
+                  type="button"
+                  onClick={() => bump(id, 1)}
+                  disabled={!canStageAnother(costs[id] ?? 0, ipc, total)}
+                  aria-label="Add one"
+                >
                   +
                 </button>
               </div>

@@ -16,12 +16,125 @@ export function isCombatUnit(unit: Unit | undefined): boolean {
   return unit != null && (unit.attack > 0 || unit.defense > 0);
 }
 
+const AA_AIR = new Set(["fighter", "tactical_bomber", "strategic_bomber"]);
+
+export function isAaGun(unit: Unit | undefined): boolean {
+  return Boolean(unit?.special?.is_aa);
+}
+
+/** One shot per attacking plane, and at most three shots from each gun. */
+export function openingAaShots(guns: number, planes: number): number {
+  return Math.min(Math.max(0, planes), Math.max(0, guns) * 3);
+}
+
+export function defendingAaGuns(units: BattleUnitState[], unitTypes: Record<string, Unit>): BattleUnitState[] {
+  return units.filter((unit) => isAlive(unit) && isAaGun(unitTypes[unit.unit_type_id]));
+}
+
+export function attackingAircraft(units: BattleUnitState[]): BattleUnitState[] {
+  return units.filter((unit) => isAlive(unit) && AA_AIR.has(unit.unit_type_id));
+}
+
+/** AA hits destroy the cheapest aircraft first. Each hit removes one plane. */
+export function assignAaHits(
+  planes: BattleUnitState[],
+  hits: number,
+  unitTypes: Record<string, Unit>,
+): BattleCasualty[] {
+  const order = planes.filter(isAlive).map((unit, index) => ({ unit, index }));
+  order.sort((a, b) => {
+    const cost = (unitTypes[a.unit.unit_type_id]?.cost ?? 0) - (unitTypes[b.unit.unit_type_id]?.cost ?? 0);
+    if (cost !== 0) return cost;
+    return a.index - b.index;
+  });
+  const plan: BattleCasualty[] = [];
+  const take = Math.min(Math.max(0, hits), order.length);
+  for (let i = 0; i < take; i++) {
+    plan.push({ unit_id: order[i].unit.id, side: "attacker", result: "destroyed", aa: true });
+  }
+  return plan;
+}
+
+/** Bombardment hits the cheapest defending land unit. One hit removes one unit. */
+export function assignBombardHits(
+  defenders: BattleUnitState[],
+  hits: number,
+  unitTypes: Record<string, Unit>,
+): BattleCasualty[] {
+  const order = defenders
+    .filter((unit) => isAlive(unit) && unitTypes[unit.unit_type_id]?.category === "land")
+    .map((unit, index) => ({ unit, index }));
+  order.sort((a, b) => {
+    const cost = (unitTypes[a.unit.unit_type_id]?.cost ?? 0) - (unitTypes[b.unit.unit_type_id]?.cost ?? 0);
+    if (cost !== 0) return cost;
+    return a.index - b.index;
+  });
+  const plan: BattleCasualty[] = [];
+  const take = Math.min(Math.max(0, hits), order.length);
+  for (let i = 0; i < take; i++) {
+    plan.push({ unit_id: order[i].unit.id, side: "defender", result: "destroyed", bombard: true });
+  }
+  return plan;
+}
+
 export function maxHpOf(unit: Unit | undefined): number {
   return unit?.special?.takes_two_hits ? 2 : 1;
 }
 
 export function isAlive(unit: BattleUnitState): boolean {
   return unit.hp > 0;
+}
+
+function canSubmerge(unit: Unit | undefined): boolean {
+  return Boolean(unit?.special?.can_submerge || unit?.special?.requires_destroyer_to_be_hit_by_air);
+}
+
+/**
+ * A submarine can be hit by a destroyer, by aircraft escorted by one, or by any
+ * other ship that actually fires. Aircraft alone cannot touch it.
+ */
+export function enemyCanHitSubmarines(
+  enemy: BattleUnitState[],
+  enemySide: BattleSide,
+  unitTypes: Record<string, Unit>,
+): boolean {
+  const living = enemy.filter(isAlive);
+  if (living.some((unit) => Boolean(unitTypes[unit.unit_type_id]?.special?.cancels_submarine_abilities))) {
+    return true;
+  }
+  return living.some((unit) => {
+    const type = unitTypes[unit.unit_type_id];
+    if (type == null || type.category === "air") {
+      return false;
+    }
+    return (enemySide === "attacker" ? type.attack : type.defense) > 0;
+  });
+}
+
+/** Submarines the other side cannot hit. They leave the battle and are not casualties. */
+export function escapingSubmarines(
+  own: BattleUnitState[],
+  enemy: BattleUnitState[],
+  enemySide: BattleSide,
+  unitTypes: Record<string, Unit>,
+): BattleUnitState[] {
+  if (enemyCanHitSubmarines(enemy, enemySide, unitTypes)) {
+    return [];
+  }
+  return own.filter((unit) => isAlive(unit) && canSubmerge(unitTypes[unit.unit_type_id]));
+}
+
+/** True when both sides still have someone in the fight after those submarines leave. */
+export function hasCombatantsAfterEscape(
+  attackers: BattleUnitState[],
+  defenders: BattleUnitState[],
+  unitTypes: Record<string, Unit>,
+): boolean {
+  const attackingLeave = new Set(escapingSubmarines(attackers, defenders, "defender", unitTypes).map((unit) => unit.id));
+  const defendingLeave = new Set(escapingSubmarines(defenders, attackers, "attacker", unitTypes).map((unit) => unit.id));
+  const attacking = attackers.some((unit) => isAlive(unit) && !attackingLeave.has(unit.id));
+  const defending = defenders.some((unit) => isAlive(unit) && !defendingLeave.has(unit.id));
+  return attacking && defending;
 }
 
 function special(unit: Unit | undefined, flag: string): boolean {

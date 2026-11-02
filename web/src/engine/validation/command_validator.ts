@@ -6,6 +6,7 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
   combat_move: [
     CommandType.MOVE_UNITS,
     CommandType.LOAD_TRANSPORT,
+    CommandType.UNLOAD_TRANSPORT,
     CommandType.DESIGNATE_AMPHIBIOUS,
     CommandType.END_PHASE,
   ],

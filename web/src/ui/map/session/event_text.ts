@@ -5,6 +5,10 @@ export function factionName(factionId: string): string {
     case "ussr":
       return "Soviet Union";
     case "ger":
+    case "germany":
+    case "german":
+    // Unit art rewrites Germany's id to "axis". The territory panel prints that id.
+    case "axis":
       return "Germany";
     case "uk":
       return "United Kingdom";
@@ -14,8 +18,6 @@ export function factionName(factionId: string): string {
       return "United States";
     case "allies":
       return "Allies";
-    case "axis":
-      return "Axis";
     case "":
     case "neutral":
       return "Neutral";
@@ -111,8 +113,11 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
       return `${who} loaded ${unitList(p.units, unitTypes)} onto ${p.transport_instance_id}`;
     case "transportunloaded":
       return `${who} unloaded ${unitList(p.units, unitTypes)} into ${p.to_region_id}`;
-    case "battlestarted":
-      return `Battle in ${p.region_id}: ${factionName(String(p.attacker ?? ""))} attacks ${factionName(String(p.defender ?? ""))}`;
+    case "battlestarted": {
+      const line = `Battle in ${p.region_id}: ${factionName(String(p.attacker ?? ""))} attacks ${factionName(String(p.defender ?? ""))}`;
+      const submerged = Array.isArray(p.submerged) ? p.submerged.length : 0;
+      return submerged > 0 ? `${line}. Submarines submerge and leave the fight.` : line;
+    }
     case "dicerolled": {
       const lost = casualtyText(p.casualties);
       return `${p.region_id} round ${p.round}: attacker ${p.attacker_hits} hits, defender ${p.defender_hits} hits${lost ? ` (${lost})` : ""}`;

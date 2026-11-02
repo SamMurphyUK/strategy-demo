@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fuelForDisplayEntry } from "../../../engine/air/air_fuel";
+import { transportLoadedLabel } from "../../../engine/transport/cargo_rules";
 import { RegionUnitDisplay } from "../../../engine/presentation/region_unit_display";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
@@ -72,7 +73,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
             const active = selection?.kind === "stack" && selection.regionId === regionId && selection.key === key;
             const cargo =
               entry.instance_id && RegionUnitDisplay.isContainerUnit(state, entry.unit_type_id)
-                ? RegionUnitDisplay.cargoSummaryLines(state, entry.instance_id).join(", ")
+                ? transportLoadedLabel(state, entry.instance_id)
                 : "";
             const fuel = fuelForDisplayEntry(state, regionId, entry.unit_type_id, entry.faction_id);
             return (
@@ -124,7 +125,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
                     <span className="unit-name">{unitName(entry.unit_type_id, state.unit_types)}</span>
                     <span className="stack-faction">{factionName(entry.faction_id)}</span>
                     {fuel != null && <span className="stack-fuel mono">fuel {fuel}</span>}
-                    {cargo && <span className="stack-cargo">cargo: {cargo}</span>}
+                    {cargo && <span className="stack-cargo">{cargo}</span>}
                   </span>
                   <b className="stack-count mono">×{entry.count}</b>
                 </button>

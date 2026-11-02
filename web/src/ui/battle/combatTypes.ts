@@ -12,7 +12,11 @@ export type UnitType =
   | 'cruiser'
   | 'carrier'
   | 'battleship'
-  | 'aaa';
+  | 'aaa'
+  | 'aa'
+  | 'transport'
+  | 'mech_infantry'
+  | 'armor';
 
 export type TheaterId = 'normandy' | 'eastern' | 'north_africa' | 'pacific' | 'navy_test' | 'air_strike_test';
 
@@ -151,6 +155,47 @@ export const UNIT_DEFINITIONS: Record<UnitType, UnitDefinition> = {
     baseDefenseRank: 1,
     isAntiAir: true,
     description: 'Pre-Battle Flak: Fires 1 die at <=1 for every attacking aircraft.',
+  },
+  aa: {
+    type: 'aa',
+    name: 'AA Gun',
+    category: 'land',
+    cost: 5,
+    maxHp: 1,
+    baseAttackRank: 0,
+    baseDefenseRank: 0,
+    isAntiAir: true,
+    description: 'Opening volley only. One die per plane, three per gun, hits on 1. Does not fire in the round.',
+  },
+  transport: {
+    type: 'transport',
+    name: 'Transport',
+    category: 'sea',
+    cost: 7,
+    maxHp: 1,
+    baseAttackRank: 0,
+    baseDefenseRank: 0,
+    description: 'Carries land units. Does not fire.',
+  },
+  mech_infantry: {
+    type: 'mech_infantry',
+    name: 'Mechanised Infantry',
+    category: 'land',
+    cost: 4,
+    maxHp: 1,
+    baseAttackRank: 1,
+    baseDefenseRank: 2,
+    description: 'Hits <=1 on attack, <=2 on defense. Moves farther than infantry.',
+  },
+  armor: {
+    type: 'armor',
+    name: 'Armor',
+    category: 'land',
+    cost: 6,
+    maxHp: 1,
+    baseAttackRank: 3,
+    baseDefenseRank: 3,
+    description: 'Hits <=3. The roster name for a tank.',
   },
 };
 

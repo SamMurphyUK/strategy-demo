@@ -36,6 +36,8 @@ export interface TokenPaint {
   categories?: Record<string, string>;
   /** A transport with cargo aboard gets a dot at the top left. */
   loaded?: boolean;
+  /** Pieces aboard a transport. Draws the `[⚓+n]` pill when it is above zero. */
+  cargoCount?: number;
   /** Remaining movement for an aircraft. Omit it for land and sea. */
   fuel?: number | null;
 }
@@ -67,7 +69,35 @@ function paintFigure(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number
 }
 
 /** The waterline hemisphere: the darker sea below the midline, a wavy waterline, the white hull and the letter. */
-function paintSea(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, loaded: boolean): void {
+function drawCargoPill(ctx: CanvasRenderingContext2D, x: number, y: number, d: number, count: number): void {
+  const label = `⚓+${count}`;
+  ctx.save();
+  ctx.font = `700 ${Math.max(8, d * 0.22)}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const w = Math.max(d * 0.7, ctx.measureText(label).width + d * 0.18);
+  const h = Math.max(11, d * 0.28);
+  const left = x - w / 2;
+  const top = y - d * 0.72;
+  ctx.fillStyle = PLINTH;
+  ctx.fillRect(left, top, w, h);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = BRASS;
+  ctx.strokeRect(left + 0.5, top + 0.5, w - 1, h - 1);
+  ctx.fillStyle = GOLD_NUM;
+  ctx.fillText(label, x, top + h / 2 + 0.5);
+  ctx.restore();
+}
+
+function paintSea(
+  ctx: CanvasRenderingContext2D,
+  entry: StackEntry,
+  x: number,
+  y: number,
+  d: number,
+  loaded: boolean,
+  cargoCount: number,
+): void {
   const r = d / 2;
   ctx.save();
   ctx.beginPath();
@@ -106,6 +136,9 @@ function paintSea(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y
     ctx.lineWidth = 1;
     ctx.strokeStyle = TOKEN_WHITE;
     ctx.stroke();
+    if (cargoCount > 0) {
+      drawCargoPill(ctx, x, y, d, cargoCount);
+    }
   }
 }
 
@@ -125,7 +158,7 @@ export function drawTokenFace(
   ctx.fill();
   const domain = unitDomain(entry.unit_type_id, paint.categories);
   if (domain === "sea") {
-    paintSea(ctx, entry, x, y, d, paint.loaded ?? false);
+    paintSea(ctx, entry, x, y, d, paint.loaded ?? false, paint.cargoCount ?? 0);
   } else {
     paintFigure(ctx, entry, x, y, d);
   }

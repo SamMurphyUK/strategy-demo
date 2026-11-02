@@ -28,6 +28,8 @@ export interface MatchRound {
   surpriseCasualties: { attacker: MatchHit[]; defender: MatchHit[] };
   /** Defender casualties from the main exchange. The engine picks them. */
   defenderCasualties: MatchHit[];
+  /** Planes the defender's AA guns shot down before the round. */
+  aaCasualties: MatchHit[];
   /** Hits the attacking player must assign. */
   attackerHitsToTake: number;
 }

@@ -35,7 +35,7 @@ export interface ResolvedTokenSpec {
 }
 
 export function resolveTokenSpec(unitTypeId: string, side: FactionSide): ResolvedTokenSpec {
-  const spec = UNIT_TOKEN_SPEC[unitTypeId];
+  const spec = UNIT_TOKEN_SPEC[unitTypeId] ?? (unitTypeId === "aa" ? UNIT_TOKEN_SPEC.aaa : undefined);
   if (!spec) return { letter: (unitTypeId[0] ?? "?").toUpperCase(), artName: null };
   const art = spec.art;
   if (!art) return { letter: spec.letter, artName: null };

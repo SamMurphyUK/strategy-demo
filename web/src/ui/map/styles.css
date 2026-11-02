@@ -56,12 +56,12 @@
   }
 
   & button:hover:not(:disabled) {
-    background: #645355;
+    background: color-mix(in srgb, var(--land, var(--gold)) 22%, var(--button));
     border-color: var(--gold);
   }
 
   & button:active:not(:disabled) {
-    background: #4b3d44;
+    background: var(--frame);
   }
 
   & button:focus-visible,
@@ -83,7 +83,7 @@
   }
 
   & button.primary:hover:not(:disabled) {
-    background: #645355;
+    background: color-mix(in srgb, var(--land, var(--gold)) 28%, var(--well));
   }
 
   & button.active {
@@ -358,6 +358,27 @@
   & .warn {
     color: var(--stamp);
     font-weight: 600;
+  }
+
+  & .cargo-hover {
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--brass);
+    background: var(--parchment);
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  & .basket-block {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--stamp);
+    background: var(--parchment);
+    color: var(--ink);
+  }
+
+  & .basket-block p {
+    margin: 0 0 8px;
   }
 
   & .row {
@@ -824,7 +845,7 @@
     gap: 8px;
     max-width: 820px;
     padding: 8px 10px 6px;
-    background: rgba(75, 61, 68, 0.96);
+    background: var(--frame);
     border: 1px solid var(--brass);
     border-radius: 0;
     box-shadow: none;

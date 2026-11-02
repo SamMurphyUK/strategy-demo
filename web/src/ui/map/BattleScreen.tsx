@@ -3,25 +3,12 @@ import type { ActiveBattle, BattleCasualty, BattleDie, BattleUnitState } from ".
 import type { Dict } from "../../engine/model/types";
 import BattleBoard from "../battle/App";
 import type { UnitType } from "../battle/combatTypes";
+import { UNIT_DEFINITIONS } from "../battle/combatTypes";
+import { battleSpriteKey } from "../battle/default_unit_matrices";
 import type { BattleMatch, MatchHit, MatchOutcome, MatchRound, MatchUnit } from "../battle/match";
 import "./battleScreen.css";
 import { playCampaignCue } from "./campaignAudio";
 import type { GameSessionHandle } from "./session/use_game_session";
-
-const BOARD_TYPES: Record<string, UnitType> = {
-  infantry: "infantry",
-  mech_infantry: "infantry",
-  artillery: "artillery",
-  tank: "tank",
-  fighter: "fighter",
-  tactical_bomber: "tactical_bomber",
-  strategic_bomber: "strategic_bomber",
-  submarine: "submarine",
-  destroyer: "destroyer",
-  cruiser: "cruiser",
-  carrier: "carrier",
-  battleship: "battleship",
-};
 
 const OUTCOMES: Record<string, MatchOutcome> = {
   attacker_won: "attacker_wins",
@@ -30,12 +17,17 @@ const OUTCOMES: Record<string, MatchOutcome> = {
   draw: "defender_wins",
 };
 
+function boardUnitType(unitTypeId: string): UnitType {
+  const key = battleSpriteKey(unitTypeId);
+  return Object.prototype.hasOwnProperty.call(UNIT_DEFINITIONS, key) ? (key as UnitType) : "infantry";
+}
+
 function toMatchUnits(units: BattleUnitState[], costOf: (unitTypeId: string) => number): MatchUnit[] {
   return units
     .filter((u) => u.hp > 0)
     .map((u) => ({
       id: u.id,
-      type: BOARD_TYPES[u.unit_type_id] ?? "infantry",
+      type: boardUnitType(u.unit_type_id),
       maxHp: u.max_hp,
       cost: costOf(u.unit_type_id),
     }));
@@ -59,7 +51,8 @@ function toRound(payload: Dict | undefined): MatchRound {
       attacker: toHits(surprise.filter((c) => c.side === "attacker")),
       defender: toHits(surprise.filter((c) => c.side === "defender")),
     },
-    defenderCasualties: toHits(casualties.filter((c) => !c.surprise && c.side === "defender")),
+    defenderCasualties: toHits(casualties.filter((c) => !c.surprise && !c.aa && c.side === "defender")),
+    aaCasualties: toHits(casualties.filter((c) => c.aa && c.side === "attacker")),
     attackerHitsToTake: Number(payload?.attacker_hits_to_take ?? 0),
   };
 }

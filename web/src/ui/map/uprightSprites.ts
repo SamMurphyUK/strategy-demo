@@ -31,6 +31,7 @@ export interface UprightPaint {
   active: boolean;
   fuel: number | null;
   loaded: boolean;
+  cargoCount?: number;
 }
 
 function withCrisp(
@@ -274,9 +275,14 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   });
 
   if (paint.loaded) {
-    const s = Math.max(3, Math.round(radius * 0.28));
-    ctx.fillStyle = GOLD;
-    ctx.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
+    const aboard = paint.cargoCount ?? 0;
+    if (aboard > 0) {
+      drawHardwareBadge(ctx, `⚓+${aboard}`, x - rx, y - ry - 16, GOLD_NUM);
+    } else {
+      const s = Math.max(3, Math.round(radius * 0.28));
+      ctx.fillStyle = GOLD;
+      ctx.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
+    }
   }
   if (paint.selected || paint.unmoved) {
     ctx.beginPath();

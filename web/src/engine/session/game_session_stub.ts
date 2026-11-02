@@ -15,7 +15,8 @@ import { GameEvent, GameEventType } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
-import { applyRecordedMove } from "../movement/phase_orders";
+import { applyCargoCommand, applyRecordedMove } from "../movement/phase_orders";
+import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
@@ -203,7 +204,37 @@ export class GameSessionStub {
         if (loadError) {
           return loadError;
         }
-        events = this.syncSeq(this.movement.processLoad(cmd));
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
+        break;
+      }
+
+      case CommandType.UNLOAD_TRANSPORT: {
+        const unload = unloadError(
+          this.state,
+          cmd.player_id,
+          String(cmd.payload.transport_instance_id ?? ""),
+          String(cmd.payload.to_region_id ?? ""),
+          cmd.payload.units ?? [],
+        );
+        if (unload != null) {
+          return this.loadError(unload, "UNLOAD_INVALID");
+        }
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
+        break;
+      }
+
+      case CommandType.DESIGNATE_AMPHIBIOUS: {
+        const assault = assaultError(
+          this.state,
+          cmd.player_id,
+          String(cmd.payload.transport_instance_id ?? ""),
+          String(cmd.payload.origin_sea_zone_id ?? ""),
+          String(cmd.payload.target_region_id ?? ""),
+        );
+        if (assault != null) {
+          return this.loadError(assault, "AMPHIBIOUS_INVALID");
+        }
+        events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
       }
 
@@ -217,6 +248,12 @@ export class GameSessionStub {
       }
 
       case CommandType.END_PHASE: {
+        if (this.state.current_phase === "combat_move") {
+          const cargo = strandedCargoGate(this.state);
+          if (!cargo.advance) {
+            return { result_type: "error", error: { code: "CARGO_STRANDED", message: cargo.warning }, events: [] };
+          }
+        }
         let forfeitEvents: GameEvent[] = [];
         if (this.state.current_phase === "mobilize") {
           forfeitEvents = this.forfeitPendingAtMobilizeEnd(cmd.player_id);
@@ -354,11 +391,11 @@ export class GameSessionStub {
       case "purchase":
         return ["purchase_units", "end_phase"];
       case "combat_move":
-        return ["move_units", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "end_phase"];
       case "combat":
         return this.legalCombatCommands();
       case "noncombat_move":
-        return ["move_units", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "end_phase"];
       case "mobilize":
         return ["place_units", "end_phase"];
       case "collect_income":
@@ -635,6 +672,10 @@ export class GameSessionStub {
 
   getLegalLoadDestinations(fromRegion: string, unitTypeId: string, factionId: string): string[] {
     return new TransportLoadValidator().getLegalLoadDestinations(fromRegion, unitTypeId, factionId, this.state);
+  }
+
+  getLegalUnloadDestinations(transportInstanceId: string, factionId: string): string[] {
+    return new TransportLoadValidator().getLegalUnloadDestinations(transportInstanceId, factionId, this.state);
   }
 
   private validateMoveCommand(cmd: Command): StubResult | null {

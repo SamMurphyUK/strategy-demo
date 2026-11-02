@@ -2,7 +2,7 @@ import type { MoveOrder, PhaseStartSnapshot } from "../movement/phase_orders";
 import type { ActiveBattle } from "./battle";
 import { Faction } from "./faction";
 import { Region } from "./region";
-import { type Dict, deepCopy, type PurchaseLine, type TransportInstance, type UnitStackEntry } from "./types";
+import { type CargoLine, type Dict, deepCopy, type PurchaseLine, type TransportInstance, type UnitStackEntry } from "./types";
 import { Unit } from "./unit";
 
 export interface TurnInfo {
@@ -50,6 +50,10 @@ export class GameState {
   ipc: Record<string, number> = {};
   pending_purchases: Record<string, PurchaseLine[]> = {};
   pending_amphibious_assaults: Dict[] = [];
+  /** Cargo already placed on a hostile coast, with the sea zone it left. Cleared after combat. */
+  amphibious_landings: { region_id: string; sea_zone_id: string; faction_id: string; cargo: CargoLine[] }[] = [];
+  /** Sea zones that opened a naval battle during this faction's combat. */
+  naval_battles_this_turn: Record<string, boolean> = {};
   factories_controlled_at_turn_start: Record<string, string[]> = {};
   next_instance_id: Record<string, number> = {};
   transport_instances: Record<string, TransportInstance> = {};
@@ -218,6 +222,8 @@ export class GameState {
     clearInPlace(this.units_attacking_this_phase);
     clearInPlace(this.air_movement_spent);
     clearInPlace(this.territories_captured_this_turn);
+    clearInPlace(this.naval_battles_this_turn);
+    this.amphibious_landings = [];
   }
 
   // ---------------------------------------------------------

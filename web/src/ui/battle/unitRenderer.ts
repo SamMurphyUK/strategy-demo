@@ -15,6 +15,7 @@ import {
   CasualtyRecord,
   WaterGeyser,
 } from './combatTypes';
+import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { type FlagMotif, ipcLostCaption } from './flagMotif';
 import { MILITARY } from '../theme/militaryPalette';
 
@@ -1460,7 +1461,7 @@ export function drawProceduralUnit(
   // 1. FREEZE CASUALTY MOVEMENT: ZERO BOBBING, ZERO SHUDDER, ZERO IDLE DRIFT
   // Static Cannons & Flak Guns (No Bobbing): Wheels, carriage, and mounts firmly anchored to ground
   const isCasualty = unit.status === 'downed' || unit.status === 'dead' || unit.isPendingCasualty;
-  const isStaticMount = unit.type === 'artillery' || unit.type === 'aaa';
+  const isStaticMount = unit.type === 'artillery' || unit.type === 'aaa' || unit.type === 'aa';
   const bob = (isCasualty || isStaticMount) ? 0 : Math.sin(time * 3 + unit.animBobOffset) * 1.5;
   let recoilX = 0;
   let recoilY = bob;
@@ -1499,10 +1500,14 @@ export function drawProceduralUnit(
     case 'infantry':
       drawInfantry(ctx, factionColor, unit, time);
       break;
+    case 'mech_infantry':
+      drawAnimatedUnitSprite(ctx, 'mech_infantry', factionColor, time);
+      break;
     case 'artillery':
       drawArtillery(ctx, factionColor, unit, time);
       break;
     case 'tank':
+    case 'armor':
       drawTank(ctx, factionColor, unit, time);
       break;
     case 'fighter':
@@ -1531,6 +1536,12 @@ export function drawProceduralUnit(
       break;
     case 'aaa':
       drawAaaFlak(ctx, factionColor, unit, time);
+      break;
+    case 'aa':
+      drawAnimatedUnitSprite(ctx, 'aa', factionColor, time);
+      break;
+    case 'transport':
+      drawAnimatedUnitSprite(ctx, 'transport', factionColor, time);
       break;
   }
 

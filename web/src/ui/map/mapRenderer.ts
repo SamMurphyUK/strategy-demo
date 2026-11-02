@@ -547,6 +547,8 @@ export interface GameOverlay {
   fuelFor?(regionId: string, entry: StackEntry): number | null;
   /** A transport with cargo aboard gets a dot at its token's top left. */
   isLoaded?(entry: StackEntry): boolean;
+  /** How many land units are aboard, for the cargo pill. */
+  cargoCount?(entry: StackEntry): number;
   /** Unit type id to land, air or sea, from the scenario's unit data. */
   categories?: Record<string, string>;
   /** The token under the pointer. Drawn last so a tucked card comes to the front. */
@@ -705,6 +707,7 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       activeFactionId: game.activeFactionId,
       categories: game.categories,
       loaded: game.isLoaded?.(entry) ?? false,
+      cargoCount: game.cargoCount?.(entry) ?? 0,
       fuel: game.fuelFor?.(region.id, entry) ?? null,
     });
     const selected = game.selectedStack?.regionId === region.id && game.selectedStack.key === counter.slot.key;
@@ -820,6 +823,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             active: isActiveFaction(entry.faction_id, game.activeFactionId),
             fuel: game.fuelFor?.(layout.region.id, entry) ?? null,
             loaded: game.isLoaded?.(entry) ?? false,
+            cargoCount: game.cargoCount?.(entry) ?? 0,
           });
         },
       });
