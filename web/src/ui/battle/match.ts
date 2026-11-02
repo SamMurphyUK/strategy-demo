@@ -39,9 +39,9 @@ export type MatchOutcome = "attacker_wins" | "defender_wins" | "mutual" | "undec
 export interface BattleMatch {
   theater: TheaterId;
   regionName: string;
-  /** Attacking faction. Picks the victory theme. Absent in the sandbox, which uses the theater. */
+  /** Attacking faction. Picks the uniform and the victory theme. Absent in the sandbox, which uses the theater. */
   attackerFaction?: string;
-  /** Defending faction. Picks the theme when they hold the ground. */
+  /** Defending faction. Picks the uniform, and the theme when they hold the ground. */
   defenderFaction?: string;
   /**
    * Sandbox stand-in for the outro numbers. A map battle ignores these and counts

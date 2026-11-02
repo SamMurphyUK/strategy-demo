@@ -75,7 +75,7 @@ import {
 } from './rules';
 import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
 import {sfxMuted, soundManager, subscribeSfx, toggleSfx} from '../../audio/sound_manager';
-import {battleThemeFor, outcomeFactionId, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
+import {battleClothColor, battleThemeFor, outcomeFactionId, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
 import {flagMotifForFaction} from './flagMotif';
 import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
@@ -1266,7 +1266,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       spawnSmoke(fixedX, fixedY, 8, 22, PALETTE.bunkerCharcoal, 6, 'impact_explosion');
     }
 
-    const theater = THEATERS[currentTheaterRef.current];
     const initialDuration = 3.0 + Math.random() * 17.0; // 3 to 20s randomized individual timer
     const rec: CasualtyRecord = {
       id: `cas_${unit.uid}_${Math.random()}`,
@@ -1275,7 +1274,11 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       x: fixedX,
       y: fixedY,
       type: unit.type,
-      faction: unit.side === 'attacker' ? theater.attackerColor : theater.defenderColor,
+      faction: battleClothColor(
+        unit.side === 'attacker' ? matchRef.current?.attackerFaction : matchRef.current?.defenderFaction,
+        currentTheaterRef.current,
+        unit.side,
+      ),
       side: unit.side,
       facing: unit.side === 'attacker' ? 'east' : 'west',
       effectiveRank: unit.effectiveRank,
@@ -4201,7 +4204,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
     // 5. Draw Units on Battlefield
     const badgeImg = assets['icon_combined_arms_badge'];
-    const theater = THEATERS[currentTheaterRef.current];
+    const attackerCloth = battleClothColor(matchRef.current?.attackerFaction, currentTheaterRef.current, 'attacker');
+    const defenderCloth = battleClothColor(matchRef.current?.defenderFaction, currentTheaterRef.current, 'defender');
 
     // Attacker units
     attackerUnitsRef.current.forEach((unit) => {
@@ -4210,7 +4214,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       const isFlying = unit.type !== 'carrier' && activeSortiesRef.current.some((s) => s.unitUid === unit.uid);
       const casRec = casualtyRecordsRef.current.find((c) => c.unitUid === unit.uid);
       const smokeAlpha = casRec ? casRec.smokeAlpha : 1.0;
-      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, theater.attackerColor, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
+      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, attackerCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
 
       if (unit.maxHp > 1 && unit.status !== 'downed') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -4227,7 +4231,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       const isFlying = unit.type !== 'carrier' && activeSortiesRef.current.some((s) => s.unitUid === unit.uid);
       const casRec = casualtyRecordsRef.current.find((c) => c.unitUid === unit.uid);
       const smokeAlpha = casRec ? casRec.smokeAlpha : 1.0;
-      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, theater.defenderColor, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
+      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, defenderCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
 
       if (unit.maxHp > 1 && unit.status !== 'downed') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -4242,7 +4246,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
     // 7. Draw Active Plane Sorties (Swooping strafing / bombing flight loops with dynamic shadow fade)
     activeSortiesRef.current.forEach((sortie) => {
-      const fColor = sortie.side === 'attacker' ? theater.attackerColor : theater.defenderColor;
+      const fColor = sortie.side === 'attacker' ? attackerCloth : defenderCloth;
       drawPlaneSortie(ctx, sortie, time, fColor);
     });
 

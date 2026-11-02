@@ -3,7 +3,7 @@
 
 import WebAudioTinySynth from "webaudio-tinysynth";
 import { holdCampaignBattle, releaseCampaignBattle } from "../map/campaignMusic";
-import { resolveFaction, type FactionKey } from "../theme/factionPalette";
+import { factionPalette, resolveFaction, type FactionKey } from "../theme/factionPalette";
 import type { TheaterId } from "./combatTypes";
 
 const THEME_URL: Partial<Record<FactionKey, string>> = {
@@ -54,7 +54,7 @@ export function battleThemeFor(
   return THEME_URL[resolveFaction(outcomeFactionId(factionId, theater, side))] ?? null;
 }
 
-/** Faction cloth for an outro. A sandbox battle uses the preset side when the match has no id. */
+/** The side's faction. A sandbox battle uses the preset when the match has no id. */
 export function outcomeFactionId(
   factionId: string | null | undefined,
   theater: TheaterId,
@@ -62,6 +62,15 @@ export function outcomeFactionId(
 ): string {
   if (factionId && resolveFaction(factionId) !== "NEUTRAL") return factionId;
   return side === "defender" ? THEATER_DEFENDER[theater] : THEATER_FACTION[theater];
+}
+
+/** Uniform and hull colour. Campaign sides keep the colour they wear on the map. */
+export function battleClothColor(
+  factionId: string | null | undefined,
+  theater: TheaterId,
+  side: "attacker" | "defender",
+): string {
+  return factionPalette(outcomeFactionId(factionId, theater, side)).primary;
 }
 
 /** Loop this theme for the victory flag and park strategist 2 until the flag closes. */

@@ -1,6 +1,6 @@
 // Single source of truth for faction colours on the campaign UI and unit tokens.
 //
-// `primary` comes from the tactical board (PALETTE / THEATERS in ui/battle). `ring`, `fill` and `ink`
+// `primary` is the campaign colour from the 16-colour strip. Battle cloth reads it back. `ring`, `fill` and `ink`
 // are the token colours: ring border, warm interior and silhouette/letter contrast.
 // US and GER use the exact colours measured from the supplied vector art (allies_inf_ii.png and the
 // axis_*.png set). UK, JAP and USSR follow the same recipe: a lighter ring, a near-white interior

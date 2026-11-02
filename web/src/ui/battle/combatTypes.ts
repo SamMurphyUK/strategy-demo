@@ -1,5 +1,7 @@
 // Frontline 1941 - Tactical Combat Engine & Definitions
 
+import { FACTION_PALETTE } from "../theme/factionPalette";
+
 export type UnitType =
   | 'infantry'
   | 'artillery'
@@ -280,8 +282,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['land', 'air', 'sea'],
     attackerFaction: 'Allied Forces',
     defenderFaction: 'Fortified Axis',
-    attackerColor: '#72745C', // Olive Drab
-    defenderColor: '#857577', // Feldgrau
+    attackerColor: FACTION_PALETTE.US.primary,
+    defenderColor: FACTION_PALETTE.GER.primary,
   },
   eastern: {
     id: 'eastern',
@@ -291,8 +293,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['land', 'air'],
     attackerFaction: 'Red Army Guard',
     defenderFaction: 'Wehrmacht Center',
-    attackerColor: '#9A4E48', // Soviet Crimson
-    defenderColor: '#857577', // Feldgrau
+    attackerColor: FACTION_PALETTE.USSR.primary,
+    defenderColor: FACTION_PALETTE.GER.primary,
   },
   north_africa: {
     id: 'north_africa',
@@ -302,8 +304,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['land', 'air'],
     attackerFaction: 'British Desert Rats',
     defenderFaction: 'Afrika Korps',
-    attackerColor: '#9E7F55', // Khaki Leather
-    defenderColor: '#CAA574', // Sand Tan
+    attackerColor: FACTION_PALETTE.UK.primary,
+    defenderColor: FACTION_PALETTE.GER.primary,
   },
   pacific: {
     id: 'pacific',
@@ -313,8 +315,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['sea', 'air'],
     attackerFaction: 'US Navy Task Force',
     defenderFaction: 'Combined Imperial Fleet',
-    attackerColor: '#495462', // Naval Steel
-    defenderColor: '#9A4E48', // Crimson
+    attackerColor: FACTION_PALETTE.US.primary,
+    defenderColor: FACTION_PALETTE.JAP.primary,
   },
   navy_test: {
     id: 'navy_test',
@@ -324,8 +326,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['sea', 'air'],
     attackerFaction: 'Task Force Vanguard',
     defenderFaction: 'Imperial Battle Fleet',
-    attackerColor: '#495462', // Naval Steel
-    defenderColor: '#857577', // Feldgrau
+    attackerColor: FACTION_PALETTE.US.primary,
+    defenderColor: FACTION_PALETTE.JAP.primary,
   },
   air_strike_test: {
     id: 'air_strike_test',
@@ -335,8 +337,8 @@ export const THEATERS: Record<TheaterId, TheaterConfig> = {
     allowedCategories: ['sea', 'air'],
     attackerFaction: 'Air Wing Strike Force',
     defenderFaction: 'Surface Task Force',
-    attackerColor: '#72745C', // Olive Drab / Naval Steel
-    defenderColor: '#857577', // Feldgrau
+    attackerColor: FACTION_PALETTE.US.primary,
+    defenderColor: FACTION_PALETTE.JAP.primary,
   },
 };
 
