@@ -1,17 +1,17 @@
 // Builds demomap01.json in the land SVG's coordinate space.
-// Projection fitted to ne_110m_land_adjsut.svg: Mercator, lon_0 = 60, 800px = 360°,
+// Projection fitted to the land SVG: Mercator, lon_0 = 60, 800px = 360°,
 // equator at y = 355. Anchors are checked against the SVG land mask before the file is written.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const svg = readFileSync(resolve(root, "web/public/assets/ne_110m_land_adjsut.svg"), "utf8");
+const svg = readFileSync(resolve(root, "web/public/assets/ne_110m_land_FINAL_02.svg"), "utf8");
 const paths = [...svg.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1]);
 
 function ringOf(part) {
   const nums = part
-    .replace(/[MZ]/gi, " ")
+    .replace(/[MLZ]/gi, " ")
     .trim()
     .split(/[\s,]+/)
     .filter((s) => s !== "")
@@ -562,7 +562,7 @@ const doc = {
   version: 2,
   name: "DEMO - TEST RUN",
   coord_space: "svg",
-  land_mask: "assets/ne_110m_land_adjsut.svg",
+  land_mask: "assets/ne_110m_land_FINAL_02.svg",
   projection: { type: "mercator", lon_0: 60, px_per_degree: round(K), origin: [OX, OY] },
   base_map: "",
   faction_colors: {

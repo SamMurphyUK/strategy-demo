@@ -15,7 +15,7 @@ import {
   ringArea,
   uncoveredLand,
 } from "../../../src/ui/map/regionClip";
-import landSvg from "../../../public/assets/ne_110m_land_FINAL.svg?raw";
+import landSvg from "../../../public/assets/ne_110m_land_FINAL_02.svg?raw";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
   { x, y },
@@ -51,8 +51,8 @@ describe("landFromPathData", () => {
     expect(pointInMultiPolygon({ x: 10, y: 10 }, land)).toBe(true);
   });
 
-  it("parses the real land SVG into 121 landmasses", () => {
-    expect(extractPathData(landSvg)).toHaveLength(121);
+  it("parses the real land SVG into 122 landmasses", () => {
+    expect(extractPathData(landSvg)).toHaveLength(122);
   });
 });
 

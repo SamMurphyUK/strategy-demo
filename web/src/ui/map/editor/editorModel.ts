@@ -23,7 +23,7 @@ export type LinkKind = "land" | "sea" | "coastal";
 /** Starting owners as demomap01.json spells them (`metadata.faction`). */
 export const OWNER_OPTIONS = ["GER", "USSR", "UK", "USA", "JAP", "Neutral"] as const;
 
-export const LAND_SVG_REF = "assets/ne_110m_land_FINAL.svg";
+export const LAND_SVG_REF = "assets/ne_110m_land_FINAL_02.svg";
 const DEFAULT_ANCHOR_CAPACITY = 5;
 /** Two vertices closer than this are the same vertex. Snapped borders are exact; hand-drawn ones are not. */
 export const SAME_VERTEX_EPS = 0.75;
