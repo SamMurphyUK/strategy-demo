@@ -24,6 +24,16 @@ const THEATER_FACTION: Record<TheaterId, string> = {
   air_strike_test: "usa",
 };
 
+/** The other side of each sandbox preset. A defeat plays their theme. */
+const THEATER_DEFENDER: Record<TheaterId, string> = {
+  normandy: "ger",
+  eastern: "ger",
+  north_africa: "ger",
+  pacific: "jap",
+  navy_test: "jap",
+  air_strike_test: "jap",
+};
+
 const THEME_VOLUME = 0.7;
 const FADE_SEC = 1.4;
 
@@ -36,14 +46,25 @@ let volumeNow = 0;
 let fadeToken = 0;
 let stopTimer = 0;
 
-export function battleThemeFor(factionId: string | null | undefined, theater: TheaterId): string | null {
-  if (factionId && resolveFaction(factionId) !== "NEUTRAL") {
-    return THEME_URL[resolveFaction(factionId)] ?? null;
-  }
-  return THEME_URL[resolveFaction(THEATER_FACTION[theater])] ?? null;
+export function battleThemeFor(
+  factionId: string | null | undefined,
+  theater: TheaterId,
+  side: "attacker" | "defender" = "attacker",
+): string | null {
+  return THEME_URL[resolveFaction(outcomeFactionId(factionId, theater, side))] ?? null;
 }
 
-/** Loop this theme under the battle and park the combat-phase bed until the battle closes. */
+/** Faction cloth for an outro. A sandbox battle uses the preset side when the match has no id. */
+export function outcomeFactionId(
+  factionId: string | null | undefined,
+  theater: TheaterId,
+  side: "attacker" | "defender",
+): string {
+  if (factionId && resolveFaction(factionId) !== "NEUTRAL") return factionId;
+  return side === "defender" ? THEATER_DEFENDER[theater] : THEATER_FACTION[theater];
+}
+
+/** Loop this theme for the victory flag and park strategist 2 until the flag closes. */
 export async function startBattleTheme(url: string): Promise<void> {
   if (activeUrl === url && player) return;
   activeUrl = url;
@@ -70,20 +91,24 @@ export async function startBattleTheme(url: string): Promise<void> {
   }
 }
 
-/** Stop the theme and bring the combat-phase bed back where it was parked. */
+/** Fade the theme out and bring strategist 2 back where the victory parked it. */
 export function stopBattleTheme(): void {
   activeUrl = "";
   loadedUrl = "";
   window.clearTimeout(stopTimer);
-  fadeToken += 1;
-  silence(player);
-  volumeNow = 0;
+  fadeTo(0);
   releaseCampaignBattle();
+  const token = fadeToken;
+  stopTimer = window.setTimeout(() => {
+    if (token !== fadeToken) return;
+    silence(player);
+    volumeNow = 0;
+  }, FADE_SEC * 1000 + 30);
 }
 
 /**
- * Silence the theme without dropping the combat-phase hold. Used for the victory piece,
- * the menu, and mute. Opening it again continues from the tick where it went quiet.
+ * Silence the theme without dropping the strategist 2 hold. Used for the menu and mute.
+ * Opening it again continues from the tick where it went quiet.
  */
 export function setBattleThemeQuiet(next: boolean): void {
   if (next === quiet) return;

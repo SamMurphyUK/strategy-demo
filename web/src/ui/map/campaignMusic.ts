@@ -1,7 +1,7 @@
-// Orchestral beds. The map loops strategist 1. The combat phase crossfades to strategist 2
-// and back when the phase ends. The battle screen parks strategist 2 and plays the attacker's
-// faction theme. A victory pauses that theme for strategist 3, then fades the theme back in
-// at the same moment. Leaving the battle fades strategist 2 back in where it was parked.
+// Orchestral beds. The map loops strategist 1. The combat phase, including the battle
+// screen, crossfades to strategist 2 and back when the phase ends. A battle victory parks
+// strategist 2 and plays the attacker's faction theme instead of strategist 3. Leaving the
+// flag fades strategist 2 back in where it was parked.
 
 import { createSeamlessLoopBuffer, scanAudioBoundaries, type SeamlessLoopResult } from "../battle/utils/BackgroundMusic";
 
@@ -34,7 +34,7 @@ let muted = false;
 let armed = false;
 let victoryOn = false;
 let battleHeld = false;
-/** Strategist 2 is parked while a faction theme owns the battle screen. */
+/** Strategist 2 is parked while a faction theme owns the victory flag. */
 let themeHolding = false;
 let themeToken = 0;
 let bedsRequested = false;

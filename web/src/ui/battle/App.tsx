@@ -75,7 +75,8 @@ import {
 } from './rules';
 import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
 import {sfxMuted, soundManager, subscribeSfx, toggleSfx} from '../../audio/sound_manager';
-import {battleThemeFor, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
+import {battleThemeFor, outcomeFactionId, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
+import {flagMotifForFaction} from './flagMotif';
 import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
   drawProceduralUnit,
@@ -328,8 +329,10 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
   // Attacker Victory Sequence State & Refs
   const [isVictorySequenceActive, setIsVictorySequenceActive] = useState(false);
+  const [victoryWinner, setVictoryWinner] = useState<'attacker' | 'defender'>('attacker');
   const victorySeqRef = useRef({
     active: false,
+    winner: 'attacker' as 'attacker' | 'defender',
     stage: 'INACTIVE' as 'INACTIVE' | 'CHEERING' | 'FADE_TO_BLACK' | 'FLAG_SCREEN',
     elapsed: 0,
     flagElapsed: 0,
@@ -359,24 +362,22 @@ export default function App({match}: {match?: BattleMatch} = {}) {
   const [isMusicMuted, setIsMusicMuted] = useState(false);
   const campaignMuted = useSyncExternalStore(subscribeCampaignMusic, campaignMusicMuted, () => false);
   const musicMuted = isMatch ? campaignMuted : isMusicMuted;
-  const themeUrl = battleThemeFor(match?.attackerFaction, match?.theater ?? currentTheater);
-  // Faction theme for the battle. Leaving the screen releases strategist 2 where it was parked.
-  useEffect(() => {
-    if (!themeUrl) return;
-    void startBattleTheme(themeUrl);
-    return () => stopBattleTheme();
-  }, [themeUrl]);
-  useEffect(() => {
-    setBattleThemeQuiet(
-      isVictorySequenceActive || isGameMenuOpen || musicMuted || gameState.status !== 'PLAYING',
-    );
-  }, [isVictorySequenceActive, isGameMenuOpen, musicMuted, gameState.status]);
-  // Strategist 3 for the flag. The faction theme stays parked and comes back when the flag is dismissed.
+  const winnerFaction = victoryWinner === 'defender' ? match?.defenderFaction : match?.attackerFaction;
+  const themeUrl = battleThemeFor(winnerFaction, match?.theater ?? currentTheater, victoryWinner);
+  // The faction theme replaces strategist 3: it starts with the victory and loops until the flag is dismissed.
   useEffect(() => {
     if (!isVictorySequenceActive) return;
-    beginCampaignVictory();
-    return () => endCampaignVictory();
-  }, [isVictorySequenceActive]);
+    if (!themeUrl) {
+      beginCampaignVictory();
+      return () => endCampaignVictory();
+    }
+    void startBattleTheme(themeUrl);
+    return () => stopBattleTheme();
+  }, [isVictorySequenceActive, themeUrl]);
+  useEffect(() => {
+    if (!isVictorySequenceActive) return;
+    setBattleThemeQuiet(isGameMenuOpen || musicMuted);
+  }, [isVictorySequenceActive, isGameMenuOpen, musicMuted]);
 
   // Attacker & Defender counts
   const [attackerUnits, setAttackerUnits] = useState<CombatUnit[]>([]);
@@ -571,6 +572,9 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       }
     } else {
       x = 862 + unit.colIndex * 105;
+      if (unit.victoryAdvanceX) {
+        x -= unit.victoryAdvanceX;
+      }
     }
 
     let y = 0;
@@ -603,7 +607,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       if (unit.staggerX !== undefined) x += unit.staggerX;
       if (unit.staggerY !== undefined) y += unit.staggerY;
       if (unit.sinkingY !== undefined) y += unit.sinkingY;
-      if (isAttacker && unit.victoryAscentY) y -= unit.victoryAscentY;
+      if (unit.victoryAscentY) y -= unit.victoryAscentY;
       return {x, y};
     }
 
@@ -639,7 +643,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       if (unit.sinkingY !== undefined) {
         y += unit.sinkingY;
       }
-      if (isAttacker && unit.victoryAscentY) {
+      if (unit.victoryAscentY) {
         y -= unit.victoryAscentY;
       }
       return {x, y};
@@ -663,7 +667,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       y += unit.sinkingY;
     }
 
-    if (isAttacker && unit.victoryAscentY) {
+    if (unit.victoryAscentY) {
       y -= unit.victoryAscentY;
     }
 
@@ -731,6 +735,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     };
     victorySeqRef.current = {
       active: false,
+      winner: 'attacker',
       stage: 'INACTIVE',
       elapsed: 0,
       flagElapsed: 0,
@@ -751,6 +756,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
             .toUpperCase(),
     };
     setIsVictorySequenceActive(false);
+    setVictoryWinner('attacker');
     returnButtonRectRef.current = null;
     attackerHitsRef.current = 0;
     defenderHitsRef.current = 0;
@@ -1535,6 +1541,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     }
     victorySeqRef.current = {
       active: false,
+      winner: 'attacker',
       stage: 'INACTIVE',
       elapsed: 0,
       flagElapsed: 0,
@@ -1542,6 +1549,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       regionName: '',
     };
     setIsVictorySequenceActive(false);
+    setVictoryWinner('attacker');
     returnButtonRectRef.current = null;
 
     // Load next historical scenario or reset engagement for fresh combat
@@ -1554,25 +1562,23 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     }));
   }, [currentScenarioIndex, loadScenario]);
 
-  // Attacker Victory Sequence Trigger:
-  // 1. Fade out UI
-  // 2. Friendly forces slowly advance forward and cheer; planes bank and climb out of sight
-  // 3. Fade to black after ~3.5s
-  // 4. Full-screen waving flag background in loop
-  // 5. Center VICTORY modal expands with region name, emblems, and IPC counters
-  // 6. "RETURN TO COMBAT" button fades in
-  const triggerAttackerVictorySequence = useCallback(() => {
+  // Outro for either side. The winner marches toward the loser, then the same flag card
+  // shows the IPC lost. The winner's theme loops until the flag is dismissed.
+  const triggerOutcomeSequence = useCallback((winner: 'attacker' | 'defender') => {
     clearSequenceTimeouts();
     setIsAutoRolling(false);
     setBattlePhase('VICTORY_SEQUENCE');
+    setVictoryWinner(winner);
     setIsVictorySequenceActive(true);
     ipcLostRef.current = matchRef.current
       ? {attacker: ipcLost(attackerUnitsRef.current), defender: ipcLost(defenderUnitsRef.current)}
       : {attacker: attackerIpcRef.current, defender: defenderIpcRef.current};
 
-    const scoreGain =
-      defenderUnitsRef.current.filter((u) => u.status === 'downed' || u.isDestroyed).length * 150;
-    setGameState((prev) => ({...prev, score: prev.score + scoreGain}));
+    if (winner === 'attacker') {
+      const scoreGain =
+        defenderUnitsRef.current.filter((u) => u.status === 'downed' || u.isDestroyed).length * 150;
+      setGameState((prev) => ({...prev, score: prev.score + scoreGain}));
+    }
 
     const theaterObj = THEATERS[currentTheaterRef.current];
     const regionName = matchRef.current
@@ -1592,6 +1598,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
     victorySeqRef.current = {
       active: true,
+      winner,
       stage: 'CHEERING',
       elapsed: 0,
       flagElapsed: 0,
@@ -1599,8 +1606,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       regionName,
     };
 
-    // Mark surviving friendly units: land units advance & cheer; air units climb upward
-    attackerUnitsRef.current.forEach((u) => {
+    const marching = winner === 'defender' ? defenderUnitsRef.current : attackerUnitsRef.current;
+    marching.forEach((u) => {
       if (isCombatActive(u)) {
         u.victoryAdvanceX = 0;
         u.victoryAscentY = 0;
@@ -1611,11 +1618,19 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     });
 
     setCombatLog((prev) => [
-      `🏆 VICTORY! All defending enemy forces eliminated!`,
-      `Friendly vanguard cheering and advancing across ${regionName}.`,
+      winner === 'defender'
+        ? `The attack is broken. ${regionName} is held.`
+        : `🏆 VICTORY! All defending enemy forces eliminated!`,
+      winner === 'defender'
+        ? `The defending line advances across ${regionName}.`
+        : `Friendly vanguard cheering and advancing across ${regionName}.`,
       ...prev.slice(0, 8),
     ]);
   }, [clearSequenceTimeouts]);
+
+  const triggerAttackerVictorySequence = useCallback(() => {
+    triggerOutcomeSequence('attacker');
+  }, [triggerOutcomeSequence]);
 
   // Debug Auto-Win Handler: eliminates all active defender units and triggers victory march
   const handleInstantKillDefenders = useCallback(() => {
@@ -1755,16 +1770,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       if (outcome === 'attacker_wins') {
         triggerAttackerVictorySequence();
       } else if (outcome === 'defender_wins' || outcome === 'mutual') {
-        setBattlePhase('IDLE');
-        setIsAutoRolling(false);
-        setGameState((prev) => ({...prev, status: outcome === 'mutual' ? 'MUTUAL' : 'GAME_OVER'}));
-        gameAudio.playDefeatMotif();
-        setCombatLog((prev) => [
-          outcome === 'mutual'
-            ? `Both sides are destroyed. The defender holds the ground.`
-            : `\u2620 DEFEAT: Friendly attacking vanguard broken!`,
-          ...prev.slice(0, 8),
-        ]);
+        triggerOutcomeSequence('defender');
       } else {
         // As Attacker, enter decision phase with RETREAT (blue) and PRESS ON (red) flanking the dice tray!
         setBattlePhase('ATTACKER_DECISION');
@@ -1777,7 +1783,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         ]);
       }
     }, finalizeDelay);
-  }, [roundNumber, scheduleSequenceTimeout, triggerAttackerVictorySequence]);
+  }, [roundNumber, scheduleSequenceTimeout, triggerAttackerVictorySequence, triggerOutcomeSequence]);
 
   // Helper to check if a specific side and rank has living, un-downed units to fire
   const toFiringUnit = (u: CombatUnit) => ({
@@ -3336,9 +3342,8 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       }
     }
 
-    // Victory Sequence Simulation:
-    // Surviving friendly army marches forward & cheers; aircraft bank & ascend off-screen;
-    // Fades to black after ~3.4s, then transitions to full-screen waving flag screen
+    // Outro simulation. The winning side marches toward the loser and cheers; aircraft climb away.
+    // Fades to black after ~3.4s, then the winner's flag and the IPC card stay up.
     if (victorySeqRef.current.active) {
       victorySeqRef.current.elapsed += deltaTime;
       const el = victorySeqRef.current.elapsed;
@@ -3347,7 +3352,9 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         victorySeqRef.current.stage = 'CHEERING';
         victorySeqRef.current.blackFadeAlpha = 0;
 
-        attackerUnitsRef.current.forEach((u) => {
+        const victors =
+          victorySeqRef.current.winner === 'defender' ? defenderUnitsRef.current : attackerUnitsRef.current;
+        victors.forEach((u) => {
           if (isCombatActive(u)) {
             const def = UNIT_DEFINITIONS[u.type];
             if (def.category === 'air') {
@@ -3363,7 +3370,9 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         const fadeP = Math.min(1, (el - 3.4) / 0.85);
         victorySeqRef.current.blackFadeAlpha = fadeP;
 
-        attackerUnitsRef.current.forEach((u) => {
+        const victors =
+          victorySeqRef.current.winner === 'defender' ? defenderUnitsRef.current : attackerUnitsRef.current;
+        victors.forEach((u) => {
           if (isCombatActive(u)) {
             const def = UNIT_DEFINITIONS[u.type];
             if (def.category === 'air') {
@@ -4025,12 +4034,20 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       const time = gameTimeRef.current;
 
       // 1. Dynamic procedural waving flag in an infinite loop fills the entire screen
+      const winner = victorySeqRef.current.winner;
+      const motif =
+        winner === 'defender'
+          ? flagMotifForFaction(
+              outcomeFactionId(matchRef.current?.defenderFaction, currentTheaterRef.current, 'defender'),
+            )
+          : undefined;
       drawProceduralWavingFlag(
         ctx,
         canvasWidth,
         canvasHeight,
         time,
         currentTheaterRef.current,
+        motif,
       );
 
       // 2. Center VICTORY modal expands outward with Region banner, circular emblems, IPC counts, and button
@@ -4044,6 +4061,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         ipcLostRef.current.attacker,
         ipcLostRef.current.defender,
         matchRef.current ? 'RETURN TO MAP' : 'RETURN TO COMBAT',
+        winner === 'defender',
       );
       returnButtonRectRef.current = returnButtonRect;
 
@@ -5223,6 +5241,14 @@ export default function App({match}: {match?: BattleMatch} = {}) {
                 }}
                 className="mt-2 w-full py-1 bg-[#A1A258]/30 hover:bg-[#A1A258]/50 border border-[#A1A258] text-[#DFCE91] font-bold text-[10px] rounded transition-colors">
                 TEST ATTACKER VICTORY SEQUENCE
+              </button>
+              <button
+                onClick={() => {
+                  setIsSandboxOpen(false);
+                  triggerOutcomeSequence('defender');
+                }}
+                className="mt-1.5 w-full py-1 bg-[#9A4E48]/40 hover:bg-[#9A4E48]/60 border border-[#B77958] text-[#DFCE91] font-bold text-[10px] rounded transition-colors">
+                TEST DEFENDER VICTORY SEQUENCE
               </button>
               <button
                 onClick={() => {

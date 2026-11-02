@@ -4366,6 +4366,7 @@ export function drawVictorySequenceModal(
   attackerIpc: number,
   defenderIpc: number,
   returnLabel = 'RETURN TO COMBAT',
+  defeat = false,
 ): {returnButtonRect: {x: number; y: number; w: number; h: number}} {
   ctx.save();
 
@@ -4431,25 +4432,28 @@ export function drawVictorySequenceModal(
   if (contentAlpha > 0.01) {
     ctx.globalAlpha = contentAlpha;
 
-    // --- ABOVE THE BOX: "You successfully took REGION" ---
+    // Above the box: the player took the region, or failed to.
     const upperTextY = by - 18;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
+    const banner = defeat
+      ? `YOU FAILED TO TAKE ${regionName.toUpperCase()}`
+      : `YOU SUCCESSFULLY TOOK ${regionName.toUpperCase()}`;
 
     // Drop shadow
     ctx.fillStyle = PALETTE.bunkerCharcoal;
     ctx.font = 'bold 15px "Courier New", monospace';
-    ctx.fillText(`YOU SUCCESSFULLY TOOK ${regionName.toUpperCase()}`, centerX + 1, upperTextY + 1);
+    ctx.fillText(banner, centerX + 1, upperTextY + 1);
 
     // Brass/Sand Cream Main Text
     ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillText(`YOU SUCCESSFULLY TOOK ${regionName.toUpperCase()}`, centerX, upperTextY);
+    ctx.fillText(banner, centerX, upperTextY);
 
-    // --- CENTER OF THE BOX: "VICTORY" IN LARGE BOLD PIXEL LETTERING ---
+    // Center of the box: VICTORY, or DEFEAT when the other side held.
     const victoryY = by + 22;
     drawPixelString(
       ctx,
-      'VICTORY',
+      defeat ? 'DEFEAT' : 'VICTORY',
       centerX,
       victoryY,
       6, // Large 6x pixel size
