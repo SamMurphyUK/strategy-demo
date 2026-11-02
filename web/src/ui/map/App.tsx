@@ -482,7 +482,7 @@ export function App() {
     if (snap.width <= 1 || snap.height <= 1 || snap.fitK <= 0) {
       return;
     }
-    const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, "zoom", shape.anchor);
+    const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, "zoom", shape.anchor, window.devicePixelRatio || 1);
     void panToTerritory(seaZoneId, goal.k, camera, shape.bounds);
   };
 
@@ -507,7 +507,7 @@ export function App() {
         const snap = camera.snapshot();
         if (snap.width > 1 && snap.height > 1 && snap.fitK > 0) {
           const mode = openedCombat.current ? "pan" : "zoom";
-          const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode, shape.anchor);
+          const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode, shape.anchor, window.devicePixelRatio || 1);
           await camera.moveTo(goal, mode === "pan" ? COMBAT_PAN_MS : COMBAT_ZOOM_MS);
           if (ticket !== approachTicket.current) return;
           openedCombat.current = true;

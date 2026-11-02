@@ -46,6 +46,7 @@ import {
   worldTokenPx,
   worldToScreen,
   anchorSpan,
+  maxZoomK,
   wrapView,
   wrapWorldX,
   zoomAt,
@@ -366,6 +367,16 @@ export function MapView(props: MapViewProps) {
     }
   }, [size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
 
+  // A view left over from the old 24× cap is pulled back as soon as the map is on screen.
+  useEffect(() => {
+    if (size.w === 0 || cameraLock.current) {
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const cap = maxZoomK(fitK, dpr);
+    setView((v) => (v.k > cap ? zoomAt(v, { x: size.w / 2, y: size.h / 2 }, cap / v.k, fitK, dpr) : v));
+  }, [fitK, size.w, size.h]);
+
   useEffect(() => {
     const api: MapCamera = {
       snapshot() {
@@ -399,7 +410,8 @@ export function MapView(props: MapViewProps) {
             const e = easeInOutCubic(t);
             const w = live.current.size.w || w0;
             const h = live.current.size.h || h0;
-            const k = fromK + (goal.k - fromK) * e;
+            const cap = maxZoomK(live.current.fitK, window.devicePixelRatio || 1);
+            const k = Math.min(fromK + (goal.k - fromK) * e, cap);
             const cx = fromCenter.x + (goal.center.x - fromCenter.x) * e;
             const cy = fromCenter.y + (goal.center.y - fromCenter.y) * e;
             let next = viewFor({ x: cx, y: cy }, k, w, h);
@@ -661,7 +673,7 @@ export function MapView(props: MapViewProps) {
       const rect = canvas.getBoundingClientRect();
       const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       setView((v) => {
-        const zoomed = zoomAt(v, p, e.deltaY > 0 ? 1 / 1.15 : 1.15, fitK);
+        const zoomed = zoomAt(v, p, e.deltaY > 0 ? 1 / 1.15 : 1.15, fitK, window.devicePixelRatio || 1);
         return live.current.wrap ? wrapView(zoomed, live.current.size.w, live.current.bounds) : zoomed;
       });
     };

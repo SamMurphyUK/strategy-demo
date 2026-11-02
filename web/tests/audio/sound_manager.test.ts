@@ -14,6 +14,7 @@ import {
   DRAG_PITCH_OFFSET,
   dragPitchStep,
   impactDelayMs,
+  playBattleOverride,
   PolyphonyLimiter,
   scheduleVolley,
   soundManager,
@@ -78,23 +79,34 @@ describe("audio manifest", () => {
     expect(SOUND_CUE_MAP.fire_aircraft).toEqual([
       "M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1",
     ]);
+    expect(SOUND_CUE_MAP.rifle_crack).toEqual(SOUND_CUE_MAP.fire_infantry);
+    expect(SOUND_CUE_MAP.gunshot_blast).toEqual(SOUND_CUE_MAP.fire_aircraft);
+    expect(SOUND_CUE_MAP.fighter_guns).toEqual(SOUND_CUE_MAP.fire_aircraft);
+    expect(SOUND_CUE_MAP.artillery_boom).toEqual(SOUND_CUE_MAP.fire_artillery);
+    expect(SOUND_CUE_MAP.tank_blast).toEqual(SOUND_CUE_MAP.fire_artillery);
+    expect(SOUND_CUE_MAP.naval_salvo).toEqual(SOUND_CUE_MAP.fire_naval);
+    expect(SOUND_CUE_MAP.aaa_flak_fire).toEqual(SOUND_CUE_MAP.stinger_frontline);
+    expect(SOUND_CUE_MAP.flak_burst).toEqual(SOUND_CUE_MAP.unit_destroyed);
+    expect(SOUND_CUE_MAP.vehicle_wreck).toEqual(SOUND_CUE_MAP.unit_destroyed);
+    expect(SOUND_CUE_MAP.artillery_cookoff).toEqual(SOUND_CUE_MAP.unit_destroyed);
+    expect(SOUND_CUE_MAP.strong_hit_gong).toEqual(SOUND_CUE_MAP.hit_impact);
+    expect(SOUND_CUE_MAP.metal_crunch).toEqual(SOUND_CUE_MAP.hit_impact);
     expect(SOUND_CUE_MAP.assign_casualty).toEqual(["Bullet_Drop_Wood_04"]);
     expect(BATTLE_CUES).toContain("assign_casualty");
     expect(BATTLE_CUES).toContain("dice_rattle");
     expect(BATTLE_CUES).toContain("rifle_crack");
     const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-    const battleSources = [
-      readFileSync(join(root, "src/ui/battle/App.tsx"), "utf8"),
-      readFileSync(join(root, "src/ui/battle/utils/helper.tsx"), "utf8"),
-    ].join("\n");
-    expect(battleSources).not.toContain("assign_casualty");
+    const appSource = readFileSync(join(root, "src/ui/battle/App.tsx"), "utf8");
+    const helperSource = readFileSync(join(root, "src/ui/battle/utils/helper.tsx"), "utf8");
+    expect(helperSource).not.toContain("assign_casualty");
+    expect(appSource).toContain('soundManager.play("assign_casualty")');
     expect(SOUND_CUE_MAP.fire_artillery).toEqual([
       "Automatic Cannon - MK44 - 03 - Single Shot with Report 03",
     ]);
     expect(SOUND_CUE_MAP.fire_armor).toEqual(SOUND_CUE_MAP.fire_artillery);
     expect(SOUND_CUE_MAP.fire_naval).toEqual(SOUND_CUE_MAP.fire_artillery);
     expect(SOUND_CUE_MAP.hit_impact).toEqual(["Impacts/Impact 059"]);
-    expect(SOUND_CUE_MAP.unit_destroyed).toEqual(["Impacts/Impact_Boom_Distorted_02"]);
+    expect(SOUND_CUE_MAP.unit_destroyed).toEqual(["Impacts/Impact_Drum Hit_03"]);
     for (const cue of SOUND_CUES) {
       const files = SOUND_CUE_MAP[cue];
       expect(files).toHaveLength(1);
@@ -186,6 +198,15 @@ describe("battle cue replacement", () => {
   it("keeps the synthesized battle tone until that one cue is replaced, and clear puts it back", () => {
     clearCueOverrides();
     expect(assignedFiles("dice_rattle")).toEqual([]);
+    expect(assignedFiles("plane_flyby")).toEqual([]);
+    expect(assignedFiles("crisp_click")).toEqual(["vintage_radio_button_006"]);
+    expect(assignedFiles("confirm_select")).toEqual(["vintage_radio_button_006"]);
+    expect(assignedFiles("dice_bounce")).toEqual([]);
+    expect(assignedFiles("tactical_hit_beep")).toEqual([]);
+    expect(assignedFiles("rifle_crack")).toEqual(["Bullet_Drop_Leaves_03"]);
+    expect(playBattleOverride("rifle_crack")).toBe(true);
+    expect(playBattleOverride("dice_rattle")).toBe(false);
+    expect(playBattleOverride("plane_flyby")).toBe(false);
     expect(assignedFiles("fire_infantry")).toEqual(["Bullet_Drop_Leaves_03"]);
     assignFileToCue("dice_rattle", "Dice 9");
     expect(assignedFiles("dice_rattle")).toEqual(["Dice 9"]);
@@ -194,6 +215,10 @@ describe("battle cue replacement", () => {
     expect(assignedFiles("token_pickup")).toEqual(["vintage_radio_button_006", "Dice 9"]);
     clearCueOverride("dice_rattle");
     expect(assignedFiles("dice_rattle")).toEqual([]);
+    assignFileToCue("rifle_crack", "Dice 9");
+    expect(assignedFiles("rifle_crack")).toEqual(["Bullet_Drop_Leaves_03", "Dice 9"]);
+    clearCueOverride("rifle_crack");
+    expect(assignedFiles("rifle_crack")).toEqual(["Bullet_Drop_Leaves_03"]);
     clearCueOverride("assign_casualty");
     expect(assignedFiles("assign_casualty")).toEqual(["Bullet_Drop_Wood_04"]);
     assignFileToCue("assign_casualty", "Dice 9");

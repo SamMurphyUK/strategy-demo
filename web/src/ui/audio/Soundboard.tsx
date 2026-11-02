@@ -121,7 +121,7 @@ export function Soundboard() {
       <CueRows cues={SOUND_CUES.filter((cue) => !battleCues.has(cue))} />
       <h2 style={{ font: "inherit", margin: "14px 0 0" }}>Battle</h2>
       <p style={{ margin: "8px 0", color: "#7A684B" }}>
-        Assign a file to replace one battle tone. Clear cue removes that file, and the original tone plays. assign_casualty can be retargeted, and the battle does not play it yet.
+        Gun, impact, and click cues use the campaign sounds. Clear cue drops a replacement. Dice and the flyby keep their tones until you assign a file. assign_casualty plays when a unit is removed.
       </p>
       <CueRows cues={BATTLE_CUES} battle />
       <h2 style={{ font: "inherit", margin: "14px 0 0" }}>All files</h2>

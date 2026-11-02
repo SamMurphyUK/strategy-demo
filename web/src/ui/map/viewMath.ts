@@ -1,5 +1,6 @@
 // Pan and zoom maths for the map canvas. Pure.
 import type { Rect, Vec2 } from "./geometry";
+import { MAX_BAKE_SCALE } from "./mapBakeMath";
 
 /** `x`, `y` is the world point at the canvas's top-left corner; `k` is screen pixels per world unit. */
 export interface View {
@@ -10,6 +11,18 @@ export interface View {
 
 export const MIN_ZOOM_FACTOR = 0.6; // relative to the fitted view
 export const MAX_ZOOM_FACTOR = 24;
+/**
+ * The baked map stops gaining pixels at `MAX_BAKE_SCALE`. Past this many screen pixels per bake pixel
+ * the bitmap is only being enlarged, and the coast breaks into blocks. Two keeps a close view sharp.
+ */
+export const MAX_BAKE_MAGNIFICATION = 2;
+
+/** Tightest zoom the wheel and the battle approach may use. The bake, not the old 24× factor, is what binds. */
+export function maxZoomK(fitK: number, dpr = 1): number {
+  const relative = (fitK > 0 ? fitK : 1) * MAX_ZOOM_FACTOR;
+  const sharp = (MAX_BAKE_SCALE * MAX_BAKE_MAGNIFICATION) / Math.max(dpr, 1);
+  return Math.min(relative, sharp);
+}
 /** How far a unit's on-screen size may drift from its size on the fitted map. */
 export const TOKEN_ZOOM_LIMIT = 0.1;
 
@@ -92,8 +105,8 @@ export function panView(view: View, dxPx: number, dyPx: number): View {
 }
 
 /** `factor` > 1 zooms in. The world point under `screenPoint` stays put. */
-export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: number): View {
-  const k = Math.min(Math.max(view.k * factor, fitK * MIN_ZOOM_FACTOR), fitK * MAX_ZOOM_FACTOR);
+export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: number, dpr = 1): View {
+  const k = Math.min(Math.max(view.k * factor, fitK * MIN_ZOOM_FACTOR), maxZoomK(fitK, dpr));
   const anchor = screenToWorld(view, screenPoint);
   const { sx, sy } = projectionScales(k);
   return { k, x: anchor.x - screenPoint.x / sx, y: anchor.y - screenPoint.y / sy };

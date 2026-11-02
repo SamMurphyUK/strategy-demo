@@ -12,14 +12,17 @@ const outFile = join(webRoot, "src", "audio", "audio_manifest.ts");
 /**
  * One clip per cue. Map interface cues are the radio-button click. Panel
  * buttons use ui_panel_flick so that click can be swapped on its own.
- * Battle cues are the synthesized board events, listed so the soundboard can retarget them.
- * assign_casualty is on the menu only: nothing in the battle calls it yet.
+ * Gun, blast, and impact cues reuse the campaign sounds. Dice, clicks, and the flyby stay synthesized until replaced.
+ * assign_casualty plays when a player removes a unit. Clicks and confirm use the radio button.
  * The T-34 files are the engine and the elevation gear, so they are not gunshots.
  */
 const RADIO = "vintage_radio_button_006";
 const CANNON = "Automatic Cannon - MK44 - 03 - Single Shot with Report 03";
 const THOMPSON = "M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1";
-const BROWNING = "M1919A4_Browning_Machine_Gun_.30cal_on_turret_1m_left_blanks_Triple_shots_x_2";
+const BROWNING = "M1919A4_Browning_Machine_Gun_.30cal_on_turret_300m_in_front_blanks_Triple_shots_x_2";
+const LEAVES = "Bullet_Drop_Leaves_03";
+const HIT = "Impacts/Impact 059";
+const BOOM = "Impacts/Impact_Drum Hit_03";
 /** Short board-piece flick for panel buttons. Its own cue, so the soundboard can retarget it. */
 const PANEL_FLICK = "Placing Pieces on the Board 2";
 const CAMPAIGN_CUE_MAP = {
@@ -31,44 +34,44 @@ const CAMPAIGN_CUE_MAP = {
   ui_button_click: [RADIO],
   ui_panel_flick: [PANEL_FLICK],
   order_cancel: [RADIO],
-  fire_infantry: ["Bullet_Drop_Leaves_03"],
+  fire_infantry: [LEAVES],
   fire_artillery: [CANNON],
   fire_armor: [CANNON],
   fire_aircraft: [THOMPSON],
   fire_naval: [CANNON],
-  hit_impact: ["Impacts/Impact 059"],
-  unit_destroyed: ["Impacts/Impact_Boom_Distorted_02"],
+  hit_impact: [HIT],
+  unit_destroyed: [BOOM],
   stinger_war_room: ["Walkie Talkie,Cobra MicroTalk,Radio Communication,End,Noise Squelch,Beep,Series"],
-  stinger_frontline: ["M1919A4_Browning_Machine_Gun_.30cal_on_turret_300m_in_front_blanks_Triple_shots_x_2"],
+  stinger_frontline: [BROWNING],
 } as const;
 
 const BATTLE_CUE_MAP = {
   assign_casualty: ["Bullet_Drop_Wood_04"],
   crisp_click: [RADIO],
-  confirm_select: ["Domino Box 15"],
+  confirm_select: [RADIO],
   footstep_stone: ["SNEAKER PLASTIC FLOOR MAT FOOTSTEP WALKING"],
   dice_rattle: ["Dice 9"],
   dice_bounce: ["Backgammon Piece 21"],
-  strong_hit_gong: ["CHT2_Cinematic_Hit_214"],
+  strong_hit_gong: [HIT],
   tactical_hit_beep: ["CHT2_Cinematic_Hit_096"],
-  rifle_crack: ["Enfield_L85_rifle_5.56mm_on_gun_DPA4062_clean_Five_shots_x_1"],
-  gunshot_blast: ["Enfield_L85_rifle_5.56mm_1m_left_off_axis_MKH416_clean_Five_shots_x_1"],
+  rifle_crack: [LEAVES],
+  gunshot_blast: [THOMPSON],
   artillery_boom: [CANNON],
-  tank_blast: ["Impacts/Impact_Drum Hit_03"],
-  fighter_guns: [BROWNING],
+  tank_blast: [CANNON],
+  fighter_guns: [THOMPSON],
   bomber_whistle: ["Fast Action Swish_HW 05"],
-  naval_salvo: ["Impacts/Impact 045"],
+  naval_salvo: [CANNON],
   aaa_flak_fire: [BROWNING],
-  flak_burst: ["Explosives - Sweetners_07"],
+  flak_burst: [BOOM],
   torpedo_whoosh: ["Fast Action Swish_HW 05"],
   plane_flyby: ["Fast Action Swish_HW 05"],
   water_geyser: ["Impacts/GS sail impact 004"],
   shield_block: ["Impacts/Impact 038"],
   soldier_scream: ["Male_Shout-of-Pain_132"],
   infantry_groan: ["Male_Grunt-Shout_317"],
-  metal_crunch: ["Impacts/Bullet_hitting_metal_#4-1793575445860"],
-  vehicle_wreck: ["T-34_foley_cannon_height_adjustment"],
-  artillery_cookoff: ["EFX SD Metal plate thunder 01 C.M"],
+  metal_crunch: [HIT],
+  vehicle_wreck: [BOOM],
+  artillery_cookoff: [BOOM],
 } as const;
 
 const SOUND_CUE_MAP = { ...CAMPAIGN_CUE_MAP, ...BATTLE_CUE_MAP };

@@ -1442,6 +1442,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       target.fadeAlpha = 1.0;
       target.isFadingOut = false;
       registerCasualtyRecord(target, true);
+      soundManager.play("assign_casualty");
     }
     setPendingAttackerHits((h) => Math.max(0, h - 1));
     const {atk} = recalculateSynergies(attackerUnitsRef.current, defenderUnitsRef.current);
@@ -1454,7 +1455,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     const currentAtk = [...attackerUnitsRef.current];
 
     if (pendingAttackerHits > 0) {
-      gameAudio.playCrispClick();
       // (BETA) Only pick from currently active units; permanent casualties from prior rounds never appear
       const rankUnits = currentAtk.filter(
         (u) => isCombatActive(u) && u.effectiveRank === rankNum,
@@ -2045,7 +2045,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         );
       }
     } else if (u.type === 'fighter') {
-      gameAudio.playFighterGuns();
       spawnSmoke(muzzleX, muzzleY, 4, 12, PALETTE.trenchMudBone, 3.8, 'muzzle_small');
     } else if (u.type === 'tactical_bomber' || u.type === 'strategic_bomber') {
       gameAudio.playBomberWhistleDrop();
@@ -2622,7 +2621,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     const currentAtk = [...attackerUnitsRef.current];
 
     if (pendingAaHits > 0) {
-      gameAudio.playCrispClick();
       const availablePlanes = currentAtk.filter(
         (u) => isCombatActive(u) && u.type === type && UNIT_DEFINITIONS[u.type].category === 'air',
       );
@@ -2637,6 +2635,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       target.fadeAlpha = 1.0;
       target.isFadingOut = false;
       registerCasualtyRecord(target, true);
+      soundManager.play("assign_casualty");
       setPendingAaHits((h) => Math.max(0, h - 1));
 
       const {atk, def} = recalculateSynergies(currentAtk, defenderUnitsRef.current);
@@ -3262,7 +3261,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         });
 
         if (hitAtk) {
-          gameAudio.playCrispClick();
           assignHitToFriendlyUnit(hitAtk);
           return;
         }
@@ -5063,19 +5061,6 @@ export default function App({match}: {match?: BattleMatch} = {}) {
                 </div>
               </div>
 
-              {/* Instructions Banner */}
-              <div className="bg-[#2b242a] p-3 rounded-lg border border-[#5E4E54] text-[11px] leading-relaxed">
-                {pendingAttackerHits > 0 ? (
-                  <p className="text-[#DFCE91]">
-                    Friendly vanguard sustained incoming fire! Click any <span className="text-[#CAA574] font-bold">Rank row</span> below or click friendly units on the battlefield to assign casualties. Cheaper ranks preserve high-value armor and air wings.
-                  </p>
-                ) : (
-                  <p className="text-[#8DA082] font-bold">
-                    ✓ All casualties accounted for. Downed units will slowly fade into battlefield terrain. Ready to confirm and commence Round {roundNumber + 1}.
-                  </p>
-                )}
-              </div>
-
               {/* Friendly Rank Selection Rows */}
               <div className="flex flex-col gap-1.5">
                 <div className="text-[10px] font-bold text-[#CAA574] uppercase tracking-wider flex justify-between px-1">
@@ -5155,17 +5140,12 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
               {/* Modal Footer Controls */}
               <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-[#5E4E54]">
-                {pendingAttackerHits > 0 ? (
-                  <button
-                    onClick={handleAutoAssignFriendlyCasualties}
-                    className="min-h-[42px] px-3.5 py-1.5 bg-[#5E4E54] hover:bg-[#7D6652] active:scale-95 text-[#DFCE91] border border-[#7D6652] rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 shadow">
-                    <Zap size={14} className="text-[#A1A258]" />
-                    <span>AUTO-ASSIGN CHEAPEST</span>
-                  </button>
-                ) : (
+                {pendingAttackerHits === 0 ? (
                   <div className="text-[11px] text-[#8DA082] font-bold flex items-center gap-1">
                     <span>SECTOR LOSSES CONFIRMED</span>
                   </div>
+                ) : (
+                  <span />
                 )}
 
                 <button

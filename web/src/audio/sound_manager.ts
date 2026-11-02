@@ -208,16 +208,37 @@ function notifyCueMap(): void {
 
 const BATTLE_CUE_SET = new Set<string>(BATTLE_CUES);
 
+/**
+ * Gun, blast, and impact cues play the campaign recording.
+ * Clicks and confirm play the radio button. Dice, footsteps, voices, and the flyby stay synthesized until replaced.
+ */
+const FILE_BACKED_BATTLE_CUES = new Set<SoundCue>([
+  "strong_hit_gong",
+  "rifle_crack",
+  "gunshot_blast",
+  "artillery_boom",
+  "tank_blast",
+  "fighter_guns",
+  "naval_salvo",
+  "aaa_flak_fire",
+  "flak_burst",
+  "metal_crunch",
+  "vehicle_wreck",
+  "artillery_cookoff",
+  "crisp_click",
+  "confirm_select",
+]);
+
 /** Battle tones that still synthesize until the soundboard replaces that one cue. */
 export function isBattleSynthCue(cue: SoundCue): boolean {
-  return BATTLE_CUE_SET.has(cue) && cue !== "assign_casualty";
+  return BATTLE_CUE_SET.has(cue) && cue !== "assign_casualty" && !FILE_BACKED_BATTLE_CUES.has(cue);
 }
 
 export function cueHasOverride(cue: SoundCue): boolean {
   return cueOverrides.has(cue);
 }
 
-/** Files a cue plays. A battle tone stays synthesized until that cue is replaced. */
+/** Files a cue plays. A synthesized battle tone stays empty until that cue is replaced. */
 export function assignedFiles(cue: SoundCue): readonly string[] {
   const override = cueOverrides.get(cue);
   if (override) return override;
@@ -238,17 +259,19 @@ export function assignFileToCue(cue: SoundCue, filename: string): void {
   notifyCueMap();
 }
 
-/** Drop one battle replacement. The synthesized tone comes back. Map cues are left alone. */
+/** Drop one battle replacement. A synthesized cue returns to its tone. A gun or impact cue returns to its campaign sound. Map cues are left alone. */
 export function clearCueOverride(cue: SoundCue): void {
   if (!BATTLE_CUE_SET.has(cue) || !cueOverrides.delete(cue)) return;
   notifyCueMap();
 }
 
-/** Play a library clip only when this battle cue has been replaced on the soundboard. */
+/** Play a library clip for a gun or impact cue, or for a tone the soundboard has replaced. */
 export function playBattleOverride(cue: SoundCue): boolean {
-  if (!isBattleSynthCue(cue) || !cueOverrides.has(cue)) return false;
-  soundManager.play(cue);
-  return true;
+  if (FILE_BACKED_BATTLE_CUES.has(cue) || (isBattleSynthCue(cue) && cueOverrides.has(cue))) {
+    soundManager.play(cue);
+    return true;
+  }
+  return false;
 }
 
 export function clearCueOverrides(): void {

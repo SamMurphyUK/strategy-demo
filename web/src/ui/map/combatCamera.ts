@@ -1,7 +1,7 @@
 // Camera for the approach into a battle. The first fight of a combat phase zooms in.
 // Every fight after that pans, and keeps the zoom the first one arrived at.
 import type { Rect, Vec2 } from "./geometry";
-import { fitView, projectionScales, screenToWorld, type View } from "./viewMath";
+import { fitView, maxZoomK, projectionScales, screenToWorld, type View } from "./viewMath";
 
 export const COMBAT_ZOOM_MS = 1900;
 export const COMBAT_PAN_MS = 1400;
@@ -74,14 +74,15 @@ export function combatGoal(
   fitK: number,
   mode: "zoom" | "pan",
   focus?: Vec2,
+  dpr = 1,
 ): CameraGoal {
   const center = focus ?? { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
   if (mode === "pan") {
-    return { center, k: current.k };
+    return { center, k: Math.min(current.k, maxZoomK(fitK, dpr)) };
   }
   const framed = fitView(bounds, Math.max(canvasW, 1), Math.max(canvasH, 1), FRAME_PADDING);
   const minK = fitK * ZOOM_MIN;
-  const maxK = fitK * ZOOM_MAX;
+  const maxK = Math.min(fitK * ZOOM_MAX, maxZoomK(fitK, dpr));
   return { center, k: Math.min(Math.max(framed.k, minK), maxK) };
 }
 

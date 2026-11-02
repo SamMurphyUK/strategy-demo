@@ -26,7 +26,7 @@ import { buildMapGeometry, layoutStackSlots, type Vec2 } from "../../../src/ui/m
 import { combinePathData, parseViewBox } from "../../../src/ui/map/landSvg";
 import { LEGACY_TO_WORLD, legacyToWorld, projectMapJson, worldToLegacy } from "../../../src/ui/map/map_space";
 import { landFill, seaFill } from "../../../src/ui/map/mapStyle";
-import { fitView, panBy, screenToWorld, tokenZoomScale, worldToScreen, zoomAt } from "../../../src/ui/map/viewMath";
+import { fitView, maxZoomK, panBy, screenToWorld, tokenZoomScale, worldToScreen, zoomAt } from "../../../src/ui/map/viewMath";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
   { x, y },
@@ -128,7 +128,8 @@ describe("view maths", () => {
     expect(z.k).toBe(2);
     expect(after.x).toBeCloseTo(before.x, 9);
     expect(after.y).toBeCloseTo(before.y, 9);
-    expect(zoomAt(v, cursor, 1000, 1).k).toBe(24);
+    expect(zoomAt(v, cursor, 1000, 1).k).toBe(maxZoomK(1, 1));
+    expect(zoomAt(v, cursor, 1000, 1, 2).k).toBe(maxZoomK(1, 2));
     expect(zoomAt(v, cursor, 0.0001, 1).k).toBeCloseTo(0.6, 9);
   });
 
