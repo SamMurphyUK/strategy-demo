@@ -3,6 +3,7 @@ import { ALL_AUDIO_FILES, BATTLE_CUES, SOUND_CUES, type SoundCue } from "../../a
 import {
   assignedFiles,
   assignFileToCue,
+  clearCueOverride,
   cueMapJson,
   cueRevisionNow,
   setSoundboardOpen,
@@ -11,6 +12,7 @@ import {
   subscribeCueMap,
   subscribeSoundboard,
 } from "../../audio/sound_manager";
+import { previewBattleCue } from "../battle/utils/helper";
 
 const panel: CSSProperties = {
   position: "fixed",
@@ -47,25 +49,42 @@ const chip: CSSProperties = {
 
 const battleCues = new Set<string>(BATTLE_CUES);
 
-function CueRows({ cues }: { cues: readonly SoundCue[] }) {
-  return cues.map((cue) => (
-    <div key={cue} style={row}>
-      <button
-        type="button"
-        style={chip}
-        onClick={() => {
-          soundManager.unlock();
-          soundManager.play(cue);
-        }}
-      >
-        [ ▶ Test ]
-      </button>
-      <div>
-        <div>{cue}</div>
-        <div style={{ color: "#CDB892" }}>{assignedFiles(cue).join(" · ")}</div>
+function CueRows({ cues, battle = false }: { cues: readonly SoundCue[]; battle?: boolean }) {
+  const [cleared, setCleared] = useState<string | null>(null);
+  return cues.map((cue) => {
+    const files = assignedFiles(cue);
+    const clearCue = () => {
+      clearCueOverride(cue);
+      setCleared(cue);
+      window.setTimeout(() => {
+        setCleared((current) => (current === cue ? null : current));
+      }, 900);
+    };
+    return (
+      <div key={cue} style={row}>
+        <button
+          type="button"
+          style={chip}
+          onClick={() => {
+            soundManager.unlock();
+            if (battle && cue !== "assign_casualty") previewBattleCue(cue);
+            else soundManager.play(cue);
+          }}
+        >
+          [ ▶ Test ]
+        </button>
+        <div>
+          <div>{cue}</div>
+          {files.length > 0 && <div style={{ color: "#CDB892" }}>{files.join(" · ")}</div>}
+          {battle && (
+            <button type="button" style={{ ...chip, marginTop: 4 }} onPointerDown={clearCue}>
+              {cleared === cue ? "Cleared" : "Clear cue"}
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-  ));
+    );
+  });
 }
 
 export function Soundboard() {
@@ -102,9 +121,9 @@ export function Soundboard() {
       <CueRows cues={SOUND_CUES.filter((cue) => !battleCues.has(cue))} />
       <h2 style={{ font: "inherit", margin: "14px 0 0" }}>Battle</h2>
       <p style={{ margin: "8px 0", color: "#7A684B" }}>
-        These replace the generated battle tones. assign_casualty is here to retarget, and the battle does not play it yet.
+        Assign a file to replace one battle tone. Clear cue removes that file, and the original tone plays. assign_casualty can be retargeted, and the battle does not play it yet.
       </p>
-      <CueRows cues={BATTLE_CUES} />
+      <CueRows cues={BATTLE_CUES} battle />
       <h2 style={{ font: "inherit", margin: "14px 0 0" }}>All files</h2>
       {ALL_AUDIO_FILES.map((file) => (
         <div key={file} style={row}>

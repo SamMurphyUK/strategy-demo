@@ -6,6 +6,7 @@ import { ALL_AUDIO_FILES, BATTLE_CUES, SOUND_CUE_MAP, SOUND_CUES } from "../../s
 import {
   assignedFiles,
   assignFileToCue,
+  clearCueOverride,
   clearCueOverrides,
   computeJitteredParams,
   DRAG_FAR_DISTANCE,
@@ -42,14 +43,22 @@ const LEGACY_TRUNCATED = [
 
 describe("audio manifest", () => {
   it("points every cue at one real clip and keeps the full Sonniss names", () => {
-    expect(ALL_AUDIO_FILES).toHaveLength(82);
-    expect(new Set(ALL_AUDIO_FILES).size).toBe(82);
+    expect(ALL_AUDIO_FILES).toHaveLength(176);
+    expect(new Set(ALL_AUDIO_FILES).size).toBe(176);
     for (const truncated of LEGACY_TRUNCATED) {
       expect(ALL_AUDIO_FILES).not.toContain(truncated);
     }
     expect(ALL_AUDIO_FILES).toContain(
       "Enfield_L85_rifle_5.56mm_1m_left_off_axis_MKH416_clean_Five_shots_x_1",
     );
+    const singles = ALL_AUDIO_FILES.filter((name) => / single \d+$/.test(name));
+    expect(singles).toHaveLength(94);
+    expect(singles).toContain(
+      "M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1 single 1",
+    );
+    for (const single of singles) {
+      expect(ALL_AUDIO_FILES).toContain(single.replace(/ single \d+$/, ""));
+    }
     expect(ALL_AUDIO_FILES).toContain("Impacts/Impact 038");
     const radio = "vintage_radio_button_006";
     const interfaceCues = [
@@ -170,6 +179,27 @@ describe("impact delay", () => {
       expect(delay).toBeGreaterThanOrEqual(180);
       expect(delay).toBeLessThanOrEqual(260);
     }
+  });
+});
+
+describe("battle cue replacement", () => {
+  it("keeps the synthesized battle tone until that one cue is replaced, and clear puts it back", () => {
+    clearCueOverrides();
+    expect(assignedFiles("dice_rattle")).toEqual([]);
+    expect(assignedFiles("fire_infantry")).toEqual(["Bullet_Drop_Leaves_03"]);
+    assignFileToCue("dice_rattle", "Dice 9");
+    expect(assignedFiles("dice_rattle")).toEqual(["Dice 9"]);
+    assignFileToCue("token_pickup", "Dice 9");
+    clearCueOverride("token_pickup");
+    expect(assignedFiles("token_pickup")).toEqual(["vintage_radio_button_006", "Dice 9"]);
+    clearCueOverride("dice_rattle");
+    expect(assignedFiles("dice_rattle")).toEqual([]);
+    clearCueOverride("assign_casualty");
+    expect(assignedFiles("assign_casualty")).toEqual(["Bullet_Drop_Wood_04"]);
+    assignFileToCue("assign_casualty", "Dice 9");
+    clearCueOverride("assign_casualty");
+    expect(assignedFiles("assign_casualty")).toEqual(["Bullet_Drop_Wood_04"]);
+    clearCueOverrides();
   });
 });
 

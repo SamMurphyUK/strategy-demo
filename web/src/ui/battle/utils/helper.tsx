@@ -7,7 +7,8 @@ import React, {
   type MutableRefObject,
   type RefObject,
 } from 'react';
-import { soundManager } from '../../../audio/sound_manager';
+import type { SoundCue } from '../../../audio/audio_manifest';
+import { playBattleOverride } from '../../../audio/sound_manager';
 
 /**  --- Overlay component ---
  * A full-screen UI overlay component used to display game states
@@ -568,23 +569,148 @@ class GameAudio {
 
   // INSERT_SFX_HERE
   playFootstepStone() {
-    soundManager.play('footstep_stone');
+    if (playBattleOverride('footstep_stone')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.noiseBurst(b, b.now, { dur: 0.05, gain: 0.08, from: 1000 * v, to: 600 * v });
+    this.blip(b, b.now, { type: 'triangle', freq: 300 * v, dur: 0.03, gain: 0.04 });
   }
 
   playDiceRattle() {
-    soundManager.play('dice_rattle');
+    if (playBattleOverride('dice_rattle')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.08);
+    // Rapid rhythmic wooden & brass tumbling dice clatter
+    this.blip(b, b.now, { type: 'triangle', freq: 540 * v, freqTo: 220 * v, dur: 0.022, gain: 0.14 });
+    this.noiseBurst(b, b.now, { dur: 0.025, gain: 0.1, from: 2800 * v, to: 700 * v });
+    this.blip(b, b.now + 0.032, { type: 'sine', freq: 920 * v, dur: 0.02, gain: 0.12 });
+    this.noiseBurst(b, b.now + 0.032, { dur: 0.02, gain: 0.08, from: 3400 * v, to: 900 * v });
   }
 
   playDiceBounce() {
-    soundManager.play('dice_bounce');
+    if (playBattleOverride('dice_bounce')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.12);
+    this.blip(b, b.now, { type: 'triangle', freq: 680 * v, freqTo: 260 * v, dur: 0.02, gain: 0.1 });
+    this.noiseBurst(b, b.now, { dur: 0.018, gain: 0.07, from: 3000 * v, to: 900 * v });
   }
 
   playStrongHitGong() {
-    soundManager.play('strong_hit_gong');
+    if (playBattleOverride('strong_hit_gong')) return;
+    const b = this.begin();
+    if (!b) return;
+    const {ctx, out, now} = b;
+    const v = this.vary(0.04);
+
+    // 1. Sharp initial impact snap/transient
+    this.blip(b, now, { type: 'sine', freq: 980 * v, freqTo: 240 * v, dur: 0.05, gain: 0.32 });
+    this.noiseBurst(b, now, { dur: 0.06, gain: 0.22, from: 3400 * v, to: 260 * v });
+
+    // 2. Powerful resonant low-mid war-room impact/gong with harmonic ring
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const g1 = ctx.createGain();
+    const g2 = ctx.createGain();
+
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(140 * v, now);
+    osc1.frequency.exponentialRampToValueAtTime(58 * v, now + 0.44);
+
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(280 * v, now);
+    osc2.frequency.exponentialRampToValueAtTime(116 * v, now + 0.36);
+
+    g1.gain.setValueAtTime(0.35, now);
+    g1.gain.exponentialRampToValueAtTime(0.0001, now + 0.48);
+
+    g2.gain.setValueAtTime(0.22, now);
+    g2.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+
+    osc1.connect(g1);
+    g1.connect(out);
+    osc2.connect(g2);
+    g2.connect(out);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.5);
+    osc2.stop(now + 0.5);
   }
 
-  playPlaneEngineFlyby(_duration = 3.6, _isBomber = false) {
-    soundManager.play('plane_flyby');
+  playPlaneEngineFlyby(duration = 3.6, isBomber = false) {
+    if (playBattleOverride('plane_flyby')) return;
+    const b = this.begin();
+    if (!b) return;
+    const {ctx, out, now} = b;
+
+    const basePitch = isBomber ? 85 : 125;
+    const peakPitch = isBomber ? 140 : 220;
+    const endPitch = isBomber ? 62 : 88;
+
+    // Carrier Oscillator (Engine cylinder roar)
+    const carrier = ctx.createOscillator();
+    carrier.type = isBomber ? 'sawtooth' : 'triangle';
+
+    // Modulator Oscillator (Propeller blade chop / humming throttle)
+    const mod = ctx.createOscillator();
+    mod.type = 'sine';
+    mod.frequency.setValueAtTime(isBomber ? 24 : 34, now);
+
+    const modGain = ctx.createGain();
+    modGain.gain.setValueAtTime(32, now);
+    mod.connect(modGain);
+    modGain.connect(carrier.frequency);
+
+    // Doppler pitch envelope: swoops in, peaks near target column, then downshifts
+    const swoopTime = now + duration * 0.45;
+    carrier.frequency.setValueAtTime(basePitch, now);
+    carrier.frequency.exponentialRampToValueAtTime(peakPitch, swoopTime);
+    carrier.frequency.exponentialRampToValueAtTime(endPitch, now + duration);
+
+    // Propeller rush noise buffer
+    const noiseLen = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const noiseBuffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) data[i] = Math.random() * 2 - 1;
+
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(1.8, now);
+    filter.frequency.setValueAtTime(320, now);
+    filter.frequency.exponentialRampToValueAtTime(980, swoopTime);
+    filter.frequency.exponentialRampToValueAtTime(200, now + duration);
+
+    // Amplitude envelopes with natural rise and decay
+    const engineGain = ctx.createGain();
+    engineGain.gain.setValueAtTime(0.001, now);
+    engineGain.gain.linearRampToValueAtTime(0.24, swoopTime);
+    engineGain.gain.linearRampToValueAtTime(0.0001, now + duration);
+
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.001, now);
+    noiseGain.gain.linearRampToValueAtTime(0.18, swoopTime);
+    noiseGain.gain.linearRampToValueAtTime(0.0001, now + duration);
+
+    carrier.connect(engineGain);
+    engineGain.connect(out);
+
+    noiseSrc.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(out);
+
+    mod.start(now);
+    carrier.start(now);
+    noiseSrc.start(now);
+
+    mod.stop(now + duration + 0.05);
+    carrier.stop(now + duration + 0.05);
+    noiseSrc.stop(now + duration + 0.05);
   }
 
   playHitmarkerTick(pitchMultiplier = 1) {
@@ -598,15 +724,30 @@ class GameAudio {
   }
 
   playTacticalHitBeep() {
-    soundManager.play('tactical_hit_beep');
+    if (playBattleOverride('tactical_hit_beep')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.02);
+    // Crisp, clean tactical confirmation 'beep' (~1080Hz pure sine ping with 45ms envelope)
+    this.blip(b, b.now, { type: 'sine', freq: 1080 * v, dur: 0.045, gain: 0.24 });
+    this.blip(b, b.now + 0.008, { type: 'triangle', freq: 2160 * v, dur: 0.02, gain: 0.08 });
   }
 
   playCrispClick() {
-    soundManager.play('crisp_click');
+    if (playBattleOverride('crisp_click')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 1200 * v, dur: 0.015, gain: 0.1 });
   }
 
   playGunshotBlast() {
-    soundManager.play('gunshot_blast');
+    if (playBattleOverride('gunshot_blast')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 120 * v, freqTo: 40 * v, dur: 0.15, gain: 0.2 });
+    this.noiseBurst(b, b.now, { dur: 0.08, gain: 0.15, from: 4000 * v, to: 1000 * v });
   }
 
   playChiptuneExplosion() {
@@ -652,55 +793,136 @@ class GameAudio {
   }
 
   playConfirmSelect() {
-    soundManager.play('confirm_select');
+    if (playBattleOverride('confirm_select')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 523.25 * v, dur: 0.1, gain: 0.08 });
+    this.blip(b, b.now + 0.08, { type: 'sine', freq: 783.99 * v, dur: 0.15, gain: 0.1 });
   }
 
   playShieldBlock() {
-    soundManager.play('shield_block');
+    if (playBattleOverride('shield_block')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 100 * v, freqTo: 30 * v, dur: 0.2, gain: 0.2 });
+    this.noiseBurst(b, b.now, { dur: 0.15, gain: 0.12, from: 500, to: 100 });
   }
 
   playRifleCrack() {
-    soundManager.play('rifle_crack');
+    if (playBattleOverride('rifle_crack')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'triangle', freq: 1600 * v, freqTo: 220 * v, dur: 0.05, gain: 0.22 });
+    this.noiseBurst(b, b.now, { dur: 0.09, gain: 0.25, from: 5500 * v, to: 1200 * v });
+    this.blip(b, b.now + 0.12, { type: 'square', freq: 880 * v, dur: 0.02, gain: 0.08 });
   }
 
   playAaaFlakFire() {
-    soundManager.play('aaa_flak_fire');
+    if (playBattleOverride('aaa_flak_fire')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.05);
+    // Rapid twin mechanical flak muzzle bark
+    this.blip(b, b.now, { type: 'triangle', freq: 1100 * v, freqTo: 180 * v, dur: 0.045, gain: 0.28 });
+    this.noiseBurst(b, b.now, { dur: 0.07, gain: 0.3, from: 4800 * v, to: 900 * v });
+    this.blip(b, b.now + 0.055, { type: 'triangle', freq: 1250 * v, freqTo: 200 * v, dur: 0.045, gain: 0.26 });
+    this.noiseBurst(b, b.now + 0.055, { dur: 0.07, gain: 0.28, from: 5200 * v, to: 1000 * v });
   }
 
   playFlakBurstSky() {
-    soundManager.play('flak_burst');
+    if (playBattleOverride('flak_burst')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.08);
+    // Heavy concussive airburst 'whump' in sky
+    this.blip(b, b.now, { type: 'sine', freq: 160 * v, freqTo: 35 * v, dur: 0.32, gain: 0.35 });
+    this.noiseBurst(b, b.now, { dur: 0.38, gain: 0.32, from: 2200 * v, to: 120 * v });
+    // Shrapnel ping
+    this.blip(b, b.now + 0.04, { type: 'square', freq: 2800 * v, dur: 0.025, gain: 0.12 });
   }
 
   playArtilleryBoom() {
-    soundManager.play('artillery_boom');
+    if (playBattleOverride('artillery_boom')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 110 * v, freqTo: 28 * v, dur: 0.55, gain: 0.35 });
+    this.noiseBurst(b, b.now, { dur: 0.6, gain: 0.3, from: 1800 * v, to: 80 * v });
   }
 
   playTankBlast() {
-    soundManager.play('tank_blast');
+    if (playBattleOverride('tank_blast')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 150 * v, freqTo: 35 * v, dur: 0.45, gain: 0.3 });
+    this.blip(b, b.now + 0.02, { type: 'triangle', freq: 620 * v, freqTo: 180 * v, dur: 0.18, gain: 0.15 });
+    this.noiseBurst(b, b.now, { dur: 0.35, gain: 0.26, from: 3200 * v, to: 150 * v });
   }
 
   playFighterGuns() {
-    soundManager.play('fighter_guns');
+    if (playBattleOverride('fighter_guns')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    for (let i = 0; i < 4; i++) {
+      const t = b.now + i * 0.045;
+      this.blip(b, t, { type: 'square', freq: 440 * v, dur: 0.02, gain: 0.12 });
+      this.noiseBurst(b, t, { dur: 0.035, gain: 0.18, from: 4000 * v, to: 800 * v });
+    }
   }
 
   playBomberWhistleDrop() {
-    soundManager.play('bomber_whistle');
+    if (playBattleOverride('bomber_whistle')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 2200 * v, freqTo: 450 * v, dur: 0.45, gain: 0.14 });
+    this.noiseBurst(b, b.now + 0.35, { dur: 0.7, gain: 0.35, from: 1400 * v, to: 60 * v });
+    this.blip(b, b.now + 0.35, { type: 'sine', freq: 85 * v, freqTo: 24 * v, dur: 0.6, gain: 0.38 });
   }
 
   playNavalSalvo() {
-    soundManager.play('naval_salvo');
+    if (playBattleOverride('naval_salvo')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 90 * v, freqTo: 22 * v, dur: 0.65, gain: 0.35 });
+    this.blip(b, b.now + 0.05, { type: 'sine', freq: 110 * v, freqTo: 25 * v, dur: 0.6, gain: 0.3 });
+    this.noiseBurst(b, b.now, { dur: 0.6, gain: 0.32, from: 2200 * v, to: 90 * v });
   }
 
   playTorpedoWhoosh() {
-    soundManager.play('torpedo_whoosh');
+    if (playBattleOverride('torpedo_whoosh')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.noiseBurst(b, b.now, { dur: 0.35, gain: 0.22, from: 2400 * v, to: 400 * v });
+    this.blip(b, b.now, { type: 'triangle', freq: 180 * v, freqTo: 340 * v, dur: 0.25, gain: 0.12 });
   }
 
   playWaterGeyserSplash() {
-    soundManager.play('water_geyser');
+    if (playBattleOverride('water_geyser')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sine', freq: 95 * v, freqTo: 22 * v, dur: 0.6, gain: 0.38 });
+    this.noiseBurst(b, b.now, { dur: 0.75, gain: 0.32, from: 1600 * v, to: 60 * v });
+    this.noiseBurst(b, b.now + 0.15, { dur: 0.5, gain: 0.2, from: 3200 * v, to: 800 * v });
   }
 
   playSoldierScream() {
-    soundManager.play('soldier_scream');
+    if (playBattleOverride('soldier_scream')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.2);
+    const baseFreq = 420 * v;
+    this.blip(b, b.now, { type: 'sawtooth', freq: baseFreq, freqTo: baseFreq * 0.45, dur: 0.32, gain: 0.15 });
+    this.blip(b, b.now, { type: 'sine', freq: baseFreq * 1.5, freqTo: baseFreq * 0.7, dur: 0.3, gain: 0.08 });
+    this.noiseBurst(b, b.now, { dur: 0.22, gain: 0.08, from: 1800 * v, to: 300 * v });
   }
 
   playSoldierCheer() {
@@ -770,24 +992,158 @@ class GameAudio {
   }
 
   playInfantryGroan() {
-    soundManager.play('infantry_groan');
+    if (playBattleOverride('infantry_groan')) return;
+    const b = this.begin();
+    if (!b) return;
+    const {ctx, out, now} = b;
+    const v = this.vary(0.08);
+
+    // Vocal distress groan: formant-filtered sawtooth/triangle with descending vocal pitch
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(160 * v, now);
+    osc.frequency.exponentialRampToValueAtTime(88 * v, now + 0.62);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(3.6, now);
+    filter.frequency.setValueAtTime(640 * v, now);
+    filter.frequency.exponentialRampToValueAtTime(360 * v, now + 0.62);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.01, now);
+    gain.gain.linearRampToValueAtTime(0.22, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(out);
+
+    osc.start(now);
+    osc.stop(now + 0.68);
   }
 
   playVehicleWreckCreak() {
-    soundManager.play('vehicle_wreck');
+    if (playBattleOverride('vehicle_wreck')) return;
+    const b = this.begin();
+    if (!b) return;
+    const {ctx, out, now} = b;
+    const v = this.vary(0.06);
+
+    // Metallic creaking friction
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc2.type = 'triangle';
+
+    osc1.frequency.setValueAtTime(360 * v, now);
+    osc1.frequency.linearRampToValueAtTime(170 * v, now + 0.48);
+
+    osc2.frequency.setValueAtTime(530 * v, now);
+    osc2.frequency.linearRampToValueAtTime(240 * v, now + 0.48);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(4.2, now);
+    filter.frequency.setValueAtTime(780 * v, now);
+    filter.frequency.exponentialRampToValueAtTime(260 * v, now + 0.52);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.52);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(out);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.55);
+    osc2.stop(now + 0.55);
+
+    // Engine splutter / cough dying out
+    this.noiseBurst(b, now + 0.12, { dur: 0.32, gain: 0.15, from: 550 * v, to: 70 * v });
+    this.blip(b, now + 0.18, { type: 'square', freq: 44 * v, freqTo: 16 * v, dur: 0.28, gain: 0.14 });
   }
 
   playArtilleryCookoff() {
-    soundManager.play('artillery_cookoff');
+    if (playBattleOverride('artillery_cookoff')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary(0.08);
+
+    // Initial rupture snap
+    this.blip(b, b.now, { type: 'sawtooth', freq: 460 * v, freqTo: 120 * v, dur: 0.1, gain: 0.22 });
+    this.noiseBurst(b, b.now, { dur: 0.14, gain: 0.2, from: 2600 * v, to: 320 * v });
+
+    // Secondary ammo cookoff crackle (staggered rapid pops)
+    [0.12, 0.24, 0.36].forEach((offset, idx) => {
+      const popV = 1 + (idx - 1) * 0.15;
+      this.blip(b, b.now + offset, {
+        type: 'square',
+        freq: (920 + idx * 280) * popV,
+        freqTo: 160,
+        dur: 0.035,
+        gain: 0.15,
+      });
+      this.noiseBurst(b, b.now + offset, {
+        dur: 0.05,
+        gain: 0.14,
+        from: 3600 * popV,
+        to: 600,
+      });
+    });
+
+    // Lingering propellant burn hiss
+    this.noiseBurst(b, b.now + 0.38, { dur: 0.32, gain: 0.12, from: 1500 * v, to: 110 * v });
   }
 
   playMetalCrunch() {
-    soundManager.play('metal_crunch');
+    if (playBattleOverride('metal_crunch')) return;
+    const b = this.begin();
+    if (!b) return;
+    const v = this.vary();
+    this.blip(b, b.now, { type: 'sawtooth', freq: 320 * v, freqTo: 80 * v, dur: 0.25, gain: 0.18 });
+    this.blip(b, b.now, { type: 'triangle', freq: 740 * v, freqTo: 210 * v, dur: 0.2, gain: 0.12 });
+    this.noiseBurst(b, b.now, { dur: 0.3, gain: 0.24, from: 3000 * v, to: 200 * v });
   }
 }
 
 /** Shared singleton — import and use anywhere. */
 export const gameAudio = new GameAudio();
+
+/** Soundboard preview. A replaced cue plays its clip. Otherwise the original tone plays. */
+export function previewBattleCue(cue: SoundCue): void {
+  const preview: Partial<Record<SoundCue, () => void>> = {
+    footstep_stone: () => gameAudio.playFootstepStone(),
+    dice_rattle: () => gameAudio.playDiceRattle(),
+    dice_bounce: () => gameAudio.playDiceBounce(),
+    strong_hit_gong: () => gameAudio.playStrongHitGong(),
+    plane_flyby: () => gameAudio.playPlaneEngineFlyby(),
+    tactical_hit_beep: () => gameAudio.playTacticalHitBeep(),
+    crisp_click: () => gameAudio.playCrispClick(),
+    gunshot_blast: () => gameAudio.playGunshotBlast(),
+    confirm_select: () => gameAudio.playConfirmSelect(),
+    shield_block: () => gameAudio.playShieldBlock(),
+    rifle_crack: () => gameAudio.playRifleCrack(),
+    aaa_flak_fire: () => gameAudio.playAaaFlakFire(),
+    flak_burst: () => gameAudio.playFlakBurstSky(),
+    artillery_boom: () => gameAudio.playArtilleryBoom(),
+    tank_blast: () => gameAudio.playTankBlast(),
+    fighter_guns: () => gameAudio.playFighterGuns(),
+    bomber_whistle: () => gameAudio.playBomberWhistleDrop(),
+    naval_salvo: () => gameAudio.playNavalSalvo(),
+    torpedo_whoosh: () => gameAudio.playTorpedoWhoosh(),
+    water_geyser: () => gameAudio.playWaterGeyserSplash(),
+    soldier_scream: () => gameAudio.playSoldierScream(),
+    infantry_groan: () => gameAudio.playInfantryGroan(),
+    vehicle_wreck: () => gameAudio.playVehicleWreckCreak(),
+    artillery_cookoff: () => gameAudio.playArtilleryCookoff(),
+    metal_crunch: () => gameAudio.playMetalCrunch(),
+  };
+  preview[cue]?.();
+}
 
 // ============================================================================
 // GENERAL UTILITIES & MATH HELPERS
