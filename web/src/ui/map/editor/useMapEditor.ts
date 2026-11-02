@@ -11,6 +11,7 @@ import { autoNeighborPairs } from "./adjacency";
 import {
   parseVersionLibrary,
   removeVersion,
+  freshMapName,
   upsertVersion,
   versionNameError,
   VERSIONS_KEY,
@@ -1090,10 +1091,17 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       return;
     }
     const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (!e.repeat) {
+          saveVersion(freshMapName(versionsRef.current));
+        }
+        return;
+      }
       if (isTypingTarget(e.target)) {
         return;
       }
-      const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) {
@@ -1129,7 +1137,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, cancelBoxPrune, cancelDraft, finishDraft, makeDecorative, redo, setTool, undo, undoVertex]);
+  }, [active, cancelBoxPrune, cancelDraft, finishDraft, makeDecorative, redo, saveVersion, setTool, undo, undoVertex]);
 
   const binding = useMemo<EditorBinding>(
     () => ({

@@ -12,6 +12,18 @@ export interface MapVersion {
   map: Dict;
 }
 
+/** A name no saved version uses yet. Ctrl+S stores the open map under it, so nothing is replaced. */
+export function freshMapName(versions: readonly { name: string }[]): string {
+  const taken = new Set(versions.map((version) => version.name));
+  let n = versions.length + 1;
+  let name = `Map ${n}`;
+  while (taken.has(name)) {
+    n += 1;
+    name = `Map ${n}`;
+  }
+  return name;
+}
+
 /** A problem with the name, or null when it can be saved. */
 export function versionNameError(name: string): string | null {
   const trimmed = name.trim();

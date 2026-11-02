@@ -374,8 +374,9 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
           </button>
         </div>
         <p className="muted editor-hint">
-          Edits autosave in this browser. Save Directly writes demomap01.json in the repo (dev server only). New game,
-          in the bar above, can start any named version. Named versions stay in this browser.
+          Edits autosave in this browser. Ctrl+S saves the open map as a new version. Save Directly writes
+          demomap01.json in the repo (dev server only). New game, in the bar above, can start any named version.
+          Named versions stay in this browser.
         </p>
       </section>
     </>

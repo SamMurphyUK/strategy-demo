@@ -3,6 +3,7 @@ import { editorFromMapJson, editorToMapJson } from "../../../src/ui/map/editor/e
 import {
   parseVersionLibrary,
   removeVersion,
+  freshMapName,
   upsertVersion,
   versionNameError,
   type MapVersion,
@@ -26,6 +27,12 @@ function region(id: string, x: number) {
 describe("map versions", () => {
   const europe = { regions: [region("Territory 1", 0)] };
   const pacific = { regions: [region("Territory 1", 40)] };
+
+  it("picks a free Map N name so a shortcut save does not replace one", () => {
+    expect(freshMapName([])).toBe("Map 1");
+    expect(freshMapName([{ name: "Europe" }, { name: "Pacific" }])).toBe("Map 3");
+    expect(freshMapName([{ name: "Map 1" }])).toBe("Map 2");
+  });
 
   it("rejects a blank name and a name past the limit", () => {
     expect(versionNameError("  ")).toBe("Name the version before saving.");
