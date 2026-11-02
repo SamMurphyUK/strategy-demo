@@ -334,6 +334,7 @@ class SoundManager {
     try {
       const ctx = this.context();
       if (!ctx || sfxMuted()) return;
+      void ctx.resume().catch(() => {});
       if (!this.limiter.tryTrigger(cue, this.now())) return;
       const files = assignedFiles(cue);
       if (!files || files.length === 0) return;

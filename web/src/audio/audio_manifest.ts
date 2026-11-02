@@ -85,7 +85,9 @@ export const ALL_AUDIO_FILES = [
   "Walkie Talkie,Kenwood TK-3107 FM,Radio Communication,No Speech,Static,Feedback Squelch,Manipulations"
 ] as const;
 
-export const SOUND_CUES = ["token_pickup","waypoint_tick","token_drop","split_wheel_tick","battle_arrow_lock","ui_button_click","ui_panel_flick","order_cancel","fire_infantry","fire_artillery","fire_armor","fire_aircraft","fire_naval","hit_impact","unit_destroyed","stinger_war_room","stinger_frontline"] as const;
+export const SOUND_CUES = ["token_pickup","waypoint_tick","token_drop","split_wheel_tick","battle_arrow_lock","ui_button_click","ui_panel_flick","order_cancel","fire_infantry","fire_artillery","fire_armor","fire_aircraft","fire_naval","hit_impact","unit_destroyed","stinger_war_room","stinger_frontline","assign_casualty","crisp_click","confirm_select","footstep_stone","dice_rattle","dice_bounce","strong_hit_gong","tactical_hit_beep","rifle_crack","gunshot_blast","artillery_boom","tank_blast","fighter_guns","bomber_whistle","naval_salvo","aaa_flak_fire","flak_burst","torpedo_whoosh","plane_flyby","water_geyser","shield_block","soldier_scream","infantry_groan","metal_crunch","vehicle_wreck","artillery_cookoff"] as const;
+
+export const BATTLE_CUES = ["assign_casualty","crisp_click","confirm_select","footstep_stone","dice_rattle","dice_bounce","strong_hit_gong","tactical_hit_beep","rifle_crack","gunshot_blast","artillery_boom","tank_blast","fighter_guns","bomber_whistle","naval_salvo","aaa_flak_fire","flak_burst","torpedo_whoosh","plane_flyby","water_geyser","shield_block","soldier_scream","infantry_groan","metal_crunch","vehicle_wreck","artillery_cookoff"] as const;
 
 export type SoundCue = (typeof SOUND_CUES)[number];
 
@@ -98,13 +100,39 @@ export const SOUND_CUE_MAP: Record<SoundCue, readonly string[]> = {
   ui_button_click: ["vintage_radio_button_006"],
   ui_panel_flick: ["Placing Pieces on the Board 2"],
   order_cancel: ["vintage_radio_button_006"],
-  fire_infantry: ["M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1"],
+  fire_infantry: ["Bullet_Drop_Leaves_03"],
   fire_artillery: ["Automatic Cannon - MK44 - 03 - Single Shot with Report 03"],
   fire_armor: ["Automatic Cannon - MK44 - 03 - Single Shot with Report 03"],
-  fire_aircraft: ["M1919A4_Browning_Machine_Gun_.30cal_on_turret_1m_left_blanks_Triple_shots_x_2"],
+  fire_aircraft: ["M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1"],
   fire_naval: ["Automatic Cannon - MK44 - 03 - Single Shot with Report 03"],
   hit_impact: ["Impacts/Impact 059"],
   unit_destroyed: ["Impacts/Impact_Boom_Distorted_02"],
   stinger_war_room: ["Walkie Talkie,Cobra MicroTalk,Radio Communication,End,Noise Squelch,Beep,Series"],
   stinger_frontline: ["M1919A4_Browning_Machine_Gun_.30cal_on_turret_300m_in_front_blanks_Triple_shots_x_2"],
+  assign_casualty: ["Bullet_Drop_Wood_04"],
+  crisp_click: ["vintage_radio_button_006"],
+  confirm_select: ["Domino Box 15"],
+  footstep_stone: ["SNEAKER PLASTIC FLOOR MAT FOOTSTEP WALKING"],
+  dice_rattle: ["Dice 9"],
+  dice_bounce: ["Backgammon Piece 21"],
+  strong_hit_gong: ["CHT2_Cinematic_Hit_214"],
+  tactical_hit_beep: ["CHT2_Cinematic_Hit_096"],
+  rifle_crack: ["Enfield_L85_rifle_5.56mm_on_gun_DPA4062_clean_Five_shots_x_1"],
+  gunshot_blast: ["Enfield_L85_rifle_5.56mm_1m_left_off_axis_MKH416_clean_Five_shots_x_1"],
+  artillery_boom: ["Automatic Cannon - MK44 - 03 - Single Shot with Report 03"],
+  tank_blast: ["Impacts/Impact_Drum Hit_03"],
+  fighter_guns: ["M1919A4_Browning_Machine_Gun_.30cal_on_turret_1m_left_blanks_Triple_shots_x_2"],
+  bomber_whistle: ["Fast Action Swish_HW 05"],
+  naval_salvo: ["Impacts/Impact 045"],
+  aaa_flak_fire: ["M1919A4_Browning_Machine_Gun_.30cal_on_turret_1m_left_blanks_Triple_shots_x_2"],
+  flak_burst: ["Explosives - Sweetners_07"],
+  torpedo_whoosh: ["Fast Action Swish_HW 05"],
+  plane_flyby: ["Fast Action Swish_HW 05"],
+  water_geyser: ["Impacts/GS sail impact 004"],
+  shield_block: ["Impacts/Impact 038"],
+  soldier_scream: ["Male_Shout-of-Pain_132"],
+  infantry_groan: ["Male_Grunt-Shout_317"],
+  metal_crunch: ["Impacts/Bullet_hitting_metal_#4-1793575445860"],
+  vehicle_wreck: ["T-34_foley_cannon_height_adjustment"],
+  artillery_cookoff: ["EFX SD Metal plate thunder 01 C.M"],
 };

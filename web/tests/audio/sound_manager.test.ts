@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ALL_AUDIO_FILES, SOUND_CUE_MAP, SOUND_CUES } from "../../src/audio/audio_manifest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ALL_AUDIO_FILES, BATTLE_CUES, SOUND_CUE_MAP, SOUND_CUES } from "../../src/audio/audio_manifest";
 import {
   assignedFiles,
   assignFileToCue,
@@ -62,12 +65,20 @@ describe("audio manifest", () => {
       expect(SOUND_CUE_MAP[cue]).toEqual([radio]);
     }
     expect(SOUND_CUE_MAP.ui_panel_flick).toEqual(["Placing Pieces on the Board 2"]);
-    expect(SOUND_CUE_MAP.fire_infantry).toEqual([
+    expect(SOUND_CUE_MAP.fire_infantry).toEqual(["Bullet_Drop_Leaves_03"]);
+    expect(SOUND_CUE_MAP.fire_aircraft).toEqual([
       "M1928A1_Thompson_Submachine_Gun_.45cal_0.3m_to_side_ORTF_Burst_of_four_x_1",
     ]);
-    expect(SOUND_CUE_MAP.fire_aircraft).toEqual([
-      "M1919A4_Browning_Machine_Gun_.30cal_on_turret_1m_left_blanks_Triple_shots_x_2",
-    ]);
+    expect(SOUND_CUE_MAP.assign_casualty).toEqual(["Bullet_Drop_Wood_04"]);
+    expect(BATTLE_CUES).toContain("assign_casualty");
+    expect(BATTLE_CUES).toContain("dice_rattle");
+    expect(BATTLE_CUES).toContain("rifle_crack");
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
+    const battleSources = [
+      readFileSync(join(root, "src/ui/battle/App.tsx"), "utf8"),
+      readFileSync(join(root, "src/ui/battle/utils/helper.tsx"), "utf8"),
+    ].join("\n");
+    expect(battleSources).not.toContain("assign_casualty");
     expect(SOUND_CUE_MAP.fire_artillery).toEqual([
       "Automatic Cannon - MK44 - 03 - Single Shot with Report 03",
     ]);
@@ -79,6 +90,9 @@ describe("audio manifest", () => {
       const files = SOUND_CUE_MAP[cue];
       expect(files).toHaveLength(1);
       expect(ALL_AUDIO_FILES).toContain(files[0]);
+    }
+    for (const cue of BATTLE_CUES) {
+      expect(SOUND_CUES).toContain(cue);
     }
   });
 });

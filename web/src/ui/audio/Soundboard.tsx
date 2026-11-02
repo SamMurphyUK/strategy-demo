@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore, type CSSProperties } from "react";
-import { ALL_AUDIO_FILES, SOUND_CUES, type SoundCue } from "../../audio/audio_manifest";
+import { ALL_AUDIO_FILES, BATTLE_CUES, SOUND_CUES, type SoundCue } from "../../audio/audio_manifest";
 import {
   assignedFiles,
   assignFileToCue,
@@ -45,6 +45,29 @@ const chip: CSSProperties = {
   font: "inherit",
 };
 
+const battleCues = new Set<string>(BATTLE_CUES);
+
+function CueRows({ cues }: { cues: readonly SoundCue[] }) {
+  return cues.map((cue) => (
+    <div key={cue} style={row}>
+      <button
+        type="button"
+        style={chip}
+        onClick={() => {
+          soundManager.unlock();
+          soundManager.play(cue);
+        }}
+      >
+        [ ▶ Test ]
+      </button>
+      <div>
+        <div>{cue}</div>
+        <div style={{ color: "#CDB892" }}>{assignedFiles(cue).join(" · ")}</div>
+      </div>
+    </div>
+  ));
+}
+
 export function Soundboard() {
   const open = useSyncExternalStore(subscribeSoundboard, soundboardVisible, () => false);
   const revision = useSyncExternalStore(subscribeCueMap, cueRevisionNow, () => 0);
@@ -76,24 +99,12 @@ export function Soundboard() {
       </div>
       <p style={{ margin: "8px 0", color: "#7A684B" }}>Shift+A closes this drawer. M toggles mute.</p>
       <h2 style={{ font: "inherit", margin: "10px 0 0" }}>Cues</h2>
-      {SOUND_CUES.map((cue) => (
-        <div key={cue} style={row}>
-          <button
-            type="button"
-            style={chip}
-            onClick={() => {
-              soundManager.unlock();
-              soundManager.play(cue);
-            }}
-          >
-            [ ▶ Test ]
-          </button>
-          <div>
-            <div>{cue}</div>
-            <div style={{ color: "#CDB892" }}>{assignedFiles(cue).join(" · ")}</div>
-          </div>
-        </div>
-      ))}
+      <CueRows cues={SOUND_CUES.filter((cue) => !battleCues.has(cue))} />
+      <h2 style={{ font: "inherit", margin: "14px 0 0" }}>Battle</h2>
+      <p style={{ margin: "8px 0", color: "#7A684B" }}>
+        These replace the generated battle tones. assign_casualty is here to retarget, and the battle does not play it yet.
+      </p>
+      <CueRows cues={BATTLE_CUES} />
       <h2 style={{ font: "inherit", margin: "14px 0 0" }}>All files</h2>
       {ALL_AUDIO_FILES.map((file) => (
         <div key={file} style={row}>
