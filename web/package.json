@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "multiplayer-server": "tsx src/multiplayer/server.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.battle.json"
   },
@@ -19,6 +20,7 @@
     "jsdom": "^30.1.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
+    "tsx": "^4.20.6",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
@@ -27,6 +29,7 @@
     "polygon-clipping": "^0.15.7",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "webaudio-tinysynth": "^1.1.3"
+    "webaudio-tinysynth": "^1.1.3",
+    "ws": "^8.22.1"
   }
 }

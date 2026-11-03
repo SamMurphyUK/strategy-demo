@@ -21,6 +21,7 @@ export const GameEventType = {
   INCOME_COLLECTED: "income_collected",
   TURN_ENDED: "turn_ended",
   GAME_FINISHED: "game_finished",
+  PHASE_ORDER_CANCELLED: "phase_order_cancelled",
 } as const;
 
 export type GameEventTypeValue = (typeof GameEventType)[keyof typeof GameEventType];

@@ -15,7 +15,7 @@ import { GameEvent, GameEventType } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
-import { applyCargoCommand, applyRecordedMove } from "../movement/phase_orders";
+import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
 import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
@@ -63,6 +63,38 @@ export interface StubStateSnapshot extends StateSnapshot {
 
 function unixNow(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+/** Keys that would let a client advance the host's dice. Never copied onto a broadcast snapshot. */
+const HIDDEN_RNG_KEYS = new Set(["rng", "rng_state", "pcg", "prng"]);
+
+/** Deep copy with the PRNG cursor removed. Bigints cannot ride along in the JSON broadcast. */
+export function redactClientSnapshot<T>(value: T): T {
+  return stripHiddenRng(value) as T;
+}
+
+function stripHiddenRng(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripHiddenRng(item));
+  }
+  if (typeof value === "object" && value !== null) {
+    const source = value as Dict;
+    const copy: Dict = {};
+    for (const key of Object.keys(source)) {
+      if (HIDDEN_RNG_KEYS.has(key)) {
+        continue;
+      }
+      const child = stripHiddenRng(source[key]);
+      if (child !== undefined) {
+        copy[key] = child;
+      }
+    }
+    return copy;
+  }
+  return value;
 }
 
 export class GameSessionStub {
@@ -271,6 +303,36 @@ export class GameSessionStub {
         break;
       }
 
+      case CommandType.CANCEL_PHASE_ORDER: {
+        const order = findPhaseOrder(this.state, cmd.payload);
+        if (order == null || this.state.phase_start_snapshot == null) {
+          return {
+            result_type: "error",
+            error: { code: "ORDER_NOT_FOUND", message: "No pending order matches order_id or index" },
+            events: [],
+          };
+        }
+        const index = this.state.phase_orders.findIndex((item) => item.id === order.id);
+        cancel_phase_order(this.state, order.id);
+        this._seq += 1;
+        events = this.syncSeq([
+          GameEvent.create(
+            GameEventType.PHASE_ORDER_CANCELLED,
+            {
+              faction_id: cmd.player_id,
+              order_id: order.id,
+              index,
+              unit_type_id: order.unitType,
+              count: order.count,
+              from_region_id: order.fromRegionId,
+              to_region_id: order.toRegionId,
+            },
+            this._seq,
+          ),
+        ]);
+        break;
+      }
+
       case CommandType.END_TURN:
         return this.handleEndTurn(cmd.player_id, sourceId);
 
@@ -368,6 +430,14 @@ export class GameSessionStub {
     };
   }
 
+  /**
+   * Board the host may broadcast. Cargo and staged orders are included.
+   * The seeded PRNG stays on this session and is stripped here.
+   */
+  clientSnapshot(): StubStateSnapshot {
+    return redactClientSnapshot(this.getState());
+  }
+
   getCostTable(): Record<string, number> {
     const table: Record<string, number> = {};
     for (const utid of Object.keys(this.state.unit_types)) {
@@ -391,11 +461,11 @@ export class GameSessionStub {
       case "purchase":
         return ["purchase_units", "end_phase"];
       case "combat_move":
-        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "cancel_phase_order", "end_phase"];
       case "combat":
         return this.legalCombatCommands();
       case "noncombat_move":
-        return ["move_units", "load_transport", "unload_transport", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "cancel_phase_order", "end_phase"];
       case "mobilize":
         return ["place_units", "end_phase"];
       case "collect_income":

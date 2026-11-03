@@ -31,9 +31,10 @@ function regionLabel(game: GameSessionHandle, regionId: string): string {
 interface Props {
   game: GameSessionHandle;
   onCancelled(): void;
+  commandsEnabled?: boolean;
 }
 
-export function PendingOrders({ game, onCancelled }: Props) {
+export function PendingOrders({ game, onCancelled, commandsEnabled = true }: Props) {
   const state = game.session.state;
   const phase = state.current_phase;
   const orders = state.phase_orders;
@@ -74,6 +75,7 @@ export function PendingOrders({ game, onCancelled }: Props) {
               <button
                 type="button"
                 className="order-cancel"
+                disabled={!commandsEnabled}
                 onClick={() => cancel(order)}
                 aria-label={`Cancel ${order.count}× ${unit}, ${from} to ${to}`}
               >

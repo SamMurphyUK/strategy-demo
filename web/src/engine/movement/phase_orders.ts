@@ -180,6 +180,26 @@ export function commitNoncombatMoves(state: GameState): void {
 }
 
 /**
+ * `order_id` selects one staged order. When it is absent, `index` is its position in
+ * `phase_orders`. A present `order_id` is never replaced by `index`.
+ */
+export function findPhaseOrder(state: GameState, payload: Dict): MoveOrder | null {
+  const rawId = payload.order_id ?? payload.orderId;
+  if (rawId != null && String(rawId) !== "") {
+    const id = String(rawId);
+    return state.phase_orders.find((order) => order.id === id) ?? null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, "index") || payload.index == null || payload.index === "") {
+    return null;
+  }
+  const index = Math.trunc(Number(payload.index));
+  if (!Number.isFinite(index) || index < 0) {
+    return null;
+  }
+  return state.phase_orders[index] ?? null;
+}
+
+/**
  * Drop `orderId`, put the board back to the phase-start clone, and run the other orders
  * through the movement validator and movement engine in their original order.
  */

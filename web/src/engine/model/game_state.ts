@@ -24,6 +24,11 @@ export interface StateSnapshot {
   ipc: Record<string, number>;
   pending_purchases: Record<string, PurchaseLine[]>;
   pending_amphibious_assaults: Dict[];
+  /** Cargo aboard transports and carriers. Stack units stay counts; only these instances have ids. */
+  transport_instances: Record<string, TransportInstance>;
+  /** Moves and cargo orders staged in the current movement phase, not yet committed. */
+  phase_orders: MoveOrder[];
+  active_battle: ActiveBattle | null;
   game_over: boolean;
   winner_faction_id: string;
   [key: string]: unknown;
@@ -324,6 +329,8 @@ export class GameState {
       ipc: { ...this.ipc },
       pending_purchases: deepCopy(this.pending_purchases),
       pending_amphibious_assaults: deepCopy(this.pending_amphibious_assaults),
+      transport_instances: deepCopy(this.transport_instances),
+      phase_orders: deepCopy(this.phase_orders),
       game_over: this.game_over,
       winner_faction_id: this.winner_faction_id,
       active_battle: deepCopy(this.active_battle),

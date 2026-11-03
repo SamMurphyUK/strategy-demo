@@ -32,13 +32,14 @@ import { EventLog } from "./panels/EventLog";
 import { PendingOrders } from "./panels/PendingOrders";
 import { PhasePanel } from "./panels/PhasePanel";
 import { RegionPanel } from "./panels/RegionPanel";
+import { RoomPill } from "./panels/RoomPill";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
 import { isActiveFaction } from "./tokenStyle";
 import { nextFacingHold, type FacingHold, type FacingStacks } from "./uprightSprites";
 import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
 import { moveUnitsPayload } from "./stackMove";
-import { useGameSession } from "./session/use_game_session";
+import { useCampaignSession } from "./session/use_campaign_session";
 
 export type Selection =
   | { kind: "stack"; regionId: string; key: string; unitTypeId: string; instanceId: string; max: number; count: number }
@@ -79,7 +80,7 @@ function facingStacksFrom(state: { region_units: Record<string, { faction_id?: s
 }
 
 export function App() {
-  const game = useGameSession(12345);
+  const { game, room, online, isMyTurn, battleFeed } = useCampaignSession();
   const { session, version } = game;
   const state = session.state;
   const faction = state.current_faction_id;
@@ -297,6 +298,12 @@ export function App() {
   const pendingForFaction = state.pending_purchases[faction] ?? [];
 
   const onRegionClick = (regionId: string) => {
+    const placing = selection?.kind === "place" && legalTargets.includes(regionId);
+    const moving = selection?.kind === "stack" && legalTargets.includes(regionId);
+    if (!isMyTurn && (placing || moving)) {
+      setSelectedRegionId(regionId);
+      return;
+    }
     if (selection?.kind === "stack" && legalTargets.includes(regionId)) {
       const unit: Record<string, unknown> = { unit_type_id: selection.unitTypeId, count: selection.count };
       if (selection.instanceId !== "") {
@@ -361,6 +368,10 @@ export function App() {
 
   /** A stack picked in the region inspector (the start of a drag): selected, never toggled off. */
   const pickStack = (regionId: string, entry: StackEntry) => {
+    if (!isMyTurn) {
+      setSelectedRegionId(regionId);
+      return;
+    }
     const max = movableCount(regionId, entry);
     setSelectedRegionId(regionId);
     setSelection(
@@ -372,6 +383,9 @@ export function App() {
 
   /** Move `count` of a stack. The map drag, its split popover, and an inspector drop all come through here. */
   const commitMove = (regionId: string, entry: StackEntry, target: string, count: number) => {
+    if (!isMyTurn) {
+      return;
+    }
     const max = movableCount(regionId, entry);
     if (max <= 0) {
       setSelection(null);
@@ -444,6 +458,9 @@ export function App() {
   };
 
   const armDrag = (regionId: string, entry: StackEntry, count: number) => {
+    if (!isMyTurn) {
+      return;
+    }
     const max = movableCount(regionId, entry);
     if (max > 0) soundManager.play("token_pickup");
     setSelectedRegionId(regionId);
@@ -463,6 +480,10 @@ export function App() {
   };
 
   const selectStack = (regionId: string, entry: StackEntry) => {
+    if (!isMyTurn) {
+      setSelectedRegionId(regionId);
+      return;
+    }
     const key = stackKey(entry);
     if (selection?.kind === "stack" && selection.regionId === regionId && selection.key === key) {
       setSelection(null);
@@ -566,10 +587,24 @@ export function App() {
     approachRef.current = null;
     setApproach(null);
     const result = game.send("start_battle", { region_id: plan.regionId });
-    if (result.result_type === "ok" && session.state.active_battle) {
+    if (!online && result.result_type === "ok" && session.state.active_battle) {
       setBattleOnScreen(session.state.active_battle);
     }
   };
+
+  useEffect(() => {
+    if (!online) {
+      return;
+    }
+    const battle = session.state.active_battle;
+    if (battle) {
+      setBattleOnScreen(battle);
+      return;
+    }
+    if (!isMyTurn) {
+      setBattleOnScreen(null);
+    }
+  }, [online, isMyTurn, version, session]);
 
   const covered = approach !== null || battleOnScreen !== null;
 
@@ -593,6 +628,7 @@ export function App() {
         editing={editing}
         versions={editor.versions}
         onToggleEditing={() => setEditing((e) => !e)}
+        room={room}
       />
       <div className="main">
         <MapView
@@ -616,7 +652,7 @@ export function App() {
             setInspectorFocus((n) => n + 1);
           }}
           registerDropResolver={registerDropResolver}
-          movableMax={movableCount}
+          movableMax={(regionId, entry) => (isMyTurn ? movableCount(regionId, entry) : 0)}
           legalMovesFor={(regionId, entry) => destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "")}
           onArmDrag={armDrag}
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
@@ -688,6 +724,7 @@ export function App() {
                 setSelection={setSelection}
                 legalTargets={legalTargets}
                 pending={pendingForFaction}
+                commandsEnabled={isMyTurn}
                 onFight={approachBattle}
                 onStrandedCargo={focusStrandedTransport}
               />
@@ -713,7 +750,7 @@ export function App() {
           )}
         </aside>
       </div>
-      {!editing && <PendingOrders game={game} onCancelled={() => setSelection(null)} />}
+      {!editing && <PendingOrders game={game} commandsEnabled={isMyTurn} onCancelled={() => setSelection(null)} />}
     </div>
     {approach?.stage === "darken" && <CombatDarken onDone={showBriefing} />}
     {approach?.stage === "briefing" && (
@@ -732,6 +769,9 @@ export function App() {
           game={game}
           battle={battleOnScreen}
           regionName={state.regions[battleOnScreen.region_id]?.name || battleOnScreen.region_id}
+          spectating={online && !isMyTurn}
+          online={online}
+          feed={battleFeed}
           onExit={() => {
             setBattleOnScreen(null);
             setSelectedRegionId(battleOnScreen.region_id);

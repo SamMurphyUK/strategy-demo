@@ -14,6 +14,7 @@ export const CommandType = {
   BATTLE_ROLL: "battle_roll",
   BATTLE_CASUALTIES: "battle_casualties",
   BATTLE_RETREAT: "battle_retreat",
+  CANCEL_PHASE_ORDER: "cancel_phase_order",
 } as const;
 
 export type CommandTypeValue = (typeof CommandType)[keyof typeof CommandType];

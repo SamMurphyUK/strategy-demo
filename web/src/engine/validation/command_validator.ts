@@ -8,6 +8,7 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
     CommandType.LOAD_TRANSPORT,
     CommandType.UNLOAD_TRANSPORT,
     CommandType.DESIGNATE_AMPHIBIOUS,
+    CommandType.CANCEL_PHASE_ORDER,
     CommandType.END_PHASE,
   ],
   combat: [
@@ -22,6 +23,7 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
     CommandType.MOVE_UNITS,
     CommandType.LOAD_TRANSPORT,
     CommandType.UNLOAD_TRANSPORT,
+    CommandType.CANCEL_PHASE_ORDER,
     CommandType.END_PHASE,
   ],
   mobilize: [CommandType.PLACE_UNITS, CommandType.END_PHASE],

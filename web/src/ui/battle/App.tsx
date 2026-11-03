@@ -220,7 +220,7 @@ function ipcLost(units: CombatUnit[]): number {
 }
 
 /** Without `match` this is the standalone sandbox. With it, the engine decides the battle. */
-export default function App({match}: {match?: BattleMatch} = {}) {
+export default function App({ match, playSignal = 0 }: { match?: BattleMatch; playSignal?: number } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stepperRef = useRef<ReturnType<typeof createFixedStepper>>(undefined);
 
@@ -1452,6 +1452,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
   // Player manual assignment by rank row click (marks unit as pending casualty)
   const handleAssignHitToFriendlyRank = (rankNum: number) => {
+    if (matchRef.current?.spectating) return;
     const currentAtk = [...attackerUnitsRef.current];
 
     if (pendingAttackerHits > 0) {
@@ -1863,6 +1864,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
   }, [getNextActiveCombatPhase, roundNumber]);
 
   const handleRetreatDecision = useCallback(() => {
+    if (matchRef.current?.spectating) return;
     gameAudio.playCrispClick();
     if (matchRef.current) {
       if (matchRef.current.canRetreat()) {
@@ -3035,6 +3037,15 @@ export default function App({match}: {match?: BattleMatch} = {}) {
       }
 
       if (e.code === 'Space' || e.code === 'Enter') {
+        if (matchRef.current?.spectating) {
+          e.preventDefault();
+          return;
+        }
+        if (matchRef.current?.online && matchRef.current.requestRoll) {
+          e.preventDefault();
+          matchRef.current.requestRoll();
+          return;
+        }
         if (victorySeqRef.current.active && victorySeqRef.current.stage === 'FLAG_SCREEN') {
           e.preventDefault();
           handleReturnToCombat();
@@ -3059,13 +3070,14 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
   // Auto-roll Continuous Handler
   const handleAutoRoll = useCallback(() => {
+    if (matchRef.current?.spectating) return;
     gameAudio.playConfirmSelect();
     setIsAutoRolling(true);
   }, []);
 
   useEffect(() => {
     if (!isAutoRolling) return;
-    if (gameState.status !== 'PLAYING') {
+    if (matchRef.current?.spectating || gameState.status !== 'PLAYING') {
       setIsAutoRolling(false);
       return;
     }
@@ -4382,7 +4394,9 @@ export default function App({match}: {match?: BattleMatch} = {}) {
         const textColor = pulse > 0.35 ? PALETTE.sandCream : PALETTE.sandTan;
         drawPixelString(
           ctx,
-          'SPACE TO ROLL',
+          matchRef.current?.spectating
+            ? (matchRef.current.spectatorLabel ?? 'SPECTATING BATTLE')
+            : 'SPACE TO ROLL',
           trayX + Math.round(trayW / 2),
           trayY + Math.round((trayH - 15) / 2),
           3,
@@ -4699,6 +4713,17 @@ export default function App({match}: {match?: BattleMatch} = {}) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const seenPlaySignal = useRef(0);
+  const fireRoundRef = useRef<() => void>(() => {});
+  fireRoundRef.current = () => {
+    if (matchRef.current) handlePrimaryCombatAction();
+  };
+  useEffect(() => {
+    if (!playSignal || seenPlaySignal.current === playSignal) return;
+    seenPlaySignal.current = playSignal;
+    fireRoundRef.current();
+  }, [playSignal]);
+
   const isMusicPlaying = gameState.status === 'PLAYING' && !isGameMenuOpen && !isVictorySequenceActive;
 
   const liveAttackerCount = attackerUnits.filter(isCombatActive).length;
@@ -4723,6 +4748,11 @@ export default function App({match}: {match?: BattleMatch} = {}) {
 
       {/* TOP HUD: Dedicated Safe Zone Container (Fades out cleanly during Victory Sequence) */}
       <header className={`w-full bg-[#423840] border-b-2 border-[#5E4E54] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0 text-xs transition-opacity duration-700 ${isVictorySequenceActive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        {match?.spectating && (
+          <span data-testid="spectator-banner" className="w-full font-black tracking-wide text-[#DFCE91]">
+            {match.spectatorLabel ?? 'SPECTATING BATTLE'}
+          </span>
+        )}
         <div className="flex items-center gap-3">
           {match && (
             <div className="bg-[#2b242a] px-2.5 py-1 rounded border border-[#7D6652] font-bold" data-testid="match-region">
@@ -4802,6 +4832,7 @@ export default function App({match}: {match?: BattleMatch} = {}) {
             onClick={() => (isAutoRolling ? setIsAutoRolling(false) : handleAutoRoll())}
             title={isAutoRolling ? 'Halt Auto-Roll' : 'Auto-Roll Salvos'}
             data-testid="autoroll-btn"
+            disabled={match?.spectating === true}
             className={`px-2 py-1 rounded font-bold text-[10px] tracking-wider transition-colors flex items-center gap-1 border shadow-sm active:scale-95 ${
               isAutoRolling
                 ? 'bg-[#9A4E48] hover:bg-[#B77958] text-[#DFCE91] border-[#DFCE91] animate-pulse'

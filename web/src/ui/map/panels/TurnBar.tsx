@@ -4,6 +4,8 @@ import { PHASES } from "../../../engine/turn/turn_engine";
 import { factionPalette } from "../../theme/factionPalette";
 import type { MapVersion } from "../editor/mapVersions";
 import { factionName, phaseName } from "../session/event_text";
+import type { RoomControls } from "../session/use_campaign_session";
+import { RoomPill } from "./RoomPill";
 import { DEMO_MAP_ID, demoPlayChoice, playChoiceFromVersion } from "../session/play_map";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -17,9 +19,10 @@ interface Props {
   editing: boolean;
   versions: MapVersion[];
   onToggleEditing(): void;
+  room?: RoomControls;
 }
 
-export function TurnBar({ game, editing, versions, onToggleEditing }: Props) {
+export function TurnBar({ game, editing, versions, onToggleEditing, room }: Props) {
   const state = game.session.state;
   const [seedInput, setSeedInput] = useState(String(game.seed));
   const [mapId, setMapId] = useState(game.mapId);
@@ -64,6 +67,7 @@ export function TurnBar({ game, editing, versions, onToggleEditing }: Props) {
           </span>
         ))}
       </div>
+      {room && <RoomPill room={room} />}
       <button
         type="button"
         className="sfx-toggle"

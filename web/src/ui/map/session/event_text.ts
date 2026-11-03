@@ -104,6 +104,8 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
       return `${who} bought ${unitList(p.units, unitTypes)} for ${p.cost} IPC`;
     case "purchasefailed":
       return `${who} purchase failed: ${String(p.reason ?? "unknown")}`;
+    case "phaseordercancelled":
+      return `${who} cancelled ${Math.trunc(Number(p.count ?? 0))}× ${unitName(String(p.unit_type_id ?? ""), unitTypes)}, ${p.from_region_id} → ${p.to_region_id}`;
     case "unitsmoved": {
       const moves: Dict[] = Array.isArray(p.moves) ? p.moves : [];
       const parts = moves.map((m) => `${unitList(m.units, unitTypes)} ${m.from_region_id} to ${m.to_region_id}`);

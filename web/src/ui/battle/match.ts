@@ -59,4 +59,12 @@ export interface BattleMatch {
   retreat(): void;
   /** Leave the board once the battle is over. */
   exit(): void;
+  /** This tab is watching the host play the battle. Rolls, casualties, and retreat stay disabled. */
+  spectating?: boolean;
+  /** Rolls are decided by the host. Space asks for the next volley instead of rolling locally. */
+  online?: boolean;
+  /** Action-bar copy while `spectating` is set. */
+  spectatorLabel?: string;
+  /** Ask the host for the next volley. The board animates when that volley is handed back. */
+  requestRoll?(): void;
 }

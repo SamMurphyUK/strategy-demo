@@ -3,8 +3,13 @@ import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../
 import { strandedCargoGate } from "../../../engine/transport/cargo_rules";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
-import { cancel_phase_order } from "../../../engine/movement/phase_orders";
-import { GameSessionStub, type StubResult } from "../../../engine/session/game_session_stub";
+import {
+  GameSessionStub,
+  type CanonicalEvent,
+  type StubResult,
+  type StubStateSnapshot,
+} from "../../../engine/session/game_session_stub";
+import { applyAuthoritativeSnapshot } from "../../../multiplayer/multiplayer_client";
 import { describeEvent, unitName } from "./event_text";
 import { type PlayChoice, demoPlayChoice, initialPlayChoice, rememberPlayId } from "./play_map";
 
@@ -21,8 +26,12 @@ export interface GameSessionHandle {
   seed: number;
   log: LogEntry[];
   send(type: string, payload?: Dict): StubResult;
-  /** Drops one movement order and rebuilds the phase from its start snapshot. */
+  /** Drops one movement order through `cancel_phase_order`, so the reversal is a command. */
   cancelPhaseOrder(orderId: string): void;
+  /** Lock the board to a host snapshot and append the events that produced it. */
+  applyRemote(snapshot: StubStateSnapshot, events: CanonicalEvent[]): void;
+  /** Record a host rejection without touching the rules. */
+  noteError(message: string): void;
   /** Starts a new game on `choice`. Omit it to restart the map already being played. */
   newGame(seed: number, choice?: PlayChoice): void;
   /** `demo`, or the id of the saved version this game was started from. */
@@ -141,8 +150,39 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       const from = session.state.regions[order.fromRegionId]?.name || order.fromRegionId;
       const to = session.state.regions[order.toRegionId]?.name || order.toRegionId;
       const label = unitName(order.unitType, session.state.unit_types);
-      cancel_phase_order(session.state, orderId);
-      append([{ kind: "event", text: `Cancelled ${order.count}× ${label}, ${from} → ${to}.` }]);
+      counter.current += 1;
+      const result = session.applyCommand({
+        command_id: `ui_${String(counter.current).padStart(5, "0")}`,
+        player_id: session.state.current_faction_id,
+        type: "cancel_phase_order",
+        payload: { order_id: orderId },
+      });
+      if (result.result_type === "ok") {
+        append([{ kind: "event", text: `Cancelled ${order.count}× ${label}, ${from} → ${to}.` }]);
+      } else {
+        append([
+          { kind: "error", text: `${result.error?.code ?? "ERROR"}: ${result.error?.message ?? ""}` },
+        ]);
+      }
+      setVersion((v) => v + 1);
+    },
+    [append],
+  );
+
+  const applyRemote = useCallback(
+    (snapshot: StubStateSnapshot, events: CanonicalEvent[]) => {
+      const session = sessionRef.current!;
+      applyAuthoritativeSnapshot(session, snapshot);
+      const unitTypes = session.state.unit_types;
+      append(events.map((evt) => ({ kind: "event" as const, text: describeEvent(evt, unitTypes) })));
+      setVersion((v) => v + 1);
+    },
+    [append],
+  );
+
+  const noteError = useCallback(
+    (message: string) => {
+      append([{ kind: "error", text: message }]);
       setVersion((v) => v + 1);
     },
     [append],
@@ -169,11 +209,13 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       log,
       send,
       cancelPhaseOrder,
+      applyRemote,
+      noteError,
       newGame,
       mapId: choice.id,
       mapName: choice.name,
       map: choice.map,
     }),
-    [version, seed, log, send, cancelPhaseOrder, newGame, choice],
+    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, choice],
   );
 }

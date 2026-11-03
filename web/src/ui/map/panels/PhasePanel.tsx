@@ -21,9 +21,20 @@ interface Props {
   onFight(regionId: string): void;
   /** Combat-move cargo still aboard: pan the camera to that sea zone. */
   onStrandedCargo?(seaZoneId: string): void;
+  /** False while the opponent owns the active faction. */
+  commandsEnabled?: boolean;
 }
 
-export function PhasePanel({ game, selection, setSelection, legalTargets, pending, onFight, onStrandedCargo }: Props) {
+export function PhasePanel({
+  game,
+  selection,
+  setSelection,
+  legalTargets,
+  pending,
+  onFight,
+  onStrandedCargo,
+  commandsEnabled = true,
+}: Props) {
   const { session } = game;
   const state = session.state;
   const faction = state.current_faction_id;
@@ -47,8 +58,15 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
       <h2>
         {factionName(faction)}: {phaseName(phase)}
       </h2>
+      {!commandsEnabled && (
+        <p className="opponent-turn" role="status">
+          OPPONENT TURN ({factionName(faction)})
+        </p>
+      )}
 
-      {phase === "purchase" && <PurchaseBody game={game} pending={pending} onStagedTotal={noteStaged} />}
+      {phase === "purchase" && (
+        <PurchaseBody game={game} pending={pending} onStagedTotal={noteStaged} commandsEnabled={commandsEnabled} />
+      )}
 
       {(phase === "combat_move" || phase === "noncombat_move") && (
         <MoveBody selection={selection} setSelection={setSelection} legalTargets={legalTargets} game={game} />
@@ -74,7 +92,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
 
       <div className="phase-actions">
         {legal.includes("start_battle") && battles.length > 0 && (
-          <button type="button" className="primary" onClick={() => onFight(battles[0].region_id)}>
+          <button type="button" className="primary" disabled={!commandsEnabled} onClick={() => onFight(battles[0].region_id)}>
             Fight next battle
           </button>
         )}
@@ -88,7 +106,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
           <button
             type="button"
             className={battles.length > 0 || mustReturn !== "" || mustPlace !== "" ? "" : "primary"}
-            disabled={mustReturn !== "" || mustPlace !== ""}
+            disabled={mustReturn !== "" || mustPlace !== "" || !commandsEnabled}
             onClick={() => {
               if (!purchaseGate.advance) {
                 setBasketWarning(true);
@@ -120,7 +138,7 @@ export function PhasePanel({ game, selection, setSelection, legalTargets, pendin
           </div>
         )}
         {legal.includes("end_turn") && (
-          <button type="button" className="primary" onClick={() => game.send("end_turn")}>
+          <button type="button" className="primary" disabled={!commandsEnabled} onClick={() => game.send("end_turn")}>
             Collect income and end turn
           </button>
         )}
@@ -133,10 +151,12 @@ function PurchaseBody({
   game,
   pending,
   onStagedTotal,
+  commandsEnabled,
 }: {
   game: GameSessionHandle;
   pending: PurchaseLine[];
   onStagedTotal(total: number): void;
+  commandsEnabled: boolean;
 }) {
   const { session } = game;
   const state = session.state;
@@ -198,7 +218,7 @@ function PurchaseBody({
                 <button
                   type="button"
                   onClick={() => bump(id, 1)}
-                  disabled={!canStageAnother(costs[id] ?? 0, ipc, total)}
+                  disabled={!commandsEnabled || !canStageAnother(costs[id] ?? 0, ipc, total)}
                   aria-label="Add one"
                 >
                   +
@@ -212,7 +232,7 @@ function PurchaseBody({
         Total <b className="mono">{total}</b> IPC of <b className="mono">{ipc}</b> available
       </p>
       <div className="row">
-        <button type="button" onClick={confirm} disabled={total === 0 || total > ipc}>
+        <button type="button" onClick={confirm} disabled={!commandsEnabled || total === 0 || total > ipc}>
           Confirm purchase
         </button>
         <button type="button" onClick={() => setStaged({})} disabled={total === 0}>

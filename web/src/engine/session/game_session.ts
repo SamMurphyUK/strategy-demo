@@ -2,11 +2,11 @@ import { AmphibiousEngine } from "../amphibious/amphibious";
 import { CombatEngine } from "../combat/combat";
 import { EconomyEngine } from "../economy/economy";
 import { Command, CommandType } from "../model/command";
-import type { GameEvent, GameEventDict } from "../model/event";
+import { GameEvent, GameEventType, type GameEventDict } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { MovementEngine } from "../movement/movement";
-import { applyCargoCommand, applyRecordedMove } from "../movement/phase_orders";
+import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
 import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { PlacementEngine } from "../placement/placement";
@@ -203,6 +203,37 @@ export class GameSession {
         break;
       }
 
+      case CommandType.CANCEL_PHASE_ORDER: {
+        const order = findPhaseOrder(this.state, cmd.payload);
+        if (order == null || this.state.phase_start_snapshot == null) {
+          return {
+            result_type: "error",
+            error: { code: "ORDER_NOT_FOUND", message: "No pending order matches order_id or index" },
+            events: [],
+            new_state: this.state.toSnapshot(),
+          };
+        }
+        const index = this.state.phase_orders.findIndex((item) => item.id === order.id);
+        cancel_phase_order(this.state, order.id);
+        this._seq += 1;
+        events = this.syncSeq([
+          GameEvent.create(
+            GameEventType.PHASE_ORDER_CANCELLED,
+            {
+              faction_id: cmd.player_id,
+              order_id: order.id,
+              index,
+              unit_type_id: order.unitType,
+              count: order.count,
+              from_region_id: order.fromRegionId,
+              to_region_id: order.toRegionId,
+            },
+            this._seq,
+          ),
+        ]);
+        break;
+      }
+
       case CommandType.END_TURN:
         events = processEndTurn(
           cmd.player_id,
@@ -256,11 +287,11 @@ export class GameSession {
       case "purchase":
         return ["purchase_units", "end_phase"];
       case "combat_move":
-        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "cancel_phase_order", "end_phase"];
       case "combat":
         return [];
       case "noncombat_move":
-        return ["move_units", "load_transport", "unload_transport", "end_phase"];
+        return ["move_units", "load_transport", "unload_transport", "cancel_phase_order", "end_phase"];
       case "mobilize":
         return ["place_units", "end_phase"];
       case "collect_income":

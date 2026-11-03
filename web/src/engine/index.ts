@@ -33,7 +33,7 @@ export type { CargoLine, Dict, PurchaseLine, TransportInstance, UnitStackEntry }
 export { Unit, type UnitType } from "./model/unit";
 export { MovementEngine } from "./movement/movement";
 export { MovementValidator } from "./movement/movement_validator";
-export { applyCargoCommand, beginMovementPhase, cancel_phase_order, recordMoveOrders, type MoveOrder, type PhaseStartSnapshot } from "./movement/phase_orders";
+export { applyCargoCommand, beginMovementPhase, cancel_phase_order, findPhaseOrder, recordMoveOrders, type MoveOrder, type PhaseStartSnapshot } from "./movement/phase_orders";
 export {
   cargoFits,
   combatCargoCommit,
