@@ -3,6 +3,8 @@ import type { Dict } from "../../../engine/model/types";
 import { isDict } from "../../../engine/model/types";
 
 export const VERSIONS_KEY = "strategy-demo.map-editor.versions.v1";
+/** Named snapshot [ Export Board JSON ] writes to demomap01.json. IndexedDB is not used. */
+export const CANONICAL_BOARD_NAME = "WorldMap_Populated";
 export const VERSION_NAME_MAX = 80;
 
 export interface MapVersion {

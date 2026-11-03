@@ -173,6 +173,15 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
             </button>
           </>
         )}
+        <button
+          type="button"
+          className={editor.showUncovered ? "active" : ""}
+          aria-pressed={editor.showUncovered}
+          title="Outline land-mask pieces no land region cutter covers, in orange and magenta."
+          onClick={editor.toggleUncovered}
+        >
+          [ Show Uncovered Land ]
+        </button>
         {editor.second && editor.selected && (
           <>
             <button type="button" className="primary" onClick={editor.mergeSelected}>

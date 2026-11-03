@@ -5,6 +5,8 @@
     "dev": "npm run dev --prefix web",
     "test": "npm test --prefix web",
     "build": "npm run build --prefix web",
-    "typecheck": "npm run typecheck --prefix web"
+    "typecheck": "npm run typecheck --prefix web",
+    "rebuild-map-geometry": "npm run rebuild-map-geometry --prefix web",
+    "normalize-land-svg": "npm run normalize-land-svg --prefix web --"
   }
 }

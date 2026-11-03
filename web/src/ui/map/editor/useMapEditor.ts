@@ -5,10 +5,11 @@ import { effectiveUnitSlots, generatedSlotsOf } from "../unitSlots";
 import { isLandAt } from "../hitTest";
 import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
-import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring } from "../regionClip";
+import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring, uncoveredLand } from "../regionClip";
 import type { MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
 import {
+  CANONICAL_BOARD_NAME,
   parseVersionLibrary,
   removeVersion,
   freshMapName,
@@ -72,6 +73,7 @@ import {
   LOOP_MIN_PX,
   masterBlocks,
   mergeRegions,
+  separateBlockedPieces,
   type PreparedStroke,
   prepareClicks,
   prepareStroke,
@@ -214,6 +216,11 @@ export interface MapEditor {
   redo(): void;
   exportJson(): void;
   saveToDevServer(): void;
+  /** Writes the saved WorldMap_Populated snapshot to demomap01.json. The open editor document stays put. */
+  exportBoardJson(): void;
+  /** Magenta and orange outline of land the land-region cutters do not cover. */
+  showUncovered: boolean;
+  toggleUncovered(): void;
   resetToDemo(): void;
   /** Named snapshots stored in this browser, newest first. */
   versions: MapVersion[];
@@ -243,6 +250,8 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   const [cursor, setCursor] = useState<{ point: Vec2; kind: "vertex" | "edge" | "free" } | null>(null);
   const [closing, setClosing] = useState(false);
   const [status, setStatus] = useState("");
+  const [showUncovered, setShowUncovered] = useState(false);
+  const [uncovered, setUncovered] = useState<MultiPolygon | null>(null);
   const dragBase = useRef<EditorMap | null>(null);
   const drawSea = layer === "sea";
   const [versions, setVersions] = useState<MapVersion[]>(() => {
@@ -323,6 +332,46 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       extra: region.extra,
     });
   }, []);
+
+  // Recompute after edits settle, so dragging a vertex does not clip the land mask on every pointer move.
+  useEffect(() => {
+    if (!showUncovered) {
+      setUncovered(null);
+      return;
+    }
+    if (!land) {
+      setUncovered(null);
+      setStatus("The land mask has not loaded, so uncovered land cannot be drawn.");
+      return;
+    }
+    const regions = doc.map.regions;
+    let cancel = false;
+    const handle = window.setTimeout(() => {
+      const covers: MultiPolygon[] = [];
+      for (const region of regions) {
+        if (region.is_sea) continue;
+        const mp: MultiPolygon = [];
+        if (region.polygon.length >= 3) mp.push([ringOf(region.polygon)]);
+        for (const extra of region.extra ?? []) {
+          if (extra.length >= 3) mp.push([ringOf(extra)]);
+        }
+        if (mp.length > 0) covers.push(mp);
+      }
+      try {
+        const free = uncoveredLand(land.polygons, covers);
+        if (!cancel) setUncovered(free.length > 0 ? free : null);
+      } catch {
+        if (!cancel) {
+          setUncovered(null);
+          setStatus("Uncovered land could not be computed for this map.");
+        }
+      }
+    }, 200);
+    return () => {
+      cancel = true;
+      window.clearTimeout(handle);
+    };
+  }, [showUncovered, land, doc.map]);
 
   /** A region's unit slots as the map draws them: hand-placed, or generated from its true shape. */
   const slotsOf = useCallback(
@@ -489,16 +538,20 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       if (!applied) {
         return;
       }
-      commit(withAutoLinks(applied.map).map);
+      const mask = live.current.land;
+      const settled = mask ? separateBlockedPieces(applied.map, clipperFor(mask.polygons)) : { map: applied.map, seaIds: [], islandIds: [] };
+      commit(withAutoLinks(settled.map).map);
       cancelDraft();
       setSelectedId(applied.newIds[0]);
       setSecondId("");
+      const parted = [...settled.seaIds, ...settled.islandIds];
+      const extra = parted.length > 0 ? ` Separated ${parted.join(", ")}: the land had already closed that piece off.` : "";
       setStatus(
-        cut.loop
+        (cut.loop
           ? `Carved ${applied.newIds.join(", ")} out of ${region.id}.`
           : applied.newIds.length === 1
           ? `Cut ${region.id} in two. The new half is ${applied.newIds[0]}; the larger piece kept ${region.id}'s settings.`
-          : `Cut ${region.id} into ${applied.newIds.length + 1}. New pieces: ${applied.newIds.join(", ")}.`,
+          : `Cut ${region.id} into ${applied.newIds.length + 1}. New pieces: ${applied.newIds.join(", ")}.`) + extra,
       );
     },
     [cancelDraft, commit, shapeOf, withAutoLinks],
@@ -917,11 +970,14 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         anchorFor(clipper.clip({ id: "master-block", type: sea ? "sea" : "land", points: polygon })) ?? labelPoint(polygon),
     );
     const added = addBlocks(state, found.blocks, sea, anchors);
-    commit(withAutoLinks(added.map).map);
+    const settled = separateBlockedPieces(added.map, clipper);
+    commit(withAutoLinks(settled.map).map);
     setSelectedId(added.ids[0]);
     setSecondId("");
+    const parted = [...settled.seaIds, ...settled.islandIds];
+    const extra = parted.length > 0 ? ` Separated ${parted.join(", ")}: the land had already closed that piece off.` : "";
     setStatus(
-      `Added ${added.ids.length} master ${sea ? "sea" : "land"} block${added.ids.length === 1 ? "" : "s"}: ${added.ids.join(", ")}. Slice ${added.ids.length === 1 ? "it" : "them"} with the knife.`,
+      `Added ${added.ids.length} master ${sea ? "sea" : "land"} block${added.ids.length === 1 ? "" : "s"}: ${added.ids.join(", ")}. Slice ${added.ids.length === 1 ? "it" : "them"} with the knife.${extra}`,
     );
   }, [commit, withAutoLinks]);
 
@@ -1007,6 +1063,47 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       })
       .catch(() => setStatus('Save failed: the dev server did not answer. Run the app with "npm run dev".'));
   }, [prepareExport]);
+
+  const exportBoardJson = useCallback(() => {
+    let library: MapVersion[] = [];
+    try {
+      library = parseVersionLibrary(window.localStorage.getItem(VERSIONS_KEY));
+    } catch {
+      library = [];
+    }
+    const board = library.find((version) => version.name === CANONICAL_BOARD_NAME);
+    if (!board) {
+      setStatus(
+        `${CANONICAL_BOARD_NAME} is not in this browser. Named versions live in localStorage under ${VERSIONS_KEY}.`,
+      );
+      return;
+    }
+    // The named snapshot can still name the previous land file. The app draws FINAL_02.
+    const map = {
+      ...board.map,
+      coord_space: typeof board.map.coord_space === "string" && board.map.coord_space !== "" ? board.map.coord_space : "svg",
+      land_mask: "assets/ne_110m_land_FINAL_02.svg",
+    };
+    const text = formatMapJson(map);
+    const regions = Array.isArray(board.map.regions) ? board.map.regions.length : 0;
+    const units = Array.isArray(board.map.starting_units) ? board.map.starting_units.length : 0;
+    setStatus(`Exporting ${CANONICAL_BOARD_NAME}…`);
+    fetch(SAVE_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: text })
+      .then(async (res) => {
+        const body: { ok?: boolean; path?: string; backup?: string; error?: string } = await res.json().catch(() => ({}));
+        if (res.ok && body.ok) {
+          const kept = body.backup || "demomap01.backup.json";
+          setStatus(`Exported ${CANONICAL_BOARD_NAME} (${regions} regions, ${units} starting units) to ${body.path ?? "demomap01.json"}. Previous file kept as ${kept}.`);
+        } else {
+          setStatus(`Export failed: ${body.error ?? `HTTP ${res.status}`}. Run the app with "npm run dev" to enable saving.`);
+        }
+      })
+      .catch(() => setStatus('Export failed: the dev server did not answer. Run the app with "npm run dev".'));
+  }, []);
+
+  const toggleUncovered = useCallback(() => {
+    setShowUncovered((on) => !on);
+  }, []);
 
   const resetToDemo = useCallback(() => {
     commit(editorFromMapJson(demoJson));
@@ -1156,6 +1253,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         pruneBox,
         pruneIds: boxIds,
         slots: selectedSlots,
+        uncovered: showUncovered ? uncovered : null,
       },
       prunePrompt: pruneBox && boxDone ? { box: pruneBox, count: boxIds.length, confirm: confirmBoxPrune, cancel: cancelBoxPrune } : null,
       pickHandle(world, tol) {
@@ -1384,7 +1482,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         apply({ map: next, past: [...cur.past, before].slice(-HISTORY_LIMIT), future: [] });
       },
     }),
-    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf],
+    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf, showUncovered, uncovered],
   );
 
   const selected = selectedId === "" ? null : (findRegion(map, selectedId) ?? null);
@@ -1446,6 +1544,9 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     redo,
     exportJson,
     saveToDevServer,
+    exportBoardJson,
+    showUncovered,
+    toggleUncovered,
     resetToDemo,
     versions,
     saveVersion,

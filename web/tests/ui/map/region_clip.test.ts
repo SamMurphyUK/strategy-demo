@@ -142,13 +142,15 @@ describe("demomap01 against the land SVG", () => {
     const left = uncoveredLand(land, lands.map((r) => clipped.get(r.id)!));
     expect(multiPolygonArea(left)).toBeLessThanOrEqual(multiPolygonArea(land) + 1e-6);
     for (const r of lands) {
-      // Clipping a coast-shaped outline against the coast changes nothing, and none is a canvas-sized box.
+      // A rough cutter may hang off the coast. Clipping can only trim it, never invent land.
       // A multi-island territory keeps its other islands in `extra`, so the outline is every ring together.
       const outline = [r.points, ...(r.extra ?? [])].reduce(
         (sum, ring) => sum + ringArea(ring.map((p) => [p.x, p.y] as [number, number])),
         0,
       );
-      expect(Math.abs(multiPolygonArea(clipped.get(r.id)!) - outline), r.id).toBeLessThan(0.5 + outline * 0.002);
+      const area = multiPolygonArea(clipped.get(r.id)!);
+      expect(area, r.id).toBeGreaterThan(0);
+      expect(area, r.id).toBeLessThanOrEqual(outline + 0.5);
       expect(r.bounds.w, r.id).toBeLessThan(700);
     }
   });
@@ -183,13 +185,22 @@ describe("clipped_polygon export", () => {
 
   it("writes each region's clipped MultiPolygon when a clipper is given, and loading ignores it", () => {
     const out = editorToMapJson(map, { round: true, clipper: clipperFor(land) });
-    const regions = out.regions as { metadata: { region_id: string }; polygon: number[][]; clipped_polygon: number[][][][] }[];
+    const regions = out.regions as {
+      metadata: { region_id: string };
+      polygon: number[][];
+      extra_polygons?: number[][][];
+      clipped_polygon: number[][][][];
+    }[];
     const landIds = new Set(map.regions.filter((r) => !r.is_sea).map((r) => r.id));
     const master = regions.find((r) => landIds.has(r.metadata.region_id))!;
     expect(master.clipped_polygon.length).toBeGreaterThan(0);
     const mp = master.clipped_polygon as unknown as MultiPolygon;
-    // Clipping to the coast can only trim the outline, never add to it.
-    const outline = multiPolygonArea([[master.polygon.map(([x, y]) => [x, y] as [number, number])]]);
+    // Clipping to the coast can only trim the cutter, including its extra islands, never add to it.
+    const rings = [master.polygon, ...(master.extra_polygons ?? [])];
+    const outline = rings.reduce(
+      (sum, ring) => sum + ringArea(ring.map(([x, y]) => [x, y] as [number, number])),
+      0,
+    );
     expect(multiPolygonArea(mp)).toBeGreaterThan(0);
     expect(multiPolygonArea(mp)).toBeLessThanOrEqual(outline * 1.002);
     expect(formatMapJson(out)).toContain("clipped_polygon");

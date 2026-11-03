@@ -17,7 +17,18 @@ import {
   uncoveredLand,
 } from "../regionClip";
 import { pointInPolygon, type Rect, type Vec2 } from "../geometry";
-import { applyMergeMany, dist, type EditorMap, type EditorRegion, findRegion, labelPoint, SAME_VERTEX_EPS } from "./editorModel";
+import {
+  addBlocks,
+  applyMergeMany,
+  detachIslands,
+  dist,
+  type EditorMap,
+  type EditorRegion,
+  findRegion,
+  labelPoint,
+  SAME_VERTEX_EPS,
+  splitId,
+} from "./editorModel";
 
 export type SliceResult<T> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -625,9 +636,57 @@ export function prepareClicks(points: Vec2[], closeDist: number, minLoop: number
 // Merge
 // ---------------------------------------------------------------
 
+function distanceToRing(p: Vec2, ring: Vec2[]): number {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+    best = Math.min(best, Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t)));
+  }
+  return best;
+}
+
+/**
+ * A gap the two outlines close around has edges of both. A hole one outline already wrapped (a lake, or a
+ * sea the promoted land was cut around) has its whole boundary on that one outline.
+ */
+function holePinchedBetween(hole: Vec2[], a: Vec2[], b: Vec2[]): boolean {
+  const eps = 0.05;
+  let fromA = false;
+  let fromB = false;
+  let unknown = 0;
+  for (let i = 0; i < hole.length; i++) {
+    const p = hole[i];
+    const q = hole[(i + 1) % hole.length];
+    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    const da = distanceToRing(mid, a);
+    const db = distanceToRing(mid, b);
+    if (da <= eps && db <= eps) {
+      continue;
+    }
+    if (da <= eps) {
+      fromA = true;
+    } else if (db <= eps) {
+      fromB = true;
+    } else {
+      unknown += 1;
+    }
+  }
+  if (fromA && fromB) {
+    return true;
+  }
+  return unknown > 0 && !fromA && !fromB;
+}
+
 /**
  * Welds two cutters into one. B's vertices within `snapEps` of one of A's are moved onto it first, so a
- * border drawn by hand (not quite coincident) still closes up.
+ * border drawn by hand (not quite coincident) still closes up. A hole one side already wrapped is bridged
+ * again, so an extension of a promoted landmass still welds. A hole that would be new, with edges on both
+ * outlines, is refused.
  */
 export function mergePolygons(a: Vec2[], b: Vec2[], snapEps: number): SliceResult<{ points: Vec2[] }> {
   const snapped = fromRing(
@@ -659,7 +718,12 @@ export function mergePolygons(a: Vec2[], b: Vec2[], snapEps: number): SliceResul
     return { ok: false, error: "These regions do not share a border. Merge needs two neighbors." };
   }
   if (union[0].length > 1) {
-    return { ok: false, error: "Merging would leave a hole between them. Merge the regions around it first." };
+    const holes = union[0].slice(1).map(fromRing).filter((hole) => hole.length >= 3);
+    if (holes.some((hole) => holePinchedBetween(hole, a, snapped))) {
+      return { ok: false, error: "Merging would leave a hole between them. Merge the regions around it first." };
+    }
+    const outer = fromRing(union[0][0]);
+    return { ok: true, points: holes.length > 0 ? bridgeHoles(outer, holes) : outer };
   }
   return { ok: true, points: fromRing(union[0][0]) };
 }
@@ -821,6 +885,228 @@ export function landComponentAt(point: Vec2, land: MultiPolygon, covered: MultiP
   }
   const outline = piecesOf([hit], 1e-6)[0];
   return outline ? { outline, area: ringAreaOf(outline) } : null;
+}
+
+// ---------------------------------------------------------------
+// Pieces the land mask already separates
+// ---------------------------------------------------------------
+
+/** An island farther than this from the rest of its territory (world units) becomes its own region. */
+export const DISTANT_ISLAND_GAP = 45;
+/** Clipped water smaller than this stays with the zone that covers it: a coast sliver, not a basin. */
+const SEALED_SEA_AREA = 20;
+
+function pointSegDistance(p: Vec2, c: Vec2, d: Vec2): number {
+  const dx = d.x - c.x;
+  const dy = d.y - c.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - c.x) * dx + (p.y - c.y) * dy) / len2));
+  return Math.hypot(p.x - (c.x + dx * t), p.y - (c.y + dy * t));
+}
+
+/** The shortest distance between two outlines. */
+function minRingDistance(a: Vec2[], b: Vec2[]): number {
+  let best = Infinity;
+  const scan = (ring: Vec2[], other: Vec2[]) => {
+    for (let i = 0; i < ring.length; i++) {
+      const c = ring[i];
+      const d = ring[(i + 1) % ring.length];
+      for (const p of other) {
+        const gap = pointSegDistance(p, c, d);
+        if (gap < best) {
+          best = gap;
+        }
+      }
+    }
+  };
+  scan(a, b);
+  scan(b, a);
+  return best;
+}
+
+function coastOf(poly: Polygon): Vec2[] {
+  return fromRing(poly[0]);
+}
+
+function signedArea(ring: Vec2[]): number {
+  let sum = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    sum += ring[j].x * ring[i].y - ring[i].x * ring[j].y;
+  }
+  return sum / 2;
+}
+
+/** polygon-clipping fills by winding, so a hole has to run opposite the ring it is cut out of. */
+function asHole(outer: Vec2[], hole: Vec2[]): Vec2[] {
+  return signedArea(outer) * signedArea(hole) > 0 ? [...hole].reverse() : hole;
+}
+
+function outlineOf(poly: Polygon): Vec2[] | null {
+  const [ring] = piecesOf([poly], 0);
+  return ring && ring.length >= 3 ? ring : null;
+}
+
+function homePolygon(parts: Polygon[], anchor: Vec2): Polygon {
+  return (
+    parts.find((poly) => pointInMultiPolygon(anchor, [poly])) ??
+    parts.reduce((a, b) => (multiPolygonArea([a]) >= multiPolygonArea([b]) ? a : b))
+  );
+}
+
+/**
+ * A sea cutter that still covers a basin the land has sealed off gives that basin its own zone. A land
+ * territory keeps islands within {@link DISTANT_ISLAND_GAP} and lets go of anything farther, including a
+ * single cutter whose clip is two landmasses with open water between them. Regions with nothing separated
+ * are left as they are.
+ */
+export function separateBlockedPieces(
+  map: EditorMap,
+  clipper: RegionClipper,
+): { map: EditorMap; seaIds: string[]; islandIds: string[] } {
+  let next = map;
+  const seaIds: string[] = [];
+  const islandIds: string[] = [];
+
+  for (const region of map.regions) {
+    if (!region.is_sea) {
+      continue;
+    }
+    const current = findRegion(next, region.id);
+    if (!current) {
+      continue;
+    }
+    const shape = clipper.clip({ id: current.id, type: "sea", points: current.polygon, extra: current.extra });
+    const parts = shape.filter((poly) => multiPolygonArea([poly]) >= SEALED_SEA_AREA);
+    if (parts.length < 2) {
+      continue;
+    }
+    const anchor = { x: current.cx, y: current.cy };
+    const home = homePolygon(parts, anchor);
+    let ring = current.polygon;
+    const spawned: { polygon: Vec2[]; cx: number; cy: number }[] = [];
+    for (const poly of parts) {
+      if (poly === home) {
+        continue;
+      }
+      const hole = coastOf(poly);
+      const at = anchorFor([poly]) ?? labelPoint(hole);
+      const bridged = bridgeHoles(ring, [asHole(ring, hole)]);
+      if (bridged.length === ring.length || pointInPolygon(at, bridged)) {
+        continue;
+      }
+      ring = bridged;
+      spawned.push({ polygon: hole, cx: at.x, cy: at.y });
+    }
+    if (spawned.length === 0) {
+      continue;
+    }
+    // No weld: the bridge copies the basin's coast onto the parent so the fill can exclude it, and welding
+    // those vertices into a real shared edge would make the two seas neighbors across the land.
+    const stripped: EditorMap = {
+      ...next,
+      regions: next.regions.map((r) => {
+        if (r.id !== current.id) {
+          return r;
+        }
+        const { extra: _dropped, ...rest } = r;
+        return { ...rest, polygon: ring };
+      }),
+    };
+    const created: EditorRegion[] = [];
+    for (const piece of spawned) {
+      const id = splitId({ ...stripped, regions: [...stripped.regions, ...created] }, current.id);
+      seaIds.push(id);
+      created.push({
+        id,
+        name: id,
+        ipc_value: 0,
+        starting_owner: current.starting_owner,
+        is_sea: true,
+        factory: "none",
+        capital: false,
+        polygon: piece.polygon,
+        cx: piece.cx,
+        cy: piece.cy,
+      });
+    }
+    next = {
+      ...stripped,
+      regions: stripped.regions.flatMap((r) => (r.id === current.id ? [r, ...created] : [r])),
+    };
+  }
+
+  const landIds = next.regions.filter((r) => !r.is_sea).map((r) => r.id);
+  for (const id of landIds) {
+    let current = findRegion(next, id);
+    if (!current) {
+      continue;
+    }
+    const anchor = { x: current.cx, y: current.cy };
+    const mainShape = clipper.clip({ id: current.id, type: "land", points: current.polygon });
+    if (mainShape.length >= 2) {
+      const home = homePolygon(mainShape, anchor);
+      const homeCoast = coastOf(home);
+      const gapOf = (poly: Polygon) => minRingDistance(homeCoast, coastOf(poly));
+      const far = mainShape.filter((poly) => poly !== home && gapOf(poly) > DISTANT_ISLAND_GAP);
+      if (far.length > 0) {
+        const kept = outlineOf(home) ?? homeCoast;
+        const nearRings = mainShape
+          .filter((poly) => poly !== home && gapOf(poly) <= DISTANT_ISLAND_GAP)
+          .map((poly) => outlineOf(poly) ?? coastOf(poly))
+          .filter((ring) => ring.length >= 3);
+        const farRings = far.map((poly) => outlineOf(poly) ?? coastOf(poly)).filter((ring) => ring.length >= 3);
+        const keptAt = pointInMultiPolygon(anchor, [home]) ? anchor : (anchorFor([home]) ?? labelPoint(kept));
+        const extra = [...(current.extra ?? []), ...nearRings];
+        next = {
+          ...next,
+          regions: next.regions.map((r) => {
+            if (r.id !== id) {
+              return r;
+            }
+            const { extra: _old, ...rest } = r;
+            return { ...rest, polygon: kept, cx: keptAt.x, cy: keptAt.y, ...(extra.length > 0 ? { extra } : {}) };
+          }),
+        };
+        const anchors = farRings.map((ring, i) => anchorFor([far[i]]) ?? labelPoint(ring));
+        const added = addBlocks(next, farRings, false, anchors);
+        next = added.map;
+        islandIds.push(...added.ids);
+      }
+    }
+    current = findRegion(next, id);
+    if (!current?.extra?.length) {
+      continue;
+    }
+    const body = clipper.clip({ id: `${current.id}#body`, type: "land", points: current.polygon });
+    if (body.length === 0) {
+      continue;
+    }
+    const homeCoast = coastOf(homePolygon(body, { x: current.cx, y: current.cy }));
+    const take: number[] = [];
+    const spots: Vec2[] = [];
+    current.extra.forEach((ring, index) => {
+      const piece = clipper.clip({ id: `${current.id}#e${index}`, type: "land", points: ring });
+      if (piece.length === 0) {
+        return;
+      }
+      if (piece.some((poly) => minRingDistance(homeCoast, coastOf(poly)) <= DISTANT_ISLAND_GAP)) {
+        return;
+      }
+      take.push(index);
+      spots.push(anchorFor(piece) ?? labelPoint(ring));
+    });
+    if (take.length === 0) {
+      continue;
+    }
+    const detached = detachIslands(next, id, take, spots);
+    if (!detached) {
+      continue;
+    }
+    next = detached.map;
+    islandIds.push(...detached.ids);
+  }
+
+  return { map: next, seaIds, islandIds };
 }
 
 // ---------------------------------------------------------------

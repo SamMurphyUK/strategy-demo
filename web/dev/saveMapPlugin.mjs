@@ -4,7 +4,7 @@
 //
 // The file is checked before it is written, and written through a temp file so a crash cannot leave a
 // half-written map. It is never part of the production build (apply: "serve").
-import { rename, writeFile } from "node:fs/promises";
+import { copyFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const SAVE_ROUTE = "/__dev/save-map";
@@ -30,6 +30,11 @@ export function validateMapJson(json) {
     }
   }
   return "";
+}
+
+/** demomap01.json -> demomap01.backup.json, beside the file being replaced. */
+export function backupFileFor(target) {
+  return path.join(path.dirname(target), `${path.basename(target, path.extname(target))}.backup.json`);
 }
 
 /** @param {{ file: string }} options the file to write, relative to the Vite root (or absolute) */
@@ -80,10 +85,20 @@ export function saveMapPlugin(options) {
             return reply(422, { ok: false, error: problem });
           }
           try {
+            const backup = backupFileFor(target);
+            let backedUp = "";
+            try {
+              await copyFile(target, backup);
+              backedUp = path.basename(backup);
+            } catch (error) {
+              if (error?.code !== "ENOENT") {
+                throw error;
+              }
+            }
             const temp = `${target}.tmp`;
             await writeFile(temp, text.endsWith("\n") ? text : `${text}\n`, "utf8");
             await rename(temp, target);
-            return reply(200, { ok: true, path: path.basename(target), regions: json.regions.length });
+            return reply(200, { ok: true, path: path.basename(target), backup: backedUp, regions: json.regions.length });
           } catch (error) {
             return reply(500, { ok: false, error: String(error?.message ?? error) });
           }

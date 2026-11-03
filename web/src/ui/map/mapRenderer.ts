@@ -1438,6 +1438,8 @@ export interface EditorOverlay {
   pruneIds?: string[];
   /** The selected region's unit slots in world units (hand-placed or generated), drawn as S1..S8 handles. */
   slots?: Vec2[];
+  /** Land-mask rings no land cutter covers: polygon, ring, [x, y]. Drawn as a debug outline. */
+  uncovered?: [number, number][][][] | null;
 }
 
 export const SLOT_HANDLE_COLOR = MILITARY.sage;
@@ -1507,6 +1509,28 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     }
   }
   ctx.globalAlpha = 1;
+
+  // Land the cutters miss. Orange under magenta, in screen pixels, so a small island stays visible when zoomed out.
+  if (editor.uncovered && editor.uncovered.length > 0) {
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for (const poly of editor.uncovered) {
+      for (const ring of poly) {
+        if (ring.length < 2) continue;
+        ctx.moveTo(ring[0][0], ring[0][1]);
+        for (let i = 1; i < ring.length; i++) ctx.lineTo(ring[i][0], ring[i][1]);
+        ctx.closePath();
+      }
+    }
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.lineWidth = 3.5 * px;
+    ctx.strokeStyle = "#FF6A00";
+    ctx.stroke();
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = "#FF2BD6";
+    ctx.stroke();
+  }
 
   // The other regions picked for a merge. Each path covers every island of its territory.
   const picked = new Set([...(editor.secondId === "" ? [] : [editor.secondId]), ...(editor.mergeIds ?? [])]);

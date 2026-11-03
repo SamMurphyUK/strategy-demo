@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GameSessionFactory, SessionMode } from "../../../src/engine";
 
 describe("integration/test_demomap_adjacency", () => {
-  it("boots the blank board as neutral master blocks, one per landmass and ocean", () => {
+  it("boots the populated board with mutual adjacency", () => {
     const session = GameSessionFactory.create(SessionMode.STUB);
     const state = session.state;
     const ids = Object.keys(state.regions);
@@ -12,10 +12,12 @@ describe("integration/test_demomap_adjacency", () => {
     expect(lands.length).toBeGreaterThanOrEqual(1);
     expect(new Set(ids).size).toBe(ids.length);
 
+    const knownOwners = new Set(["", "ussr", "ger", "uk", "jap", "usa"]);
     for (const id of ids) {
-      expect(state.regions[id].owner_faction_id).toBe("");
-      expect(state.regions[id].is_capital).toBe(false);
+      expect(knownOwners.has(state.regions[id].owner_faction_id), id).toBe(true);
     }
+    expect(ids.some((id) => state.regions[id].owner_faction_id !== "")).toBe(true);
+    expect(Object.values(state.region_units).some((units) => units.length > 0)).toBe(true);
 
     // Every adjacency names a real region and is mutual, whatever the map has been sliced into.
     for (const id of ids) {
@@ -25,6 +27,5 @@ describe("integration/test_demomap_adjacency", () => {
       }
     }
     expect(state.turn_order).toEqual(["ussr", "ger", "uk", "jap", "usa"]);
-    expect(Object.values(state.region_units).every((units) => units.length === 0)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import polygonClipping from "polygon-clipping";
 import type { Vec2 } from "../../../src/ui/map/geometry";
 import {
   addBlocks,
@@ -29,10 +30,12 @@ import {
   prepareStroke,
   rdp,
   removeLoops,
+  separateBlockedPieces,
   splitPolygon,
   splitPolygonInto,
 } from "../../../src/ui/map/editor/slicing";
-import { multiPolygonArea, type MultiPolygon, RegionClipper, ringArea } from "../../../src/ui/map/regionClip";
+import { autoNeighborPairs } from "../../../src/ui/map/editor/adjacency";
+import { multiPolygonArea, type MultiPolygon, pointInMultiPolygon, RegionClipper, ringArea } from "../../../src/ui/map/regionClip";
 
 const square = (x: number, y: number, s: number): Vec2[] => [
   { x, y },
@@ -179,6 +182,37 @@ describe("merge", () => {
       { x: 0, y: 100 },
     ];
     expect(mergePolygons(c, [{ x: 100, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 100 }, { x: 100, y: 100 }], 0.75).ok).toBe(false);
+  });
+
+  it("welds an extension onto land that already wraps a lake", () => {
+    // A hairline joins the lake to the outline, the same cut a promoted landmass keeps.
+    const land: Vec2[] = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+      { x: 0, y: 50 },
+      { x: 40, y: 50 },
+      { x: 40, y: 40 },
+      { x: 40, y: 60 },
+      { x: 60, y: 60 },
+      { x: 60, y: 40 },
+      { x: 40, y: 40 },
+      { x: 40, y: 50 },
+      { x: 0, y: 50 },
+    ];
+    const extension = [
+      { x: 100, y: 0 },
+      { x: 140, y: 0 },
+      { x: 140, y: 100 },
+      { x: 100, y: 100 },
+    ];
+    const m = mergePolygons(land, extension, 0.75);
+    if (!m.ok) {
+      throw new Error(m.error);
+    }
+    // 100×100 minus the 20×20 lake, plus the 40×100 extension.
+    expect(area(m.points)).toBeCloseTo(13600, 4);
   });
 });
 
@@ -612,5 +646,93 @@ describe("knife on the real outline", () => {
   it("stretches a bite stroke that stopped just inside the coast on its way out", () => {
     const r = splitPolygonInto(square(0, 0, 100), [{ x: 30, y: -20 }, { x: 50, y: 40 }, { x: 62, y: 8 }]);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("land that already separates a piece", () => {
+  const toMulti = (rings: Vec2[][]): MultiPolygon => rings.map((ring) => [ring.map((p): [number, number] => [p.x, p.y])]);
+
+  it("gives a basin the land has sealed its own sea zone, and leaves open water around an island as one zone", () => {
+    const land = polygonClipping.difference(
+      [[[20, 20], [80, 20], [80, 80], [20, 80]]],
+      [[[40, 40], [60, 40], [60, 60], [40, 60]]],
+    );
+    const clipper = new RegionClipper(land);
+    let map = editorFromMapJson({ regions: [] });
+    const added = addRegionFromPolygon(map, square(0, 0, 100), true);
+    map = { ...added.map, regions: added.map.regions.map((r) => ({ ...r, cx: 5, cy: 5 })) };
+    const settled = separateBlockedPieces(map, clipper);
+    expect(settled.seaIds).toHaveLength(1);
+    expect(settled.map.regions).toHaveLength(2);
+    const parent = settled.map.regions.find((r) => r.id === added.id)!;
+    const basin = settled.map.regions.find((r) => r.id === settled.seaIds[0])!;
+    const parentWater = multiPolygonArea(clipper.clip({ id: parent.id, type: "sea", points: parent.polygon }));
+    const basinWater = multiPolygonArea(clipper.clip({ id: basin.id, type: "sea", points: basin.polygon }));
+    expect(basinWater).toBeCloseTo(400, 3);
+    expect(parentWater).toBeCloseTo(10000 - 3600, 3);
+    expect(multiPolygonArea(polygonClipping.intersection(
+      clipper.clip({ id: parent.id, type: "sea", points: parent.polygon }),
+      clipper.clip({ id: basin.id, type: "sea", points: basin.polygon }),
+    ))).toBe(0);
+    // The hole bridge is not a border: ships cannot sail from the basin to the outer sea.
+    const pairs = autoNeighborPairs(
+      settled.map.regions.map((r) => ({ id: r.id, polygon: r.polygon, is_sea: r.is_sea })),
+      (x, y) => pointInMultiPolygon({ x, y }, land),
+    );
+    expect(pairs).toEqual([]);
+    // Two zones that actually share water still link. The sealed basin does not.
+    const touching = autoNeighborPairs(
+      [
+        { id: "A", polygon: square(0, 0, 10), is_sea: true },
+        { id: "B", polygon: square(10, 0, 10), is_sea: true },
+      ],
+      () => false,
+    );
+    expect(touching.map((p) => p.join("|"))).toEqual(["A|B"]);
+    expect(separateBlockedPieces(settled.map, clipper).seaIds).toEqual([]);
+
+    const island = new RegionClipper([[[[40, 40], [60, 40], [60, 60], [40, 60]]]]);
+    const open = separateBlockedPieces(map, island);
+    expect(open.seaIds).toEqual([]);
+    expect(open.map.regions).toHaveLength(1);
+  });
+
+  it("detaches an island far from its territory and keeps one that sits close", () => {
+    const main = square(0, 0, 30);
+    const near = square(36, 0, 8);
+    const far = square(100, 100, 10);
+    const clipper = new RegionClipper(toMulti([main, near, far]));
+    let map = editorFromMapJson({ regions: [] });
+    const added = addRegionFromPolygon(map, main, false);
+    map = {
+      ...added.map,
+      regions: added.map.regions.map((r) => ({ ...r, cx: 15, cy: 15, extra: [near, far] })),
+    };
+    const settled = separateBlockedPieces(map, clipper);
+    const kept = settled.map.regions.find((r) => r.id === added.id)!;
+    expect(kept.extra).toHaveLength(1);
+    expect(kept.extra![0]).toEqual(near);
+    expect(settled.islandIds).toHaveLength(1);
+    const spawned = settled.map.regions.find((r) => r.id === settled.islandIds[0])!;
+    expect(spawned.polygon).toEqual(far);
+    expect(separateBlockedPieces(settled.map, clipper).islandIds).toEqual([]);
+  });
+
+  it("splits one land cutter that covers two landmasses far apart, and keeps the close one", () => {
+    const home = square(0, 0, 30);
+    const close = square(40, 0, 8);
+    const away = square(120, 0, 10);
+    const clipper = new RegionClipper(toMulti([home, close, away]));
+    let map = editorFromMapJson({ regions: [] });
+    const added = addRegionFromPolygon(map, square(0, 0, 140), false);
+    map = { ...added.map, regions: added.map.regions.map((r) => ({ ...r, cx: 15, cy: 15 })) };
+    const settled = separateBlockedPieces(map, clipper);
+    const kept = settled.map.regions.find((r) => r.id === added.id)!;
+    expect(area(kept.polygon)).toBeCloseTo(900, 3);
+    expect(kept.extra).toHaveLength(1);
+    expect(area(kept.extra![0])).toBeCloseTo(64, 3);
+    expect(settled.islandIds).toHaveLength(1);
+    const spawned = settled.map.regions.find((r) => r.id === settled.islandIds[0])!;
+    expect(area(spawned.polygon)).toBeCloseTo(100, 3);
   });
 });

@@ -363,6 +363,14 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
       <section className="panel editor-panel">
         <h2>Export</h2>
         <div className="export-buttons">
+          <button
+            type="button"
+            className="primary"
+            title="Write the saved WorldMap_Populated version (localStorage key strategy-demo.map-editor.versions.v1) to demomap01.json. The previous file is kept as demomap01.backup.json. Neighbors are not recalculated, and the map open in the editor is left as it is."
+            onClick={editor.exportBoardJson}
+          >
+            [ Export Board JSON ]
+          </button>
           <button type="button" className="primary" onClick={editor.exportJson}>
             Recalculate All Adjacencies &amp; Download JSON
           </button>
@@ -374,9 +382,10 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
           </button>
         </div>
         <p className="muted editor-hint">
-          Edits autosave in this browser. Ctrl+S saves the open map as a new version. Save Directly writes
-          demomap01.json in the repo (dev server only). New game, in the bar above, can start any named version.
-          Named versions stay in this browser.
+          Edits autosave in this browser. Ctrl+S saves the open map as a new version. [ Export Board JSON ]
+          writes the saved version WorldMap_Populated from localStorage key strategy-demo.map-editor.versions.v1
+          to demomap01.json and keeps the previous file as demomap01.backup.json. Save Directly writes the
+          open map instead. Named versions stay in this browser.
         </p>
       </section>
     </>

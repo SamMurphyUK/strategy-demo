@@ -344,9 +344,11 @@ describe("export", () => {
 
   it("feeds the engine's explicit neighbors straight into adjacency", () => {
     const loaded = editorFromMapJson(projectMapJson(loadJson(NEWMAP_PATH)));
-    const map = applyAutoLinks({ ...loaded, overrides: { add: [], remove: [] } }, [["Sea Zone 01", "Territory 1"]]);
+    const [first, second] = loaded.regions.map((region) => region.id);
+    const [from, to] = first < second ? [first, second] : [second, first];
+    const map = applyAutoLinks({ ...loaded, overrides: { add: [], remove: [] } }, [[first, second]]);
     const data = buildMapData(editorToMapJson(map));
-    expect(data.adjacency).toEqual([{ from: "Sea Zone 01", to: "Territory 1" }]);
+    expect(data.adjacency).toEqual([{ from, to }]);
   });
 
   it("still derives adjacency from polygons when no neighbors are listed", () => {

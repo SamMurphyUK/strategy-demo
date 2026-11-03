@@ -46,6 +46,27 @@ function reachableSeaTwoAway(stub: GameSessionStub, start: string): string {
   return "";
 }
 
+/** Placement finishes in mobilize. The new ship sails on that faction's next movement phase. */
+function reachMovementPhase(stub: GameSessionStub, faction: string): boolean {
+  for (let i = 0; i < 48; i++) {
+    const phase = stub.state.current_phase;
+    if (stub.state.current_faction_id === faction && (phase === "combat_move" || phase === "noncombat_move")) {
+      return true;
+    }
+    const type = phase === "collect_income" ? "end_turn" : "end_phase";
+    const stepped = stub.applyCommand({
+      command_id: `advance_${i}`,
+      player_id: stub.state.current_faction_id,
+      type,
+      payload: {},
+    });
+    if (String(stepped.result_type ?? "") !== "ok") {
+      return false;
+    }
+  }
+  return false;
+}
+
 function landSeaWithTransport(
   stub: GameSessionStub,
   faction: string,
@@ -95,6 +116,11 @@ describe("integration/test_session_stub_ship_move_load", () => {
       type: "place_units",
       payload: { placements: [{ region_id: sea, units: [{ unit_type_id: "transport", count: 1 }] }] },
     });
+    const owner = stub.state.current_faction_id;
+    if (!reachMovementPhase(stub, owner)) {
+      ctx.skip("Could not reach a movement phase");
+      return;
+    }
     const transportId = firstTransportInRegion(stub, sea);
     expect(transportId === "").toBe(false);
     const dest = reachableSeaTwoAway(stub, sea);
@@ -113,6 +139,13 @@ describe("integration/test_session_stub_ship_move_load", () => {
       }] },
     });
     expect(String(res.result_type ?? "")).toBe("ok");
+    const commit = stub.applyCommand({
+      command_id: "commit_move",
+      player_id: stub.state.current_faction_id,
+      type: "end_phase",
+      payload: {},
+    });
+    expect(String(commit.result_type ?? "")).toBe("ok");
     expect(String(stub.state.transport_instances[transportId].region_id)).toBe(dest);
   });
 

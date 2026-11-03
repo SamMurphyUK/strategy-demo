@@ -97,6 +97,33 @@ export function sharesEdgeSegment(a: Vec2[], b: Vec2[], eps: number): boolean {
 }
 
 /** Land-to-land or sea-to-sea: two shared vertices, or a shared edge segment. */
+/**
+ * Drops vertices that only exist to bridge a hole (an edge traced there and back). The outline that remains
+ * is the border other regions can actually share. A ring with no hairline comes back unchanged.
+ */
+export function stripHairlines(ring: Vec2[]): Vec2[] {
+  const n = ring.length;
+  if (n < 4) {
+    return ring;
+  }
+  const key = (p: Vec2, q: Vec2) => {
+    const a = `${p.x.toFixed(3)},${p.y.toFixed(3)}`;
+    const b = `${q.x.toFixed(3)},${q.y.toFixed(3)}`;
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  };
+  const count = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    const k = key(ring[i], ring[(i + 1) % n]);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  const doubled = (i: number) => (count.get(key(ring[i], ring[(i + 1) % n])) ?? 0) >= 2;
+  const keep = ring.filter((_, i) => {
+    const prev = (i - 1 + n) % n;
+    return !(doubled(prev) && doubled(i));
+  });
+  return keep.length >= 3 ? keep : ring;
+}
+
 export function sameDomainAdjacent(a: Vec2[], b: Vec2[], eps = SHARED_VERTEX_EPS): boolean {
   if (a.length === 0 || b.length === 0) {
     return false;
@@ -144,6 +171,69 @@ export function cachedLandMask(isLand: (x: number, y: number) => boolean, cell =
     }
     return hit;
   };
+}
+
+/**
+ * Two sea zones are neighbors when their real water comes within `reach`. A hole bridge copies a basin's coast
+ * onto the zone that used to contain it, so a shared cutter edge is not enough: that edge can lie on land.
+ */
+function distanceToRing(p: Vec2, ring: Vec2[]): number {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const c = ring[i];
+    const d = ring[(i + 1) % ring.length];
+    const dx = d.x - c.x;
+    const dy = d.y - c.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - c.x) * dx + (p.y - c.y) * dy) / len2));
+    best = Math.min(best, Math.hypot(p.x - (c.x + dx * t), p.y - (c.y + dy * t)));
+  }
+  return best;
+}
+
+export function waterAdjacent(a: Vec2[], b: Vec2[], isLand: (x: number, y: number) => boolean, eps = SHARED_VERTEX_EPS): boolean {
+  if (!sameDomainAdjacent(stripHairlines(a), stripHairlines(b), eps)) {
+    return false;
+  }
+  // The shared cutter edge counts only when water lies on both sides. A hole cut around a sealed basin
+  // has land on one side, so the basin is not a neighbor of the zone it was cut out of.
+  const touch = (ring: Vec2[], other: Vec2[]) => {
+    for (let i = 0; i < ring.length; i++) {
+      const c = ring[i];
+      const d = ring[(i + 1) % ring.length];
+      const len = Math.hypot(d.x - c.x, d.y - c.y);
+      if (len <= eps * 2) {
+        continue;
+      }
+      const mid = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+      if (distanceToRing(mid, other) > eps) {
+        continue;
+      }
+      const nx = -(d.y - c.y) / len;
+      const ny = (d.x - c.x) / len;
+      const left = { x: mid.x + nx, y: mid.y + ny };
+      const right = { x: mid.x - nx, y: mid.y - ny };
+      const side = (p: Vec2) => {
+        if (isLand(p.x, p.y)) {
+          return "";
+        }
+        if (pointInPolygon(p, a)) {
+          return "a";
+        }
+        if (pointInPolygon(p, b)) {
+          return "b";
+        }
+        return "";
+      };
+      const ls = side(left);
+      const rs = side(right);
+      if ((ls === "a" && rs === "b") || (ls === "b" && rs === "a")) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return touch(a, b) || touch(b, a);
 }
 
 /**
@@ -259,8 +349,12 @@ export function autoNeighborPairs(
           if (linked) {
             break;
           }
-          if (a.is_sea === b.is_sea) {
-            linked = remembered(pa, pb, false, () => sameDomainAdjacent(pa, pb));
+          if (a.is_sea && b.is_sea && mask) {
+            linked = remembered(pa, pb, false, () => waterAdjacent(pa, pb, mask));
+          } else if (a.is_sea === b.is_sea) {
+            const left = a.is_sea ? stripHairlines(pa) : pa;
+            const right = b.is_sea ? stripHairlines(pb) : pb;
+            linked = remembered(pa, pb, false, () => sameDomainAdjacent(left, right));
           } else if (mask) {
             const land = a.is_sea ? pb : pa;
             const sea = a.is_sea ? pa : pb;
