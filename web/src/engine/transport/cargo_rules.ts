@@ -177,12 +177,12 @@ export function transportLoadedLabel(state: GameState, instanceId: string): stri
     }
     const raw = state.unit_types[String(line.unit_type_id)]?.name || String(line.unit_type_id);
     const name = raw.charAt(0).toUpperCase() + raw.slice(1);
-    parts.push(`${count}× ${name}`);
+    parts.push(`${name} × ${count}`);
   }
   if (parts.length === 0) {
-    return "Transport (Loaded: empty)";
+    return "Transport (Cargo: empty)";
   }
-  return `Transport (Loaded: ${parts.join(", ")})`;
+  return `Transport (Cargo: ${parts.join(", ")})`;
 }
 
 export function unloadError(

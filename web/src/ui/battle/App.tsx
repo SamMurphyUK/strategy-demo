@@ -1865,12 +1865,11 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
   const handleRetreatDecision = useCallback(() => {
     if (matchRef.current?.spectating) return;
+    if (matchRef.current && !matchRef.current.canRetreat()) return;
     gameAudio.playCrispClick();
     if (matchRef.current) {
-      if (matchRef.current.canRetreat()) {
-        setIsAutoRolling(false);
-        matchRef.current.retreat();
-      }
+      setIsAutoRolling(false);
+      matchRef.current.retreat();
       return;
     }
     setIsAutoRolling(false);
@@ -4506,7 +4505,9 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
         const rightBtnX = trayX + trayW + 14;
         const btnY = trayY + Math.round((trayH - btnH) / 2);
 
-        // LEFT BUTTON: RETREAT
+        // LEFT BUTTON: RETREAT. Amphibious troops cannot leave the beach.
+        const mayRetreat = !matchRef.current || matchRef.current.canRetreat();
+        ctx.globalAlpha = mayRetreat ? 1 : 0.35;
         ctx.fillStyle = PALETTE.bunkerCharcoal;
         ctx.fillRect(leftBtnX + 3, btnY + 3, btnW, btnH);
         ctx.fillStyle = PALETTE.navalSteel;
@@ -4528,7 +4529,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
         drawPixelString(
           ctx,
-          'RETREAT',
+          mayRetreat ? 'RETREAT' : 'NO RETREAT',
           leftBtnX + btnW / 2,
           btnY + 14,
           3,
@@ -4539,7 +4540,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
         ctx.fillStyle = PALETTE.trenchMudBone;
         ctx.font = 'bold 9px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('[ WITHDRAW ]', leftBtnX + btnW / 2, btnY + 44);
+        ctx.fillText(mayRetreat ? '[ WITHDRAW ]' : '[ HELD ]', leftBtnX + btnW / 2, btnY + 44);
+        ctx.globalAlpha = 1;
 
         // RIGHT BUTTON: PRESS ON
         const pulse = (Math.sin(time * 6) + 1) / 2;
