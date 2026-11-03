@@ -1,7 +1,7 @@
 /** Shop basket rules. The panel stages a purchase locally until Confirm. */
 
 export const UNCONFIRMED_BASKET_MESSAGE =
-  "You have unconfirmed units in your requisition basket. Confirm purchase or clear basket before ending phase";
+  "Unconfirmed requisition basket! Confirm purchase or clear basket before ending phase";
 
 /** True when one more of this unit still fits in the IPC that is left. */
 export function canStageAnother(unitCost: number, availableIpc: number, stagedTotal: number): boolean {
