@@ -283,14 +283,12 @@ export class BakeCache<I, T> {
 
   constructor(private readonly render: (input: I, scale: number) => T) {}
 
-  get(key: BakeKey, pixelsPerUnit: number, input: I): { value: T; scale: number } {
+  get(key: BakeKey, pixelsPerUnit: number, input: I, holdResolution = false): { value: T; scale: number } {
     const wanted = bakeScaleFor(pixelsPerUnit);
-    const stale =
-      this.value === null ||
-      this.key === null ||
-      !sameKey(this.key, key) ||
-      wanted > this.scale ||
-      wanted < this.scale - 1;
+    const missing = this.value === null || this.key === null || !sameKey(this.key, key);
+    const resolutionStale = wanted > this.scale || wanted < this.scale - 1;
+    // A wheel glide keeps the sheet it already has. Geometry and ownership still rebuild.
+    const stale = missing || (resolutionStale && !holdResolution);
     if (stale) {
       this.value = this.render(input, wanted);
       this.scale = wanted;

@@ -40,6 +40,24 @@ export function terrainStampAlpha(zoom: number): number {
   return Math.max(0.4, (zoom - OPERATIONAL) / (STAMP_FULL - OPERATIONAL));
 }
 
+/** Stamps fade across this band. The operational LoD switch stays at 1.0875. */
+export const STAMP_FADE_START = 1.05;
+export const STAMP_FADE_END = 1.25;
+
+/**
+ * Opacity of the LoD 1 terrain stamps. Linear from 0 at 1.05 to 1 at 1.25,
+ * so the pines do not pop on at the operational threshold.
+ */
+export function terrainStampFadeAlpha(zoom: number): number {
+  if (zoom <= STAMP_FADE_START) {
+    return 0;
+  }
+  if (zoom >= STAMP_FADE_END) {
+    return 1;
+  }
+  return (zoom - STAMP_FADE_START) / (STAMP_FADE_END - STAMP_FADE_START);
+}
+
 /** How far above a plinth centre a click still counts as that sprite, in screen pixels. */
 export const UPRIGHT_HIT_PX = 26;
 

@@ -40,14 +40,17 @@ import {
 import {
   fitView,
   panView,
-  screenToWorld,
   tiltFactor,
   type View,
   visibleCopies,
   worldTokenPx,
   worldToScreen,
   anchorSpan,
+  dampZoomK,
   maxZoomK,
+  MIN_ZOOM_FACTOR,
+  screenToWorld,
+  wheelZoomFactor,
   wrapView,
   wrapWorldX,
   zoomAt,
@@ -189,8 +192,12 @@ interface SplitPrompt {
   legal: string[];
 }
 
-/** One wheel notch. Smaller trackpad deltas accumulate until they cross this. */
+/** One wheel notch while a stack is held. Smaller trackpad deltas accumulate until they cross this. */
 const WHEEL_STEP = 40;
+/** The glide is finished once the live zoom is this close to the wheel target. */
+const ZOOM_EPSILON = 0.0005;
+/** After the glide stops, wait this long before upgrading the coast bitmap. */
+const BAKE_SETTLE_MS = 120;
 /** Upright figures breathe at this rate. The motion is half a hertz, so twelve frames cover it. */
 const IDLE_BOB_MS = 84;
 
@@ -248,6 +255,30 @@ export function MapView(props: MapViewProps) {
   const [spriteClock, setSpriteClock] = useState(0);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
+  const wheelZoom = useRef({
+    active: false,
+    targetK: 1,
+    anchorScreen: { x: 0, y: 0 } as Vec2,
+    anchorWorld: { x: 0, y: 0 } as Vec2,
+    raf: 0,
+    generation: 0,
+    lastFrame: 0,
+    settledAt: Number.NEGATIVE_INFINITY,
+    bakeTimer: 0,
+  });
+  const [, setBakeTick] = useState(0);
+  const stopWheelZoom = () => {
+    const zoom = wheelZoom.current;
+    zoom.generation += 1;
+    if (zoom.raf !== 0) {
+      cancelAnimationFrame(zoom.raf);
+    }
+    zoom.raf = 0;
+    zoom.active = false;
+    window.clearTimeout(zoom.bakeTimer);
+    zoom.bakeTimer = 0;
+    zoom.settledAt = Number.NEGATIVE_INFINITY;
+  };
   const drag = useRef<Drag | null>(null);
   const suppressClick = useRef(false);
   const waypointRegion = useRef("");
@@ -389,6 +420,7 @@ export function MapView(props: MapViewProps) {
         return { view: { ...current }, fitK: fitted, width: canvas.w, height: canvas.h };
       },
       moveTo(goal, ms) {
+        stopWheelZoom();
         cameraJob.current?.cancel();
         userMoved.current = true;
         cameraLock.current = true;
@@ -455,10 +487,13 @@ export function MapView(props: MapViewProps) {
     }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    // The cached base map: rebuilt only when the geometry, an owner or the needed resolution changes.
+    // The cached base map. A wheel glide keeps the current sheet; geometry and ownership still rebuild.
+    const glide = wheelZoom.current;
+    const holdResolution = glide.active || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
     const baked = bakeRef.current!.bake.ensure(
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
       view.k * dpr,
+      holdResolution,
     );
     const moveTone = props.movement?.phase === "noncombat_move" ? "move" : "attack";
     const dragHighlight: HighlightMode | null = gesture?.moved
@@ -676,16 +711,78 @@ export function MapView(props: MapViewProps) {
         return;
       }
       userMoved.current = true;
-      const { fitK } = live.current;
+      const zoom = wheelZoom.current;
+      const { fitK, view } = live.current;
+      const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
       const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      setView((v) => {
-        const zoomed = zoomAt(v, p, e.deltaY > 0 ? 1 / 1.15 : 1.15, fitK, window.devicePixelRatio || 1);
-        return live.current.wrap ? wrapView(zoomed, live.current.size.w, live.current.bounds) : zoomed;
-      });
+      const minK = fitK * MIN_ZOOM_FACTOR;
+      const maxK = maxZoomK(fitK, dpr);
+      const baseK = zoom.active ? zoom.targetK : view.k;
+      window.clearTimeout(zoom.bakeTimer);
+      zoom.bakeTimer = 0;
+      zoom.targetK = Math.min(maxK, Math.max(minK, baseK * wheelZoomFactor(e.deltaY, e.deltaMode)));
+      zoom.anchorScreen = p;
+      zoom.anchorWorld = screenToWorld(view, p);
+      zoom.active = true;
+      if (zoom.raf !== 0) {
+        return;
+      }
+      zoom.lastFrame = performance.now();
+      const generation = zoom.generation;
+      const step = (now: number) => {
+        const state = wheelZoom.current;
+        if (state.generation !== generation || cameraLock.current || !state.active) {
+          state.raf = 0;
+          return;
+        }
+        const current = live.current;
+        const dt = now - state.lastFrame;
+        state.lastFrame = now;
+        const liveView = current.view;
+        const dprNow = window.devicePixelRatio || 1;
+        let nextK = dampZoomK(liveView.k, state.targetK, dt);
+        if (Math.abs(state.targetK - liveView.k) < ZOOM_EPSILON || Math.abs(state.targetK - nextK) < ZOOM_EPSILON) {
+          nextK = state.targetK;
+        }
+        const stepFactor = liveView.k > 0 ? nextK / liveView.k : 1;
+        let zoomed = zoomAt(liveView, state.anchorScreen, stepFactor, current.fitK, dprNow);
+        if (current.wrap) {
+          zoomed = wrapView(zoomed, current.size.w, current.bounds);
+        }
+        setView(zoomed);
+        if (Math.abs(state.targetK - zoomed.k) < ZOOM_EPSILON) {
+          state.active = false;
+          state.raf = 0;
+          state.settledAt = performance.now();
+          window.clearTimeout(state.bakeTimer);
+          const settledGeneration = state.generation;
+          state.bakeTimer = window.setTimeout(() => {
+            const latest = wheelZoom.current;
+            if (latest.generation !== settledGeneration || latest.active) {
+              return;
+            }
+            // The quiet window is over, so the next paint may rebuild the coast sheet.
+            latest.settledAt = Number.NEGATIVE_INFINITY;
+            setBakeTick((n) => n + 1);
+          }, BAKE_SETTLE_MS);
+          return;
+        }
+        state.raf = requestAnimationFrame(step);
+      };
+      zoom.raf = requestAnimationFrame(step);
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
+    return () => {
+      canvas.removeEventListener("wheel", onWheel);
+      const zoom = wheelZoom.current;
+      zoom.generation += 1;
+      if (zoom.raf !== 0) {
+        cancelAnimationFrame(zoom.raf);
+      }
+      zoom.raf = 0;
+      window.clearTimeout(zoom.bakeTimer);
+    };
   }, []);
 
   const publishGesture = (g: UnitGesture) => {
@@ -1070,6 +1167,7 @@ export function MapView(props: MapViewProps) {
         <button
           type="button"
           onClick={() => {
+            stopWheelZoom();
             userMoved.current = false;
             setView(fitView(bounds, size.w, size.h));
           }}

@@ -79,7 +79,7 @@ import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScr
 import {
   type MapLod,
   type TerrainStamp,
-  terrainStampAlpha,
+  terrainStampFadeAlpha,
   terrainStamps,
   uprightDrawOrder,
 } from "./zoomLod";
@@ -429,7 +429,7 @@ function drawWaterDash(ctx: CanvasRenderingContext2D, x: number, y: number, u: n
 }
 
 function drawPixelStamps(ctx: CanvasRenderingContext2D, s: TerrainScene, dx: number): void {
-  const alpha = terrainStampAlpha(s.view.k);
+  const alpha = terrainStampFadeAlpha(s.view.k);
   if (alpha <= 0) {
     return;
   }
@@ -528,9 +528,7 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
     }
   }
 
-  if ((s.lod ?? 0) >= 1) {
-    drawPixelStamps(ctx, s, dx);
-  }
+  drawPixelStamps(ctx, s, dx);
 
   drawFrontlines(ctx, s.frontlines ?? []);
   drawBattleScars(ctx, s.scars ?? [], px, (s.unitFade ?? 0) <= 0);

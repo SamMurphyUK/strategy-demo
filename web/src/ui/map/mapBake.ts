@@ -358,8 +358,12 @@ export class TerrainBake {
   /** How long the last rebuild took, in ms. */
   lastBuildMs = 0;
 
-  /** The cached bitmap, rebuilt only if the geometry, ownership or needed resolution changed. */
-  ensure(input: BakeInput, pixelsPerUnit: number): Baked {
+  /**
+   * The cached bitmap. Geometry and ownership rebuild immediately.
+   * `holdResolution` keeps the current sheet while a wheel zoom is still gliding,
+   * so crossing a whole pixel-per-unit step does not rebuild the coast mid-gesture.
+   */
+  ensure(input: BakeInput, pixelsPerUnit: number, holdResolution = false): Baked {
     const key: BakeKey = {
       regions: input.regions,
       paths: input.paths,
@@ -370,7 +374,7 @@ export class TerrainBake {
     };
     const before = this.cache.builds;
     const started = performance.now();
-    const out = this.cache.get(key, pixelsPerUnit, input).value;
+    const out = this.cache.get(key, pixelsPerUnit, input, holdResolution).value;
     if (this.cache.builds !== before) {
       this.lastBuildMs = performance.now() - started;
     }

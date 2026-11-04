@@ -112,6 +112,39 @@ export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: numb
   return { k, x: anchor.x - screenPoint.x / sx, y: anchor.y - screenPoint.y / sy };
 }
 
+/** Line mode is 16px per click, page mode 100px. Pixel mode is already in pixels. */
+export function normalizedWheelDelta(deltaY: number, deltaMode: number): number {
+  if (deltaMode === 1) {
+    return deltaY * 16;
+  }
+  if (deltaMode === 2) {
+    return deltaY * 100;
+  }
+  return deltaY;
+}
+
+/** Radians of zoom per normalized pixel. A 4px trackpad tick is under one percent. */
+export const WHEEL_ZOOM_GAIN = 0.0018;
+/** One wheel event cannot ask for more than this many normalized pixels. */
+export const WHEEL_ZOOM_DELTA_CAP = 400;
+
+/** Multiplier for one wheel event. Positive `deltaY` zooms out. */
+export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
+  const normalized = normalizedWheelDelta(deltaY, deltaMode);
+  const capped = Math.min(WHEEL_ZOOM_DELTA_CAP, Math.max(-WHEEL_ZOOM_DELTA_CAP, normalized));
+  return Math.exp(-capped * WHEEL_ZOOM_GAIN);
+}
+
+/**
+ * Next zoom after one frame of exponential damping toward `targetK`.
+ * `1 - exp(-dt * 18)` with `dt` in seconds, so the glide is the same at any frame rate.
+ */
+export function dampZoomK(currentK: number, targetK: number, dtMs: number): number {
+  const dt = Math.max(0, dtMs) / 1000;
+  const t = 1 - Math.exp(-dt * 18);
+  return currentK + (targetK - currentK) * t;
+}
+
 /**
  * Distance between two territory anchors. On a wrapping map the shorter way around wins, so a
  * neighbour drawn on the other copy is not a trip across the world.
