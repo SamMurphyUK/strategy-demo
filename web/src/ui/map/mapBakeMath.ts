@@ -94,12 +94,108 @@ function edgeKey(a: Pt, b: Pt): string {
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 }
 
+type Seg = [number, number, number, number];
+
+/** One shape's piece of a horizontal, vertical, or 45° line. `t` runs along the line. */
+interface LineSeg {
+  owner: number;
+  t0: number;
+  t1: number;
+}
+
+interface LineBucket {
+  axis: "H" | "V" | "D+" | "D-";
+  /** World position of the line: y, x, y − x, or y + x. */
+  at: number;
+  segs: LineSeg[];
+}
+
+/** Joins pieces of one shape that meet or overlap on the same line. */
+function unionIntervals(spans: [number, number][]): [number, number][] {
+  const sorted = [...spans].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const out: [number, number][] = [];
+  for (const [lo, hi] of sorted) {
+    const last = out[out.length - 1];
+    if (last && lo <= last[1] + KEY_EPS) {
+      last[1] = Math.max(last[1], hi);
+    } else {
+      out.push([lo, hi]);
+    }
+  }
+  return out;
+}
+
+/** Stretches of a line covered by at least `minShapes` different shapes. */
+function coveredSpans(segs: LineSeg[], minShapes: number): [number, number][] {
+  const byOwner = new Map<number, [number, number][]>();
+  for (const seg of segs) {
+    const list = byOwner.get(seg.owner);
+    if (list) {
+      list.push([seg.t0, seg.t1]);
+    } else {
+      byOwner.set(seg.owner, [[seg.t0, seg.t1]]);
+    }
+  }
+  const events: { t: number; d: number }[] = [];
+  for (const spans of byOwner.values()) {
+    for (const [lo, hi] of unionIntervals(spans)) {
+      events.push({ t: lo, d: 1 }, { t: hi, d: -1 });
+    }
+  }
+  events.sort((p, q) => p.t - q.t || p.d - q.d);
+  const out: [number, number][] = [];
+  let count = 0;
+  let prev = 0;
+  let open = false;
+  for (const event of events) {
+    if (open && event.t - prev > KEY_EPS && count >= minShapes) {
+      out.push([prev, event.t]);
+    }
+    count += event.d;
+    prev = event.t;
+    open = true;
+  }
+  return out;
+}
+
+function pushLine(lines: Map<string, LineBucket>, key: string, axis: LineBucket["axis"], at: number, owner: number, t0: number, t1: number): void {
+  const lo = Math.min(t0, t1);
+  const hi = Math.max(t0, t1);
+  if (hi - lo <= KEY_EPS) {
+    return;
+  }
+  let bucket = lines.get(key);
+  if (!bucket) {
+    bucket = { axis, at, segs: [] };
+    lines.set(key, bucket);
+  }
+  bucket.segs.push({ owner, t0: lo, t1: hi });
+}
+
+function lineSegment(bucket: LineBucket, t0: number, t1: number): Seg {
+  const { axis, at } = bucket;
+  if (axis === "H") {
+    return [t0, at, t1, at];
+  }
+  if (axis === "V") {
+    return [at, t0, at, t1];
+  }
+  if (axis === "D+") {
+    return [t0, t0 + at, t1, t1 + at];
+  }
+  return [t0, at - t0, t1, at - t1];
+}
+
 /**
- * The edges listed by at least `minShapes` different shapes, minus seam edges: the borders two territories
- * share. With `minShapes` 1 it is every distinct edge. Each edge comes back once, as [x1, y1, x2, y2].
+ * Borders shared by at least `minShapes` shapes, minus seam edges. A border counts when its endpoints
+ * match. On a horizontal, vertical, or 45° line the overlapping stretch counts too, so a vertex that
+ * only one shape lists still leaves the run. With `minShapes` 1 every distinct edge is returned.
+ * Each stretch is [x1, y1, x2, y2].
  */
-export function sharedEdges(shapes: Iterable<MultiPolygon>, seam: Seam | null, minShapes = 2): [number, number, number, number][] {
-  const seen = new Map<string, { seg: [number, number, number, number]; count: number }>();
+export function sharedEdges(shapes: Iterable<MultiPolygon>, seam: Seam | null, minShapes = 2): Seg[] {
+  const lines = new Map<string, LineBucket>();
+  const exact = new Map<string, { seg: Seg; owners: Set<number> }>();
+  let owner = 0;
   for (const shape of shapes) {
     const mine = new Set<string>();
     for (const ring of ringsOf(shape)) {
@@ -116,19 +212,49 @@ export function sharedEdges(shapes: Iterable<MultiPolygon>, seam: Seam | null, m
           continue; // a hairline traversed twice by one shape is not a border between two
         }
         mine.add(key);
-        const hit = seen.get(key);
-        if (hit) {
-          hit.count++;
+        const ax = q(a[0]);
+        const ay = q(a[1]);
+        const bx = q(b[0]);
+        const by = q(b[1]);
+        const dx = bx - ax;
+        const dy = by - ay;
+        if (dy === 0 && dx !== 0) {
+          pushLine(lines, `H:${ay}`, "H", a[1], owner, a[0], b[0]);
+        } else if (dx === 0 && dy !== 0) {
+          pushLine(lines, `V:${ax}`, "V", a[0], owner, a[1], b[1]);
+        } else if (dx !== 0 && Math.abs(dx) === Math.abs(dy)) {
+          if ((dx > 0) === (dy > 0)) {
+            pushLine(lines, `D+:${ay - ax}`, "D+", a[1] - a[0], owner, a[0], b[0]);
+          } else {
+            pushLine(lines, `D-:${ay + ax}`, "D-", a[1] + a[0], owner, a[0], b[0]);
+          }
         } else {
-          seen.set(key, { seg: [a[0], a[1], b[0], b[1]], count: 1 });
+          const hit = exact.get(key);
+          if (hit) {
+            hit.owners.add(owner);
+          } else {
+            exact.set(key, { seg: [a[0], a[1], b[0], b[1]], owners: new Set([owner]) });
+          }
         }
       }
     }
+    owner++;
   }
-  const out: [number, number, number, number][] = [];
-  for (const { seg, count } of seen.values()) {
-    if (count >= minShapes && !(seam && isSeamEdge([seg[0], seg[1]], [seg[2], seg[3]], seam))) {
-      out.push(seg);
+  const out: Seg[] = [];
+  const keep = (seg: Seg) => {
+    if (seam && isSeamEdge([seg[0], seg[1]], [seg[2], seg[3]], seam)) {
+      return;
+    }
+    out.push(seg);
+  };
+  for (const bucket of lines.values()) {
+    for (const [t0, t1] of coveredSpans(bucket.segs, minShapes)) {
+      keep(lineSegment(bucket, t0, t1));
+    }
+  }
+  for (const { seg, owners } of exact.values()) {
+    if (owners.size >= minShapes) {
+      keep(seg);
     }
   }
   return out;

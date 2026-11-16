@@ -120,6 +120,76 @@ describe("shared territory borders", () => {
     const b = shape([[100.0000001, 0], [200, 0], [200, 100], [99.9999999, 100], [100.0000001, 0]]);
     expect(sharedEdges([a, b], null)).toHaveLength(1);
   });
+
+  it("inks the whole shared run when one side is split by an extra vertex", () => {
+    const left = shape([[0, 0], [40, 0], [40, 80], [0, 80], [0, 0]]);
+    const right = shape([[40, 0], [80, 0], [80, 80], [40, 40], [40, 80], [40, 0]]);
+    const edges = sharedEdges([left, right], null);
+    expect(edges).toHaveLength(1);
+    const [x1, y1, x2, y2] = edges[0];
+    expect(x1).toBe(40);
+    expect(x2).toBe(40);
+    expect(Math.min(y1, y2)).toBe(0);
+    expect(Math.max(y1, y2)).toBe(80);
+  });
+
+  it("joins a lattice run broken into cell edges on one side", () => {
+    const open = shape([[0, 8], [80, 8], [80, 40], [0, 40], [0, 8]]);
+    const stepped: Pt[] = [[0, 8]];
+    for (let x = 8; x <= 80; x += 8) {
+      stepped.push([x, 8]);
+    }
+    stepped.push([80, 0], [0, 0], [0, 8]);
+    const edges = sharedEdges([open, shape(stepped)], null);
+    expect(edges).toHaveLength(1);
+    const [x1, y1, x2, y2] = edges[0];
+    expect(y1).toBe(8);
+    expect(y2).toBe(8);
+    expect(Math.min(x1, x2)).toBe(0);
+    expect(Math.max(x1, x2)).toBe(80);
+  });
+
+  it("inks only the overlapping stretch of a shared line", () => {
+    const edges = sharedEdges([shape(rect(0, 0, 100, 40)), shape(rect(30, 40, 20, 40))], null);
+    expect(edges).toHaveLength(1);
+    const [x1, y1, x2, y2] = edges[0];
+    expect(y1).toBe(40);
+    expect(y2).toBe(40);
+    expect(Math.min(x1, x2)).toBe(30);
+    expect(Math.max(x1, x2)).toBe(50);
+  });
+
+  it("keeps a gap where the shared line is interrupted", () => {
+    const edges = sharedEdges([shape(rect(0, 0, 100, 40)), shape(rect(0, 40, 20, 20)), shape(rect(60, 40, 40, 20))], null);
+    const along = edges.filter(([, y1, , y2]) => y1 === 40 && y2 === 40);
+    const spans = along.map(([x1, , x2]) => [Math.min(x1, x2), Math.max(x1, x2)]).sort((a, b) => a[0] - b[0]);
+    expect(spans).toEqual([
+      [0, 20],
+      [60, 100],
+    ]);
+  });
+
+  it("inks a diagonal border split into pieces on one side", () => {
+    const a = shape([[0, 0], [16, 16], [16, 0], [0, 0]]);
+    const b = shape([[0, 0], [8, 8], [16, 16], [0, 16], [0, 0]]);
+    const edges = sharedEdges([a, b], null);
+    expect(edges).toHaveLength(1);
+    const [x1, y1, x2, y2] = edges[0];
+    expect(Math.min(x1, x2)).toBe(0);
+    expect(Math.max(x1, x2)).toBe(16);
+    expect(Math.min(y1, y2)).toBe(0);
+    expect(Math.max(y1, y2)).toBe(16);
+  });
+
+  it("does not ink a border where two zones only meet at a point", () => {
+    expect(sharedEdges([shape(rect(0, 0, 40, 40)), shape(rect(40, 40, 40, 40))], null)).toEqual([]);
+    expect(sharedEdges([shape(rect(0, 0, 40, 40)), shape(rect(40, 40, 40, 20))], null)).toEqual([]);
+  });
+
+  it("counts a colinear run once when listing every edge", () => {
+    const ring: Pt[] = [[0, 0], [40, 0], [100, 0], [100, 100], [0, 100], [0, 0]];
+    expect(sharedEdges([shape(ring)], null, 1)).toHaveLength(4);
+  });
 });
 
 describe("the parchment grain tile", () => {
