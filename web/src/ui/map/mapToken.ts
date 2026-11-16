@@ -25,8 +25,10 @@ const PLINTH = MILITARY.charcoal;
 const BRASS = MILITARY.brass;
 const GOLD_NUM = MILITARY.cream;
 const TEAL_NUM = MILITARY.spruce;
-/** The ink ring that separates overlapping tokens. One and a half screen pixels, whatever the zoom. */
-const SEPARATION_RING_PX = 1.5;
+/** Tokens draw a tenth smaller than their slot, so a crowded coast does not stack discs on top of each other. */
+const FACE_SCALE = 0.9;
+const PARCHMENT = MILITARY.cream;
+const faceCache = new Map<string, CanvasImageSource>();
 
 export interface TokenPaint {
   dpr: number;
@@ -61,9 +63,16 @@ function whiteLetter(ctx: CanvasRenderingContext2D, letter: string, x: number, y
   ctx.fillText(letter, x, y + px * 0.04);
 }
 
-function paintFigure(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number): void {
-  ctx.fillStyle = TOKEN_WHITE;
+function paintFigure(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
+  ctx.fillStyle = color;
   for (const part of unitSilhouette(entry.unit_type_id)) {
+    fillPolygon(ctx, part, x, y, d);
+  }
+}
+
+function paintHull(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
+  ctx.fillStyle = color;
+  for (const part of hullFor(entry.unit_type_id)) {
     fillPolygon(ctx, part, x, y, d);
   }
 }
@@ -123,10 +132,8 @@ function paintSea(
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = TOKEN_WHITE;
-  for (const part of hullFor(entry.unit_type_id)) {
-    fillPolygon(ctx, part, x, y, d);
-  }
+  paintHull(ctx, entry, x + 1.5, y + 1.5, d, MILITARY.charcoal);
+  paintHull(ctx, entry, x, y, d, PARCHMENT);
   whiteLetter(ctx, navalLetter(entry.unit_type_id), x, y - d * 0.3, d * 0.27);
   if (loaded && entry.unit_type_id === "transport") {
     ctx.beginPath();
@@ -142,7 +149,35 @@ function paintSea(
   }
 }
 
-/** The disc and its silhouette, without a count. A 1.5px ink ring keeps overlapped tokens readable. */
+function enamelRings(ctx: CanvasRenderingContext2D, x: number, y: number, d: number): void {
+  const r = d / 2;
+  // 1.5px outer, 1.5px faction gap, 0.75px hairline. The hairline centre sits 3.375px in,
+  // so a world-view token smaller than 7.5px scales the stack instead of asking for a negative radius.
+  const fit = r >= 3.75 ? 1 : r / 3.75;
+  if (!(fit > 0)) {
+    return;
+  }
+  const outerW = 1.5 * fit;
+  const gap = 1.5 * fit;
+  const hair = 0.75 * fit;
+  const outerR = r - outerW / 2;
+  const hairR = outerR - outerW / 2 - gap - hair / 2;
+  if (outerR <= 0 || hairR <= 0) {
+    return;
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, outerR, 0, Math.PI * 2);
+  ctx.lineWidth = outerW;
+  ctx.strokeStyle = MILITARY.charcoal;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, hairR, 0, Math.PI * 2);
+  ctx.lineWidth = hair;
+  ctx.strokeStyle = MILITARY.charcoal;
+  ctx.stroke();
+}
+
+/** The disc and its silhouette, without a count. A dark outer ring, a faction gap, then a hairline. */
 export function drawTokenFace(
   ctx: CanvasRenderingContext2D,
   entry: StackEntry,
@@ -153,26 +188,70 @@ export function drawTokenFace(
 ): void {
   const r = d / 2;
   ctx.beginPath();
-  ctx.arc(x, y, r - SEPARATION_RING_PX / 2, 0, Math.PI * 2);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = factionPalette(entry.faction_id).primary;
   ctx.fill();
   const domain = unitDomain(entry.unit_type_id, paint.categories);
   if (domain === "sea") {
     paintSea(ctx, entry, x, y, d, paint.loaded ?? false, paint.cargoCount ?? 0);
   } else {
-    paintFigure(ctx, entry, x, y, d);
+    paintFigure(ctx, entry, x + 1.5, y + 1.5, d, MILITARY.charcoal);
+    paintFigure(ctx, entry, x, y, d, PARCHMENT);
   }
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.82, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = "rgba(75, 61, 68, 0.16)";
+  let seed = 17;
+  for (let i = 0; i < entry.unit_type_id.length; i++) {
+    seed = (seed + entry.unit_type_id.charCodeAt(i) * 13) % 2147483647;
+  }
+  for (let i = 0; i < 16; i++) {
+    seed = (seed * 16807 + 11) % 2147483647;
+    const u = (seed % 1000) / 1000;
+    seed = (seed * 16807 + 11) % 2147483647;
+    const v = (seed % 1000) / 1000;
+    ctx.fillRect(x - r + u * d, y - r + v * d, 1, 1);
+  }
+  ctx.restore();
   ctx.imageSmoothingEnabled = false;
-  ctx.beginPath();
-  ctx.arc(x, y, r - 0.6, 0, Math.PI * 2);
-  ctx.lineWidth = Math.max(1.5, d * 0.06);
-  ctx.strokeStyle = MILITARY.charcoal;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x, y, r - Math.max(2.4, d * 0.09), 0, Math.PI * 2);
-  ctx.lineWidth = Math.max(1, d * 0.035);
-  ctx.strokeStyle = BRASS;
-  ctx.stroke();
+  enamelRings(ctx, x, y, d);
+}
+
+function layerContext(size: number): { image: CanvasImageSource; ctx: CanvasRenderingContext2D } | null {
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      return { image: canvas, ctx: ctx as unknown as CanvasRenderingContext2D };
+    }
+  }
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  return ctx ? { image: canvas, ctx } : null;
+}
+
+function bakedFace(entry: StackEntry, d: number, paint: TokenPaint): CanvasImageSource | null {
+  const size = Math.ceil(d + 8);
+  const key = `${entry.unit_type_id}|${entry.faction_id}|${size}|${paint.loaded ? 1 : 0}|${paint.cargoCount ?? 0}|${paint.categories?.[entry.unit_type_id] ?? ""}`;
+  const cached = faceCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const layer = layerContext(size);
+  if (!layer) {
+    return null;
+  }
+  layer.ctx.imageSmoothingEnabled = false;
+  drawTokenFace(layer.ctx as CanvasRenderingContext2D, entry, size / 2, size / 2, d, paint);
+  faceCache.set(key, layer.image);
+  return layer.image;
 }
 
 /** Remaining fuel, top-left, so it sits clear of the count pill. */
@@ -220,7 +299,7 @@ export function drawCountPill(
   ctx.fillText(String(count), cx, cy + 0.5);
 }
 
-/** A whole token: shadowed disc, silhouette and count pill. */
+/** A whole token: cached enamel face, silhouette and count pill. The face is a tenth smaller than the slot. */
 export function drawMapToken(
   ctx: CanvasRenderingContext2D,
   entry: StackEntry,
@@ -229,19 +308,19 @@ export function drawMapToken(
   d: number,
   paint: TokenPaint,
 ): void {
+  const face = d * FACE_SCALE;
+  const image = bakedFace(entry, face, paint);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.shadowColor = "rgba(26, 24, 21, 0.5)";
-  ctx.shadowBlur = 3 * paint.dpr;
-  ctx.shadowOffsetY = 1 * paint.dpr;
-  ctx.beginPath();
-  ctx.arc(x, y, d / 2, 0, Math.PI * 2);
-  ctx.fillStyle = factionPalette(entry.faction_id).primary;
-  ctx.fill();
+  if (image) {
+    const size = Math.ceil(face + 8);
+    ctx.drawImage(image, x - size / 2, y - size / 2);
+  } else {
+    drawTokenFace(ctx, entry, x, y, face, paint);
+  }
   ctx.restore();
-  drawTokenFace(ctx, entry, x, y, d, paint);
-  drawCountPill(ctx, entry.count, x, y, d, isActiveFaction(entry.faction_id, paint.activeFactionId));
+  drawCountPill(ctx, entry.count, x, y, face, isActiveFaction(entry.faction_id, paint.activeFactionId));
   if (paint.fuel != null) {
-    drawFuelPill(ctx, paint.fuel, x, y, d);
+    drawFuelPill(ctx, paint.fuel, x, y, face);
   }
 }

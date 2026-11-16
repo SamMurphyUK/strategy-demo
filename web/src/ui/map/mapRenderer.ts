@@ -667,37 +667,19 @@ function drawPlusBadge(ctx: CanvasRenderingContext2D, x: number, y: number, toke
   ctx.stroke();
 }
 
-/** The IPC shield, 20 x 25 px at the base token size. */
-function shieldPath(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+/** The capital's mark: a small geometric diamond in the same ink as the numeral. */
+function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number): void {
   ctx.beginPath();
-  ctx.moveTo(x - 10 * s, y - 11 * s);
-  ctx.lineTo(x + 10 * s, y - 11 * s);
-  ctx.lineTo(x + 10 * s, y + 3 * s);
-  ctx.quadraticCurveTo(x + 10 * s, y + 11 * s, x, y + 14 * s);
-  ctx.quadraticCurveTo(x - 10 * s, y + 11 * s, x - 10 * s, y + 3 * s);
+  ctx.moveTo(x, y - outer);
+  ctx.lineTo(x + outer * 0.72, y);
+  ctx.lineTo(x, y + outer);
+  ctx.lineTo(x - outer * 0.72, y);
   ctx.closePath();
-}
-
-/** The capital's emblem: a gold five-point star with an ink edge. */
-function drawStar(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number): void {
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const radius = i % 2 === 0 ? outer : outer * 0.45;
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const px = x + radius * Math.cos(a);
-    const py = y + radius * Math.sin(a);
-    if (i === 0) {
-      ctx.moveTo(px, py);
-    } else {
-      ctx.lineTo(px, py);
-    }
-  }
-  ctx.closePath();
-  ctx.fillStyle = MILITARY.brass;
+  ctx.fillStyle = MILITARY.charcoal;
   ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "miter";
+  ctx.strokeStyle = MILITARY.cream;
   ctx.stroke();
 }
 
@@ -922,19 +904,19 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
       return;
     }
     const shieldY = layout.shieldY;
-    shieldPath(ctx, anchor.x, shieldY, s);
-    ctx.fillStyle = PLINTH;
-    ctx.fill();
-    ctx.lineWidth = Math.max(1, 1.25 * s);
-    ctx.strokeStyle = BRASS;
-    ctx.stroke();
-    ctx.fillStyle = GOLD_NUM;
-    ctx.font = `700 ${Math.max(8, 12 * s)}px ${MONO}`;
+    const label = String(region.ipc);
+    const size = Math.max(9, 13 * s);
+    ctx.font = `700 ${size}px ${MONO}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(region.ipc), anchor.x, shieldY - 1 * s);
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 1.5 * Math.max(1, s);
+    ctx.strokeStyle = MILITARY.cream;
+    ctx.strokeText(label, anchor.x, shieldY);
+    ctx.fillStyle = MILITARY.charcoal;
+    ctx.fillText(label, anchor.x, shieldY);
     if (region.capital) {
-      drawStar(ctx, anchor.x, shieldY - 17 * s, Math.max(4, 6.5 * s));
+      drawDiamond(ctx, anchor.x, shieldY - size * 0.95, Math.max(3, 4 * s));
     }
   };
   const drawMarker = (layout: RegionLayout) => {
