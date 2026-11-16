@@ -16,6 +16,7 @@ import {
 import { WORLD_COORD_SPACE } from "../map_space";
 import type { RegionClipper } from "../regionClip";
 import { type Pair, sharedVertexCount } from "./adjacency";
+import { fillKey, parseLatticeCells, type LatticeCell } from "./seaLattice";
 
 export type { Pair };
 export type LinkKind = "land" | "sea" | "coastal";
@@ -89,6 +90,8 @@ export interface EditorRegion {
   air_anchor?: [number, number];
   /** Up to six hand-placed unit token slots, world units. Absent means the map generates them. */
   unit_slots?: [number, number][];
+  /** Squares and wedges painted by the sea lattice. The polygon is dissolved from these. */
+  lattice?: LatticeCell[];
 }
 
 /** The region's facility anchor, or the default below its unit anchor. */
@@ -159,6 +162,24 @@ export function neighborsOf(map: EditorMap, id: string): string[] {
     if (r.id !== id && isLinked(map, id, r.id)) {
       out.push(r.id);
     }
+  }
+  return out;
+}
+
+/** `neighborsOf` for every region at once, in the same order. One pass over the links. */
+function neighborIndex(map: EditorMap): Map<string, string[]> {
+  const order = new Map(map.regions.map((r, i) => [r.id, i]));
+  const sets = new Map<string, Set<string>>();
+  for (const [a, b] of map.links) {
+    if (a === b || !order.has(a) || !order.has(b)) {
+      continue;
+    }
+    (sets.get(a) ?? sets.set(a, new Set()).get(a)!).add(b);
+    (sets.get(b) ?? sets.set(b, new Set()).get(b)!).add(a);
+  }
+  const out = new Map<string, string[]>();
+  for (const [id, set] of sets) {
+    out.set(id, [...set].sort((x, y) => order.get(x)! - order.get(y)!));
   }
   return out;
 }
@@ -1261,6 +1282,10 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
       capital: Boolean(meta.victory ?? false),
       polygon: polygonOf(raw.polygon),
       ...(shape.extra && shape.extra.length > 0 ? { extra: shape.extra.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
+      ...(() => {
+        const lattice = parseLatticeCells(meta.lattice_cells);
+        return lattice ? { lattice } : {};
+      })(),
       cx: shape.anchor.x,
       cy: shape.anchor.y,
       ...facilityFieldsOf(meta, shape.type === "sea"),
@@ -1319,6 +1344,7 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
             .map((polygon) => polygon.map((ring) => ring.map(([x, y]) => [r(x), r(y)]))),
         }
       : {};
+  const neighbors = neighborIndex(map);
   return {
     ...map.meta,
     version: map.meta.version ?? 2,
@@ -1348,13 +1374,16 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         victory: region.capital,
         type: region.is_sea ? "sea" : "land",
         is_sea: region.is_sea,
+        ...(region.lattice && region.lattice.length > 0
+          ? { lattice_cells: region.lattice.map((cell) => ({ col: cell.col, row: cell.row, fill: fillKey(cell.fill) })) }
+          : {}),
       },
       polygon: region.polygon.map((p) => [r(p.x), r(p.y)]),
       ...(region.extra && region.extra.length > 0
         ? { extra_polygons: region.extra.map((ring) => ring.map((p) => [r(p.x), r(p.y)])) }
         : {}),
       ...clipped(region),
-      neighbors: neighborsOf(map, region.id),
+      neighbors: neighbors.get(region.id) ?? [],
     })),
   };
 }

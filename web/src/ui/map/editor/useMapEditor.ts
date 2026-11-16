@@ -59,6 +59,7 @@ import {
   subdivideEdge,
   TOPO_LOCK_EPS,
   toggleLink,
+  nextRegionId,
   updateRegion,
   type VertexRef,
   weldRegion,
@@ -80,6 +81,18 @@ import {
   splitPolygonInto,
   strokePreview,
 } from "./slicing";
+import {
+  dissolveLatticeCellsToRings,
+  editLatticeZones,
+  hitsAlong,
+  latticeAnchor,
+  latticeHit,
+  partTouches,
+  rasterizeRings,
+  type LatticeCell,
+  type LatticeHit,
+  type LatticeRings,
+} from "./seaLattice";
 
 export type EditorTool = EditorToolName;
 export type EditorLayer = "land" | "sea";
@@ -145,7 +158,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return el !== null && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
 }
 
-const TOOL_KEYS: Record<string, EditorTool> = { s: "select", v: "vertex", k: "knife", m: "merge", d: "draw", l: "link", p: "promote", b: "prune" };
+const TOOL_KEYS: Record<string, EditorTool> = { s: "select", v: "vertex", k: "knife", m: "merge", d: "draw", l: "link", p: "promote", b: "prune", g: "lattice" };
 
 const ringOf = (points: Vec2[]): Ring => points.map((p) => [p.x, p.y]);
 
@@ -207,6 +220,12 @@ export interface MapEditor {
   setStrokeTolerance(t: StrokeTolerance): void;
   strokeSmooth: boolean;
   setStrokeSmooth(on: boolean): void;
+  /** Square paints an 8×8 cell. Triangle paints one diagonal wedge. Shift holds triangle for one stroke. */
+  latticeBrush: "square" | "triangle";
+  setLatticeBrush(brush: "square" | "triangle"): void;
+  latticeShift: boolean;
+  /** Adds an empty sea zone and selects it, so the next lattice stroke carves it out of the ocean. */
+  newSeaZone(): void;
   /** Roughens the border between the selected region and its second pick, or every border it shares. */
   roughenSelected(): void;
   addMasterBlock(): void;
@@ -230,6 +249,99 @@ export interface MapEditor {
   loadVersion(id: string): void;
   /** Removes a saved version. The open map stays. */
   deleteVersion(id: string): void;
+}
+
+function anchorForLattice(region: EditorRegion, rings: LatticeRings, land: MasterLand | null): Vec2 {
+  const inside = latticeAnchor(rings.polygon, rings.extra);
+  if (land && rings.polygon.length >= 3) {
+    const shape = clipperFor(land.polygons).clip({
+      id: region.id,
+      type: "sea",
+      points: rings.polygon,
+      extra: rings.extra,
+    });
+    const clipped = anchorFor(shape, inside ?? undefined);
+    if (clipped) {
+      return clipped;
+    }
+  }
+  return inside ?? { x: region.cx, y: region.cy };
+}
+
+/** An empty sea zone for the lattice to paint into. It has no shape until the first square. */
+function addEmptySeaZone(map: EditorMap): { map: EditorMap; id: string } {
+  const id = nextRegionId(map, true);
+  const region: EditorRegion = {
+    id,
+    name: id,
+    ipc_value: 0,
+    starting_owner: "Neutral",
+    is_sea: true,
+    factory: "none",
+    capital: false,
+    polygon: [],
+    cx: 0,
+    cy: 0,
+  };
+  return { map: { ...map, regions: [...map.regions, region] }, id };
+}
+
+/** A hand-drawn sea zone joins the lattice once a stroke reaches it, so the stroke can carve it. */
+function latticeCellsOf(region: EditorRegion, targetId: string, hits: LatticeHit[]): LatticeCell[] {
+  if (region.lattice && region.lattice.length > 0) {
+    return region.lattice;
+  }
+  if (region.polygon.length < 3) {
+    return [];
+  }
+  const rings = [region.polygon, ...(region.extra ?? [])].filter((ring) => ring.length >= 3);
+  const reached = region.id === targetId || hits.some((hit) => partTouches(rings, hit.col, hit.row, hit.part));
+  return reached ? rasterizeRings(region.polygon, region.extra ?? []) : [];
+}
+
+/**
+ * Dissolve every sea zone the stroke changed. Other zones lose any wedge this stroke claims.
+ * `final` places the unit pin inside the land-clipped water, which is too slow for every drag sample.
+ */
+function paintSeaLatticeMap(
+  base: EditorMap,
+  targetId: string,
+  hits: LatticeHit[],
+  erase: boolean,
+  land: MasterLand | null,
+  final: boolean,
+): EditorMap {
+  // The preview paints only the target. Carving the zones around it waits for release.
+  const zones = base.regions
+    .filter((region) => region.is_sea && (final || region.id === targetId))
+    .map((region) => ({ id: region.id, cells: latticeCellsOf(region, targetId, hits) }));
+  const edited = editLatticeZones(zones, targetId, hits, erase);
+  let next = base;
+  for (const zone of edited) {
+    const region = findRegion(next, zone.id);
+    if (!region) {
+      continue;
+    }
+    const before = zones.find((item) => item.id === zone.id)?.cells ?? [];
+    if (JSON.stringify(before) === JSON.stringify(zone.cells)) {
+      continue;
+    }
+    const rings = dissolveLatticeCellsToRings(zone.cells);
+    const anchor =
+      rings.polygon.length < 3
+        ? { x: region.cx, y: region.cy }
+        : final
+          ? anchorForLattice(region, rings, land)
+          : (latticeAnchor(rings.polygon, rings.extra) ?? { x: region.cx, y: region.cy });
+    next = updateRegion(next, zone.id, {
+      lattice: zone.cells.length > 0 ? zone.cells : undefined,
+      polygon: rings.polygon,
+      extra: rings.extra.length > 0 ? rings.extra : undefined,
+      cx: anchor.x,
+      cy: anchor.y,
+    });
+  }
+  return next;
 }
 
 export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: boolean): MapEditor {
@@ -265,11 +377,24 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   versionsRef.current = versions;
   const [strokeTolerance, setStrokeTolerance] = useState<StrokeTolerance>("medium");
   const [strokeSmooth, setStrokeSmooth] = useState(true);
+  const [latticeBrush, setLatticeBrush] = useState<"square" | "triangle">("square");
+  const [latticeShift, setLatticeShift] = useState(false);
+  const [latticeHover, setLatticeHover] = useState<LatticeHit | null>(null);
   const stroke = useRef({ active: false, ignore: false, raw: [] as Vec2[], scale: 1 });
   /** World units per screen pixel at the current zoom, so the 25px and 20px knife limits mean pixels. */
   const pxScale = useRef(1);
-  const live = useRef({ tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth });
-  live.current = { tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth };
+  const live = useRef({ tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift });
+  live.current = { tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift };
+  /** `base` is what Undo restores. `start` is what the stroke paints onto: `base` plus a zone it created. */
+  const latticeStroke = useRef<{
+    base: EditorMap;
+    start: EditorMap;
+    hits: LatticeHit[];
+    erase: boolean;
+    last: Vec2;
+    targetId: string;
+  } | null>(null);
+  const latticeFrame = useRef(0);
 
   const map = doc.map;
   const apply = useCallback((next: Doc) => {
@@ -287,12 +412,39 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   );
 
   useEffect(() => {
+    // A lattice drag previews on every sample. Persist once, when the stroke is released.
+    if (latticeStroke.current) {
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(editorToMapJson(map, { round: false })));
     } catch {
       // Storage full or blocked: the editor still works, it just will not persist.
     }
   }, [map]);
+
+  useEffect(() => {
+    const onShift = (event: KeyboardEvent) => {
+      if (event.key === "Shift") {
+        setLatticeShift(event.type === "keydown");
+      }
+    };
+    window.addEventListener("keydown", onShift);
+    window.addEventListener("keyup", onShift);
+    return () => {
+      window.removeEventListener("keydown", onShift);
+      window.removeEventListener("keyup", onShift);
+    };
+  }, []);
+
+  const newSeaZone = useCallback(() => {
+    const created = addEmptySeaZone(docRef.current.map);
+    commit(created.map);
+    setLayerState("sea");
+    setToolState("lattice");
+    setSelectedId(created.id);
+    setStatus(`${created.id} is selected. Paint squares to carve it out of the sea around it.`);
+  }, [commit]);
 
   const geometry = useMemo(() => editorToGeometry(map), [map]);
 
@@ -434,6 +586,8 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       setBoxDone(false);
       if (next === "sea") {
         setToolState((t) => (t === "prune" ? "select" : t));
+      } else {
+        setToolState((t) => (t === "lattice" ? "select" : t));
       }
       setLayerState(next);
       const picked = findRegion(docRef.current.map, live.current.selectedId);
@@ -1210,7 +1364,11 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         e.preventDefault();
         redo();
       } else if (!mod && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) {
-        setTool(TOOL_KEYS[e.key.toLowerCase()]);
+        const nextTool = TOOL_KEYS[e.key.toLowerCase()];
+        if (nextTool === "lattice") {
+          setLayer("sea");
+        }
+        setTool(nextTool);
       } else if (e.key === "Enter") {
         finishDraft();
       } else if (e.key === "Backspace" && live.current.draft.length > 0) {
@@ -1254,6 +1412,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         pruneIds: boxIds,
         slots: selectedSlots,
         uncovered: showUncovered ? uncovered : null,
+        lattice: tool === "lattice" && layer === "sea" ? { brush: latticeBrush, shift: latticeShift, hover: latticeHover } : null,
       },
       prunePrompt: pruneBox && boxDone ? { box: pruneBox, count: boxIds.length, confirm: confirmBoxPrune, cancel: cancelBoxPrune } : null,
       pickHandle(world, tol) {
@@ -1387,6 +1546,21 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
           pxScale.current = tol / SNAP_PX;
         }
         const t = live.current.tool;
+        if (t === "lattice") {
+          const triangle = live.current.latticeBrush === "triangle" || live.current.latticeShift;
+          const hit = world && live.current.layer === "sea" ? latticeHit(world.x, world.y, triangle) : null;
+          setLatticeHover((prev) => {
+            if (!hit && !prev) {
+              return prev;
+            }
+            if (hit && prev && hit.col === prev.col && hit.row === prev.row && hit.part === prev.part && hit.originX === prev.originX) {
+              return prev;
+            }
+            return hit;
+          });
+        } else {
+          setLatticeHover((prev) => (prev === null ? prev : null));
+        }
         if ((t !== "draw" && t !== "knife") || world === null) {
           setCursor(null);
           setClosing(false);
@@ -1481,8 +1655,98 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         const cur = docRef.current;
         apply({ map: next, past: [...cur.past, before].slice(-HISTORY_LIMIT), future: [] });
       },
+      onLattice(world, mods) {
+        const { tool: t, layer: current, selectedId, latticeBrush: brush, latticeShift: shiftDown, land: mask } = live.current;
+        if (t !== "lattice" || current !== "sea") {
+          setStatus("Switch to Sea mode and choose Lattice to paint zones.");
+          return false;
+        }
+        let stroke = latticeStroke.current;
+        if (!stroke || stroke.erase !== mods.erase) {
+          const base = docRef.current.map;
+          const picked = findRegion(base, selectedId);
+          const under = findRegion(base, mods.underId ?? "");
+          let start = base;
+          let targetId = picked?.is_sea ? picked.id : under?.is_sea ? under.id : "";
+          if (targetId === "") {
+            if (mods.erase) {
+              setStatus("Select a sea zone to erase from.");
+              return false;
+            }
+            const created = addEmptySeaZone(base);
+            start = created.map;
+            targetId = created.id;
+          }
+          if (selectedId !== targetId) {
+            setSelectedId(targetId);
+          }
+          stroke = { base, start, hits: [], erase: mods.erase, last: world, targetId };
+          latticeStroke.current = stroke;
+        }
+        const triangle = brush === "triangle" || mods.shift || shiftDown;
+        const hover = latticeHit(world.x, world.y, triangle);
+        setLatticeHover((prev) => {
+          if (!hover && !prev) {
+            return prev;
+          }
+          if (hover && prev && hover.col === prev.col && hover.row === prev.row && hover.part === prev.part && hover.originX === prev.originX) {
+            return prev;
+          }
+          return hover;
+        });
+        const seen = new Set(stroke.hits.map((hit) => `${hit.col},${hit.row},${hit.part}`));
+        for (const hit of hitsAlong(stroke.last, world, triangle)) {
+          const key = `${hit.col},${hit.row},${hit.part}`;
+          if (seen.has(key)) {
+            continue;
+          }
+          seen.add(key);
+          stroke.hits.push(hit);
+        }
+        stroke.last = world;
+        const active = stroke;
+        if (!mods.done) {
+          if (active.hits.length > 0 && latticeFrame.current === 0) {
+            latticeFrame.current = window.requestAnimationFrame(() => {
+              latticeFrame.current = 0;
+              if (latticeStroke.current !== active) {
+                return;
+              }
+              const preview = paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, false);
+              apply({ ...docRef.current, map: preview });
+            });
+          }
+          return true;
+        }
+        if (latticeFrame.current !== 0) {
+          window.cancelAnimationFrame(latticeFrame.current);
+          latticeFrame.current = 0;
+        }
+        latticeStroke.current = null;
+        const next =
+          active.hits.length > 0 ? paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, true) : active.start;
+        const cur = docRef.current;
+        if (next === active.start) {
+          apply({ ...cur, map: active.base });
+          const owner = active.base.regions.find((region) => region.is_sea && region.id === active.targetId);
+          setStatus(
+            owner && active.start === active.base
+              ? `Those squares already belong to ${active.targetId}. Press New sea zone to carve a separate zone out of it.`
+              : "Nothing changed. Paint over water to add squares.",
+          );
+          return true;
+        }
+        apply({ map: next, past: [...cur.past, active.base].slice(-HISTORY_LIMIT), future: [] });
+        const count = findRegion(next, active.targetId)?.lattice?.length ?? 0;
+        setStatus(
+          active.erase
+            ? `Erased cells from ${active.targetId}. ${count} lattice cells remain.`
+            : `Painted ${active.targetId}. ${count} lattice cells. The land mask clips the coast when the map draws.`,
+        );
+        return true;
+      },
     }),
-    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf, showUncovered, uncovered],
+    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf, showUncovered, uncovered, latticeBrush, latticeShift, latticeHover],
   );
 
   const selected = selectedId === "" ? null : (findRegion(map, selectedId) ?? null);
@@ -1536,6 +1800,10 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     setStrokeTolerance,
     strokeSmooth,
     setStrokeSmooth,
+    latticeBrush,
+    setLatticeBrush,
+    latticeShift,
+    newSeaZone,
     roughenSelected,
     addMasterBlock,
     calculateNeighbors,

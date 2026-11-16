@@ -11,6 +11,7 @@
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { MILITARY } from "../theme/militaryPalette";
 import { isLandAt } from "./hitTest";
+import { LATTICE, LATTICE_COLS, LATTICE_ROWS, latticePartRing, MAP_H, MAP_W } from "./editor/seaLattice";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
 import {
@@ -1411,7 +1412,7 @@ export function drawMoveGuide(ctx: CanvasRenderingContext2D, dpr: number, from: 
 export const LINK_COLORS = { land: MILITARY.olive, sea: MILITARY.steel, coastal: MILITARY.terracotta } as const;
 export type EditorLinkKind = keyof typeof LINK_COLORS;
 
-export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote" | "prune";
+export type EditorToolName = "select" | "vertex" | "knife" | "merge" | "draw" | "link" | "promote" | "prune" | "lattice";
 
 export interface EditorOverlay {
   regions: RegionShape[];
@@ -1438,6 +1439,12 @@ export interface EditorOverlay {
   slots?: Vec2[];
   /** Land-mask rings no land cutter covers: polygon, ring, [x, y]. Drawn as a debug outline. */
   uncovered?: [number, number][][][] | null;
+  /** Sea-lattice grid. Set only while that tool is painting the sea layer. */
+  lattice?: {
+    brush: "square" | "triangle";
+    shift: boolean;
+    hover: { col: number; row: number; part: "FULL" | "N" | "E" | "S" | "W"; originX: number } | null;
+  } | null;
 }
 
 export const SLOT_HANDLE_COLOR = MILITARY.sage;
@@ -1486,6 +1493,85 @@ function drawFacilityHandle(ctx: CanvasRenderingContext2D, x: number, y: number)
   ctx.strokeText("BASE", x, y + 24);
   ctx.fillStyle = FACILITY_HANDLE_COLOR;
   ctx.fillText("BASE", x, y + 24);
+}
+
+function drawSeaLattice(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  lattice: NonNullable<EditorOverlay["lattice"]>,
+): void {
+  const { view } = scene;
+  const px = 1 / view.k;
+  const x0 = view.x;
+  const x1 = view.x + scene.width / view.k;
+  const y0 = view.y;
+  const y1 = view.y + scene.height / view.k;
+  const diagonals = lattice.brush === "triangle" || lattice.shift;
+
+  ctx.save();
+  ctx.lineWidth = px;
+  ctx.strokeStyle = "rgba(184, 148, 90, 0.45)";
+  ctx.beginPath();
+  for (let col = 0; col <= LATTICE_COLS; col++) {
+    const x = col * LATTICE;
+    for (const shift of [-MAP_W, 0, MAP_W]) {
+      const gx = x + shift;
+      if (gx < x0 - LATTICE || gx > x1 + LATTICE) {
+        continue;
+      }
+      ctx.moveTo(gx, Math.max(y0, 0));
+      ctx.lineTo(gx, Math.min(y1, MAP_H));
+    }
+  }
+  const rowTop = Math.max(0, Math.floor(y0 / LATTICE));
+  const rowBottom = Math.min(LATTICE_ROWS, Math.ceil(y1 / LATTICE));
+  for (let row = rowTop; row <= rowBottom; row++) {
+    const y = row * LATTICE;
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+  }
+  ctx.stroke();
+
+  if (diagonals) {
+    ctx.strokeStyle = "rgba(184, 148, 90, 0.28)";
+    ctx.beginPath();
+    const colStart = Math.floor(x0 / LATTICE) - 1;
+    const colEnd = Math.ceil(x1 / LATTICE) + 1;
+    const rowStart = Math.max(0, Math.floor(y0 / LATTICE) - 1);
+    const rowEnd = Math.min(LATTICE_ROWS - 1, Math.ceil(y1 / LATTICE));
+    for (let col = colStart; col <= colEnd; col++) {
+      for (let row = rowStart; row <= rowEnd; row++) {
+        const gx = col * LATTICE;
+        const gy = row * LATTICE;
+        ctx.moveTo(gx, gy);
+        ctx.lineTo(gx + LATTICE, gy + LATTICE);
+        ctx.moveTo(gx + LATTICE, gy);
+        ctx.lineTo(gx, gy + LATTICE);
+      }
+    }
+    ctx.stroke();
+  }
+
+  const hover = lattice.hover;
+  if (hover) {
+    const ring = latticePartRing(hover.col, hover.row, hover.part);
+    ctx.beginPath();
+    ring.forEach((point, index) => {
+      const x = point.x + hover.originX;
+      if (index === 0) {
+        ctx.moveTo(x, point.y);
+      } else {
+        ctx.lineTo(x, point.y);
+      }
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(80, 196, 206, 0.35)";
+    ctx.fill();
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = "rgba(196, 164, 106, 0.95)";
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, editor: EditorOverlay): void {
@@ -1557,6 +1643,10 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
   }
   ctx.setLineDash([]);
   ctx.lineCap = "butt";
+
+  if (editor.tool === "lattice" && editor.layer === "sea" && editor.lattice) {
+    drawSeaLattice(ctx, scene, editor.lattice);
+  }
 
   setScreenTransform(ctx, dpr);
   const S = (p: Vec2) => worldToScreen(view, p);

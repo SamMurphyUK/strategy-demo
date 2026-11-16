@@ -9,6 +9,7 @@ const TOOLS: { tool: EditorTool; label: string; key: string; title: string }[] =
   { tool: "draw", label: "Draw", key: "D", title: "Click vertices for a new region in this layer." },
   { tool: "link", label: "Link", key: "L", title: "Click two regions to add or remove a neighbor link." },
   { tool: "promote", label: "Promote", key: "P", title: "Click bare, decorative land to turn that island into a playable region." },
+  { tool: "lattice", label: "Lattice", key: "G", title: "Paint the selected sea zone on the 8×8 grid. Square or triangle. Right-drag or Alt-drag erases. Shift holds the triangle brush." },
 ];
 
 const HINTS: Record<EditorTool, string> = {
@@ -20,6 +21,7 @@ const HINTS: Record<EditorTool, string> = {
   link: "Click region A, then region B, to add or remove a neighbor link.",
   prune: "Drag a box over small default islands. Only untouched Territories under the threshold whose anchor is inside the box are pruned. Confirm on the badge, or Esc to cancel.",
   promote: "Click land that no territory covers (a decorative island) to make it a playable region again.",
+  lattice: "Press New sea zone, then left-drag to carve it out of the sea around it. Left-drag paints the selected zone. Right-drag or Alt-drag erases. Middle-drag pans. Shift, or Triangle, paints one wedge.",
 };
 
 /** Floating controls over the map while the editor is open. */
@@ -50,7 +52,7 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
           </button>
         </div>
         <div className="segmented" role="group" aria-label="Tool">
-          {TOOLS.map((t) => (
+          {TOOLS.filter((t) => t.tool !== "lattice" || sea).map((t) => (
             <button
               key={t.tool}
               type="button"
@@ -149,6 +151,33 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
               curves
             </label>
           </>
+        )}
+        {editor.tool === "lattice" && (
+          <div className="segmented" role="group" aria-label="Lattice brush">
+            <button
+              type="button"
+              className={editor.latticeBrush === "square" && !editor.latticeShift ? "active" : ""}
+              title="Paint a whole 8×8 square."
+              onClick={() => editor.setLatticeBrush("square")}
+            >
+              Square
+            </button>
+            <button
+              type="button"
+              className={editor.latticeBrush === "triangle" || editor.latticeShift ? "active" : ""}
+              title="Paint one diagonal wedge. Hold Shift to use this brush without switching."
+              onClick={() => editor.setLatticeBrush("triangle")}
+            >
+              Triangle
+            </button>
+            <button
+              type="button"
+              title="Add an empty sea zone and select it. Painting then takes squares from the zones around it."
+              onClick={editor.newSeaZone}
+            >
+              New sea zone
+            </button>
+          </div>
         )}
         {editor.tool === "vertex" && (
           <button

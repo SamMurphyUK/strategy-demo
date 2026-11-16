@@ -80,6 +80,8 @@ export interface EditorBinding {
   strokeBegin(): void;
   /** The world points of the stroke so far; `pxToWorld` is world units per screen pixel. `done` on release. */
   onStroke(points: Vec2[], pxToWorld: number, done: boolean): void;
+  /** Paint or erase one sample of a sea-lattice stroke. `done` commits the undo step. False when nothing can be painted, so the press can pan instead. */
+  onLattice?(world: Vec2, mods: { erase: boolean; shift: boolean; done: boolean; underId?: string }): boolean;
 }
 
 export interface MapViewProps {
@@ -159,7 +161,8 @@ type Drag =
   | { kind: "pan"; startX: number; startY: number; view: View; moved: boolean }
   | { kind: "handle"; handle: unknown }
   | { kind: "unit" }
-  | { kind: "swipe"; from: Vec2; points: Vec2[]; moved: boolean; startX: number; startY: number; lastX: number; lastY: number };
+  | { kind: "swipe"; from: Vec2; points: Vec2[]; moved: boolean; startX: number; startY: number; lastX: number; lastY: number }
+  | { kind: "lattice"; erase: boolean };
 
 /** A friendly stack being pulled. `originWorld` is on the primary copy, so the guide can hop wraps. */
 interface UnitGesture {
@@ -837,10 +840,28 @@ export function MapView(props: MapViewProps) {
     }
   };
 
+  /** Capture can throw when the pointer is already gone (a quick touchpad tap). The gesture still works. */
+  const capturePointer = (pointerId: number) => {
+    try {
+      canvasRef.current?.setPointerCapture(pointerId);
+    } catch {
+      // Without capture, moves outside the canvas end the gesture at pointerleave.
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     soundManager.unlock();
-    if (e.button !== 0 || cameraLock.current) {
+    const editor = live.current.props.editor;
+    const latticeTool = editor?.overlay.tool === "lattice" && editor.overlay.layer === "sea";
+    const latticeButton = latticeTool && (e.button === 0 || e.button === 2);
+    if (cameraLock.current) {
       return;
+    }
+    if (e.button !== 0 && e.button !== 1 && !latticeButton) {
+      return;
+    }
+    if (e.button === 1) {
+      e.preventDefault();
     }
     if (splitRef.current && !(e.target as HTMLElement).closest?.(".split-popover")) {
       soundManager.play("order_cancel");
@@ -848,10 +869,21 @@ export function MapView(props: MapViewProps) {
       live.current.props.onDragCancel?.();
     }
     const sp = pointer(e);
-    const { view: v, layouts: ls, props: p, plusHitPx: plusHit } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, plusHitPx: plusHit, exact: ex, only: layer } = live.current;
     const ed = p.editor;
-    const handle = ed?.pickHandle(screenToWorld(v, sp), HANDLE_PX / v.k) ?? null;
     const from = screenToWorld(v, sp);
+    if (latticeButton && ed) {
+      e.preventDefault();
+      const erase = e.button === 2 || e.altKey;
+      const under = pickRegion(p.geometry.regions, ps, p.land, pickWorld(from), ex, layer ?? "sea");
+      const started = ed.onLattice?.(from, { erase, shift: e.shiftKey, done: false, underId: under }) === true;
+      if (started) {
+        drag.current = { kind: "lattice", erase };
+        capturePointer(e.pointerId);
+        return;
+      }
+    }
+    const handle = ed?.pickHandle(from, HANDLE_PX / v.k) ?? null;
     if (handle !== null) {
       drag.current = { kind: "handle", handle };
     } else if (ed?.swipeable() && !e.altKey) {
@@ -890,7 +922,7 @@ export function MapView(props: MapViewProps) {
     } else {
       drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
     }
-    canvasRef.current?.setPointerCapture(e.pointerId);
+    capturePointer(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -898,6 +930,11 @@ export function MapView(props: MapViewProps) {
     const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
     const world = screenToWorld(v, sp);
     const d = drag.current;
+    if (d?.kind === "lattice") {
+      p.editor?.onLattice?.(world, { erase: d.erase, shift: e.shiftKey, done: false });
+      canvasRef.current!.style.cursor = "crosshair";
+      return;
+    }
     if (d?.kind === "handle") {
       p.editor?.onDrag(d.handle, world, SNAP_PX / v.k);
       return;
@@ -978,7 +1015,7 @@ export function MapView(props: MapViewProps) {
     setHoverStack((prev) =>
       prev?.regionId === nextHover?.regionId && prev?.key === nextHover?.key && prev?.copyDx === nextHover?.copyDx ? prev : nextHover,
     );
-    const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw";
+    const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw" || p.editor?.overlay.tool === "lattice";
     canvasRef.current!.style.cursor = aiming ? "crosshair" : overPlus || picked !== null || id !== "" ? "pointer" : "default";
   };
 
@@ -989,6 +1026,11 @@ export function MapView(props: MapViewProps) {
       return;
     }
     const { view: v, paths: ps, props: p, exact: ex } = live.current;
+    if (d.kind === "lattice") {
+      const end = screenToWorld(v, pointer(e));
+      p.editor?.onLattice?.(end, { erase: d.erase, shift: e.shiftKey, done: true });
+      return;
+    }
     if (d.kind === "handle") {
       p.editor?.onDragEnd(d.handle);
       return;
@@ -1076,7 +1118,21 @@ export function MapView(props: MapViewProps) {
     p.editor?.onDoubleClick(screenToWorld(v, pointer(e)), SNAP_PX / v.k);
   };
 
-  const onPointerLeave = () => {
+  /** A touchpad or the OS can cancel a press without a pointerup. A lattice stroke still commits. */
+  const onPointerCancel = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d?.kind !== "lattice") {
+      return;
+    }
+    drag.current = null;
+    const { view: v, props: p } = live.current;
+    p.editor?.onLattice?.(screenToWorld(v, pointer(e)), { erase: d.erase, shift: e.shiftKey, done: true });
+  };
+
+  const onPointerLeave = (e: React.PointerEvent) => {
+    if (drag.current?.kind === "lattice" && !canvasRef.current?.hasPointerCapture(e.pointerId)) {
+      onPointerCancel(e);
+    }
     if (unitRef.current) {
       return;
     }
@@ -1160,7 +1216,14 @@ export function MapView(props: MapViewProps) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerLeave}
+        onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onPointerCancel}
         onDoubleClick={onDoubleClick}
+        onContextMenu={(event) => {
+          if (live.current.props.editor?.overlay.tool === "lattice") {
+            event.preventDefault();
+          }
+        }}
       />
       <canvas ref={arrowRef} className="map-arrows" style={{ width: size.w, height: size.h }} />
       <div className="map-controls">
