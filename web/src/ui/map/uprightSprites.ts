@@ -1,7 +1,18 @@
-// Upright side-profile sprites for LoD 2. Same palette and standing poses as the battle screen,
-// drawn at integer pixels with smoothing off, feet on the plinth centre. Guns point right; a
-// negative face mirrors the body so the stack looks toward the nearer hostile territory.
+// Upright side-profile sprites for LoD 2. Same palette, standing poses and faction cues as the
+// battle screen, drawn at integer pixels with smoothing off, feet on the plinth centre. Guns point
+// right; a negative face mirrors the body so the stack looks toward the nearer hostile territory.
 import { factionPalette } from "../theme/factionPalette";
+import {
+  rosterCues,
+  type BomberCue,
+  type FighterCue,
+  type GunCue,
+  type Helmet,
+  type RosterCues,
+  type ShipCue,
+  type SubCue,
+  type TankCue,
+} from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -255,7 +266,66 @@ function drawHardwareBadge(
   ctx.fillText(label, x + w / 2, top + h / 2 + 0.5);
 }
 
-function drawInfantry(ctx: CanvasRenderingContext2D, color: string): void {
+/** Map a cue range onto the few pixels an upright figure has. */
+function fit(value: number, lo: number, hi: number, outLo: number, outHi: number): number {
+  const t = hi === lo ? 0 : (value - lo) / (hi - lo);
+  return Math.round(outLo + Math.max(0, Math.min(1, t)) * (outHi - outLo));
+}
+
+/** The six helmets from the battle sprites, drawn to sit on an upright head. */
+function drawUprightHelmet(ctx: CanvasRenderingContext2D, helmet: Helmet, cx: number, top: number, color: string): void {
+  switch (helmet) {
+    case "stahlhelm":
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top, 7, 3);
+      ctx.fillRect(cx - 4, top + 2, 2, 3);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 1, top + 2, 6, 1);
+      return;
+    case "ssh40":
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 2, top - 1, 5, 1);
+      ctx.fillRect(cx - 3, top, 7, 4);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 4, top + 3, 8, 1);
+      ctx.fillStyle = MILITARY.crimson;
+      ctx.fillRect(cx + 1, top + 1, 2, 2);
+      return;
+    case "brodie":
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 2, top + 1, 5, 2);
+      ctx.fillRect(cx - 5, top + 2, 10, 1);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 5, top + 3, 10, 1);
+      return;
+    case "m1":
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 2, top - 1, 5, 1);
+      ctx.fillRect(cx - 3, top, 7, 4);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 4, top + 3, 8, 1);
+      ctx.fillRect(cx + 2, top + 4, 1, 2);
+      return;
+    case "havelock":
+      ctx.fillStyle = LEATHER;
+      ctx.fillRect(cx - 4, top + 2, 2, 4);
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top, 7, 3);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 3, top + 2, 7, 1);
+      ctx.fillStyle = BRASS;
+      ctx.fillRect(cx + 1, top + 1, 1, 1);
+      return;
+    default:
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top, 7, 3);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(cx - 1, top - 1, 2, 1);
+      ctx.fillRect(cx - 4, top + 2, 8, 2);
+  }
+}
+
+function drawInfantry(ctx: CanvasRenderingContext2D, color: string, helmet: Helmet): void {
   ctx.fillStyle = CHARCOAL;
   ctx.fillRect(-4, -5, 3, 5);
   ctx.fillRect(1, -5, 3, 5);
@@ -268,10 +338,7 @@ function drawInfantry(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillRect(-2, -16, 2, 5);
   ctx.fillStyle = CREAM;
   ctx.fillRect(-3, -20, 6, 5);
-  ctx.fillStyle = color;
-  ctx.fillRect(-4, -23, 8, 4);
-  ctx.fillStyle = CHARCOAL;
-  ctx.fillRect(-5, -20, 10, 2);
+  drawUprightHelmet(ctx, helmet, 0, -23, color);
   ctx.fillStyle = BROWN;
   ctx.fillRect(-2, -13, 9, 3);
   ctx.fillStyle = STEEL;
@@ -280,13 +347,17 @@ function drawInfantry(ctx: CanvasRenderingContext2D, color: string): void {
   ctx.fillRect(15, -13, 3, 1);
 }
 
-function drawArtillery(ctx: CanvasRenderingContext2D, color: string, flak: boolean): void {
+function drawArtillery(ctx: CanvasRenderingContext2D, color: string, flak: boolean, gun: GunCue, helmet: Helmet): void {
   ctx.fillStyle = CHARCOAL;
   ctx.fillRect(-8, -6, 5, 6);
   ctx.fillRect(3, -6, 5, 6);
   ctx.fillStyle = STEEL;
   ctx.fillRect(-7, -5, 3, 4);
   ctx.fillRect(4, -5, 3, 4);
+  if (gun.platform) {
+    ctx.fillStyle = TAUPE;
+    ctx.fillRect(-10, -2, 20, 2);
+  }
   ctx.fillStyle = BROWN;
   ctx.fillRect(-14, -4, 7, 2);
   ctx.fillStyle = TAUPE;
@@ -297,70 +368,171 @@ function drawArtillery(ctx: CanvasRenderingContext2D, color: string, flak: boole
     ctx.fillStyle = CHARCOAL;
     ctx.fillRect(0, -18, 5, 2);
   } else {
-    ctx.fillRect(-2, -11, 16, 3);
-    ctx.fillStyle = CHARCOAL;
-    ctx.fillRect(12, -11, 4, 3);
+    const barrel = fit(gun.barrel, 14, 24, 10, 18);
+    const bore = gun.bore >= 5 ? 4 : 2;
+    ctx.fillRect(-2, -11, barrel, bore);
+    if (gun.brake) {
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(-2 + barrel, -12, 3, bore + 2);
+    }
+    if (gun.shield > 0) {
+      const shield = fit(gun.shield, 8, 13, 6, 10);
+      ctx.fillStyle = STEEL;
+      ctx.fillRect(-4, -11 - shield, 3, shield);
+    }
   }
-  ctx.fillStyle = color;
-  ctx.fillRect(-12, -16, 5, 3);
+  drawUprightHelmet(ctx, helmet, -11, -16, color);
   ctx.fillStyle = CREAM;
-  ctx.fillRect(-11, -13, 3, 3);
+  ctx.fillRect(-13, -13, 4, 3);
   ctx.fillStyle = TAUPE;
-  ctx.fillRect(-12, -10, 4, 4);
+  ctx.fillRect(-14, -10, 5, 4);
 }
 
-function drawArmor(ctx: CanvasRenderingContext2D, color: string): void {
+function drawArmor(ctx: CanvasRenderingContext2D, color: string, cue: TankCue): void {
+  const hull = fit(cue.length, 26, 40, 20, 30);
+  const left = -Math.round(hull / 2);
+  const trackTop = cue.highTrack ? -10 : -7;
+  const trackH = cue.highTrack ? 10 : 7;
   ctx.fillStyle = CHARCOAL;
-  ctx.fillRect(-14, -7, 28, 7);
+  ctx.fillRect(left, trackTop, hull, trackH);
+  if (cue.highTrack) ctx.fillRect(left + hull - 2, trackTop + 2, 3, trackH - 2);
+  const wheels = Math.max(4, Math.min(7, cue.wheels > 6 ? 6 : cue.wheels));
   ctx.fillStyle = STEEL;
-  for (let i = -10; i <= 10; i += 5) {
-    ctx.fillRect(i, -6, 3, 5);
+  const gap = hull / (wheels + 1);
+  const wheel = cue.wheelR >= 3.4 ? 2 : 1;
+  for (let i = 1; i <= wheels; i++) {
+    ctx.fillRect(left + Math.round(i * gap) - wheel, trackTop + 1, wheel * 2, trackH - 2);
   }
-  ctx.fillStyle = TAUPE;
-  ctx.fillRect(-13, -11, 26, 5);
+  const glacis = fit(cue.glacis, 0, 7, 0, 6);
   ctx.fillStyle = color;
-  ctx.fillRect(-11, -15, 22, 5);
-  ctx.fillRect(-2, -20, 12, 6);
+  ctx.fillRect(left, -15, hull - glacis, 8);
+  for (let i = 0; i < glacis; i++) ctx.fillRect(left + hull - glacis + i, -15 + i, 1, 8 - i);
+  const tw = fit(cue.turretW, 10, 18, 7, 12);
+  const th = fit(cue.turretH, 7, 10, 4, 6);
+  const tx = fit(cue.turretX, -2, 3, -4, 5);
+  ctx.fillRect(tx, -15 - th, tw, th);
+  if (cue.castTurret) ctx.fillRect(tx + 1, -16 - th, tw - 2, 1);
+  const barrel = fit(cue.barrel, 9, 23, 6, 14);
   ctx.fillStyle = CHARCOAL;
-  ctx.fillRect(8, -18, 10, 2);
-  ctx.fillStyle = TAUPE;
-  ctx.fillRect(0, -22, 4, 3);
+  ctx.fillRect(tx + tw - 1, -14 - th, barrel, 2);
+  if (cue.brake) ctx.fillRect(tx + tw + barrel - 2, -15 - th, 3, 4);
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, color: string): void {
+function drawFighter(ctx: CanvasRenderingContext2D, color: string, cue: FighterCue): void {
+  const wing = cue.roundTips ? 22 : 18;
   ctx.fillStyle = TAUPE;
   ctx.fillRect(-8, -2, 14, 2);
   ctx.fillStyle = color;
-  ctx.fillRect(-7, -5, 12, 3);
-  ctx.fillRect(-11, -8, 20, 4);
+  ctx.fillRect(-wing / 2, -8, wing, 4);
+  ctx.fillRect(-7, -5, 14, 3);
+  if (cue.roundTips) {
+    ctx.fillRect(-wing / 2 - 1, -7, 1, 2);
+    ctx.fillRect(wing / 2, -7, 1, 2);
+  }
+  if (cue.scoop) {
+    ctx.fillStyle = TAUPE;
+    ctx.fillRect(-3, -2, 6, 2);
+  }
   ctx.fillStyle = BRASS;
-  ctx.fillRect(9, -7, 3, 3);
+  if (cue.radial) {
+    ctx.fillRect(7, -8, 4, 7);
+    ctx.fillStyle = CHARCOAL;
+    ctx.fillRect(7, -8, 1, 7);
+  } else {
+    ctx.fillRect(8, -6, 3, 4);
+    ctx.fillRect(11, -5, 2, 2);
+  }
   ctx.fillStyle = color;
-  ctx.fillRect(-13, -12, 4, 5);
+  ctx.fillRect(-12, -12, 4, 5);
   ctx.fillStyle = SPRUCE;
-  ctx.fillRect(-3, -10, 6, 3);
-  ctx.fillStyle = CREAM;
-  ctx.fillRect(12, -10, 1, 6);
+  const canopy = Math.max(3, Math.min(7, cue.canopy));
+  ctx.fillRect(2 - Math.floor(canopy / 2), -8, canopy, 3);
+  if (cue.fixedGear) {
+    ctx.fillStyle = CHARCOAL;
+    ctx.fillRect(3, -1, 1, 4);
+    ctx.fillRect(2, 2, 3, 1);
+  }
 }
 
-function drawBomber(ctx: CanvasRenderingContext2D, color: string): void {
+function drawBomber(ctx: CanvasRenderingContext2D, color: string, cue: BomberCue, strategic: boolean): void {
+  const wing = fit(Math.round(cue.span * 100), 68, 100, 16, 26) + (strategic ? 2 : 0);
+  const bodyH = cue.cigar ? 6 : 4;
   ctx.fillStyle = TAUPE;
-  ctx.fillRect(-12, -2, 22, 2);
+  ctx.fillRect(-12, -2, wing, 2);
   ctx.fillStyle = color;
-  ctx.fillRect(-14, -6, 26, 4);
-  ctx.fillRect(-6, -9, 16, 3);
-  ctx.fillRect(-16, -11, 5, 6);
+  ctx.fillRect(-14, -2 - bodyH, wing, bodyH);
+  ctx.fillRect(-6, -6 - bodyH, Math.round(wing * 0.6), 3);
+  const finH = cue.tallFin ? 8 : 5;
+  ctx.fillRect(-16, -2 - bodyH - finH, 4, finH + bodyH);
+  if (cue.twinTail) ctx.fillRect(-16 + wing - 6, -2 - bodyH - finH + 1, 3, finH);
   ctx.fillStyle = SPRUCE;
-  ctx.fillRect(-2, -10, 7, 3);
+  ctx.fillRect(-2, -4 - bodyH, cue.glazedNose ? 5 : 7, 3);
+  if (cue.glazedNose) {
+    ctx.fillStyle = CREAM;
+    ctx.fillRect(-14 + wing - 4, -1 - bodyH, 4, 2);
+  }
   ctx.fillStyle = CHARCOAL;
-  ctx.fillRect(-8, -4, 3, 2);
-  ctx.fillRect(6, -4, 3, 2);
+  const nacelles = cue.engines === 4 ? [-10, -4, 4, 10] : [-6, 6];
+  for (const nx of nacelles) ctx.fillRect(nx, -bodyH, 3, 2);
 }
 
-function drawWarship(ctx: CanvasRenderingContext2D, color: string, unitType: string): void {
-  const sub = unitType === "submarine";
+function drawSubmarine(ctx: CanvasRenderingContext2D, color: string, cue: SubCue): void {
+  const hull = fit(cue.length, 32, 56, 18, 30);
+  const left = -Math.round(hull / 2);
+  ctx.fillStyle = STEEL;
+  ctx.fillRect(left, -4, hull, 4);
+  ctx.fillStyle = CHARCOAL;
+  ctx.fillRect(left + 1, -2, hull - 2, 2);
+  const tower = fit(cue.tower, 8, 12, 4, 7);
+  ctx.fillStyle = color;
+  ctx.fillRect(-3, -4 - tower, 6, tower);
+  ctx.fillStyle = STEEL;
+  ctx.fillRect(-1, -4 - tower - 3, 1, 3);
+  if (cue.hangar) {
+    ctx.fillStyle = color;
+    ctx.fillRect(3, -8, 8, 4);
+    ctx.fillStyle = CHARCOAL;
+    ctx.fillRect(10, -7, 1, 3);
+  }
+  if (cue.deckGun) {
+    ctx.fillStyle = CHARCOAL;
+    ctx.fillRect(cue.hangar ? -10 : 4, -7, 5, 2);
+  }
+}
+
+function drawBridge(ctx: CanvasRenderingContext2D, cue: ShipCue, x: number, deck: number): void {
+  switch (cue.bridge) {
+    case "pagoda":
+      ctx.fillStyle = TAUPE;
+      ctx.fillRect(x, deck - 4, 6, 4);
+      ctx.fillRect(x + 1, deck - 7, 4, 3);
+      ctx.fillRect(x + 2, deck - 10, 2, 3);
+      return;
+    case "tripod":
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(x + 2, deck - 9, 1, 9);
+      ctx.fillRect(x, deck - 3, 5, 1);
+      ctx.fillRect(x + 1, deck - 6, 3, 1);
+      return;
+    case "tower":
+      ctx.fillStyle = TAUPE;
+      ctx.fillRect(x, deck - 8, 4, 8);
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(x + 1, deck - 11, 2, 3);
+      return;
+    default:
+      ctx.fillStyle = TAUPE;
+      ctx.fillRect(x, deck - 5, 7, 5);
+  }
+}
+
+function drawWarship(ctx: CanvasRenderingContext2D, color: string, unitType: string, cues: RosterCues): void {
+  if (unitType === "submarine") {
+    drawSubmarine(ctx, color, cues.sub);
+    return;
+  }
   const carrier = unitType === "carrier";
-  const hull = unitType === "battleship" ? 32 : sub ? 22 : 28;
+  const hull = unitType === "battleship" ? 32 : unitType === "cruiser" ? 28 : 24;
   const left = -hull / 2;
   if (unitType === "transport") {
     ctx.fillStyle = color;
@@ -378,50 +550,61 @@ function drawWarship(ctx: CanvasRenderingContext2D, color: string, unitType: str
     ctx.fillRect(left + 16, -10, 5, 3);
     return;
   }
-  ctx.fillStyle = sub ? STEEL : color;
+  ctx.fillStyle = color;
   ctx.fillRect(left, -5, hull, 5);
   ctx.fillStyle = CHARCOAL;
   ctx.fillRect(left, -2, hull, 2);
-  if (sub) {
-    ctx.fillStyle = STEEL;
-    ctx.fillRect(-3, -9, 6, 4);
-    return;
-  }
   if (carrier) {
+    const island = cues.carrier;
     ctx.fillStyle = TAUPE;
     ctx.fillRect(left + 2, -8, hull - 4, 3);
+    const ix = fit(island.islandX, 4, 14, left + 4, left + hull - 10);
+    const iw = fit(island.islandW, 8, 17, 4, 8);
+    const ih = fit(island.islandH, 8, 14, 4, 7);
     ctx.fillStyle = color;
-    ctx.fillRect(4, -13, 5, 5);
+    ctx.fillRect(ix, -8 - ih, iw, ih);
+    if (island.funnel) {
+      ctx.fillStyle = CHARCOAL;
+      ctx.fillRect(ix + iw - 2, -10 - ih, 2, 3);
+    }
     return;
   }
-  ctx.fillStyle = TAUPE;
-  ctx.fillRect(-4, -11, 10, 6);
-  ctx.fillStyle = CHARCOAL;
-  ctx.fillRect(0, -15, 3, 4);
-  ctx.fillStyle = STEEL;
-  ctx.fillRect(6, -8, 6, 2);
-  if (unitType === "battleship") {
-    ctx.fillRect(-12, -8, 6, 2);
+  const cue = unitType === "battleship" ? cues.battleship : unitType === "cruiser" ? cues.cruiser : cues.destroyer;
+  const deck = -5;
+  for (let i = 0; i < cue.turrets; i++) {
+    const tx = left + 3 + Math.round((i * (hull - 10)) / Math.max(1, cue.turrets - 1));
+    ctx.fillStyle = STEEL;
+    ctx.fillRect(tx, deck - 3, 4, 3);
+  }
+  drawBridge(ctx, cue, -2, deck);
+  for (let i = 0; i < cue.funnels; i++) {
+    ctx.fillStyle = CHARCOAL;
+    ctx.fillRect(2 + i * 4, deck - 7, 2, 4);
   }
 }
 
-function drawUprightBody(ctx: CanvasRenderingContext2D, unitType: string, color: string): void {
+function drawUprightBody(ctx: CanvasRenderingContext2D, unitType: string, color: string, factionId: string): void {
+  const cues = rosterCues(factionId);
   switch (unitType) {
     case "artillery":
-      drawArtillery(ctx, color, false);
+      drawArtillery(ctx, color, false, cues.gun, cues.helmet);
       return;
     case "aaa":
-      drawArtillery(ctx, color, true);
+    case "aa":
+      drawArtillery(ctx, color, true, cues.gun, cues.helmet);
       return;
     case "tank":
-      drawArmor(ctx, color);
+    case "armor":
+      drawArmor(ctx, color, cues.tank);
       return;
     case "fighter":
-      drawFighter(ctx, color);
+      drawFighter(ctx, color, cues.fighter);
       return;
     case "tactical_bomber":
+      drawBomber(ctx, color, cues.bomber, false);
+      return;
     case "strategic_bomber":
-      drawBomber(ctx, color);
+      drawBomber(ctx, color, cues.bomber, true);
       return;
     case "submarine":
     case "destroyer":
@@ -429,10 +612,10 @@ function drawUprightBody(ctx: CanvasRenderingContext2D, unitType: string, color:
     case "battleship":
     case "carrier":
     case "transport":
-      drawWarship(ctx, color, unitType);
+      drawWarship(ctx, color, unitType, cues);
       return;
     default:
-      drawInfantry(ctx, color);
+      drawInfantry(ctx, color, cues.helmet);
   }
 }
 
@@ -465,7 +648,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       ctx.save();
       ctx.translate(at(x + off.x), at(y + off.y + bob));
       if ((paint.face ?? 1) < 0) ctx.scale(-1, 1);
-      drawUprightBody(ctx, paint.unitType, color);
+      drawUprightBody(ctx, paint.unitType, color, paint.factionId);
       ctx.restore();
     }
     if (paint.count > 1) {
