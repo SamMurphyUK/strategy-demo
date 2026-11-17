@@ -31,6 +31,8 @@ let victoryGain: GainNode | null = null;
 let victorySource: AudioBufferSourceNode | null = null;
 let bed: CampaignBed = "map";
 let muted = false;
+/** 0 silences the beds. 1 is the authored level. */
+let volumeScale = 1;
 let armed = false;
 let victoryOn = false;
 let battleHeld = false;
@@ -44,6 +46,18 @@ const prefetched = new Map<string, Promise<ArrayBuffer>>();
 
 export function campaignMusicMuted(): boolean {
   return muted;
+}
+
+export function campaignVolume(): number {
+  return volumeScale;
+}
+
+export function setCampaignVolume(scale: number): void {
+  const next = Math.min(1, Math.max(0, scale));
+  if (volumeScale === next) return;
+  volumeScale = next;
+  notify();
+  ramp(MUTE_FADE_SEC);
 }
 
 export function subscribeCampaignMusic(listener: () => void): () => void {
@@ -336,12 +350,12 @@ function stopVictory(): void {
 function level(slot: BedAudio, which: Exclude<CampaignBed, "off">): number {
   if (!armed || muted || bed !== which || !slot.source) return 0;
   if (which === "battle" && (victoryOn || themeHolding)) return 0;
-  return VOLUME;
+  return VOLUME * volumeScale;
 }
 
 function victoryLevel(): number {
   if (muted || !victoryOn) return 0;
-  return VOLUME;
+  return VOLUME * volumeScale;
 }
 
 function ramp(seconds: number): void {

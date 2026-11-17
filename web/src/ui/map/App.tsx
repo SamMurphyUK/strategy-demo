@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NEWMAP_PATH } from "../../content/game_scene_session_builder";
+import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
 import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
 import { loadJson } from "../../engine/content/res";
 import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
-import { factionIdFromDisplay } from "../../content/game_scene_session_builder";
 import { BattleScreen } from "./BattleScreen";
 import { playUiPanelFlick, soundManager } from "../../audio/sound_manager";
 import { Soundboard } from "../audio/Soundboard";
 import { playCampaignCue } from "./campaignAudio";
-import { armCampaignMusic, setCampaignBed } from "./campaignMusic";
+import { armCampaignMusic, setCampaignBed, setCampaignVolume } from "./campaignMusic";
 import { CombatDarken, CombatIntro } from "./CombatIntro";
 import {
   COMBAT_PAN_MS,
@@ -20,10 +19,12 @@ import {
 } from "./combatCamera";
 import { seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
 import { EditorPanel } from "./editor/EditorPanel";
+import { EditorStart } from "./editor/EditorStart";
 import { EditorToolbar } from "./editor/EditorToolbar";
-import { startingStacks } from "./editor/editorModel";
+import { boardFrame } from "./editor/blankMap";
+import { editorToMapJson, startingStacks } from "./editor/editorModel";
 import { useMapEditor } from "./editor/useMapEditor";
-import { factionChrome } from "./factionChrome";
+import { duskChrome, factionChrome } from "./factionChrome";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
@@ -41,6 +42,9 @@ import { isActiveFaction } from "./tokenStyle";
 import { nextFacingHold, type FacingHold, type FacingStacks } from "./uprightSprites";
 import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
 import { moveUnitsPayload } from "./stackMove";
+import { MainMenu } from "./menu/MainMenu";
+import { readCampaignSaves, writeCampaignSave, type CampaignSave } from "./menu/campaignSave";
+import { type PlayChoice } from "./session/play_map";
 import { useCampaignSession } from "./session/use_campaign_session";
 
 export type Selection =
@@ -57,6 +61,19 @@ interface ApproachPlan {
 }
 
 const MOVEMENT_PHASES = ["combat_move", "noncombat_move"];
+
+function storedVolume(): number {
+  try {
+    const raw = window.localStorage.getItem("strategy-demo.volume");
+    if (raw == null || raw.trim() === "") {
+      return 1;
+    }
+    const stored = Number(raw);
+    return Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : 1;
+  } catch {
+    return 1;
+  }
+}
 
 // Stable empties for editor mode, so the canvas does not see new objects every render.
 const NO_HIGHLIGHT: HighlightMode = { kind: "none" };
@@ -108,6 +125,18 @@ export function App() {
   const geometry = useMemo(() => buildMapGeometry(playMapJson), [playMapJson]);
   const { land, error: landError } = useMasterLand();
   const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(true);
+  const [boardGate, setBoardGate] = useState(false);
+  const [look, setLook] = useState<"field" | "dusk">(() => {
+    try {
+      return window.localStorage.getItem("strategy-demo.look") === "dusk" ? "dusk" : "field";
+    } catch {
+      return "field";
+    }
+  });
+  const [volume, setVolume] = useState(storedVolume);
+  const [playerFaction, setPlayerFaction] = useState("ussr");
+  const [saveTick, setSaveTick] = useState(0);
   const editor = useMapEditor(demoMapJson, land, editing);
   const editorStacks = useMemo(() => startingStacks(editor.map), [editor.map]);
   const editorOwners = useMemo(() => {
@@ -118,6 +147,82 @@ export function App() {
     }
     return out;
   }, [editor.map]);
+  const saves = useMemo(() => readCampaignSaves(), [saveTick]);
+  const board = editing ? boardFrame(editor.map) : null;
+
+  const stashSave = useCallback((): CampaignSave => {
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      label: `${game.mapName} · round ${session.state.game_round}`,
+      mapId: game.mapId,
+      mapName: game.mapName,
+      seed: game.seed,
+      map: game.map,
+      snapshot: game.capture(),
+    };
+  }, [game, session]);
+
+  useEffect(() => {
+    setCampaignVolume(volume);
+  }, [volume]);
+
+  useEffect(() => {
+    if (menuOpen || editing) {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      writeCampaignSave(stashSave());
+      setSaveTick((n) => n + 1);
+    }, 600);
+    return () => window.clearTimeout(handle);
+  }, [menuOpen, editing, stashSave, game.version]);
+
+  const openMenu = useCallback(() => {
+    writeCampaignSave(stashSave());
+    setSaveTick((n) => n + 1);
+    setEditing(false);
+    setBoardGate(false);
+    setMenuOpen(true);
+  }, [stashSave]);
+
+  const beginCampaign = useCallback(
+    (choice: PlayChoice, seed: number) => {
+      game.newGame(seed, choice);
+      setEditing(false);
+      setBoardGate(false);
+      setMenuOpen(false);
+    },
+    [game],
+  );
+
+  const resumeSave = useCallback(
+    (save: CampaignSave) => {
+      const choice: PlayChoice = { id: save.mapId, name: save.mapName, map: save.map };
+      game.newGame(save.seed, choice);
+      game.restore(save.snapshot);
+      setEditing(false);
+      setBoardGate(false);
+      setMenuOpen(false);
+    },
+    [game],
+  );
+
+  const playtest = useCallback(() => {
+    const json = editorToMapJson(editor.map, { round: false });
+    const stored = editor.archiveMap("Playtest", json);
+    if (stored.error !== "") {
+      return;
+    }
+    game.newGame(game.seed, {
+      id: stored.id,
+      name: "Playtest",
+      map: projectMapJson(prepareSavedMap(json)),
+    });
+    setEditing(false);
+    setBoardGate(false);
+    setMenuOpen(false);
+  }, [editor, game]);
 
   const [selectedRegionId, setSelectedRegionId] = useState("");
   /** Bumped when a capped fan opens the region inspector, so the panel can take focus. */
@@ -635,15 +740,16 @@ export function App() {
   return (
     <>
     <div
-      className="campaign"
-      style={factionChrome(faction)}
+      className={menuOpen ? "campaign menu-open" : "campaign"}
+      data-look={look}
+      style={look === "dusk" ? duskChrome() : factionChrome(faction)}
       inert={covered ? true : undefined}
       onClickCapture={(event) => {
         const target = event.target;
         if (!(target instanceof Element)) return;
         const button = target.closest("button");
         if (!button || button.closest(".sfx-toggle, .region-panel, .pending-orders")) return;
-        if (!button.closest(".phase-panel, .turn-bar, .editor-panel, .editor-toolbar")) return;
+        if (!button.closest(".phase-panel, .turn-bar, .editor-panel, .editor-toolbar, .main-menu, .editor-start")) return;
         playUiPanelFlick();
       }}
     >
@@ -651,7 +757,13 @@ export function App() {
         game={game}
         editing={editing}
         versions={editor.versions}
-        onToggleEditing={() => setEditing((e) => !e)}
+        onToggleEditing={() => {
+          setMenuOpen(false);
+          setBoardGate(false);
+          setEditing((e) => !e);
+        }}
+        onMenu={openMenu}
+        playerFaction={playerFaction}
         room={room}
       />
       <div className="main">
@@ -736,14 +848,17 @@ export function App() {
           warningRegionId={warningSea}
           editor={editing ? editor.binding : undefined}
           bindCamera={bindCamera}
+          menuBackdrop={menuOpen}
+          referenceImage={editing ? editor.referenceUrl : null}
+          frame={board}
           suspended={approach?.stage === "darken" || approach?.stage === "briefing" || battleOnScreen !== null}
           inBattle={approach !== null || battleOnScreen !== null}
         >
-          {editing && <EditorToolbar editor={editor} />}
+          {editing && !boardGate && <EditorToolbar editor={editor} />}
         </MapView>
         <aside className="sidebar">
           {editing ? (
-            <EditorPanel editor={editor} />
+            <EditorPanel editor={editor} onPlaytest={playtest} />
           ) : (
             <>
               <PhasePanel
@@ -778,7 +893,76 @@ export function App() {
           )}
         </aside>
       </div>
-      {!editing && <PendingOrders game={game} commandsEnabled={isMyTurn} onCancelled={() => setSelection(null)} />}
+      {!editing && !menuOpen && <PendingOrders game={game} commandsEnabled={isMyTurn} onCancelled={() => setSelection(null)} />}
+      {menuOpen && (
+        <MainMenu
+          mapName={game.mapName}
+          versions={editor.versions}
+          saves={saves}
+          room={room}
+          volume={volume}
+          look={look}
+          playerFaction={playerFaction}
+          onVolume={(value) => {
+            setVolume(value);
+            setCampaignVolume(value);
+            try {
+              window.localStorage.setItem("strategy-demo.volume", String(value));
+            } catch {
+              // The slider still moves. The next visit starts at full volume.
+            }
+          }}
+          onLook={(next) => {
+            setLook(next);
+            try {
+              window.localStorage.setItem("strategy-demo.look", next);
+            } catch {
+              // The look still changes for this visit.
+            }
+          }}
+          onPlayerFaction={setPlayerFaction}
+          onNewCampaign={beginCampaign}
+          onResume={resumeSave}
+          onSaveNow={() => {
+            writeCampaignSave(stashSave());
+            setSaveTick((n) => n + 1);
+          }}
+          onOpenEditor={() => {
+            setMenuOpen(false);
+            setEditing(true);
+            setBoardGate(true);
+          }}
+          onImportMap={(name, map) => editor.archiveMap(name, projectMapJson(prepareSavedMap(map))).error}
+        />
+      )}
+      {editing && boardGate && (
+        <EditorStart
+          versions={editor.versions}
+          onBlank={(width, height, referenceUrl) => {
+            editor.openBlank(width, height);
+            editor.setReference(referenceUrl);
+            setBoardGate(false);
+          }}
+          onDemo={() => {
+            editor.resetToDemo();
+            setBoardGate(false);
+          }}
+          onVersion={(id) => {
+            editor.loadVersion(id);
+            editor.setReference(null);
+            setBoardGate(false);
+          }}
+          onMap={(map) => {
+            editor.openMap(map);
+            setBoardGate(false);
+          }}
+          onBack={() => {
+            setEditing(false);
+            setBoardGate(false);
+            setMenuOpen(true);
+          }}
+        />
+      )}
     </div>
     {approach?.stage === "darken" && <CombatDarken onDone={showBriefing} />}
     {approach?.stage === "briefing" && (

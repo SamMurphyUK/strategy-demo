@@ -8,6 +8,8 @@ import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
 import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring, uncoveredLand } from "../regionClip";
 import type { MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
+import { blankEditorMap } from "./blankMap";
+import { validateEditorMap } from "./validateMap";
 import {
   CANONICAL_BOARD_NAME,
   parseVersionLibrary,
@@ -249,6 +251,17 @@ export interface MapEditor {
   loadVersion(id: string): void;
   /** Removes a saved version. The open map stays. */
   deleteVersion(id: string): void;
+  /** Replaces the open board. Undo returns to the map that was open. */
+  openMap(next: EditorMap, note?: string): void;
+  /** An empty board of `width` by `height` world units. */
+  openBlank(width: number, height: number): void;
+  /** A tracing sheet drawn over the board. Null clears it. */
+  referenceUrl: string | null;
+  setReference(url: string | null): void;
+  /** Closed polygons, names, and sea zones that do not meet. */
+  validate(): string[];
+  /** Stores `map` under `name` without changing the open board. `error` is empty when it saved. */
+  archiveMap(name: string, map: Dict): { id: string; error: string };
 }
 
 function anchorForLattice(region: EditorRegion, rings: LatticeRings, land: MasterLand | null): Vec2 {
@@ -377,6 +390,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   versionsRef.current = versions;
   const [strokeTolerance, setStrokeTolerance] = useState<StrokeTolerance>("medium");
   const [strokeSmooth, setStrokeSmooth] = useState(true);
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [latticeBrush, setLatticeBrush] = useState<"square" | "triangle">("square");
   const [latticeShift, setLatticeShift] = useState(false);
   const [latticeHover, setLatticeHover] = useState<LatticeHit | null>(null);
@@ -1264,8 +1278,37 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     setSelectedId("");
     setSecondId("");
     cancelDraft();
+    setReferenceUrl(null);
     setStatus("Reset to the demo map. Undo brings your work back.");
   }, [cancelDraft, commit, demoJson]);
+
+  const openMap = useCallback(
+    (next: EditorMap, note = "Map loaded.") => {
+      commit(next);
+      setSelectedId("");
+      setSecondId("");
+      setMergeIds([]);
+      setDraft([]);
+      setReferenceUrl(null);
+      setStatus(note);
+    },
+    [commit],
+  );
+
+  const openBlank = useCallback(
+    (width: number, height: number) => {
+      openMap(blankEditorMap(width, height), "Blank map. Draw land with the pen, then cut sea zones in Sea mode.");
+    },
+    [openMap],
+  );
+
+  const setReference = useCallback((url: string | null) => {
+    setReferenceUrl(url);
+  }, []);
+
+  const validate = useCallback((): string[] => {
+    return validateEditorMap(docRef.current.map, land ? (x, y) => isLandAt(land, { x, y }) : null);
+  }, [land]);
 
   const writeVersions = useCallback((next: MapVersion[]): boolean => {
     try {
@@ -1277,6 +1320,27 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     setVersions(next);
     return true;
   }, []);
+
+  const archiveMap = useCallback(
+    (name: string, mapJson: Dict): { id: string; error: string } => {
+      const problem = versionNameError(name);
+      if (problem) {
+        setStatus(problem);
+        return { id: "", error: problem };
+      }
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `v-${Date.now().toString(36)}`;
+      const next = upsertVersion(versionsRef.current, name, mapJson, Date.now(), id);
+      if (!writeVersions(next.versions)) {
+        const full = "This browser could not store that version. Delete an older one and try again.";
+        setStatus(full);
+        return { id: "", error: full };
+      }
+      setStatus(`Saved “${name.trim()}”.`);
+      return { id: next.version.id, error: "" };
+    },
+    [writeVersions],
+  );
 
   const saveVersion = useCallback(
     (name: string): string => {
@@ -1820,5 +1884,11 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     saveVersion,
     loadVersion,
     deleteVersion,
+    openMap,
+    openBlank,
+    referenceUrl,
+    setReference,
+    validate,
+    archiveMap,
   };
 }

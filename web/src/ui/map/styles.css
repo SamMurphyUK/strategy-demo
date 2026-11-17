@@ -25,6 +25,8 @@
   --serif: "JetBrains Mono", "VT323", "Courier New", ui-monospace, monospace;
   --mono: "JetBrains Mono", "VT323", "Courier New", ui-monospace, monospace;
 
+  position: relative;
+
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -1253,3 +1255,221 @@
   transform: translate(-50%, -50%);
   filter: drop-shadow(0 2px 3px rgba(75, 61, 68, 0.55));
 }
+
+/* The menu sits on the left third. The map behind it is the live board, dimmed. */
+.campaign.menu-open .turn-bar,
+.campaign.menu-open .sidebar,
+.campaign.menu-open .pending-orders {
+  display: none;
+}
+
+.campaign.menu-open .main {
+  position: absolute;
+  inset: 0;
+}
+
+.campaign.menu-open .map-canvas {
+  filter: contrast(0.72) brightness(0.55);
+}
+
+.campaign.menu-open .map-wrap {
+  pointer-events: none;
+}
+
+.campaign.menu-open .map-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(8, 6, 6, 0.78) 100%);
+  z-index: 4;
+}
+
+.campaign[data-look="dusk"] {
+  --frame: #1b2430;
+  --well: #243246;
+  --brass: #6d8494;
+  --gold: #8fbfc4;
+  --gold-text: #d5e4e2;
+  --parchment: #b7c4c6;
+  --button: #314154;
+  --button-edge: #6d8494;
+}
+
+.campaign[data-look="dusk"] .map-canvas {
+  filter: saturate(0.75) contrast(1.12);
+}
+
+.campaign.menu-open[data-look="dusk"] .map-canvas {
+  filter: saturate(0.75) contrast(0.85) brightness(0.55);
+}
+
+.main-menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(33vw, 420px);
+  min-width: 280px;
+  box-sizing: border-box;
+  padding: 28px 22px;
+  overflow: auto;
+  color: var(--gold-text);
+  background: rgba(28, 22, 24, 0.88);
+  border-right: 1px solid var(--brass);
+  box-shadow:
+    inset 0 0 0 5px rgba(28, 22, 24, 0.95),
+    inset 0 0 0 6px var(--gold);
+}
+
+.main-menu button.active {
+  background: var(--frame);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.main-menu h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.main-menu h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.main-menu-kicker {
+  margin: 0;
+  color: var(--gold);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.main-menu-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 22px;
+}
+
+.main-menu-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.main-menu-nav,
+.main-menu-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.main-menu button,
+.main-menu select,
+.main-menu input[type="text"],
+.main-menu input:not([type="range"]):not([type="file"]) {
+  font: inherit;
+  letter-spacing: 0.08em;
+}
+
+.main-menu-nav button,
+.main-menu-page > button {
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.main-menu label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--parchment);
+}
+
+.main-menu-saves,
+.editor-start-versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.main-menu-saves button,
+.editor-start-versions button {
+  width: 100%;
+  text-align: left;
+}
+
+.main-menu-seats,
+.editor-start-actions,
+.editor-start-size {
+  display: flex;
+  gap: 8px;
+}
+
+.turn-you {
+  color: var(--gold-text);
+  letter-spacing: 0.08em;
+}
+
+.editor-start-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 6, 6, 0.62);
+}
+
+.editor-start {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 22px;
+  color: var(--gold-text);
+  background: rgba(28, 22, 24, 0.94);
+  border: 1px solid var(--brass);
+  box-shadow:
+    inset 0 0 0 5px rgba(28, 22, 24, 0.95),
+    inset 0 0 0 6px var(--gold);
+}
+
+.editor-start h2,
+.editor-start h3 {
+  margin: 0 0 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.editor-start section {
+  margin: 16px 0;
+}
+
+.editor-start-size label,
+.editor-start-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--parchment);
+}
+
+.editor-start input[type="number"] {
+  width: 96px;
+  font: inherit;
+  color: inherit;
+  background: var(--button);
+  border: 1px solid var(--button-edge);
+}
+

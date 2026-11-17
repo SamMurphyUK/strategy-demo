@@ -40,6 +40,7 @@ import {
 import {
   fitView,
   panView,
+  projectionScales,
   tiltFactor,
   type View,
   visibleCopies,
@@ -147,6 +148,12 @@ export interface MapViewProps {
   sameTeam?(a: string, b: string): boolean;
   /** Piece counts from the start of the current faction's combat move. */
   facingStacks?: FacingStacks;
+  /** Slow autonomous pan while the main menu covers the board. */
+  menuBackdrop?: boolean;
+  /** Tracing sheet for a blank map, drawn over the board. */
+  referenceImage?: string | null;
+  /** Camera frame for a blank board. Absent frames the land mask. */
+  frame?: Rect | null;
 }
 
 const DRAG_THRESHOLD_PX = 4;
@@ -228,6 +235,7 @@ export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const referenceRef = useRef<HTMLImageElement | null>(null);
   const arrowRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
@@ -249,7 +257,7 @@ export function MapView(props: MapViewProps) {
   const splitPanel = useRef<HTMLDivElement>(null);
   useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
 
-  const bounds: Rect = land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
+  const bounds: Rect = props.frame ?? land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
   const userMoved = useRef(false);
   const lodHold = useRef<MapLod>(0);
@@ -401,10 +409,55 @@ export function MapView(props: MapViewProps) {
 
   // Fit until the user takes over, including once the land mask arrives and changes the bounds.
   useEffect(() => {
+    if (props.menuBackdrop) {
+      return;
+    }
     if (size.w > 0 && !userMoved.current) {
       setView(fitView(bounds, size.w, size.h));
     }
-  }, [size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
+  }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
+
+  // The menu keeps the live map moving: a slow figure-eight in world space, from wherever the camera sat.
+  useEffect(() => {
+    if (!props.menuBackdrop || size.w === 0) {
+      return;
+    }
+    const origin = fitView(bounds, size.w, size.h);
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = (now - t0) / 1000;
+      setView({
+        k: origin.k,
+        x: origin.x + Math.sin(t * 0.07) * 36,
+        y: origin.y + Math.sin(t * 0.05) * 18,
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
+
+  useEffect(() => {
+    const url = props.referenceImage;
+    if (!url) {
+      referenceRef.current = null;
+      return;
+    }
+    let gone = false;
+    const img = new Image();
+    img.onload = () => {
+      if (gone) {
+        return;
+      }
+      referenceRef.current = img;
+      setView((current) => ({ ...current }));
+    };
+    img.src = url;
+    return () => {
+      gone = true;
+    };
+  }, [props.referenceImage]);
 
   // A view left over from the old 24× cap is pulled back as soon as the map is on screen.
   useEffect(() => {
@@ -546,6 +599,17 @@ export function MapView(props: MapViewProps) {
           }),
     };
     drawTerrain(ctx, scene);
+    const refImg = referenceRef.current;
+    if (refImg && props.frame && refImg.complete && refImg.naturalWidth > 0) {
+      const { sx, sy } = projectionScales(view.k);
+      const xs = dpr * sx;
+      const ys = dpr * sy;
+      ctx.save();
+      ctx.setTransform(xs, 0, 0, ys, -view.x * xs, -view.y * ys);
+      ctx.globalAlpha = 0.4;
+      ctx.drawImage(refImg, props.frame.x, props.frame.y, props.frame.w, props.frame.h);
+      ctx.restore();
+    }
     const settled = !editor && mapLod === 2 && unitFade >= 1;
     spritesSettled.current = settled;
     const overlay: GameOverlay = {

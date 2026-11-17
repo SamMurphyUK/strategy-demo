@@ -50,8 +50,9 @@ function withCurrent(options: readonly string[], current: string): string[] {
   return [...new Set([...options, current])];
 }
 
-export function EditorPanel({ editor }: { editor: MapEditor }) {
+export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlaytest?: () => void }) {
   const [renameError, setRenameError] = useState("");
+  const [issues, setIssues] = useState<string[] | null>(null);
   const { selected, map } = editor;
   const num = (value: string, fallback: number) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
   const units = editor.selectedUnits;
@@ -380,7 +381,39 @@ export function EditorPanel({ editor }: { editor: MapEditor }) {
           <button type="button" onClick={editor.resetToDemo}>
             Reset to demo map
           </button>
+          <button
+            type="button"
+            onClick={() => setIssues(editor.validate())}
+          >
+            Validate map
+          </button>
+          {onPlaytest && (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                const found = editor.validate();
+                setIssues(found);
+                if (found.length === 0) {
+                  onPlaytest();
+                }
+              }}
+            >
+              Playtest
+            </button>
+          )}
         </div>
+        {issues && (
+          issues.length === 0 ? (
+            <p className="muted editor-hint">Map checks passed.</p>
+          ) : (
+            <ul className="warn editor-hint">
+              {issues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          )
+        )}
         <p className="muted editor-hint">
           Edits autosave in this browser. Ctrl+S saves the open map as a new version. [ Export Board JSON ]
           writes the saved version WorldMap_Populated from localStorage key strategy-demo.map-editor.versions.v1

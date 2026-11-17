@@ -36,3 +36,21 @@ export function factionChrome(factionId: string): CSSProperties {
     "--teal": mix(land, CREAM, 0.78),
   } as CSSProperties;
 }
+
+/** A cool night board. Inline so it wins over the faction tint. */
+export function duskChrome(): CSSProperties {
+  return {
+    "--land": "#6d8494",
+    "--frame": "#1b2430",
+    "--well": "#243246",
+    "--brass": "#6d8494",
+    "--gold": "#8fbfc4",
+    "--gold-text": "#d5e4e2",
+    "--parchment": "#b7c4c6",
+    "--button": "#314154",
+    "--button-edge": "#6d8494",
+    "--stamp": "#8f5a56",
+    "--chit-active": "#3d5168",
+    "--teal": "#8fbfc4",
+  } as CSSProperties;
+}

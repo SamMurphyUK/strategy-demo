@@ -34,6 +34,10 @@ export interface GameSessionHandle {
   noteError(message: string): void;
   /** Starts a new game on `choice`. Omit it to restart the map already being played. */
   newGame(seed: number, choice?: PlayChoice): void;
+  /** The board as a snapshot the host would broadcast. */
+  capture(): StubStateSnapshot;
+  /** Puts a saved snapshot back on the live session. */
+  restore(snapshot: StubStateSnapshot): void;
   /** `demo`, or the id of the saved version this game was started from. */
   mapId: string;
   mapName: string;
@@ -200,6 +204,25 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
     setVersion((v) => v + 1);
   }, []);
 
+  const capture = useCallback((): StubStateSnapshot => {
+    const snap = sessionRef.current!.state.toSnapshot();
+    return {
+      ...snap,
+      gameover: snap.game_over,
+      cost_table: {},
+      applied_event_ids: [],
+    };
+  }, []);
+
+  const restore = useCallback((snapshot: StubStateSnapshot) => {
+    const session = sessionRef.current;
+    if (!session) {
+      return;
+    }
+    applyAuthoritativeSnapshot(session, snapshot);
+    setVersion((v) => v + 1);
+  }, []);
+
   // The session is mutated in place, so `version` is what tells React it changed.
   return useMemo(
     () => ({
@@ -212,10 +235,12 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       applyRemote,
       noteError,
       newGame,
+      capture,
+      restore,
       mapId: choice.id,
       mapName: choice.name,
       map: choice.map,
     }),
-    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, choice],
+    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, capture, restore, choice],
   );
 }

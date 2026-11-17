@@ -19,10 +19,12 @@ interface Props {
   editing: boolean;
   versions: MapVersion[];
   onToggleEditing(): void;
+  onMenu?(): void;
+  playerFaction?: string;
   room?: RoomControls;
 }
 
-export function TurnBar({ game, editing, versions, onToggleEditing, room }: Props) {
+export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, playerFaction, room }: Props) {
   const state = game.session.state;
   const [seedInput, setSeedInput] = useState(String(game.seed));
   const [mapId, setMapId] = useState(game.mapId);
@@ -87,6 +89,12 @@ export function TurnBar({ game, editing, versions, onToggleEditing, room }: Prop
       <button type="button" className={editing ? "active editor-toggle" : "editor-toggle"} onClick={onToggleEditing}>
         {editing ? "Back to game" : "Map editor"}
       </button>
+      {playerFaction && <span className="turn-you">You: {factionName(playerFaction)}</span>}
+      {onMenu && (
+        <button type="button" onClick={onMenu}>
+          Menu
+        </button>
+      )}
       <form
         className="seed"
         onSubmit={(e) => {
