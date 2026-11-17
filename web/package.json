@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.battle.json",
     "rebuild-map-geometry": "node scripts/rebuild-map-geometry.mjs",
-    "normalize-land-svg": "node scripts/normalize-land-svg.mjs"
+    "normalize-land-svg": "node scripts/normalize-land-svg.mjs",
+    "bake:candidates": "tsx scripts/bakeCandidates.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
