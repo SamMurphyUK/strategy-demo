@@ -65,6 +65,13 @@ export function landFill(regionId: string, owner: string, mode: HighlightMode): 
   return base ? rgba(base, OWNED_ALPHA) : null;
 }
 
+function seaTargetWash(regionId: string, mode: HighlightMode): [number, number, number] {
+  if (mode.kind === "move" && mode.hostile) {
+    return mode.hostile.includes(regionId) ? REACHABLE : MOVE_BLUE;
+  }
+  return moveWash(mode);
+}
+
 /** Fill for a sea zone: a faint wash normally, so the zone reads against open ocean, and the move highlight. */
 export function seaFill(regionId: string, mode: HighlightMode): string {
   if (mode.kind === "move") {
@@ -72,7 +79,7 @@ export function seaFill(regionId: string, mode: HighlightMode): string {
       return rgba([255, 255, 255], 0.3);
     }
     if (mode.legal.includes(regionId)) {
-      return rgba(moveWash(mode), regionId === mode.hover ? 0.6 : 0.42);
+      return rgba(seaTargetWash(regionId, mode), regionId === mode.hover ? 0.6 : 0.42);
     }
   }
   if (mode.kind === "mobilize" && mode.legal.includes(regionId)) {

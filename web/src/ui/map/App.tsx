@@ -27,6 +27,7 @@ import { factionChrome } from "./factionChrome";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
+import { concealNeutralGarrison } from "./neutralGarrison";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PendingOrders } from "./panels/PendingOrders";
@@ -35,6 +36,7 @@ import { RegionPanel } from "./panels/RegionPanel";
 import { RoomPill } from "./panels/RoomPill";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
+import { rosterName } from "../theme/factionRoster";
 import { isActiveFaction } from "./tokenStyle";
 import { nextFacingHold, type FacingHold, type FacingStacks } from "./uprightSprites";
 import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
@@ -210,8 +212,28 @@ export function App() {
   }, [state, version]);
 
   const stacks = useMemo(() => {
+    const atWar = new Set<string>();
+    const battleId = state.active_battle?.region_id ?? "";
+    if (battleId !== "") {
+      atWar.add(battleId);
+    }
+    if (state.current_phase === "combat_move" || state.current_phase === "combat") {
+      for (const order of state.phase_orders) {
+        atWar.add(order.toRegionId);
+      }
+    }
+    for (const id of Object.keys(state.territories_fought_this_round)) {
+      if (state.territories_fought_this_round[id]) {
+        atWar.add(id);
+      }
+    }
     const out: Record<string, StackEntry[]> = {};
     for (const id of Object.keys(state.region_units)) {
+      const region = state.regions[id];
+      const owner = region?.owner_faction_id ?? "";
+      if (region != null && concealNeutralGarrison(owner, region.isLandRegion(), atWar.has(id))) {
+        continue;
+      }
       out[id] = RegionUnitDisplay.buildDisplayEntries(state.region_units[id]);
     }
     return out;
@@ -248,12 +270,14 @@ export function App() {
 
   const highlight: HighlightMode = useMemo(() => {
     if (selection?.kind === "stack") {
+      const naval = state.unit_types[selection.unitTypeId]?.category === "sea";
       return {
         kind: "move",
         from: selection.regionId,
         legal: legalTargets,
         hover: hoverRegionId,
         tone: phase === "noncombat_move" ? "move" : "attack",
+        hostile: naval ? legalTargets.filter((id) => state.holdsEnemyNavalUnit(id, faction)) : undefined,
       };
     }
     if (selection?.kind === "place") {
@@ -658,7 +682,11 @@ export function App() {
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
           onDragCancel={() => setSelection(null)}
           onDropMove={commitMove}
-          unitTitle={(entry) => unitName(entry.unit_type_id, session.state.unit_types)}
+          unitTitle={(entry) => {
+            const name = unitName(entry.unit_type_id, session.state.unit_types);
+            const historic = rosterName(entry.unit_type_id, entry.faction_id);
+            return historic ? `${historic} (${name})` : name;
+          }}
           movement={
             editing
               ? null

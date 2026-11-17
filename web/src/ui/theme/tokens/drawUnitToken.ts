@@ -1,7 +1,8 @@
-// Renders a unit chit for a faction: ring and fill drawn as vectors in the faction colours, the shared
+// Renders a unit chit for a faction: ring and fill drawn as vectors in the faction colours, then the
+// faction's own vector silhouette for roster units (factionSilhouettes.ts). Anything else gets the shared
 // silhouette tinted with the faction's ink, and a serif unit letter when the silhouette leaves room.
 //
-// One art file serves every faction. Results are cached per unit, faction and pixel size, and are only
+// One art file serves every faction for the shared drawings. Results are cached per unit, faction and pixel size, and are only
 // cached once the art has loaded, so a first paint never freezes in a half-finished state.
 
 import { factionPalette, resolveFaction, type FactionPalette } from "../factionPalette";
@@ -15,7 +16,11 @@ import {
   ringWidthPx,
   tokenCanvasSize,
 } from "./tokenGeometry";
+import { factionSilhouette } from "./factionSilhouettes";
 import { resolveTokenSpec } from "./unitTokenSpec";
+
+/** Faction silhouettes reach 0.46 of the diameter; this keeps them clear of the ring. */
+const OWN_SILHOUETTE_SCALE = 0.86;
 
 export const TOKEN_SERIF = 'Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif';
 
@@ -110,6 +115,20 @@ function paintToken(request: TokenRequest, dpr: number): RenderedToken {
   ctx.lineWidth = ringW;
   ctx.strokeStyle = palette.ring;
   ctx.stroke();
+
+  // A roster unit wears its own faction's silhouette, kept inside the ring.
+  const own = factionSilhouette(request.unitTypeId, request.factionId);
+  if (own) {
+    const k = d * OWN_SILHOUETTE_SCALE;
+    ctx.fillStyle = palette.ink;
+    for (const part of own) {
+      ctx.beginPath();
+      part.forEach((p, i) => (i === 0 ? ctx.moveTo(cx + p.x * k, cy + p.y * k) : ctx.lineTo(cx + p.x * k, cy + p.y * k)));
+      ctx.closePath();
+      ctx.fill();
+    }
+    return { canvas, complete: true };
+  }
 
   const status = spec.artName ? artStatus(spec.artName) : "ready";
   const art = spec.artName ? getArtMask(spec.artName) : null;

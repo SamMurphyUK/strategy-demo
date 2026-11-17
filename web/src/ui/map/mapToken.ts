@@ -65,14 +65,14 @@ function whiteLetter(ctx: CanvasRenderingContext2D, letter: string, x: number, y
 
 function paintFigure(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
   ctx.fillStyle = color;
-  for (const part of unitSilhouette(entry.unit_type_id)) {
+  for (const part of unitSilhouette(entry.unit_type_id, entry.faction_id)) {
     fillPolygon(ctx, part, x, y, d);
   }
 }
 
 function paintHull(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
   ctx.fillStyle = color;
-  for (const part of hullFor(entry.unit_type_id)) {
+  for (const part of hullFor(entry.unit_type_id, entry.faction_id)) {
     fillPolygon(ctx, part, x, y, d);
   }
 }

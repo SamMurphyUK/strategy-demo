@@ -362,6 +362,22 @@ function drawWarship(ctx: CanvasRenderingContext2D, color: string, unitType: str
   const carrier = unitType === "carrier";
   const hull = unitType === "battleship" ? 32 : sub ? 22 : 28;
   const left = -hull / 2;
+  if (unitType === "transport") {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(left, -1);
+    ctx.lineTo(left + 6, -7);
+    ctx.lineTo(hull / 2 - 4, -7);
+    ctx.lineTo(hull / 2, -1);
+    ctx.lineTo(hull / 2 - 3, 2);
+    ctx.lineTo(left + 1, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = TAUPE;
+    ctx.fillRect(left + 8, -11, 6, 4);
+    ctx.fillRect(left + 16, -10, 5, 3);
+    return;
+  }
   ctx.fillStyle = sub ? STEEL : color;
   ctx.fillRect(left, -5, hull, 5);
   ctx.fillStyle = CHARCOAL;
@@ -371,13 +387,11 @@ function drawWarship(ctx: CanvasRenderingContext2D, color: string, unitType: str
     ctx.fillRect(-3, -9, 6, 4);
     return;
   }
-  if (carrier || unitType === "transport") {
+  if (carrier) {
     ctx.fillStyle = TAUPE;
     ctx.fillRect(left + 2, -8, hull - 4, 3);
-    if (carrier) {
-      ctx.fillStyle = color;
-      ctx.fillRect(4, -13, 5, 5);
-    }
+    ctx.fillStyle = color;
+    ctx.fillRect(4, -13, 5, 5);
     return;
   }
   ctx.fillStyle = TAUPE;

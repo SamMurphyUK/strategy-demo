@@ -396,7 +396,15 @@ export function ownerFill(owner: string): Rgba {
 
 export type HighlightMode =
   | { kind: "none" }
-  | { kind: "move"; from: string; legal: string[]; hover: string; tone?: "attack" | "move" }
+  | {
+      kind: "move";
+      from: string;
+      legal: string[];
+      hover: string;
+      tone?: "attack" | "move";
+      /** Sea zones in `legal` that hold an enemy ship. Absent keeps the tone for every legal sea. */
+      hostile?: readonly string[];
+    }
   | { kind: "mobilize"; legal: string[]; hover: string };
 
 export function regionFill(regionId: string, owner: string, mode: HighlightMode): Rgba {

@@ -418,6 +418,19 @@ describe("highlights drawn over the baked map", () => {
     expect(highlightSeaFill("s", { kind: "move", from: "a", legal: ["s"], hover: "", tone: "attack" })).toContain("242, 38, 31");
   });
 
+  it("marks a sea zone hostile only when it is listed as holding an enemy ship", () => {
+    const mode = {
+      kind: "move" as const,
+      from: "a",
+      legal: ["empty", "fleet"],
+      hover: "",
+      tone: "attack" as const,
+      hostile: ["fleet"],
+    };
+    expect(highlightSeaFill("empty", mode)).toContain("36, 112, 210");
+    expect(highlightSeaFill("fleet", mode)).toContain("242, 38, 31");
+  });
+
   it("tints the legal targets of a mobilize", () => {
     const mode = { kind: "mobilize" as const, legal: ["b"], hover: "" };
     expect(highlightLandFill("b", "ussr", mode)).not.toBeNull();

@@ -5,6 +5,7 @@
 //                 and a bold classification letter above it
 //   Count pill    bottom-right: gold with black text for the faction whose turn it is, black with gold otherwise
 import { type FactionKey, resolveFaction } from "../theme/factionPalette";
+import { factionSilhouette } from "../theme/tokens/factionSilhouettes";
 import type { Vec2 } from "./geometry";
 
 /** Disc colours by faction. */
@@ -120,8 +121,15 @@ const HULLS: Record<string, Hull> = {
   ],
 };
 
-/** The hull for a sea unit. `sub` is a submarine. An unknown ship gets a destroyer's. */
-export function hullFor(unitTypeId: string): Hull {
+/**
+ * The hull for a sea unit. `sub` is a submarine. An unknown ship gets a destroyer's.
+ * With a faction, a roster ship gets that navy's own profile: Yamato's pagoda, the I-400's hangar.
+ */
+export function hullFor(unitTypeId: string, factionId?: string): Hull {
+  if (factionId !== undefined) {
+    const own = factionSilhouette(unitTypeId, factionId);
+    if (own) return own;
+  }
   const id = unitTypeId === "sub" ? "submarine" : unitTypeId;
   return HULLS[id] ?? HULLS.destroyer;
 }
@@ -216,8 +224,15 @@ const SILHOUETTES: Record<string, Hull> = {
   ],
 };
 
-/** The white silhouette for a unit type. Sea units are their hulls. An unknown type is a small diamond. */
-export function unitSilhouette(unitTypeId: string): Hull {
+/**
+ * The white silhouette for a unit type. Sea units are their hulls. An unknown type is a small diamond.
+ * With a faction, a roster unit gets that faction's own machine: a Stahlhelm, a T-34, a Spitfire's wing.
+ */
+export function unitSilhouette(unitTypeId: string, factionId?: string): Hull {
+  if (factionId !== undefined) {
+    const own = factionSilhouette(unitTypeId, factionId);
+    if (own) return own;
+  }
   const id = silhouetteId(unitTypeId);
   if (id === "sub" || id === "destroyer" || id === "cruiser" || id === "battleship" || id === "carrier" || id === "transport") {
     return hullFor(id);

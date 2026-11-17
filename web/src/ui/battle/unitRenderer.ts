@@ -18,6 +18,15 @@ import {
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { type FlagMotif, ipcLostCaption } from './flagMotif';
 import { MILITARY } from '../theme/militaryPalette';
+import {
+  type BomberCue,
+  type Bridge,
+  type FighterCue,
+  type Helmet,
+  type RosterCues,
+  type ShipCue,
+  rosterCues,
+} from '../theme/factionRoster';
 
 /**
  * STRICT 16-COLOR VINTAGE MILITARY PALETTE
@@ -1425,6 +1434,49 @@ export function drawPixelRankBadge(
 }
 
 /**
+ * A transport in a sea battle is a naval token: faction disc, waterline, hull and holds.
+ * The old matrix sprite was a flat bar and read as a road.
+ */
+function drawNavalTransportToken(
+  ctx: CanvasRenderingContext2D,
+  factionColor: string,
+  time: number,
+): void {
+  const bob = Math.sin(time * 2) * 0.6;
+  ctx.save();
+  ctx.translate(0, bob);
+  const r = 16;
+  ctx.beginPath();
+  ctx.arc(0, -2, r, 0, Math.PI * 2);
+  ctx.fillStyle = factionColor;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = PALETTE.bunkerCharcoal;
+  ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, -2, r - 1, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = "rgba(78, 84, 99, 0.55)";
+  ctx.fillRect(-r, -2, r * 2, r);
+  ctx.restore();
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.beginPath();
+  ctx.moveTo(-11, 1);
+  ctx.lineTo(-7, -5);
+  ctx.lineTo(7, -5);
+  ctx.lineTo(11, 0);
+  ctx.lineTo(7, 4);
+  ctx.lineTo(-8, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  ctx.fillRect(-6, -9, 5, 4);
+  ctx.fillRect(2, -8, 4, 3);
+  ctx.restore();
+}
+
+/**
  * Draws a procedural combat unit facing East (if Attacker) or West (if Defender),
  * using actual ambient occlusion drop shadows underneath and radial gradient bloom on muzzle flashes.
  */
@@ -1440,7 +1492,9 @@ export function drawProceduralUnit(
   isInFlight = false,
   smokeAlpha = 1.0,
   theater?: TheaterId,
+  factionId?: string,
 ) {
+  const cues = rosterCues(factionId);
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
 
@@ -1498,41 +1552,41 @@ export function drawProceduralUnit(
 
   switch (unit.type) {
     case 'infantry':
-      drawInfantry(ctx, factionColor, unit, time);
+      drawInfantry(ctx, factionColor, unit, time, cues.helmet);
       break;
     case 'mech_infantry':
       drawAnimatedUnitSprite(ctx, 'mech_infantry', factionColor, time);
       break;
     case 'artillery':
-      drawArtillery(ctx, factionColor, unit, time);
+      drawArtillery(ctx, factionColor, unit, time, cues);
       break;
     case 'tank':
     case 'armor':
-      drawTank(ctx, factionColor, unit, time);
+      drawTank(ctx, factionColor, unit, time, cues);
       break;
     case 'fighter':
-      drawFighter(ctx, factionColor, unit, time, noPlaneShadow);
+      drawFighter(ctx, factionColor, unit, time, noPlaneShadow, cues.fighter);
       break;
     case 'tactical_bomber':
-      drawTacticalBomber(ctx, factionColor, unit, time, noPlaneShadow);
+      drawTacticalBomber(ctx, factionColor, unit, time, noPlaneShadow, cues.bomber);
       break;
     case 'strategic_bomber':
-      drawStrategicBomber(ctx, factionColor, unit, time, noPlaneShadow);
+      drawStrategicBomber(ctx, factionColor, unit, time, noPlaneShadow, cues.bomber);
       break;
     case 'submarine':
-      drawSubmarine(ctx, factionColor, unit, time);
+      drawSubmarine(ctx, factionColor, unit, time, cues);
       break;
     case 'destroyer':
-      drawDestroyer(ctx, factionColor, unit, time);
+      drawDestroyer(ctx, factionColor, unit, time, cues.destroyer);
       break;
     case 'cruiser':
-      drawCruiser(ctx, factionColor, unit, time);
+      drawCruiser(ctx, factionColor, unit, time, cues.cruiser);
       break;
     case 'carrier':
-      drawCarrier(ctx, factionColor, unit, time, noFire);
+      drawCarrier(ctx, factionColor, unit, time, noFire, cues);
       break;
     case 'battleship':
-      drawBattleship(ctx, factionColor, unit, time, noFire);
+      drawBattleship(ctx, factionColor, unit, time, noFire, cues.battleship);
       break;
     case 'aaa':
       drawAaaFlak(ctx, factionColor, unit, time);
@@ -1541,7 +1595,7 @@ export function drawProceduralUnit(
       drawAnimatedUnitSprite(ctx, 'aa', factionColor, time);
       break;
     case 'transport':
-      drawAnimatedUnitSprite(ctx, 'transport', factionColor, time);
+      drawNavalTransportToken(ctx, factionColor, time);
       break;
   }
 
@@ -1550,8 +1604,10 @@ export function drawProceduralUnit(
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const muzzleBloomR = 18 * unit.animRecoil;
-    const flashX = unit.type === 'tank' ? 29 : 18;
-    const flashY = unit.type === 'tank' ? -9 : -2;
+    const isTank = unit.type === 'tank' || unit.type === 'armor';
+    const muzzle = isTank ? tankMuzzle(cues.tank) : { x: 18, y: -2 };
+    const flashX = muzzle.x;
+    const flashY = muzzle.y;
     const mGrad = ctx.createRadialGradient(flashX, flashY, 2, flashX, flashY, muzzleBloomR);
     mGrad.addColorStop(0, 'rgba(255, 250, 210, 0.95)');
     mGrad.addColorStop(0.3, 'rgba(255, 190, 70, 0.6)');
@@ -1591,11 +1647,78 @@ export function drawProceduralUnit(
   ctx.restore();
 }
 
+/**
+ * A soldier's helmet, centred on `cx` with the crown at `top`. The head sits from top + 3 to top + 8.
+ * Faces +x; a defender is already mirrored by the caller.
+ */
+function drawHelmet(ctx: CanvasRenderingContext2D, helmet: Helmet, cx: number, top: number, color: string) {
+  const ink = PALETTE.bunkerCharcoal;
+  switch (helmet) {
+    case 'stahlhelm':
+      // Coal-scuttle: dome, a skirt flaring down over the neck, a short visor.
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 4, top, 8, 4);
+      ctx.fillRect(cx - 5, top + 2, 3, 5);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 2, top + 3, 7, 1);
+      ctx.fillRect(cx - 6, top + 6, 2, 1);
+      return;
+    case 'ssh40':
+      // Tall rounded dome, a slight flare at the rim, the red star on the front.
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top - 2, 6, 1);
+      ctx.fillRect(cx - 4, top - 1, 8, 5);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 5, top + 3, 10, 1);
+      ctx.fillStyle = PALETTE.crimson;
+      ctx.fillRect(cx + 1, top + 1, 2, 2);
+      return;
+    case 'brodie':
+      // Soup bowl: a shallow dome on a wide flat brim.
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top + 1, 6, 3);
+      ctx.fillRect(cx - 6, top + 3, 12, 1);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 6, top + 4, 12, 1);
+      return;
+    case 'm1':
+      // Deep round pot reaching the ears, a narrow rim and a chinstrap.
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 3, top - 1, 6, 1);
+      ctx.fillRect(cx - 4, top, 8, 5);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 5, top + 4, 10, 1);
+      ctx.fillRect(cx + 2, top + 5, 1, 3);
+      return;
+    case 'havelock':
+      // Type 90 dome with the brass star, and a cloth sun flap hanging behind.
+      ctx.fillStyle = PALETTE.khakiLeather;
+      ctx.fillRect(cx - 5, top + 3, 3, 6);
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 4, top, 8, 4);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 4, top + 3, 9, 1);
+      ctx.fillStyle = PALETTE.mustardBrass;
+      ctx.fillRect(cx + 1, top + 1, 1, 1);
+      return;
+    case 'adrian':
+    default:
+      // Adrian: dome, a crest along the crown, front and rear peaks.
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - 4, top, 8, 4);
+      ctx.fillStyle = ink;
+      ctx.fillRect(cx - 1, top - 1, 3, 1);
+      ctx.fillRect(cx - 5, top + 3, 10, 2);
+      return;
+  }
+}
+
 function drawInfantry(
   ctx: CanvasRenderingContext2D,
   factionColor: string,
   unit: CombatUnit,
   time: number,
+  helmet: Helmet = 'adrian',
 ) {
   // Ambient occlusion drop shadow
   drawAmbientOcclusionShadow(ctx, 0, 9, 10, 4, 11);
@@ -1650,11 +1773,7 @@ function drawInfantry(
     ctx.fillStyle = PALETTE.plum;
     ctx.fillRect(-1, -9, 3, 2);
 
-    // Helmet
-    ctx.fillStyle = factionColor;
-    ctx.fillRect(-4, -15, 8, 4);
-    ctx.fillStyle = PALETTE.bunkerCharcoal;
-    ctx.fillRect(-5, -12, 10, 2);
+    drawHelmet(ctx, helmet, 0, -15, factionColor);
     return;
   }
 
@@ -1686,11 +1805,7 @@ function drawInfantry(
     ctx.fillStyle = PALETTE.sandCream;
     ctx.fillRect(-3, -11, 6, 5);
 
-    // Helmet Dome & Rim
-    ctx.fillStyle = factionColor;
-    ctx.fillRect(-4, -14, 8, 4);
-    ctx.fillStyle = PALETTE.bunkerCharcoal;
-    ctx.fillRect(-5, -11, 10, 2);
+    drawHelmet(ctx, helmet, 0, -14, factionColor);
 
     // Rifle carried at slope on shoulder while marching
     ctx.save();
@@ -1730,10 +1845,7 @@ function drawInfantry(
       ctx.fillStyle = PALETTE.sandCream;
       ctx.fillRect(-3, -10, 6, 4);
 
-      ctx.fillStyle = factionColor;
-      ctx.fillRect(-4, -13, 8, 4);
-      ctx.fillStyle = PALETTE.bunkerCharcoal;
-      ctx.fillRect(-5, -10, 10, 2);
+      drawHelmet(ctx, helmet, 0, -13, factionColor);
 
       ctx.fillStyle = PALETTE.earthBrown;
       ctx.fillRect(-1, -3, 8, 3);
@@ -1761,10 +1873,7 @@ function drawInfantry(
       ctx.fillStyle = PALETTE.sandCream;
       ctx.fillRect(-3, -11, 6, 5);
 
-      ctx.fillStyle = factionColor;
-      ctx.fillRect(-4, -14, 8, 4);
-      ctx.fillStyle = PALETTE.bunkerCharcoal;
-      ctx.fillRect(-5, -11, 10, 2);
+      drawHelmet(ctx, helmet, 0, -14, factionColor);
 
       ctx.save();
       ctx.rotate(rifleTilt);
@@ -1798,10 +1907,7 @@ function drawInfantry(
       ctx.fillStyle = PALETTE.sandCream;
       ctx.fillRect(-2, -12, 6, 5);
 
-      ctx.fillStyle = factionColor;
-      ctx.fillRect(-3, -15, 8, 4);
-      ctx.fillStyle = PALETTE.bunkerCharcoal;
-      ctx.fillRect(-4, -12, 10, 2);
+      drawHelmet(ctx, helmet, 1, -15, factionColor);
 
       // Hand to brow
       ctx.fillStyle = PALETTE.sandCream;
@@ -1845,11 +1951,7 @@ function drawInfantry(
   ctx.fillStyle = PALETTE.sandCream;
   ctx.fillRect(-3, -11, 6, 5);
 
-  // Helmet Dome & Rim
-  ctx.fillStyle = factionColor;
-  ctx.fillRect(-4, -14, 8, 4);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-5, -11, 10, 2);
+  drawHelmet(ctx, helmet, 0, -14, factionColor);
 
   // Rifle & Bayonet
   ctx.save();
@@ -1865,7 +1967,8 @@ function drawInfantry(
   ctx.restore();
 }
 
-function drawArtillery(ctx: CanvasRenderingContext2D, factionColor: string, unit: CombatUnit, time = 0) {
+function drawArtillery(ctx: CanvasRenderingContext2D, factionColor: string, unit: CombatUnit, time = 0, cues?: RosterCues) {
+  const gun = cues?.gun ?? { barrel: 20, bore: 4, brake: true, shield: 12, platform: false };
   // Ambient occlusion drop shadow for cannon
   drawAmbientOcclusionShadow(ctx, 0, 9, 15, 5, 18);
   // Ambient occlusion drop shadow for crewman standing behind
@@ -1913,13 +2016,16 @@ function drawArtillery(ctx: CanvasRenderingContext2D, factionColor: string, unit
   ctx.fillStyle = PALETTE.sandCream;
   ctx.fillRect(-19, -11, 5, 4);
 
-  // Helmet Dome & Brim
-  ctx.fillStyle = factionColor;
-  ctx.fillRect(-20, -14, 7, 3.5);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-21, -11, 9, 1.5);
+  drawHelmet(ctx, cues?.helmet ?? 'adrian', -16, -14, factionColor);
 
   // --- CANNON ASSEMBLY ---
+  // The 25-pounder sits on its round firing platform.
+  if (gun.platform) {
+    ctx.fillStyle = PALETTE.deepTaupe;
+    ctx.fillRect(-10, 9, 16, 2);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(-11, 10, 18, 1);
+  }
   // Split Trail Carriage
   ctx.fillStyle = PALETTE.deepTaupe;
   ctx.fillRect(-13, 2, 15, 4);
@@ -1948,22 +2054,40 @@ function drawArtillery(ctx: CanvasRenderingContext2D, factionColor: string, unit
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(-3, 2, 3, 3);
 
-  // Gun Shield
-  ctx.fillStyle = factionColor;
-  ctx.fillRect(-3, -8, 5, 12);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(2, -7, 1, 10);
+  // Gun shield: tall on a leFH 18, low on a ZiS-3.
+  if (gun.shield > 0) {
+    ctx.fillStyle = factionColor;
+    ctx.fillRect(-3, 4 - gun.shield, 5, gun.shield);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(2, 5 - gun.shield, 1, gun.shield - 2);
+  }
 
-  // Barrel with elevation adjustment
+  // Barrel with elevation adjustment: a stubby howitzer or a long field gun.
   ctx.save();
   const tiltAngle = (unit.animAnticipation > 0 ? -0.42 : -0.18) - crankTilt;
   ctx.rotate(tiltAngle);
   const barrelRecoil = unit.animRecoil > 0 ? unit.animRecoil * 4 : 0;
   ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(-4 - barrelRecoil, -5, 20, 4);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(14 - barrelRecoil, -6, 3, 6);
+  ctx.fillRect(-4 - barrelRecoil, -1 - gun.bore, gun.barrel, gun.bore);
+  if (gun.brake) {
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(gun.barrel - 6 - barrelRecoil, -2 - gun.bore, 3, gun.bore + 2);
+  }
   ctx.restore();
+}
+
+/** Turret box for a tank cue. The turret sits on the upper hull deck at y = -6. */
+function tankTurret(cue: RosterCues['tank']) {
+  const cx = cue.turretX + 2;
+  const left = Math.round(cx - cue.turretW / 2);
+  const top = -6 - cue.turretH;
+  return { cx, left, top, right: left + cue.turretW, gunY: top + Math.floor(cue.turretH / 2) - 2 };
+}
+
+/** Where the muzzle flash blooms for this faction's tank. */
+export function tankMuzzle(cue: RosterCues['tank']): { x: number; y: number } {
+  const t = tankTurret(cue);
+  return { x: t.right - 2 + cue.barrel + 1, y: t.gunY + 1 };
 }
 
 function drawTank(
@@ -1971,7 +2095,10 @@ function drawTank(
   factionColor: string,
   unit: CombatUnit,
   time: number,
+  cues: RosterCues,
 ) {
+  const cue = cues.tank;
+  const half = Math.round(cue.length / 2);
   const creepX = unit.animAnticipation > 0 ? 3 : 0;
   ctx.translate(creepX, 0);
 
@@ -1987,80 +2114,99 @@ function drawTank(
     turretAngle = Math.sin(unit.readyAnimProgress * Math.PI * 2) * 0.14;
   }
 
-  // Scaled up by ~30% for heavy imposing battlefield presence
-  // Ambient occlusion drop shadow
-  drawAmbientOcclusionShadow(ctx, 0, 11, 26, 8, 34);
+  drawAmbientOcclusionShadow(ctx, 0, 11, half + 8, 8, half * 2);
 
-  // Caterpillar Treads (widened and heightened by ~1.3x)
+  // Caterpillar treads. A Churchill's run up and over the hull sides.
   ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-18, 3, 36, 8);
+  if (cue.highTrack) {
+    ctx.fillRect(-half, -4, cue.length, 15);
+    ctx.fillRect(half - 2, -2, 3, 10); // track horn round the nose
+  } else {
+    ctx.fillRect(-half, 3, cue.length, 8);
+  }
 
-  // Animated turning track treads if marching
   if (unit.isMarching) {
     ctx.fillStyle = PALETTE.deepTaupe;
     const trackTick = Math.floor((time * 24) % 6);
-    for (let tx = -17 + trackTick; tx <= 16; tx += 6) {
+    for (let tx = -half + 1 + trackTick; tx <= half - 2; tx += 6) {
       ctx.fillRect(tx, 3, 2, 8);
     }
   }
 
-  // Road Wheels (5 heavy road wheels along track length)
+  // Road wheels: many small ones on a Churchill or Chi-Ha, five big ones on a T-34.
   ctx.fillStyle = PALETTE.feldgrau;
-  for (let i = -14; i <= 14; i += 7) {
+  const span = cue.length - 8;
+  const step = cue.wheels > 1 ? span / (cue.wheels - 1) : 0;
+  for (let w = 0; w < cue.wheels; w++) {
+    const wx = Math.round(-half + 4 + w * step);
     ctx.beginPath();
-    ctx.arc(i, 7, 3.2, 0, Math.PI * 2);
+    ctx.arc(wx, 7, cue.wheelR, 0, Math.PI * 2);
     ctx.fill();
     if (unit.isMarching) {
       ctx.fillStyle = PALETTE.sandCream;
       const spinAngle = time * 14;
-      ctx.fillRect(i + Math.cos(spinAngle) * 1.5, 7 + Math.sin(spinAngle) * 1.5, 1, 1);
+      ctx.fillRect(wx + Math.cos(spinAngle) * 1.5, 7 + Math.sin(spinAngle) * 1.5, 1, 1);
       ctx.fillStyle = PALETTE.feldgrau;
     }
   }
 
-  // Lower Hull
+  // Lower hull
   ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-17, -1, 34, 6);
+  ctx.fillRect(-half + 1, -1, cue.length - 2, 6);
 
-  // Upper Hull (sloped armor plate)
+  // Upper hull. The glacis slopes back on a T-34 or Sherman and stands as a slab on a Tiger.
   ctx.fillStyle = factionColor;
-  ctx.fillRect(-15, -6, 30, 6);
+  ctx.beginPath();
+  ctx.moveTo(-half + 3, -6);
+  ctx.lineTo(half - 3 - cue.glacis, -6);
+  ctx.lineTo(half - 1, 0);
+  ctx.lineTo(-half + 3, 0);
+  ctx.closePath();
+  ctx.fill();
   ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-16, -2, 4, 3); // Glacis edge detail
+  ctx.fillRect(-half + 2, -2, 4, 3);
 
-  // Heavy Turret with swivel capability
+  const t = tankTurret(cue);
   ctx.save();
   if (turretAngle !== 0) {
-    ctx.translate(3, -9);
+    ctx.translate(t.cx, t.top + cue.turretH / 2);
     ctx.rotate(turretAngle);
-    ctx.translate(-3, 9);
+    ctx.translate(-t.cx, -(t.top + cue.turretH / 2));
   }
 
   ctx.fillStyle = factionColor;
-  ctx.fillRect(-5, -13, 17, 8);
+  if (cue.castTurret) {
+    // Rounded cast turret: clipped corners and a sloped face.
+    ctx.fillRect(t.left + 1, t.top, cue.turretW - 3, cue.turretH);
+    ctx.fillRect(t.left, t.top + 1, cue.turretW - 1, cue.turretH - 1);
+    ctx.fillRect(t.right - 2, t.top + 2, 2, cue.turretH - 2);
+  } else {
+    ctx.fillRect(t.left, t.top, cue.turretW, cue.turretH);
+  }
   ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(9, -12, 3, 6); // Gun mantlet armor plate
+  ctx.fillRect(t.right - 3, t.top + 1, 3, cue.turretH - 2); // mantlet
   ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-3, -16, 7, 3); // Commander's cupola hatch
+  ctx.fillRect(t.left + 2, t.top - 3, Math.min(7, cue.turretW - 4), 3); // commander's cupola
 
-  // Heavy Cannon barrel (~1.3x length and thickness)
   ctx.save();
   if (unit.animAnticipation > 0) {
     ctx.rotate(-0.08);
   }
   const barrelRecoil = unit.animRecoil > 0 ? unit.animRecoil * 4.2 : 0;
+  const bore = cue.barrel > 14 ? 4 : 3;
   ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(10 - barrelRecoil, -10, 18, 4);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(27 - barrelRecoil, -11, 4, 6); // Imposing muzzle brake
+  ctx.fillRect(t.right - 2 - barrelRecoil, t.gunY, cue.barrel, bore);
+  if (cue.brake) {
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(t.right - 3 + cue.barrel - barrelRecoil, t.gunY - 1, 4, bore + 2);
+  }
   ctx.restore();
 
-  ctx.restore(); // restore turret swivel
+  ctx.restore();
 
-  // Exhaust
   const exhaustLife = (time * (unit.isMarching ? 7 : 4)) % 1;
   ctx.fillStyle = PALETTE.trenchMudBone;
-  ctx.fillRect(-18 - exhaustLife * 7, -3, unit.isMarching ? 4 : 3, unit.isMarching ? 4 : 3);
+  ctx.fillRect(-half - exhaustLife * 7, -3, unit.isMarching ? 4 : 3, unit.isMarching ? 4 : 3);
 }
 
 function drawFighter(
@@ -2069,6 +2215,7 @@ function drawFighter(
   unit: CombatUnit,
   time: number,
   noDropShadow = false,
+  cue: FighterCue = { radial: false, roundTips: false, scoop: false, fixedGear: false, canopy: 6 },
 ) {
   // Ambient occlusion drop shadow (omitted if noDropShadow)
   if (!noDropShadow) {
@@ -2080,27 +2227,55 @@ function drawFighter(
   const alt = (unit.isMarching ? -10 : -6) + Math.sin(time * 4) * 2 + jitter;
   ctx.translate(0, alt);
 
-  // Wings
+  // Wings. A Spitfire's or Zero's tips round off; a Bf 109's are clipped square.
   ctx.fillStyle = factionColor;
   ctx.fillRect(-6, -2, 14, 5);
   ctx.fillStyle = PALETTE.deepTaupe;
   ctx.fillRect(-8, 3, 16, 2);
+  if (cue.roundTips) {
+    ctx.fillRect(-9, 4, 1, 1);
+    ctx.fillRect(8, 4, 1, 1);
+  } else {
+    ctx.fillRect(-9, 3, 1, 2);
+    ctx.fillRect(8, 3, 1, 2);
+  }
+
+  // Fixed spatted undercarriage, as on the Fokker D.XXI.
+  if (cue.fixedGear) {
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(4, 2, 1, 5);
+    ctx.fillRect(3, 6, 3, 2);
+  }
 
   // Fuselage
   ctx.fillStyle = factionColor;
   ctx.fillRect(-12, -4, 22, 6);
 
-  // Nose Cowl
+  // Belly radiator scoop: Mustang and Yak.
+  if (cue.scoop) {
+    ctx.fillStyle = PALETTE.deepTaupe;
+    ctx.fillRect(-4, 2, 6, 2);
+  }
+
+  // Nose: a blunt radial cowl, or a pointed inline spinner.
   ctx.fillStyle = PALETTE.mustardBrass;
-  ctx.fillRect(10, -3, 3, 4);
+  if (cue.radial) {
+    ctx.fillRect(9, -5, 4, 8);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(9, -5, 1, 8);
+  } else {
+    ctx.fillRect(10, -3, 3, 4);
+    ctx.fillRect(13, -2, 1, 2);
+  }
 
   // Tail Fin
   ctx.fillStyle = factionColor;
   ctx.fillRect(-12, -9, 4, 6);
+  if (cue.roundTips) ctx.fillRect(-11, -10, 2, 1);
 
-  // Canopy
+  // Canopy: the Zero's long glasshouse, the Spitfire's short bubble.
   ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(-2, -6, 6, 3);
+  ctx.fillRect(1 - cue.canopy / 2, -6, cue.canopy, 3);
 
   // Propeller Blur
   ctx.fillStyle = PALETTE.sandCream;
@@ -2118,6 +2293,7 @@ function drawTacticalBomber(
   unit: CombatUnit,
   time: number,
   noDropShadow = false,
+  cue?: BomberCue,
 ) {
   // Ambient occlusion drop shadow (omitted if noDropShadow)
   if (!noDropShadow) {
@@ -2132,24 +2308,63 @@ function drawTacticalBomber(
   ctx.fillStyle = factionColor;
   ctx.fillRect(-8, -4, 18, 7);
   ctx.fillRect(-16, -5, 28, 8);
+  if (cue?.cigar) {
+    ctx.fillRect(-13, -7, 22, 2);
+    ctx.fillRect(-13, 3, 22, 2);
+  }
 
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(0, -9, 8, 4);
   ctx.fillRect(0, 3, 8, 4);
+  if (cue?.engines === 4) {
+    ctx.fillRect(-6, -8, 5, 3);
+    ctx.fillRect(-6, 3, 5, 3);
+  }
 
   ctx.fillStyle = PALETTE.sandCream;
   ctx.fillRect(8, -12, 1, 10);
   ctx.fillRect(8, 0, 1, 10);
 
-  ctx.fillStyle = factionColor;
-  ctx.fillRect(-16, -10, 4, 6);
-  ctx.fillRect(-16, 3, 4, 6);
-
-  ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(10, -4, 4, 6);
+  drawBomberTail(ctx, factionColor, -16, -5, cue);
+  drawBomberNose(ctx, 10, -4, 6, cue);
 
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(-2, 3, 8, 3);
+}
+
+/** Tail feathers: one fin, a B-17's tall one, or the twin fins of a Lancaster or Pe-2. `y` is the fuselage top. */
+function drawBomberTail(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, cue?: BomberCue) {
+  ctx.fillStyle = color;
+  if (cue?.twinTail) {
+    ctx.fillRect(x, y - 6, 3, 7);
+    ctx.fillRect(x + 1, y + 8, 3, 6);
+    ctx.fillStyle = PALETTE.deepTaupe;
+    ctx.fillRect(x, y + 2, 4, 2);
+  } else if (cue?.tallFin) {
+    ctx.fillRect(x, y - 9, 4, 10);
+    ctx.fillRect(x + 4, y - 4, 4, 4);
+  } else {
+    ctx.fillRect(x, y - 5, 4, 6);
+    ctx.fillRect(x, y + 8, 4, 6);
+  }
+}
+
+/** The nose: fully glazed on the He 111 and Betty, a solid nose with a gun turret on the Lancaster. */
+function drawBomberNose(ctx: CanvasRenderingContext2D, x: number, y: number, h: number, cue?: BomberCue) {
+  if (cue && !cue.glazedNose) {
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(x, y, 3, h);
+    ctx.fillStyle = PALETTE.spruceSea;
+    ctx.fillRect(x + 3, y + 1, 2, 3);
+    return;
+  }
+  ctx.fillStyle = PALETTE.spruceSea;
+  ctx.fillRect(x, y, 4, h);
+  if (cue?.glazedNose) {
+    ctx.fillRect(x + 4, y + 1, 2, h - 2);
+    ctx.fillStyle = PALETTE.sandCream;
+    ctx.fillRect(x + 1, y + 1, 1, 1);
+  }
 }
 
 function drawStrategicBomber(
@@ -2158,6 +2373,7 @@ function drawStrategicBomber(
   unit: CombatUnit,
   time: number,
   noDropShadow = false,
+  cue?: BomberCue,
 ) {
   // Ambient occlusion drop shadow (omitted if noDropShadow)
   if (!noDropShadow) {
@@ -2171,15 +2387,23 @@ function drawStrategicBomber(
   ctx.fillStyle = factionColor;
   ctx.fillRect(-10, -6, 24, 10);
   ctx.fillRect(-22, -6, 40, 10);
+  if (cue?.cigar) {
+    // The Betty's deep rounded cigar body.
+    ctx.fillRect(-18, -8, 32, 2);
+    ctx.fillRect(-18, 4, 32, 2);
+  }
 
+  // Engine nacelles: four on a Lancaster or B-17, two on a He 111, Pe-2 or Betty.
   ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(-2, -14, 8, 4);
+  if (cue?.engines !== 2) {
+    ctx.fillRect(-2, -14, 8, 4);
+    ctx.fillRect(-2, 9, 8, 4);
+  }
   ctx.fillRect(4, -10, 8, 4);
   ctx.fillRect(4, 5, 8, 4);
-  ctx.fillRect(-2, 9, 8, 4);
 
-  ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(14, -5, 5, 5);
+  drawBomberTail(ctx, factionColor, -22, -6, cue);
+  drawBomberNose(ctx, 14, -5, 5, cue);
 
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(-22, -3, 3, 3);
@@ -2191,61 +2415,142 @@ function drawSubmarine(
   factionColor: string,
   unit: CombatUnit,
   time: number,
+  cues?: RosterCues,
 ) {
+  const cue = cues?.sub ?? { length: 46, tower: 12, hangar: false, deckGun: true };
+  const half = Math.round(cue.length / 2);
+
   // Ambient occlusion and submerged hull shadow
-  drawAmbientOcclusionShadow(ctx, 0, 5, 26, 6, 22);
+  drawAmbientOcclusionShadow(ctx, 0, 5, half + 3, 6, cue.length / 2);
 
   // Submerged dark hull shadow underwater in bunker charcoal / spruce sea
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.beginPath();
-  ctx.ellipse(0, 4, 25, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 4, half + 2, 7, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // Waterline hull (slate / faction color)
   ctx.fillStyle = factionColor;
   ctx.beginPath();
-  ctx.moveTo(-22, 3);
-  ctx.lineTo(24, 3);
-  ctx.lineTo(22, 0);
-  ctx.lineTo(-20, 0);
+  ctx.moveTo(-half + 1, 3);
+  ctx.lineTo(half + 1, 3);
+  ctx.lineTo(half - 1, 0);
+  ctx.lineTo(-half + 3, 0);
   ctx.closePath();
   ctx.fill();
 
-  // Low-profile Conning Tower
+  // The I-400's long aircraft hangar runs forward from the tower.
+  if (cue.hangar) {
+    ctx.fillStyle = factionColor;
+    ctx.fillRect(4, -5, 16, 5);
+    ctx.fillStyle = PALETTE.deepTaupe;
+    ctx.fillRect(4, -5, 16, 1);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(19, -4, 1, 4); // hangar door
+    ctx.fillStyle = PALETTE.navalSteel;
+    ctx.fillRect(20, -1, half - 22, 1); // catapult rail
+  }
+
+  // Conning tower: low on a Type VII, tall on a T-class or I-400.
+  const towerH = Math.round(cue.tower * 0.6);
   ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-4, -6, 12, 7);
+  ctx.fillRect(-4, -towerH, cue.tower, towerH + 1);
   ctx.fillStyle = factionColor;
-  ctx.fillRect(-2, -5, 8, 5);
+  ctx.fillRect(-2, 1 - towerH, cue.tower - 4, towerH - 1);
 
   // Periscope shears & searchlight
   ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(1, -12, 2, 7);
+  ctx.fillRect(1, -towerH - 6, 2, 7);
   ctx.fillStyle = PALETTE.sandCream;
-  ctx.fillRect(1, -12, 3, 2); // Periscope lens glint
+  ctx.fillRect(1, -towerH - 6, 3, 2); // Periscope lens glint
 
-  // Foredeck deck gun
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(9, -2, 4, 2);
-  ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(11, -3, 6, 1.5);
+  // Foredeck deck gun, ahead of the tower or the hangar.
+  if (cue.deckGun) {
+    const gx = cue.hangar ? -12 : cue.tower;
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(gx, -2, 4, 2);
+    ctx.fillStyle = PALETTE.navalSteel;
+    ctx.fillRect(gx + 2, -3, 6, 1.5);
+  }
 
   // Bow torpedo tube shutter caps
   ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(22, 1, 2, 2);
+  ctx.fillRect(half - 2, 1, 2, 2);
 
   // Bow wave and churning water wake ripples
   ctx.fillStyle = PALETTE.sandCream;
   const wakeW = Math.sin(time * 3) * 2;
-  ctx.fillRect(23, 3, 6 + wakeW, 1.5);
-  ctx.fillRect(-26, 3, 8, 1.5);
+  ctx.fillRect(half - 1, 3, 6 + wakeW, 1.5);
+  ctx.fillRect(-half - 3, 3, 8, 1.5);
   ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(-24, 4, 18, 1.5);
+  ctx.fillRect(-half - 1, 4, 18, 1.5);
 
   // Torpedo launch bubbles on fire
   if (unit.animRecoil > 0) {
     ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillRect(26, 0, 4, 3);
-    ctx.fillRect(30, 1, 3, 2);
+    ctx.fillRect(half + 2, 0, 4, 3);
+    ctx.fillRect(half + 6, 1, 3, 2);
+  }
+}
+
+/** Funnels with smoke caps, spaced aft from `x`. */
+function drawFunnels(ctx: CanvasRenderingContext2D, count: number, x: number, top: number, h: number, w: number, gap: number) {
+  for (let i = 0; i < count; i++) {
+    const fx = x - i * (w + gap);
+    ctx.fillStyle = PALETTE.deepTaupe;
+    ctx.fillRect(fx, top, w, h);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(fx, top - 1, w, 2);
+  }
+}
+
+/**
+ * The bridge and mast above the citadel. `x` is its centre, `deck` the citadel top, `scale` grows it with the hull.
+ * A pagoda for Yamato and Takao, a tower for Bismarck and Iowa, a tripod mast, or a boxy British bridge.
+ */
+function drawBridge(ctx: CanvasRenderingContext2D, bridge: Bridge, x: number, deck: number, scale: number) {
+  const s = (n: number) => Math.round(n * scale);
+  switch (bridge) {
+    case 'pagoda':
+      for (let tier = 0; tier < 4; tier++) {
+        const w = s(12 - tier * 2);
+        ctx.fillStyle = tier % 2 === 0 ? PALETTE.feldgrau : PALETTE.navalSteel;
+        ctx.fillRect(x - Math.round(w / 2), deck - s(4) * (tier + 1), w, s(4));
+      }
+      ctx.fillStyle = PALETTE.spruceSea;
+      ctx.fillRect(x - s(3), deck - s(14), s(6), 1);
+      ctx.fillStyle = PALETTE.bunkerCharcoal;
+      ctx.fillRect(x - s(5), deck - s(17), s(10), 2); // rangefinder
+      return;
+    case 'tower':
+      ctx.fillStyle = PALETTE.feldgrau;
+      ctx.fillRect(x - s(5), deck - s(8), s(10), s(8));
+      ctx.fillStyle = PALETTE.navalSteel;
+      ctx.fillRect(x - s(3), deck - s(13), s(6), s(5));
+      ctx.fillStyle = PALETTE.spruceSea;
+      ctx.fillRect(x - s(4), deck - s(6), s(8), 2);
+      ctx.fillStyle = PALETTE.bunkerCharcoal;
+      ctx.fillRect(x - s(4), deck - s(14), s(8), 2);
+      return;
+    case 'tripod':
+      ctx.fillStyle = PALETTE.feldgrau;
+      ctx.fillRect(x - s(5), deck - s(5), s(10), s(5));
+      ctx.fillStyle = PALETTE.spruceSea;
+      ctx.fillRect(x - s(3), deck - s(3), s(7), 2);
+      ctx.fillStyle = PALETTE.bunkerCharcoal;
+      ctx.fillRect(x, deck - s(11), 2, s(7));
+      ctx.fillRect(x - s(3), deck - s(10), s(8), 1.5);
+      return;
+    case 'block':
+    default:
+      ctx.fillStyle = PALETTE.feldgrau;
+      ctx.fillRect(x - s(6), deck - s(6), s(12), s(6));
+      ctx.fillStyle = PALETTE.spruceSea;
+      ctx.fillRect(x - s(5), deck - s(4), s(10), 2);
+      ctx.fillStyle = PALETTE.bunkerCharcoal;
+      ctx.fillRect(x - s(1), deck - s(10), 2, s(4));
+      ctx.fillRect(x - s(4), deck - s(9), s(8), 1.5);
+      return;
   }
 }
 
@@ -2254,6 +2559,7 @@ function drawDestroyer(
   factionColor: string,
   unit: CombatUnit,
   time: number,
+  cue: ShipCue = { funnels: 1, bridge: 'tripod', turrets: 2 },
 ) {
   // Ambient occlusion drop shadow under hull
   drawAmbientOcclusionShadow(ctx, 0, 7, 28, 6, 24);
@@ -2277,24 +2583,15 @@ function drawDestroyer(
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(-23, 3, 49, 1.5);
 
-  // Superstructure: Enclosed Bridge & Flying Bridge
+  // A superfiring B turret stands just behind the bridge front.
+  if (cue.turrets >= 3) drawNavalTurret(ctx, 10, -6, unit.animRecoil > 0 ? -0.26 : 0, 0, 8, false, 0);
+
+  // Superstructure citadel, then this navy's bridge on top.
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(-6, -9, 14, 8);
-  ctx.fillStyle = PALETTE.feldgrau;
-  ctx.fillRect(-4, -13, 10, 5);
-  ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(-3, -11, 7, 2); // Bridge observation slits
+  drawBridge(ctx, cue.bridge, 1, -8, 0.85);
 
-  // Rangefinder director & tripod mast
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(1, -19, 2, 7);
-  ctx.fillRect(-2, -18, 8, 1.5);
-
-  // Funnels (with black smoke caps)
-  ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-12, -10, 5, 8);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-12, -11, 5, 2);
+  drawFunnels(ctx, cue.funnels, -12, -10, 8, 4, 2);
 
   // Midships Torpedo Tube Bank
   ctx.fillStyle = PALETTE.navalSteel;
@@ -2326,6 +2623,7 @@ function drawCruiser(
   factionColor: string,
   unit: CombatUnit,
   time: number,
+  cue: ShipCue = { funnels: 2, bridge: 'tripod', turrets: 3 },
 ) {
   // Ambient occlusion drop shadow under hull
   drawAmbientOcclusionShadow(ctx, 0, 8, 34, 7, 30);
@@ -2349,26 +2647,13 @@ function drawCruiser(
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(-29, 3, 61, 2);
 
-  // Multi-tier Superstructure Citadel
+  // Superstructure citadel and this navy's bridge: Takao's great pagoda, the County's boxy bridge.
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(-9, -12, 18, 9);
-  ctx.fillStyle = PALETTE.feldgrau;
-  ctx.fillRect(-6, -17, 13, 6);
-  ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(-4, -15, 9, 2); // Bridge observation slits
+  drawBridge(ctx, cue.bridge, 1, -11, 1);
 
-  // Rangefinder Director & Fire Control Tower
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(0, -24, 3, 8);
-  ctx.fillRect(-4, -23, 11, 2);
-
-  // Twin Funnels with smoke caps
-  ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-17, -13, 6, 10);
-  ctx.fillRect(-8, -13, 5, 10);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-17, -14, 6, 2);
-  ctx.fillRect(-8, -14, 5, 2);
+  // Funnels: one big one on a Hipper, three tall stacks on a County.
+  drawFunnels(ctx, cue.funnels, -8, -13, 10, 5, cue.funnels === 3 ? 1 : 3);
 
   // Aircraft Catapult on quarterdeck
   ctx.fillStyle = PALETTE.navalSteel;
@@ -2389,8 +2674,9 @@ function drawCruiser(
   const barrelRecoil = isFiring ? unit.animRecoil * 4.2 : 0;
 
   drawNavalTurret(ctx, 20, -5, turretAngle, barrelRecoil, 12, isFiring, unit.animRecoil);
-  drawNavalTurret(ctx, 8, -9, turretAngle, barrelRecoil, 12, isFiring, unit.animRecoil);
-  drawNavalTurret(ctx, -21, -5, isFiring ? -0.12 : 0, isFiring ? barrelRecoil * 0.6 : 0, 11, false, 0);
+  if (cue.turrets >= 3) drawNavalTurret(ctx, 8, -9, turretAngle, barrelRecoil, 12, isFiring, unit.animRecoil);
+  if (cue.turrets >= 4) drawNavalTurret(ctx, -16, -9, isFiring ? -0.12 : 0, 0, 10, false, 0);
+  drawNavalTurret(ctx, cue.turrets >= 4 ? -26 : -21, -5, isFiring ? -0.12 : 0, isFiring ? barrelRecoil * 0.6 : 0, 11, false, 0);
 }
 
 function drawCarrier(
@@ -2399,7 +2685,9 @@ function drawCarrier(
   unit: CombatUnit,
   time: number,
   noFire = false,
+  cues?: RosterCues,
 ) {
+  const island = cues?.carrier ?? { islandW: 10, islandH: 10, islandX: 9, funnel: true };
   // Ambient occlusion drop shadow under hull
   drawAmbientOcclusionShadow(ctx, 0, 8, 38, 7, 34);
 
@@ -2445,18 +2733,27 @@ function drawCarrier(
   ctx.fillRect(-20, -6, 1, 5);
   ctx.fillRect(-14, -6, 1, 5);
 
-  // Starboard Island Superstructure Bridge Tower & Radar
+  // Starboard island: Essex's big block, Shokaku's small one far forward, Graf Zeppelin's long one.
+  const il = Math.round(island.islandX - island.islandW / 2);
+  const it = -5 - island.islandH;
   ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(4, -15, 10, 10);
+  ctx.fillRect(il, it, island.islandW, island.islandH);
   ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(6, -14, 7, 6);
+  ctx.fillRect(il + 2, it + 1, island.islandW - 3, Math.max(3, island.islandH - 4));
   ctx.fillStyle = PALETTE.feldgrau;
-  ctx.fillRect(8, -19, 2, 5); // Radar mast
-  ctx.fillRect(5, -18, 8, 1.5);
+  const mastX = il + Math.floor(island.islandW / 2);
+  ctx.fillRect(mastX - 1, it - 4, 2, 5); // Radar mast
+  ctx.fillRect(mastX - 4, it - 3, 8, 1.5);
 
-  // Chimney / Funnel venting off island side
+  // Funnel trunked into the island. Shokaku vents down the hull side instead.
   ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(1, -12, 3, 7);
+  if (island.funnel) {
+    ctx.fillRect(il - 3, it + 3, 3, island.islandH - 3);
+  } else {
+    ctx.fillRect(il - 2, -1, 3, 4);
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(il - 2, 3, 3, 1);
+  }
 
   // --- CARRIER PLANE CAPACITY & AIRPLANE SYMBOLS ---
   // Count active planes carried (default max 2)
@@ -2591,6 +2888,7 @@ function drawBattleship(
   unit: CombatUnit,
   time: number,
   noFire = false,
+  cue: ShipCue = { funnels: 2, bridge: 'tripod', turrets: 3 },
 ) {
   // Massive broadside capital ship (~88px long)
   // Ambient occlusion drop shadow under massive hull
@@ -2615,28 +2913,14 @@ function drawBattleship(
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(-41, 4, 82, 3);
 
-  // Armored Citadel & Bridge Superstructure
+  // Armored citadel, then this navy's bridge: Yamato's pagoda, Bismarck's tower, King George V's block.
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(-15, -14, 28, 10);
-  ctx.fillStyle = PALETTE.feldgrau;
-  ctx.fillRect(-10, -20, 20, 7);
-  ctx.fillStyle = PALETTE.spruceSea;
-  ctx.fillRect(-8, -17, 16, 2.5); // Bridge armored slits
 
-  // Tripod Mast & Rangefinder Directors
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-1, -29, 3, 10);
-  ctx.fillRect(-6, -28, 13, 2);
-  ctx.fillStyle = PALETTE.sandCream;
-  ctx.fillRect(-4, -26, 9, 1);
-
-  // Twin Heavy Funnels with smoke caps
-  ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(-24, -16, 8, 12);
-  ctx.fillRect(-15, -16, 7, 12);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-24, -17, 8, 2);
-  ctx.fillRect(-15, -17, 7, 2);
+  // Heavy funnels behind the bridge. Yamato's single raked stack, Iowa's pair.
+  const fourTurrets = cue.turrets >= 4;
+  drawFunnels(ctx, cue.funnels, fourTurrets ? -9 : -15, -16, 12, cue.funnels === 1 ? 9 : 7, 2);
+  drawBridge(ctx, cue.bridge, 0, -13, 1.4);
 
   // Secondary 5-inch Casemate Battery Ports
   ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -2658,8 +2942,9 @@ function drawBattleship(
   const barrelRecoil = isFiring ? unit.animRecoil * 5.2 : 0;
 
   drawNavalTurret(ctx, 24, -6, turretAngle, barrelRecoil, 15, isFiring, unit.animRecoil, true);
-  drawNavalTurret(ctx, 10, -11, turretAngle, barrelRecoil, 15, isFiring, unit.animRecoil, true);
-  drawNavalTurret(ctx, -28, -6, isFiring ? -0.15 : 0, isFiring ? barrelRecoil * 0.7 : 0, 14, false, 0, true);
+  if (cue.turrets >= 3) drawNavalTurret(ctx, 10, -11, turretAngle, barrelRecoil, 15, isFiring, unit.animRecoil, true);
+  if (fourTurrets) drawNavalTurret(ctx, -20, -11, isFiring ? -0.15 : 0, isFiring ? barrelRecoil * 0.7 : 0, 14, false, 0, true);
+  drawNavalTurret(ctx, fourTurrets ? -33 : -28, -6, isFiring ? -0.15 : 0, isFiring ? barrelRecoil * 0.7 : 0, 14, false, 0, true);
 
   // 1st Hit (Injured Phase):
   // Permanently tilted 10 degrees, continuous rising dithered black smoke (no fire if in AIR STRIKE TEST)!

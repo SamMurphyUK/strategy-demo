@@ -200,6 +200,17 @@ export interface PhaseQuery {
   shoreFired: boolean;
   attackers: FiringUnit[];
   defenders: FiringUnit[];
+  /** Hits the attacker has scored in the ranks fired so far this round. */
+  attackerHits?: number;
+  /** Hit points the defenders still have. A two-hit ship counts twice. */
+  defenderHitPoints?: number;
+}
+
+/** The attacker has already scored enough this round to destroy every defender. */
+export function defendersOverwhelmed(query: PhaseQuery): boolean {
+  const hits = query.attackerHits ?? 0;
+  const hp = query.defenderHitPoints;
+  return hp != null && hp > 0 && hits >= hp;
 }
 
 function firstRank(query: PhaseQuery, side: "attacker" | "defender"): BattlePhase | null {
@@ -261,6 +272,11 @@ export function nextCombatPhase(query: PhaseQuery): BattlePhase {
   }
 
   if (current.startsWith("ATK_RANK_")) {
+    // Every defender is already accounted for, so the attacker's later ranks hold fire.
+    // Defenders still return fire this round, then casualties are taken.
+    if (defendersOverwhelmed(query)) {
+      return firstRank(query, "defender") ?? "ALLOCATION";
+    }
     const rank = Number(current.replace("ATK_RANK_", ""));
     for (let next = rank + 1; next <= 4; next++) {
       if (rankCanFire(query.attackers, "attacker", next, query.theater)) {

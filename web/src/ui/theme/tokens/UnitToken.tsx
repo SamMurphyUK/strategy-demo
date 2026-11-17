@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { rosterName } from "../factionRoster";
 import { renderUnitToken } from "./drawUnitToken";
 import { getTokenArtVersion, subscribeTokenArt } from "./tokenArt";
 import { TOKEN_WIDTH_RATIO } from "./tokenGeometry";
@@ -9,6 +10,7 @@ interface Props {
   faction: string;
   /** Circle diameter in px. The silhouette may overhang the circle sideways. */
   size?: number;
+  /** Tooltip. Defaults to the faction's historical name for the piece, such as "M4 Sherman". */
   title?: string;
   className?: string;
 }
@@ -30,12 +32,13 @@ export function UnitToken({ unit, faction, size = 48, title, className }: Props)
   }, [unit, faction, size, dpr, artVersion]);
 
   const bleed = (size * (TOKEN_WIDTH_RATIO - 1)) / 2;
+  const tip = title ?? rosterName(unit, faction) ?? undefined;
   return (
     <span
       className={className ? `unit-token ${className}` : "unit-token"}
       role="img"
-      aria-label={title ?? `${faction} ${unit}`}
-      title={title}
+      aria-label={tip ?? `${faction} ${unit}`}
+      title={tip}
       style={{ width: size, height: size }}
     >
       <canvas ref={ref} style={{ left: -bleed, width: size * TOKEN_WIDTH_RATIO, height: size }} />

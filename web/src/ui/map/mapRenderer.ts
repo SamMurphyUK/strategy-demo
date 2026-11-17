@@ -67,7 +67,6 @@ import {
   ATTACK_WIDTH,
   battleBadgeHalf,
   battleBadgeScale,
-  ARROW_BRASS,
   operationalFill,
   type OperationalOrder,
   type PlannedArrow,
@@ -1214,16 +1213,6 @@ export function drawOperationalArrows(
     ctx.fillStyle = fill;
     for (const poly of inners) {
       fillPolygon(ctx, poly);
-    }
-    ctx.strokeStyle = ARROW_BRASS;
-    ctx.lineWidth = 1;
-    ctx.lineJoin = "miter";
-    for (const poly of inners) {
-      if (poly.length < 3) {
-        continue;
-      }
-      tracePolygon(ctx, poly);
-      ctx.stroke();
     }
     if (phase === "combat_move") {
       const scan = attackScanPattern(ctx);

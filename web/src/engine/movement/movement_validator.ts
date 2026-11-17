@@ -164,6 +164,8 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_INVALID", "Missing from/to region"));
     } else if (fromRegion === toRegion) {
       result.errors.push(MoveError.of("MOVE_INVALID", "Cannot move to the same region"));
+    } else if (this.landUnitIntoSea(unitTypeId, toRegion, state, ruleset)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "Land units cannot enter sea zones"));
     } else if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
     } else if (
@@ -236,6 +238,11 @@ export class MovementValidator {
     return String(state.transport_instances[instanceId]?.unit_type_id ?? "");
   }
 
+  /** A tank (or any land piece) cannot step onto water, even when the zone is next door. */
+  private landUnitIntoSea(unitTypeId: string, regionId: string, state: GameState, ruleset: Ruleset): boolean {
+    return ruleset.getUnitCategory(unitTypeId, state) === "land" && state.regions[regionId]?.isSeaRegion() === true;
+  }
+
   /** AA guns have a movement of 1, and only during non-combat. */
   private movesOnlyInNoncombat(unitTypeId: string, state: GameState): boolean {
     return Boolean(state.unit_types[unitTypeId]?.special?.noncombat_move_only) && state.current_phase !== "noncombat_move";
@@ -300,11 +307,13 @@ export class MovementValidator {
       }
 
       for (const n of state.getAdjacentRegions(region)) {
+        const neighbor = state.regions[n];
         if (seaOnly) {
-          const neighbor = state.regions[n];
           if (neighbor == null || !neighbor.isSeaRegion()) {
             continue;
           }
+        } else if (!air && neighbor != null && neighbor.isSeaRegion()) {
+          continue;
         }
         frontier.push({ region: n, dist: dist + 1 });
       }
@@ -362,11 +371,13 @@ export class MovementValidator {
         continue;
       }
       for (const n of state.getAdjacentRegions(region)) {
+        const neighbor = state.regions[n];
         if (seaOnly) {
-          const neighbor = state.regions[n];
           if (neighbor == null || !neighbor.isSeaRegion()) {
             continue;
           }
+        } else if (!air && neighbor != null && neighbor.isSeaRegion()) {
+          continue;
         }
         if (queued[n]) {
           continue;

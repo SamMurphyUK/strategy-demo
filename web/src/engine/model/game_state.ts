@@ -140,6 +140,28 @@ export class GameState {
     return this.teamOf(a) === this.teamOf(b);
   }
 
+  /**
+   * A sea zone is a naval target only when an enemy ship is in it.
+   * An empty zone, and a zone that merely borders enemy land, is not.
+   */
+  holdsEnemyNavalUnit(regionId: string, factionId: string): boolean {
+    const region = this.regions[regionId];
+    if (region == null || !region.isSeaRegion()) {
+      return false;
+    }
+    for (const entry of this.getUnitsInRegion(regionId)) {
+      const other = String(entry.faction_id ?? "");
+      const count = Math.trunc(Number(entry.count ?? 0));
+      if (other === "" || count <= 0 || this.sameTeam(other, factionId)) {
+        continue;
+      }
+      if (String(this.unit_types[String(entry.unit_type_id ?? "")]?.category ?? "") === "sea") {
+        return true;
+      }
+    }
+    return false;
+  }
+
   isRegionHostileTo(regionId: string, factionId: string): boolean {
     const region = this.regions[regionId];
     if (region == null) {

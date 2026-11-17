@@ -77,6 +77,8 @@ import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
 import {sfxMuted, soundManager, subscribeSfx, toggleSfx} from '../../audio/sound_manager';
 import {battleClothColor, battleThemeFor, outcomeFactionId, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
 import {flagMotifForFaction} from './flagMotif';
+import {UnitToken} from '../theme/tokens/UnitToken';
+import {rosterName} from '../theme/factionRoster';
 import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
   drawProceduralUnit,
@@ -1824,6 +1826,15 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       shoreFired: offshoreBattleshipRef.current.hasFired,
       attackers: attackerUnitsRef.current.map(toFiringUnit),
       defenders: defenderUnitsRef.current.map(toFiringUnit),
+      // A map battle's dice come from the engine, so it fires every rank the engine rolled.
+      ...(matchRef.current
+        ? {}
+        : {
+            attackerHits: attackerHitsRef.current,
+            defenderHitPoints: defenderUnitsRef.current
+              .filter(isCombatActive)
+              .reduce((sum, u) => sum + Math.max(0, u.currentHp), 0),
+          }),
     });
   }, []);
 
@@ -2142,12 +2153,26 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     clearSequenceTimeouts();
     const current = battlePhaseRef.current;
     const nextPhase = getNextActiveCombatPhase(current);
+    const currentRank = current.startsWith('ATK_RANK_') ? Number(current.replace('ATK_RANK_', '')) : 5;
+    let attackerHeldFire = false;
+    if (!nextPhase.startsWith('ATK_')) {
+      for (let r = currentRank + 1; r <= 4; r++) {
+        if (hasActiveUnitsInRank('attacker', r)) attackerHeldFire = true;
+      }
+    }
 
     setBattlePhase(nextPhase);
     setRankStepState('READY_TO_FIRE');
     setRankSubPhase('IDLE');
     setLastVolleySummary('');
     activeDiceRef.current = [];
+
+    if (attackerHeldFire) {
+      setCombatLog((prev) => [
+        `Every defender is already hit. The remaining attacker ranks hold fire.`,
+        ...prev.slice(0, 8),
+      ]);
+    }
 
     if (nextPhase === 'ALLOCATION') {
       setLastVolleySummary('All salvos complete! Allocate round casualties.');
@@ -4215,6 +4240,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     const badgeImg = assets['icon_combined_arms_badge'];
     const attackerCloth = battleClothColor(matchRef.current?.attackerFaction, currentTheaterRef.current, 'attacker');
     const defenderCloth = battleClothColor(matchRef.current?.defenderFaction, currentTheaterRef.current, 'defender');
+    const attackerRoster = outcomeFactionId(matchRef.current?.attackerFaction, currentTheaterRef.current, 'attacker');
+    const defenderRoster = outcomeFactionId(matchRef.current?.defenderFaction, currentTheaterRef.current, 'defender');
 
     // Attacker units
     attackerUnitsRef.current.forEach((unit) => {
@@ -4223,7 +4250,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       const isFlying = unit.type !== 'carrier' && activeSortiesRef.current.some((s) => s.unitUid === unit.uid);
       const casRec = casualtyRecordsRef.current.find((c) => c.unitUid === unit.uid);
       const smokeAlpha = casRec ? casRec.smokeAlpha : 1.0;
-      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, attackerCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
+      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, attackerCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current, attackerRoster);
 
       if (unit.maxHp > 1 && unit.status !== 'downed') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -4240,7 +4267,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       const isFlying = unit.type !== 'carrier' && activeSortiesRef.current.some((s) => s.unitUid === unit.uid);
       const casRec = casualtyRecordsRef.current.find((c) => c.unitUid === unit.uid);
       const smokeAlpha = casRec ? casRec.smokeAlpha : 1.0;
-      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, defenderCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current);
+      drawProceduralUnit(ctx, unit, pos.x, pos.y, 1, time, defenderCloth, badgeImg, isFlying, smokeAlpha, currentTheaterRef.current, defenderRoster);
 
       if (unit.maxHp > 1 && unit.status !== 'downed') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -4730,6 +4757,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
   const liveAttackerCount = attackerUnits.filter(isCombatActive).length;
   const liveDefenderCount = defenderUnits.filter(isCombatActive).length;
+  const attackerRosterId = outcomeFactionId(match?.attackerFaction, currentTheater, 'attacker');
 
   return (
     <div className="fixed inset-0 overflow-hidden touch-none flex flex-col bg-stone-950 text-stone-100 font-mono select-none">
@@ -4991,12 +5019,13 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                             : 'bg-[#2b242a]/40 border-[#5E4E54]/40 text-[#A69C90]/40 cursor-not-allowed'
                         }`}>
                         <div className="flex items-center gap-2.5">
+                          <UnitToken unit={airType} faction={attackerRosterId} size={28} />
                           <span className="font-black px-2 py-0.5 rounded bg-[#423840] border border-[#5E4E54] text-[#DFCE91] text-[10px]">
                             RANK {['I', 'II', 'III', 'IV'][def.baseAttackRank - 1]}
                           </span>
                           <div>
                             <div className="font-bold text-xs text-[#DFCE91] capitalize">
-                              {def.name}
+                              {rosterName(airType, attackerRosterId) ?? def.name}
                             </div>
                             <div className="text-[9px] text-[#A69C90]">
                               {activeCount} active &bull; Cost: ${def.cost}
@@ -5113,6 +5142,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                   ).length;
                   const minCost = count > 0 ? Math.min(...unitsInRank.map((u) => UNIT_DEFINITIONS[u.type].cost)) : 0;
                   const canAssign = pendingAttackerHits > 0 && count > 0;
+                  const typesInRank = [...new Set(unitsInRank.map((u) => u.type))];
 
                   return (
                     <button
@@ -5130,6 +5160,13 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                         <span className="font-black px-2 py-0.5 rounded bg-[#423840] border border-[#5E4E54] text-[#DFCE91] text-[10px]">
                           RANK {rankRoman}
                         </span>
+                        {typesInRank.length > 0 && (
+                          <span className="flex items-center gap-1">
+                            {typesInRank.map((t) => (
+                              <UnitToken key={t} unit={t} faction={attackerRosterId} size={24} />
+                            ))}
+                          </span>
+                        )}
                         <div>
                           <div className="font-bold text-xs text-[#DFCE91]">
                             {rankNum === 1
