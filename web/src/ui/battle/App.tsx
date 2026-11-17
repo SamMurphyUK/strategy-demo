@@ -79,6 +79,9 @@ import {battleClothColor, battleThemeFor, outcomeFactionId, setBattleThemeQuiet,
 import {flagMotifForFaction} from './flagMotif';
 import {UnitToken} from '../theme/tokens/UnitToken';
 import {rosterName} from '../theme/factionRoster';
+import {bakeScenery, type BakedScenery} from './scenery/sceneryBake';
+import {sceneForRegion, sceneRegionList} from './scenery/sceneRegions';
+import type {RegionScene} from './scenery/regionScene';
 import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaignMusicMuted, subscribeCampaignMusic} from '../map/campaignMusic';
 import {
   drawProceduralUnit,
@@ -110,6 +113,24 @@ export const isCombatActive = (u: CombatUnit): boolean => {
 };
 
 let nextUnitUid = 1;
+
+/** Sea zones need an open-sea board; Normandy and the Coral Sea need a coast for their ships. */
+function theaterFitsScene(theater: TheaterId, scene: RegionScene | null): boolean {
+  if (!scene) return true;
+  const openSea = theater === 'navy_test' || theater === 'air_strike_test';
+  if (scene.kind === 'sea') return openSea;
+  if (openSea) return false;
+  return (theater !== 'normandy' && theater !== 'pacific') || scene.coastal;
+}
+
+/** The sandbox scenario to show a region in: the one asked for if it fits, else the first that does. */
+function scenarioForRegion(index: number, regionId: string): number {
+  const scene = regionId ? sceneForRegion(regionId) : null;
+  const wanted = index % SCENARIOS.length;
+  if (theaterFitsScene(SCENARIOS[wanted].theater, scene)) return wanted;
+  const fit = SCENARIOS.findIndex((s) => theaterFitsScene(s.theater, scene));
+  return fit === -1 ? wanted : fit;
+}
 
 /**
  * Deterministic organic jitter calculated from unit ID and index:
@@ -274,6 +295,14 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0);
   const [isTheaterMenuOpen, setIsTheaterMenuOpen] = useState(false);
   const theaterDropdownRef = useRef<HTMLDivElement>(null);
+  /** Sandbox preview of a board region's backdrop. `?region=Germany` opens on one. */
+  const [sandboxRegionId, setSandboxRegionId] = useState(
+    () => new URLSearchParams(window.location.search).get('region') ?? '',
+  );
+  const sandboxRegionRef = useRef(sandboxRegionId);
+  const sceneryRef = useRef<BakedScenery | null>(null);
+  const activeScene = match?.scene ?? (sandboxRegionId ? sceneForRegion(sandboxRegionId) : null);
+  sceneryRef.current = activeScene ? bakeScenery(activeScene, canvasWidth, canvasHeight) : null;
 
   // Close theater menu on click outside
   useEffect(() => {
@@ -702,6 +731,10 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
           defenderUnits: launched.defenders.map((u) => u.type),
         }
       : SCENARIOS[scenarioIndex % SCENARIOS.length];
+    if (!launched && sandboxRegionRef.current && !theaterFitsScene(sc.theater, sceneForRegion(sandboxRegionRef.current))) {
+      sandboxRegionRef.current = '';
+      setSandboxRegionId('');
+    }
     setCurrentTheater(sc.theater);
     setCurrentScenarioIndex(scenarioIndex);
     setBattlePhase('DEPLOYMENT_MARCH');
@@ -832,6 +865,16 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     [loadScenario],
   );
 
+  const handleSelectRegion = useCallback(
+    (regionId: string) => {
+      sandboxRegionRef.current = regionId;
+      setSandboxRegionId(regionId);
+      const index = scenarioForRegion(currentScenarioIndex, regionId);
+      if (index !== currentScenarioIndex % SCENARIOS.length) loadScenario(index);
+    },
+    [currentScenarioIndex, loadScenario],
+  );
+
   const initGame = useCallback(() => {
     setGameState((prev) => ({
       ...prev,
@@ -840,7 +883,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       level: 1,
       round: 1,
     }));
-    loadScenario(currentScenarioIndex);
+    loadScenario(scenarioForRegion(currentScenarioIndex, sandboxRegionRef.current));
     if (sdk && !matchRef.current) {
       sdk.startGame();
     }
@@ -858,7 +901,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
         initGame();
         return;
       }
-      loadScenario(0);
+      loadScenario(scenarioForRegion(0, sandboxRegionRef.current));
       if (new URLSearchParams(window.location.search).has('autoplay')) {
         initGame();
       }
@@ -4150,11 +4193,17 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       cratersRef.current,
       bloodPuddlesRef.current,
       casualtyRecordsRef.current,
+      sceneryRef.current,
     );
 
-    // 2. Draw Animated Sea at the edge of the troop lines (for land theaters)
+    // 2. Draw Animated Sea at the edge of the troop lines (for land theaters), or an inland region's land
     if (!isMaritime) {
-      drawAnimatedSea(ctx, canvasWidth, canvasHeight, time);
+      const scenery = sceneryRef.current;
+      if (scenery?.kind === 'land' && scenery.edge) {
+        ctx.drawImage(scenery.edge, 0, 525);
+      } else {
+        drawAnimatedSea(ctx, canvasWidth, canvasHeight, time);
+      }
     }
 
     // 2a. Draw Offshore Support Battleship in European Test (Coast / Forest)
@@ -4832,6 +4881,35 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
               </div>
             )}
           </div>
+
+          {!isMatch && (
+            <label
+              className="flex items-center gap-1.5 bg-[#2b242a] px-2.5 py-1 rounded border border-[#7D6652] text-xs font-bold"
+              title="Preview a board region's battle backdrop">
+              <span className="text-[#DFCE91] tracking-wider">MAP:</span>
+              <select
+                data-testid="region-scene-select"
+                value={sandboxRegionId}
+                onChange={(e) => handleSelectRegion(e.target.value)}
+                className="bg-[#2b242a] text-[#CAA574] uppercase max-w-[170px] outline-none cursor-pointer">
+                <option value="">Theater default</option>
+                <optgroup label="Land">
+                  {sceneRegionList()
+                    .filter((r) => r.type === 'land')
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                </optgroup>
+                <optgroup label="Sea">
+                  {sceneRegionList()
+                    .filter((r) => r.type === 'sea')
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                </optgroup>
+              </select>
+            </label>
+          )}
 
           <div className="bg-[#2b242a] px-2 py-1 rounded border border-[#5E4E54] text-[#A69C90] font-bold">
             ROUND <span className="text-[#DFCE91]">{roundNumber}</span>

@@ -27,6 +27,7 @@ import {
   type ShipCue,
   rosterCues,
 } from '../theme/factionRoster';
+import type { BakedScenery } from './scenery/sceneryBake';
 
 /**
  * STRICT 16-COLOR VINTAGE MILITARY PALETTE
@@ -212,6 +213,7 @@ export function drawSkyboxAndTreeline(
   ctx: CanvasRenderingContext2D,
   width: number,
   time: number,
+  bakedHorizon?: CanvasImageSource,
 ) {
   const horizonY = 114;
   const cycleSeconds = 60;
@@ -360,8 +362,12 @@ export function drawSkyboxAndTreeline(
   ctx.fillStyle = treeAo;
   ctx.fillRect(0, horizonY - 6, width, 14);
 
-  // 7. HORIZON FOREST SILHOUETTE
-  drawForestSilhouette(ctx, width, horizonY);
+  // 7. HORIZON FOREST SILHOUETTE, or the region's baked skyline
+  if (bakedHorizon) {
+    ctx.drawImage(bakedHorizon, 0, 0);
+  } else {
+    drawForestSilhouette(ctx, width, horizonY);
+  }
 
   ctx.restore();
 }
@@ -462,6 +468,7 @@ export function drawSeaSkyboxAndHorizon(
   ctx: CanvasRenderingContext2D,
   width: number,
   time: number,
+  bakedHorizon?: CanvasImageSource,
 ) {
   const horizonY = 114;
   const cycleSeconds = 60;
@@ -637,7 +644,11 @@ export function drawSeaSkyboxAndHorizon(
   });
 
   // 7. OCCASIONAL DISTANT ROCKY & TROPICAL PIXEL ISLANDS ON HORIZON (Zero Trees!)
-  drawDistantSeaIslands(ctx, width, horizonY);
+  if (bakedHorizon) {
+    ctx.drawImage(bakedHorizon, 0, 0);
+  } else {
+    drawDistantSeaIslands(ctx, width, horizonY);
+  }
 
   // 8. Distant Calm Ocean Seam & Waterline Shimmer
   ctx.fillStyle = PALETTE.bunkerCharcoal;
@@ -800,9 +811,14 @@ export function drawOpenOceanBattlefield(
   dynamicCraters?: GroundCrater[],
   bloodPuddles?: BloodPuddle[],
   casualtyRecords?: CasualtyRecord[],
+  sea?: Extract<BakedScenery, { kind: 'sea' }>,
 ) {
+  const look = sea?.look;
+  const swellScale = look?.swell ?? 1;
+  const phase = look?.phase ?? 0;
+
   // 1. Dynamic open sea skybox with distant islands & animated seagulls (Zero Trees!)
-  drawSeaSkyboxAndHorizon(ctx, width, time);
+  drawSeaSkyboxAndHorizon(ctx, width, time, sea?.horizon);
 
   const horizonY = 114;
 
@@ -822,22 +838,23 @@ export function drawOpenOceanBattlefield(
 
   // 3. Deep Navy Ocean Floor Fill (Y: 114 to height)
   const oceanGrad = ctx.createLinearGradient(0, horizonY, 0, height);
-  oceanGrad.addColorStop(0, PALETTE.navalSteel);
-  oceanGrad.addColorStop(0.35, PALETTE.spruceSea);
-  oceanGrad.addColorStop(0.7, PALETTE.bunkerCharcoal);
-  oceanGrad.addColorStop(1, PALETTE.bunkerCharcoal);
+  oceanGrad.addColorStop(0, look?.surface ?? PALETTE.navalSteel);
+  oceanGrad.addColorStop(0.35, look?.mid ?? PALETTE.spruceSea);
+  oceanGrad.addColorStop(0.7, look?.deep ?? PALETTE.bunkerCharcoal);
+  oceanGrad.addColorStop(1, look?.deep ?? PALETTE.bunkerCharcoal);
   ctx.fillStyle = oceanGrad;
   ctx.fillRect(0, horizonY, width, height - horizonY);
 
   // 4. Horizontally scrolling 1-bit wave ticks and water foam swells
+  const [tickA, tickB] = look?.ticks ?? [PALETTE.spruceSea, PALETTE.navalSteel];
   for (let y = horizonY + 6; y < height; y += 10) {
     // Dynamic open-sea swells
-    const swell = Math.sin(time * 2.1 + y * 0.045) * 10 + Math.cos(time * 1.4 + y * 0.02) * 6;
-    const speed = 14 + ((y * 7) % 18);
+    const swell = (Math.sin(time * 2.1 + y * 0.045 + phase) * 10 + Math.cos(time * 1.4 + y * 0.02 + phase) * 6) * swellScale;
+    const speed = (14 + ((y * 7) % 18)) * swellScale;
     const scroll = (time * speed) % 44;
 
     // 1-bit Wave Ticks in Spruce Sea and Naval Steel
-    ctx.fillStyle = (Math.floor(y / 10) % 2 === 0) ? PALETTE.spruceSea : PALETTE.navalSteel;
+    ctx.fillStyle = (Math.floor(y / 10) % 2 === 0) ? tickA : tickB;
     for (let x = -50; x < width + 50; x += 38) {
       const wx = Math.round(x + scroll + swell);
       ctx.fillRect(wx, y, 14, 2);
@@ -851,12 +868,27 @@ export function drawOpenOceanBattlefield(
 
     // Dynamic wave foam crests on occasional wave peaks
     if ((Math.floor(y / 10) % 3) === 0) {
-      ctx.fillStyle = PALETTE.sandCream;
+      ctx.fillStyle = look?.foam ?? PALETTE.sandCream;
       for (let x = -30; x < width + 50; x += 64) {
         const fx = Math.round(x + scroll * 1.2 + swell);
         ctx.fillRect(fx + 3, y - 1, 8, 1);
         ctx.fillRect(fx + 5, y - 2, 4, 1);
       }
+    }
+  }
+
+  // 4b. Arctic zones carry drifting ice floes
+  if (look?.ice) {
+    for (let i = 0; i < 9; i++) {
+      const w = 18 + ((i * 37) % 30);
+      const fx = Math.round((((i * 151 + time * 4) % (width + 80)) + width + 80) % (width + 80)) - 40;
+      const fy = horizonY + 30 + ((i * 97) % (height - horizonY - 60));
+      ctx.fillStyle = PALETTE.navalSteel;
+      ctx.fillRect(fx + 2, fy + 3, w, 4);
+      ctx.fillStyle = PALETTE.sandCream;
+      ctx.fillRect(fx, fy, w, 4);
+      ctx.fillStyle = PALETTE.trenchMudBone;
+      ctx.fillRect(fx + 3, fy + 3, w - 6, 1);
     }
   }
 
@@ -984,10 +1016,23 @@ export function drawWWIIBattlefield(
   dynamicCraters?: GroundCrater[],
   bloodPuddles?: BloodPuddle[],
   casualtyRecords?: CasualtyRecord[],
+  scenery?: BakedScenery | null,
 ) {
   // If theater is NAVY TEST or AIR STRIKE TEST: Render full open-sea maritime battleground
-  if (theater === 'navy_test' || theater === 'air_strike_test') {
-    drawOpenOceanBattlefield(ctx, width, height, time, dynamicCraters, bloodPuddles, casualtyRecords);
+  if (theater === 'navy_test' || theater === 'air_strike_test' || scenery?.kind === 'sea') {
+    const sea = scenery?.kind === 'sea' ? scenery : undefined;
+    drawOpenOceanBattlefield(ctx, width, height, time, dynamicCraters, bloodPuddles, casualtyRecords, sea);
+    return;
+  }
+
+  if (scenery?.kind === 'land') {
+    if (scenery.island) {
+      drawSeaSkyboxAndHorizon(ctx, width, time, scenery.horizon);
+    } else {
+      drawSkyboxAndTreeline(ctx, width, time, scenery.horizon);
+    }
+    ctx.drawImage(scenery.ground, 0, 114);
+    drawBattleScars(ctx, scenery.dirt, dynamicCraters, bloodPuddles, casualtyRecords);
     return;
   }
 
@@ -1077,6 +1122,18 @@ export function drawWWIIBattlefield(
     drawSingleCrater(ctx, c.x, c.y, c.r, c.r * 0.7, dirtColor);
   });
 
+  drawBattleScars(ctx, dirtColor, dynamicCraters, bloodPuddles, casualtyRecords);
+  drawWireAndSandbags(ctx);
+}
+
+/** Craters, blood and oil left by the fight. Drawn over the field, under the units. */
+function drawBattleScars(
+  ctx: CanvasRenderingContext2D,
+  dirtColor: string,
+  dynamicCraters?: GroundCrater[],
+  bloodPuddles?: BloodPuddle[],
+  casualtyRecords?: CasualtyRecord[],
+) {
   // 4b. Draw Dynamic Combat Craters & Small Casualty Craters (layered UNDERNEATH fluids & units!)
   if (dynamicCraters && dynamicCraters.length > 0) {
     dynamicCraters.forEach((dc) => {
@@ -1159,6 +1216,9 @@ export function drawWWIIBattlefield(
     });
   }
 
+}
+
+function drawWireAndSandbags(ctx: CanvasRenderingContext2D) {
   // 5. Barbed Wire Obstacles across No-Man's Land
   ctx.fillStyle = PALETTE.earthBrown;
   for (let wy = 350; wy <= 510; wy += 35) {

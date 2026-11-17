@@ -8,6 +8,7 @@ import type { UnitType } from "../battle/combatTypes";
 import { UNIT_DEFINITIONS } from "../battle/combatTypes";
 import { battleSpriteKey } from "../battle/default_unit_matrices";
 import type { BattleMatch, MatchHit, MatchOutcome, MatchRound, MatchUnit } from "../battle/match";
+import { sceneForRegion } from "../battle/scenery/sceneRegions";
 import "./battleScreen.css";
 import { playCampaignCue } from "./campaignAudio";
 import { factionName } from "./session/event_text";
@@ -112,6 +113,7 @@ export function BattleScreen({ game, battle, regionName, onExit, spectating = fa
     return {
       theater: battle.battle_type === "naval" ? "navy_test" : "eastern",
       regionName,
+      scene: sceneForRegion(battle.region_id) ?? undefined,
       attackerFaction: battle.attacker_faction_id,
       defenderFaction: battle.defender_faction_id,
       attackerIpc: game.session.state.getFactionIpc(battle.attacker_faction_id),

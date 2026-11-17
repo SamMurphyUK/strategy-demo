@@ -1,6 +1,7 @@
 // The contract between the battle board and a battle the engine is deciding.
 // The board animates what it is given and reports the player's choices; it never rolls.
 import type { TheaterId, UnitType } from "./combatTypes";
+import type { RegionScene } from "./scenery/regionScene";
 
 export interface MatchUnit {
   /** Engine battle unit id. The board uses it as the unit's uid. */
@@ -39,6 +40,8 @@ export type MatchOutcome = "attacker_wins" | "defender_wins" | "mutual" | "undec
 export interface BattleMatch {
   theater: TheaterId;
   regionName: string;
+  /** The region's backdrop. Absent falls back to the theater's stock scenery. */
+  scene?: RegionScene;
   /** Attacking faction. Picks the uniform and the victory theme. Absent in the sandbox, which uses the theater. */
   attackerFaction?: string;
   /** Defending faction. Picks the uniform, and the theme when they hold the ground. */
