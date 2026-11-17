@@ -33,6 +33,8 @@ describe("blank map and validation", () => {
     expect(map.regions).toEqual([]);
     expect(map.meta.board).toEqual({ x: 0, y: 0, w: 800, h: 504 });
     expect(map.meta.starting_units).toEqual([]);
+    expect(map.meta.no_landmass).toBe(true);
+    expect(blankEditorMap(800, 504, true).meta.no_landmass).toBeUndefined();
   });
 
   it("flags an untagged polygon and seas that do not touch", () => {

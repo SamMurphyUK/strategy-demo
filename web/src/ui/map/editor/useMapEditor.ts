@@ -6,9 +6,32 @@ import { isLandAt } from "../hitTest";
 import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
 import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring, uncoveredLand } from "../regionClip";
-import type { MasterLand } from "../svgLandLoader";
+import { parseLandSvg, type MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
-import { blankEditorMap } from "./blankMap";
+import { blankEditorMap, boardFrame } from "./blankMap";
+import {
+  bakeLandmass,
+  blobFromStroke,
+  circleRing,
+  copyShape,
+  type DraftShape,
+  edgeAt,
+  insertVertex,
+  landmassToSvg,
+  moveVertex,
+  replaceShape,
+  ringFromStroke,
+  rotateShape,
+  scaleShape,
+  type SculptTool,
+  shapeAt,
+  shapeBounds,
+  shapeCenter,
+  shapesFromSvg,
+  translateShape,
+  vertexAt,
+  viewBoxAround,
+} from "./landmass";
 import { validateEditorMap } from "./validateMap";
 import {
   CANONICAL_BOARD_NAME,
@@ -253,8 +276,8 @@ export interface MapEditor {
   deleteVersion(id: string): void;
   /** Replaces the open board. Undo returns to the map that was open. */
   openMap(next: EditorMap, note?: string): void;
-  /** An empty board of `width` by `height` world units. */
-  openBlank(width: number, height: number): void;
+  /** An empty board of `width` by `height` world units. `worldLand` keeps the shared coastline. */
+  openBlank(width: number, height: number, worldLand?: boolean): void;
   /** A tracing sheet drawn over the board. Null clears it. */
   referenceUrl: string | null;
   setReference(url: string | null): void;
@@ -262,6 +285,27 @@ export interface MapEditor {
   validate(): string[];
   /** Stores `map` under `name` without changing the open board. `error` is empty when it saved. */
   archiveMap(name: string, map: Dict): { id: string; error: string };
+  /** Landmass stage. Cut stage is the knife, the lattice, and the rest of the slicer. */
+  sculpting: boolean;
+  sculptTool: SculptTool;
+  sculptShapes: DraftShape[];
+  sculptSelectedId: string;
+  sculptTolerance: number;
+  blobRadius: number;
+  sculptBaked: boolean;
+  setSculpting(on: boolean): void;
+  setSculptTool(tool: SculptTool): void;
+  setSculptTolerance(tolerance: number): void;
+  setBlobRadius(radius: number): void;
+  toggleSculptHole(): void;
+  deleteSculptShape(): void;
+  importSculptSvg(text: string): void;
+  bakeSculpt(): void;
+  downloadLandmassSvg(): void;
+  /** Leave Landmass. A new or changed coast is baked and becomes the blocks the knife slices. */
+  enterCutting(): void;
+  /** Read a landmass SVG, install it as the coast, and open Cut. */
+  openCoastSvg(text: string): void;
 }
 
 function anchorForLattice(region: EditorRegion, rings: LatticeRings, land: MasterLand | null): Vec2 {
@@ -357,7 +401,12 @@ function paintSeaLatticeMap(
   return next;
 }
 
-export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: boolean): MapEditor {
+export function useMapEditor(
+  demoJson: Dict,
+  land: MasterLand | null,
+  active: boolean,
+  onLandmask?: (land: MasterLand | "file" | "none") => void,
+): MapEditor {
   const [doc, setDoc] = useState<Doc>(() => ({ map: loadInitial(demoJson), past: [], future: [] }));
   const docRef = useRef(doc);
   const [tool, setToolState] = useState<EditorTool>("select");
@@ -394,11 +443,36 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
   const [latticeBrush, setLatticeBrush] = useState<"square" | "triangle">("square");
   const [latticeShift, setLatticeShift] = useState(false);
   const [latticeHover, setLatticeHover] = useState<LatticeHit | null>(null);
+  const [sculpting, setSculptingState] = useState(false);
+  const [sculptTool, setSculptToolState] = useState<SculptTool>("pen");
+  const [sculptShapes, setSculptShapes] = useState<DraftShape[]>([]);
+  const [sculptSelectedId, setSculptSelectedId] = useState("");
+  const [sculptDraft, setSculptDraft] = useState<Vec2[]>([]);
+  const [sculptTolerance, setSculptToleranceState] = useState(2);
+  const [blobRadius, setBlobRadiusState] = useState(12);
+  const [sculptSvg, setSculptSvg] = useState("");
   const stroke = useRef({ active: false, ignore: false, raw: [] as Vec2[], scale: 1 });
   /** World units per screen pixel at the current zoom, so the 25px and 20px knife limits mean pixels. */
   const pxScale = useRef(1);
-  const live = useRef({ tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift });
-  live.current = { tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift };
+  const onLandmaskRef = useRef(onLandmask);
+  onLandmaskRef.current = onLandmask;
+  const shapesRef = useRef(sculptShapes);
+  shapesRef.current = sculptShapes;
+  const sculptPast = useRef<DraftShape[][]>([]);
+  const sculptFuture = useRef<DraftShape[][]>([]);
+  const sculptBefore = useRef<DraftShape[] | null>(null);
+  const sculptDragged = useRef(false);
+  const shapeSeq = useRef(1);
+  const sculptSvgRef = useRef(sculptSvg);
+  sculptSvgRef.current = sculptSvg;
+  const live = useRef({
+    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift,
+    sculpting, sculptTool, sculptShapes, sculptSelectedId, sculptDraft, sculptTolerance, blobRadius,
+  });
+  live.current = {
+    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift,
+    sculpting, sculptTool, sculptShapes, sculptSelectedId, sculptDraft, sculptTolerance, blobRadius,
+  };
   /** `base` is what Undo restores. `start` is what the stroke paints onto: `base` plus a zone it created. */
   const latticeStroke = useRef<{
     base: EditorMap;
@@ -1165,21 +1239,92 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     [commit],
   );
 
+  const rememberShapes = useCallback((next: DraftShape[]) => {
+    sculptPast.current = [...sculptPast.current, shapesRef.current.map(copyShape)].slice(-40);
+    sculptFuture.current = [];
+    shapesRef.current = next;
+    setSculptShapes(next);
+    sculptSvgRef.current = "";
+    setSculptSvg("");
+  }, []);
+
+  const undoSculpt = useCallback(() => {
+    const previous = sculptPast.current.pop();
+    if (!previous) {
+      return false;
+    }
+    sculptFuture.current.push(shapesRef.current.map(copyShape));
+    shapesRef.current = previous;
+    setSculptShapes(previous);
+    sculptSvgRef.current = "";
+    setSculptSvg("");
+    return true;
+  }, []);
+
+  const redoSculpt = useCallback(() => {
+    const next = sculptFuture.current.pop();
+    if (!next) {
+      return false;
+    }
+    sculptPast.current.push(shapesRef.current.map(copyShape));
+    shapesRef.current = next;
+    setSculptShapes(next);
+    sculptSvgRef.current = "";
+    setSculptSvg("");
+    return true;
+  }, []);
+
+  function clearSculpt(): void {
+    sculptPast.current = [];
+    sculptFuture.current = [];
+    shapesRef.current = [];
+    setSculptShapes([]);
+    setSculptDraft([]);
+    setSculptSelectedId("");
+    sculptSvgRef.current = "";
+    setSculptSvg("");
+  }
+
+  function restoreCoast(map: EditorMap): void {
+    const set = onLandmaskRef.current;
+    if (!set) {
+      return;
+    }
+    const svg = map.meta.sculpted_land_svg;
+    if (typeof svg === "string" && svg.includes("<path")) {
+      try {
+        set(parseLandSvg(svg));
+        return;
+      } catch {
+        // A broken bake falls through to the board's coast flag.
+      }
+    }
+    set(map.meta.no_landmass === true ? "none" : "file");
+  }
+
   const undo = useCallback(() => {
+    if (live.current.sculpting && undoSculpt()) {
+      return;
+    }
     const cur = docRef.current;
     const previous = cur.past[cur.past.length - 1];
     if (previous) {
       apply({ map: previous, past: cur.past.slice(0, -1), future: [cur.map, ...cur.future] });
+      restoreCoast(previous);
     }
-  }, [apply]);
+  }, [apply, undoSculpt]);
 
   const redo = useCallback(() => {
+    if (live.current.sculpting && redoSculpt()) {
+      return;
+    }
     const cur = docRef.current;
     const [next, ...rest] = cur.future;
     if (next) {
       apply({ map: next, past: [...cur.past, cur.map], future: rest });
+      restoreCoast(next);
     }
-  }, [apply]);
+  }, [apply, redoSculpt]);
 
   /**
    * The map as it will be written: neighbors recalculated first (when the land is loaded, so coastal links can
@@ -1273,18 +1418,28 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     setShowUncovered((on) => !on);
   }, []);
 
+  const applyStoredCoast = useCallback((map: EditorMap) => {
+    restoreCoast(map);
+  }, []);
+
   const resetToDemo = useCallback(() => {
-    commit(editorFromMapJson(demoJson));
+    const next = editorFromMapJson(demoJson);
+    commit(next);
+    applyStoredCoast(next);
+    clearSculpt();
+    setSculptingState(false);
     setSelectedId("");
     setSecondId("");
     cancelDraft();
     setReferenceUrl(null);
     setStatus("Reset to the demo map. Undo brings your work back.");
-  }, [cancelDraft, commit, demoJson]);
+  }, [applyStoredCoast, cancelDraft, commit, demoJson]);
 
   const openMap = useCallback(
     (next: EditorMap, note = "Map loaded.") => {
       commit(next);
+      applyStoredCoast(next);
+      clearSculpt();
       setSelectedId("");
       setSecondId("");
       setMergeIds([]);
@@ -1292,14 +1447,196 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       setReferenceUrl(null);
       setStatus(note);
     },
-    [commit],
+    [applyStoredCoast, commit],
   );
 
   const openBlank = useCallback(
-    (width: number, height: number) => {
-      openMap(blankEditorMap(width, height), "Blank map. Draw land with the pen, then cut sea zones in Sea mode.");
+    (width: number, height: number, worldLand = false) => {
+      openMap(
+        blankEditorMap(width, height, worldLand),
+        worldLand
+          ? "Blank map on the world landmass. Draw land with the pen, then cut sea zones in Sea mode."
+          : "Landmass. Empty ocean. Draw the coast, then switch to Cut.",
+      );
+      setSculptingState(!worldLand);
     },
     [openMap],
+  );
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    applyStoredCoast(docRef.current.map);
+  }, [active, applyStoredCoast]);
+
+  const nextShapeId = () => `land-${shapeSeq.current++}`;
+
+  const finishSculptPen = useCallback(() => {
+    const pts = live.current.sculptDraft;
+    if (pts.length < 3) {
+      setStatus("A land shape needs at least three points.");
+      return;
+    }
+    const id = nextShapeId();
+    rememberShapes([...shapesRef.current, { id, ring: pts.map((p) => ({ ...p })), holes: [], hole: false }]);
+    setSculptDraft([]);
+    setSculptSelectedId(id);
+    setStatus("Shape added. Cut this landmass when the coast is ready.");
+  }, [rememberShapes]);
+
+  const currentSvg = useCallback((): string => {
+    if (sculptSvgRef.current !== "") {
+      return sculptSvgRef.current;
+    }
+    const box = boardFrame(docRef.current.map) ?? live.current.land?.viewBox ?? { x: 0, y: 0, w: 800, h: 504 };
+    const result = bakeLandmass(shapesRef.current, live.current.sculptTolerance);
+    if (!result.ok) {
+      setStatus(result.error);
+      sculptSvgRef.current = "";
+      setSculptSvg("");
+      return "";
+    }
+    const svg = landmassToSvg(result.polygons, viewBoxAround(box, result.polygons));
+    sculptSvgRef.current = svg;
+    setSculptSvg(svg);
+    const points = result.polygons.reduce((sum, poly) => sum + poly.reduce((n, ring) => n + ring.length, 0), 0);
+    setStatus(`Baked ${result.polygons.length} coastline${result.polygons.length === 1 ? "" : "s"}, ${points} points.`);
+    return svg;
+  }, []);
+
+  const downloadLandmassSvg = useCallback(() => {
+    const svg = currentSvg();
+    if (svg === "") {
+      return;
+    }
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "landmass.svg";
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus("Saved landmass.svg. Switch to Cut to slice this coast.");
+  }, [currentSvg]);
+
+  const installCoast = useCallback(
+    (svg: string): boolean => {
+      let master: MasterLand;
+      try {
+        master = parseLandSvg(svg);
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : "The baked SVG could not be read.");
+        return false;
+      }
+      if (master.polygons.length === 0) {
+        setStatus("That SVG has no coastline.");
+        return false;
+      }
+      onLandmaskRef.current?.(master);
+      live.current = { ...live.current, land: master };
+      const clipper = clipperFor(master.polygons);
+      const landFound = masterBlocks([], master.viewBox, "land", clipper);
+      const seaFound = masterBlocks([], master.viewBox, "sea", clipper);
+      if (landFound.blocks.length === 0) {
+        setStatus("That coast produced no land to slice.");
+        return false;
+      }
+      const base = docRef.current.map;
+      const hadRegions = base.regions.length > 0;
+      const keptMeta = { ...base.meta };
+      delete keptMeta.no_landmass;
+      let next: EditorMap = {
+        ...base,
+        regions: [],
+        links: [],
+        auto: [],
+        overrides: { add: [], remove: [] },
+        meta: {
+          ...keptMeta,
+          sculpted_land_svg: svg,
+          board: { x: master.viewBox.x, y: master.viewBox.y, w: master.viewBox.w, h: master.viewBox.h },
+        },
+      };
+      const landAnchors = landFound.blocks.map(
+        (polygon) => anchorFor(clipper.clip({ id: "landmass", type: "land", points: polygon })) ?? labelPoint(polygon),
+      );
+      const addedLand = addBlocks(next, landFound.blocks, false, landAnchors);
+      next = addedLand.map;
+      const seaAnchors = seaFound.blocks.map(
+        (polygon) => anchorFor(clipper.clip({ id: "landmass", type: "sea", points: polygon })) ?? labelPoint(polygon),
+      );
+      const addedSea = addBlocks(next, seaFound.blocks, true, seaAnchors);
+      next = withAutoLinks(addedSea.map).map;
+      commit(next);
+      sculptSvgRef.current = svg;
+      setSculptSvg(svg);
+      setSculptingState(false);
+      setSculptDraft([]);
+      setLayerState("land");
+      setToolState("knife");
+      setSelectedId(addedLand.ids[0] ?? "");
+      const landN = addedLand.ids.length;
+      const seaN = addedSea.ids.length;
+      const blocks = `${landN} land block${landN === 1 ? "" : "s"} and ${seaN} sea block${seaN === 1 ? "" : "s"}`;
+      setStatus(
+        hadRegions
+          ? `Coast updated. ${blocks} replaced the territories. Undo brings them back.`
+          : `Coast ready. ${blocks}. Slice the land with the knife.`,
+      );
+      return true;
+    },
+    [commit, withAutoLinks],
+  );
+
+  const enterCutting = useCallback(() => {
+    const stored = docRef.current.map.meta.sculpted_land_svg;
+    if (shapesRef.current.length > 0) {
+      const svg = currentSvg();
+      if (svg === "") {
+        return;
+      }
+      if (typeof stored !== "string" || stored !== svg || docRef.current.map.regions.length === 0) {
+        installCoast(svg);
+        return;
+      }
+    }
+    setSculptingState(false);
+    setSculptDraft([]);
+    if (docRef.current.map.regions.length > 0) {
+      setLayerState("land");
+      setToolState("knife");
+      setStatus("Cut. Slice the land with the knife, and sea zones with the lattice.");
+      return;
+    }
+    setStatus("No coast yet. Draw one under Landmass, or open a landmass SVG.");
+  }, [currentSvg, installCoast]);
+
+  const openCoastSvg = useCallback(
+    (text: string) => {
+      let imported: DraftShape[];
+      try {
+        parseLandSvg(text);
+        imported = shapesFromSvg(text).map((shape) => ({ ...shape, id: nextShapeId() }));
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : "That SVG could not be read.");
+        return;
+      }
+      if (imported.length === 0) {
+        setStatus("That SVG has no closed paths.");
+        return;
+      }
+      sculptPast.current = [...sculptPast.current, shapesRef.current.map(copyShape)].slice(-40);
+      sculptFuture.current = [];
+      shapesRef.current = imported;
+      setSculptShapes(imported);
+      setSculptSelectedId(imported[0].id);
+      setSculptDraft([]);
+      sculptSvgRef.current = text;
+      setSculptSvg(text);
+      installCoast(text);
+    },
+    [installCoast],
   );
 
   const setReference = useCallback((url: string | null) => {
@@ -1379,12 +1716,15 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         return;
       }
       commit(loaded);
+      applyStoredCoast(loaded);
+      clearSculpt();
+      setSculptingState(false);
       setSelectedId("");
       setMergeIds([]);
       cancelDraft();
       setStatus(`Loaded "${version.name}". Undo brings back the map you had open.`);
     },
-    [cancelDraft, commit],
+    [applyStoredCoast, cancelDraft, commit],
   );
 
   const deleteVersion = useCallback(
@@ -1415,6 +1755,47 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         return;
       }
       if (isTypingTarget(e.target)) {
+        return;
+      }
+      if (live.current.sculpting) {
+        if (mod && e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          if (e.shiftKey) {
+            redoSculpt();
+          } else {
+            undoSculpt();
+          }
+          return;
+        }
+        if (mod && e.key.toLowerCase() === "y") {
+          e.preventDefault();
+          redoSculpt();
+          return;
+        }
+        if (e.key === "Enter") {
+          finishSculptPen();
+          return;
+        }
+        if (e.key === "Escape") {
+          if (live.current.sculptDraft.length > 0) {
+            setSculptDraft([]);
+          } else {
+            setSculptSelectedId("");
+          }
+          return;
+        }
+        if ((e.key === "Backspace" || e.key === "Delete") && live.current.sculptDraft.length > 0) {
+          e.preventDefault();
+          setSculptDraft((pts) => pts.slice(0, -1));
+          return;
+        }
+        if ((e.key === "Backspace" || e.key === "Delete") && live.current.sculptSelectedId !== "") {
+          e.preventDefault();
+          const id = live.current.sculptSelectedId;
+          rememberShapes(shapesRef.current.filter((shape) => shape.id !== id));
+          setSculptSelectedId("");
+          return;
+        }
         return;
       }
       if (mod && e.key.toLowerCase() === "z") {
@@ -1456,7 +1837,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, cancelBoxPrune, cancelDraft, finishDraft, makeDecorative, redo, saveVersion, setTool, undo, undoVertex]);
+  }, [active, cancelBoxPrune, cancelDraft, finishDraft, finishSculptPen, makeDecorative, redo, redoSculpt, rememberShapes, saveVersion, setTool, undo, undoSculpt, undoVertex]);
 
   const binding = useMemo<EditorBinding>(
     () => ({
@@ -1477,9 +1858,62 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         slots: selectedSlots,
         uncovered: showUncovered ? uncovered : null,
         lattice: tool === "lattice" && layer === "sea" ? { brush: latticeBrush, shift: latticeShift, hover: latticeHover } : null,
+        sculpt: sculpting
+          ? { tool: sculptTool, shapes: sculptShapes, selectedId: sculptSelectedId, draft: sculptDraft }
+          : null,
       },
       prunePrompt: pruneBox && boxDone ? { box: pruneBox, count: boxIds.length, confirm: confirmBoxPrune, cancel: cancelBoxPrune } : null,
       pickHandle(world, tol) {
+        if (live.current.sculpting) {
+          const { sculptTool: mode, sculptShapes: shapes, sculptSelectedId: picked } = live.current;
+          const selected = shapes.find((shape) => shape.id === picked) ?? null;
+          if (mode === "select" && selected) {
+            const center = shapeCenter(selected);
+            const bounds = shapeBounds(selected);
+            const spin = { x: center.x, y: bounds.minY - tol * 2.4 };
+            if (dist(world, spin) <= tol) {
+              sculptBefore.current = shapes.map(copyShape);
+              sculptDragged.current = false;
+              return {
+                kind: "sculpt-rotate",
+                id: selected.id,
+                from: copyShape(selected),
+                center,
+                start: Math.atan2(world.y - center.y, world.x - center.x),
+              };
+            }
+            const corner = { x: bounds.maxX, y: bounds.maxY };
+            if (dist(world, corner) <= tol) {
+              sculptBefore.current = shapes.map(copyShape);
+              sculptDragged.current = false;
+              return {
+                kind: "sculpt-scale",
+                id: selected.id,
+                from: copyShape(selected),
+                center,
+                start: Math.max(tol, dist(world, center)),
+              };
+            }
+          }
+          if (mode === "vertex" && selected) {
+            const hit = vertexAt(selected, world, tol);
+            if (hit) {
+              sculptBefore.current = shapes.map(copyShape);
+              sculptDragged.current = false;
+              return { kind: "sculpt-vertex", id: selected.id, from: copyShape(selected), hole: hit.hole, index: hit.index };
+            }
+          }
+          if (mode === "select") {
+            const under = shapeAt(shapes, world);
+            if (under) {
+              setSculptSelectedId(under.id);
+              sculptBefore.current = shapes.map(copyShape);
+              sculptDragged.current = false;
+              return { kind: "sculpt-move", id: under.id, from: copyShape(under), origin: { ...world } };
+            }
+          }
+          return null;
+        }
         const { tool: t, selectedId: id } = live.current;
         if (id === "" || !(t === "select" || t === "vertex" || t === "merge")) {
           return null;
@@ -1538,6 +1972,38 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
       },
       onClick(world, regionId, tol, mods) {
         pxScale.current = tol / SNAP_PX;
+        if (live.current.sculpting) {
+          const { sculptTool: mode, sculptDraft: pts, sculptShapes: shapes, blobRadius: radius, sculptSelectedId: picked } = live.current;
+          if (mode === "pen") {
+            if (pts.length >= 3 && dist(world, pts[0]) <= tol) {
+              finishSculptPen();
+              return;
+            }
+            setSculptDraft([...pts, { ...world }]);
+            return;
+          }
+          if (mode === "blob") {
+            const id = nextShapeId();
+            rememberShapes([...shapes, { id, ring: circleRing(world.x, world.y, radius), holes: [], hole: false }]);
+            setSculptSelectedId(id);
+            return;
+          }
+          if (mode === "vertex") {
+            const selected = shapes.find((shape) => shape.id === picked);
+            if (selected) {
+              const edge = edgeAt(selected, world, tol);
+              if (edge) {
+                const ring = edge.hole < 0 ? selected.ring : selected.holes[edge.hole];
+                const a = ring[edge.index];
+                const b = ring[(edge.index + 1) % ring.length];
+                rememberShapes(replaceShape(shapes, insertVertex(selected, edge.hole, edge.index, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })));
+                return;
+              }
+            }
+          }
+          setSculptSelectedId(shapeAt(shapes, world)?.id ?? "");
+          return;
+        }
         const { tool: t, draft: pts, layer: current, selectedId: pickedId } = live.current;
         const state = docRef.current.map;
         const sameLayer = state.regions.filter((r) => r.is_sea === (current === "sea"));
@@ -1600,6 +2066,10 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         }
       },
       onDoubleClick() {
+        if (live.current.sculpting && live.current.sculptTool === "pen") {
+          finishSculptPen();
+          return;
+        }
         const t = live.current.tool;
         if (t === "draw" || t === "knife") {
           finishDraft();
@@ -1643,6 +2113,10 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         setClosing(false);
       },
       swipeable() {
+        if (live.current.sculpting) {
+          const mode = live.current.sculptTool;
+          return mode === "blob" || (mode === "pen" && live.current.sculptDraft.length === 0);
+        }
         const { tool: t, draft: pts, layer: current } = live.current;
         return (t === "knife" && pts.length === 0) || (t === "prune" && current === "land");
       },
@@ -1650,6 +2124,39 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         stroke.current = { active: true, ignore: false, raw: [], scale: 1 };
       },
       onStroke(points, pxToWorld, done) {
+        if (live.current.sculpting) {
+          const mode = live.current.sculptTool;
+          if (mode !== "pen" && mode !== "blob") {
+            return;
+          }
+          if (!done) {
+            setSculptDraft(mode === "pen" ? strokePreview(points) : points);
+            return;
+          }
+          setSculptDraft([]);
+          if (mode === "blob") {
+            const blob = blobFromStroke(points, live.current.blobRadius);
+            if (!blob) {
+              setStatus("That blob is too small to keep.");
+              return;
+            }
+            const id = nextShapeId();
+            rememberShapes([...shapesRef.current, { ...blob, id }]);
+            setSculptSelectedId(id);
+            setStatus("Blob added. Cut this landmass when the coast is ready.");
+            return;
+          }
+          const ring = ringFromStroke(points, Math.max(0.4, pxToWorld * 2));
+          if (!ring) {
+            setStatus("Draw a longer outline.");
+            return;
+          }
+          const id = nextShapeId();
+          rememberShapes([...shapesRef.current, { id, ring, holes: [], hole: false }]);
+          setSculptSelectedId(id);
+          setStatus("Shape added. Cut this landmass when the coast is ready.");
+          return;
+        }
         if (live.current.tool === "prune") {
           // Not a freehand cut: the first and latest points are the marquee's opposite corners.
           if (points.length >= 2) {
@@ -1675,6 +2182,42 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         runStroke();
       },
       onDrag(raw, world, tol) {
+        const sculptKind = (raw as { kind?: string }).kind ?? "";
+        if (sculptKind.startsWith("sculpt-")) {
+          const handle = raw as {
+            kind: string;
+            id: string;
+            from: DraftShape;
+            origin?: Vec2;
+            center?: Vec2;
+            start?: number;
+            hole?: number;
+            index?: number;
+          };
+          const source = shapesRef.current.find((shape) => shape.id === handle.id);
+          if (!source) {
+            return;
+          }
+          sculptDragged.current = true;
+          let next = handle.from;
+          if (handle.kind === "sculpt-move" && handle.origin) {
+            next = translateShape(handle.from, world.x - handle.origin.x, world.y - handle.origin.y);
+          } else if (handle.kind === "sculpt-vertex" && handle.hole !== undefined && handle.index !== undefined) {
+            next = moveVertex(handle.from, handle.hole, handle.index, world);
+          } else if (handle.kind === "sculpt-scale" && handle.center && handle.start) {
+            const factor = Math.min(8, Math.max(0.15, dist(world, handle.center) / handle.start));
+            next = scaleShape(handle.from, handle.center, factor);
+          } else if (handle.kind === "sculpt-rotate" && handle.center && handle.start !== undefined) {
+            const angle = Math.atan2(world.y - handle.center.y, world.x - handle.center.x) - handle.start;
+            next = rotateShape(handle.from, handle.center, angle);
+          }
+          const updated = replaceShape(shapesRef.current, next);
+          shapesRef.current = updated;
+          setSculptShapes(updated);
+          sculptSvgRef.current = "";
+          setSculptSvg("");
+          return;
+        }
         const handle = raw as Handle;
         const base = docRef.current.map;
         if (dragBase.current === null) {
@@ -1704,6 +2247,16 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         apply({ ...docRef.current, map: moveVertices(base, handle.group, snap.point) });
       },
       onDragEnd(raw) {
+        const sculptKind = (raw as { kind?: string }).kind ?? "";
+        if (sculptKind.startsWith("sculpt-")) {
+          if (sculptDragged.current && sculptBefore.current) {
+            sculptPast.current = [...sculptPast.current, sculptBefore.current].slice(-40);
+            sculptFuture.current = [];
+          }
+          sculptBefore.current = null;
+          sculptDragged.current = false;
+          return;
+        }
         const handle = raw as Handle;
         const before = dragBase.current;
         dragBase.current = null;
@@ -1810,7 +2363,7 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
         return true;
       },
     }),
-    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf, showUncovered, uncovered, latticeBrush, latticeShift, latticeHover],
+    [links, selectedId, secondId, mergeIds, promoteAt, linkFirstId, draft, drawSea, layer, cursor, closing, tool, pruneBox, boxDone, boxIds, confirmBoxPrune, cancelBoxPrune, apply, commit, finishDraft, cancelDraft, runStroke, roughenAt, selectedSlots, slotsOf, showUncovered, uncovered, latticeBrush, latticeShift, latticeHover, sculpting, sculptTool, sculptShapes, sculptSelectedId, sculptDraft, finishSculptPen, rememberShapes],
   );
 
   const selected = selectedId === "" ? null : (findRegion(map, selectedId) ?? null);
@@ -1832,8 +2385,8 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     selectedUnits,
     linkFirstId,
     status,
-    canUndo: doc.past.length > 0,
-    canRedo: doc.future.length > 0,
+    canUndo: doc.past.length > 0 || sculptPast.current.length > 0,
+    canRedo: doc.future.length > 0 || sculptFuture.current.length > 0,
     linkCounts,
     binding,
     setTool,
@@ -1890,5 +2443,69 @@ export function useMapEditor(demoJson: Dict, land: MasterLand | null, active: bo
     setReference,
     validate,
     archiveMap,
+    sculpting,
+    sculptTool,
+    sculptShapes,
+    sculptSelectedId,
+    sculptTolerance,
+    blobRadius,
+    sculptBaked: sculptSvg !== "",
+    setSculpting(on) {
+      setSculptingState(on);
+      setSculptDraft([]);
+      if (on) {
+        setStatus("Landmass. Draw the coast, then Cut this landmass.");
+      }
+    },
+    setSculptTool(next) {
+      setSculptToolState(next);
+      setSculptDraft([]);
+    },
+    setSculptTolerance(tolerance) {
+      setSculptToleranceState(Math.max(0.25, Math.min(12, tolerance)));
+      sculptSvgRef.current = "";
+      setSculptSvg("");
+    },
+    setBlobRadius(radius) {
+      setBlobRadiusState(Math.max(2, Math.min(48, radius)));
+    },
+    toggleSculptHole() {
+      const id = sculptSelectedId;
+      const shape = sculptShapes.find((item) => item.id === id);
+      if (!shape) {
+        setStatus("Select a draft shape to mark it as a hole.");
+        return;
+      }
+      rememberShapes(replaceShape(sculptShapes, { ...shape, hole: !shape.hole }));
+      setStatus(shape.hole ? `${id} is land again.` : `${id} will be cut out as an inland hole.`);
+    },
+    deleteSculptShape() {
+      if (sculptSelectedId === "") {
+        return;
+      }
+      rememberShapes(sculptShapes.filter((shape) => shape.id !== sculptSelectedId));
+      setSculptSelectedId("");
+    },
+    importSculptSvg(text) {
+      try {
+        const imported = shapesFromSvg(text).map((shape) => ({ ...shape, id: nextShapeId() }));
+        if (imported.length === 0) {
+          setStatus("That SVG has no closed paths.");
+          return;
+        }
+        rememberShapes([...shapesRef.current, ...imported]);
+        setSculptSelectedId(imported[0].id);
+        setSculptingState(true);
+        setStatus(`Imported ${imported.length} shape${imported.length === 1 ? "" : "s"}. Cut this landmass when the coast is ready.`);
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : "That SVG could not be read.");
+      }
+    },
+    bakeSculpt() {
+      currentSvg();
+    },
+    downloadLandmassSvg,
+    enterCutting,
+    openCoastSvg,
   };
 }

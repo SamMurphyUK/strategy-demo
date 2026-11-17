@@ -29,6 +29,7 @@ import {
   type Seam,
   sharedEdges,
 } from "./mapBakeMath";
+import { sunkTerritoryFill } from "./figureGround";
 import {
   BORDER_PASSES,
   BURN_PASSES,
@@ -269,7 +270,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   }
   for (const region of landRegions) {
     const owner = input.owners[region.id] ?? "";
-    ctx.fillStyle = tacticalLandTint(owner);
+    ctx.fillStyle = sunkTerritoryFill(tacticalLandTint(owner));
     ctx.fill(input.paths.get(region.id)!, "evenodd");
     if (!land && isHatchedOwner(owner)) {
       ctx.save();

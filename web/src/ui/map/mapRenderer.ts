@@ -60,6 +60,7 @@ import {
   SELECTED_COLOR,
   SELECTED_TINT,
 } from "./mapStyle";
+import { shapeBounds, shapeCenter, type DraftShape, type SculptTool } from "./editor/landmass";
 import type { MasterLand } from "./svgLandLoader";
 import {
   type ArrowStart,
@@ -1416,6 +1417,13 @@ export interface EditorOverlay {
     shift: boolean;
     hover: { col: number; row: number; part: "FULL" | "N" | "E" | "S" | "W"; originX: number } | null;
   } | null;
+  /** Draft landmass shapes, drawn above the regions while that layer is open. */
+  sculpt?: {
+    tool: SculptTool;
+    shapes: DraftShape[];
+    selectedId: string;
+    draft: Vec2[];
+  } | null;
 }
 
 export const SLOT_HANDLE_COLOR = MILITARY.sage;
@@ -1543,6 +1551,81 @@ function drawSeaLattice(
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function traceRing(ctx: CanvasRenderingContext2D, ring: Vec2[], move: boolean): void {
+  if (ring.length === 0) {
+    return;
+  }
+  ctx.moveTo(ring[0].x, ring[0].y);
+  for (let i = 1; i < ring.length; i++) {
+    ctx.lineTo(ring[i].x, ring[i].y);
+  }
+  if (!move) {
+    ctx.closePath();
+  }
+}
+
+function drawSculptLayer(
+  ctx: CanvasRenderingContext2D,
+  scene: TerrainScene,
+  sculpt: NonNullable<EditorOverlay["sculpt"]>,
+  px: number,
+): void {
+  setWorldTransform(ctx, scene.view, scene.dpr);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const shape of sculpt.shapes) {
+    ctx.beginPath();
+    traceRing(ctx, shape.ring, false);
+    for (const hole of shape.holes) {
+      traceRing(ctx, hole, false);
+    }
+    const selected = shape.id === sculpt.selectedId;
+    if (!shape.hole) {
+      ctx.fillStyle = selected ? "rgba(91, 125, 115, 0.55)" : "rgba(91, 125, 115, 0.35)";
+      ctx.fill("evenodd");
+    }
+    ctx.setLineDash(shape.hole ? [4 * px, 3 * px] : []);
+    ctx.lineWidth = (selected ? 2.25 : 1.25) * px;
+    ctx.strokeStyle = selected ? MILITARY.brass : MILITARY.charcoal;
+    ctx.stroke();
+    if (selected && (sculpt.tool === "vertex" || sculpt.tool === "select")) {
+      const rings = [shape.ring, ...shape.holes];
+      ctx.setLineDash([]);
+      ctx.fillStyle = MILITARY.brass;
+      for (const ring of rings) {
+        for (const p of ring) {
+          ctx.fillRect(p.x - 2.5 * px, p.y - 2.5 * px, 5 * px, 5 * px);
+        }
+      }
+    }
+    if (selected && sculpt.tool === "select" && shape.ring.length >= 3) {
+      const bounds = shapeBounds(shape);
+      const center = shapeCenter(shape);
+      ctx.setLineDash([]);
+      ctx.fillStyle = MILITARY.cream;
+      ctx.fillRect(bounds.maxX - 3 * px, bounds.maxY - 3 * px, 6 * px, 6 * px);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(center.x, bounds.minY - 14 * px);
+      ctx.strokeStyle = MILITARY.cream;
+      ctx.lineWidth = px;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(center.x, bounds.minY - 14 * px, 3.5 * px, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (sculpt.draft.length > 1) {
+    ctx.beginPath();
+    traceRing(ctx, sculpt.draft, true);
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeStyle = MILITARY.spruce;
+    ctx.stroke();
+  }
+  setScreenTransform(ctx, scene.dpr);
 }
 
 export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, editor: EditorOverlay): void {
@@ -1857,6 +1940,10 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
     ctx.setLineDash([]);
     setScreenTransform(ctx, dpr);
+  }
+
+  if (editor.sculpt) {
+    drawSculptLayer(ctx, scene, editor.sculpt, px);
   }
 
   // Snap indicator.

@@ -1465,6 +1465,14 @@
   color: var(--parchment);
 }
 
+.editor-start-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  color: var(--parchment);
+}
+
 .editor-start input[type="number"] {
   width: 96px;
   font: inherit;

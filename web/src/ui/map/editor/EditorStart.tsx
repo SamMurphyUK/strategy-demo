@@ -13,7 +13,7 @@ export function EditorStart({
   onBack,
 }: {
   versions: MapVersion[];
-  onBlank(width: number, height: number, referenceUrl: string | null): void;
+  onBlank(width: number, height: number, referenceUrl: string | null, emptyOcean: boolean): void;
   onDemo(): void;
   onVersion(id: string): void;
   onMap(map: EditorMap): void;
@@ -21,6 +21,7 @@ export function EditorStart({
 }) {
   const [width, setWidth] = useState(800);
   const [height, setHeight] = useState(504);
+  const [emptyOcean, setEmptyOcean] = useState(true);
   const [referenceName, setReferenceName] = useState("");
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -64,9 +65,8 @@ export function EditorStart({
       <div className="editor-start">
         <h2>Map editor</h2>
         <p className="muted">
-          Draw land with the pen, split it with the knife, and cut sea zones with the lattice. The lattice clips
-          each zone to the coast. Calculate Neighbors writes land, sea, and coastal borders. The Link tool adds a
-          strait or marks a border impassable.
+          Landmass draws the coast. Cut slices that coast into territories and sea zones. Open a saved landmass
+          SVG from Cut to slice it. The lattice clips each zone to the coast.
         </p>
         {error !== "" && <p className="warn">{error}</p>}
         <section>
@@ -105,10 +105,26 @@ export function EditorStart({
             />
           </label>
           {referenceName !== "" && <p className="muted">Tracing sheet: {referenceName}</p>}
+          <label className="editor-start-check">
+            <input
+              type="checkbox"
+              checked={emptyOcean}
+              aria-label="Empty ocean"
+              onChange={(event) => setEmptyOcean(event.target.checked)}
+            />
+            Empty ocean
+          </label>
+          <p className="muted">
+            {emptyOcean
+              ? "No continents. Draw the coast, then switch to Cut."
+              : "The world landmass stays on the board."}
+          </p>
           <button
             type="button"
             className="primary"
-            onClick={() => onBlank(Math.max(64, width) || 800, Math.max(64, height) || 504, referenceUrl)}
+            onClick={() =>
+              onBlank(Math.max(64, width) || 800, Math.max(64, height) || 504, referenceUrl, emptyOcean)
+            }
           >
             Start blank map
           </button>

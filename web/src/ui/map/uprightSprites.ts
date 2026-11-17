@@ -14,6 +14,7 @@ import {
   type TankCue,
 } from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
+import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
@@ -28,6 +29,7 @@ const BROWN = MILITARY.brown;
 const LEATHER = MILITARY.khaki;
 const BRASS = MILITARY.brass;
 const PLINTH = MILITARY.charcoal;
+const sheets = new Map<string, CanvasImageSource>();
 const GOLD = MILITARY.brass;
 const GOLD_NUM = MILITARY.cream;
 const TEAL_NUM = MILITARY.spruce;
@@ -619,6 +621,22 @@ function drawUprightBody(ctx: CanvasRenderingContext2D, unitType: string, color:
   }
 }
 
+function spriteSheet(unitType: string, factionId: string, face: FaceSign): CanvasImageSource | null {
+  const key = `${unitType}|${factionId}|${face}`;
+  const cached = sheets.get(key);
+  if (cached) {
+    return cached;
+  }
+  const baked = bakeUnitSprite(face, (ctx) => {
+    drawUprightBody(ctx, unitType, factionPalette(factionId).primary, factionId);
+  });
+  if (!baked) {
+    return null;
+  }
+  sheets.set(key, baked);
+  return baked;
+}
+
 /** Foreshortened baseplate, then the upright sprite standing on its centre. */
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
@@ -641,14 +659,20 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   ctx.stroke();
 
   const color = factionPalette(paint.factionId).primary;
+  const face = paint.face ?? 1;
+  const sheet = typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, face) : null;
   const bob = paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = squadOffsets(paint.count).slice().sort((a, b) => a.y - b.y);
     for (const off of figures) {
       ctx.save();
       ctx.translate(at(x + off.x), at(y + off.y + bob));
-      if ((paint.face ?? 1) < 0) ctx.scale(-1, 1);
-      drawUprightBody(ctx, paint.unitType, color, paint.factionId);
+      if (sheet) {
+        ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
+      } else {
+        if (face < 0) ctx.scale(-1, 1);
+        drawUprightBody(ctx, paint.unitType, color, paint.factionId);
+      }
       ctx.restore();
     }
     if (paint.count > 1) {

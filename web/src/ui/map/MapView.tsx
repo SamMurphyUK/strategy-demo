@@ -1079,7 +1079,13 @@ export function MapView(props: MapViewProps) {
     setHoverStack((prev) =>
       prev?.regionId === nextHover?.regionId && prev?.key === nextHover?.key && prev?.copyDx === nextHover?.copyDx ? prev : nextHover,
     );
-    const aiming = p.editor?.overlay.tool === "knife" || p.editor?.overlay.tool === "draw" || p.editor?.overlay.tool === "lattice";
+    const sculptAim = p.editor?.overlay.sculpt?.tool;
+    const aiming =
+      p.editor?.overlay.tool === "knife" ||
+      p.editor?.overlay.tool === "draw" ||
+      p.editor?.overlay.tool === "lattice" ||
+      sculptAim === "pen" ||
+      sculptAim === "blob";
     canvasRef.current!.style.cursor = aiming ? "crosshair" : overPlus || picked !== null || id !== "" ? "pointer" : "default";
   };
 

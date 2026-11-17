@@ -29,6 +29,7 @@ import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from 
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
 import { concealNeutralGarrison } from "./neutralGarrison";
+import type { MasterLand } from "./svgLandLoader";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PendingOrders } from "./panels/PendingOrders";
@@ -123,7 +124,9 @@ export function App() {
   const demoMapJson = useMemo(() => projectMapJson(loadJson(NEWMAP_PATH)), []);
   const playMapJson = game.map ?? demoMapJson;
   const geometry = useMemo(() => buildMapGeometry(playMapJson), [playMapJson]);
-  const { land, error: landError } = useMasterLand();
+  const { land: fileLand, error: landError } = useMasterLand();
+  const [coast, setCoast] = useState<MasterLand | "file" | "none">("file");
+  const [coastForPlay, setCoastForPlay] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(true);
   const [boardGate, setBoardGate] = useState(false);
@@ -137,7 +140,9 @@ export function App() {
   const [volume, setVolume] = useState(storedVolume);
   const [playerFaction, setPlayerFaction] = useState("ussr");
   const [saveTick, setSaveTick] = useState(0);
-  const editor = useMapEditor(demoMapJson, land, editing);
+  const land =
+    editing || coastForPlay ? (coast === "file" ? fileLand : coast === "none" ? null : coast) : fileLand;
+  const editor = useMapEditor(demoMapJson, land, editing, setCoast);
   const editorStacks = useMemo(() => startingStacks(editor.map), [editor.map]);
   const editorOwners = useMemo(() => {
     const out: Record<string, string> = {};
@@ -183,6 +188,7 @@ export function App() {
     setSaveTick((n) => n + 1);
     setEditing(false);
     setBoardGate(false);
+    setCoastForPlay(false);
     setMenuOpen(true);
   }, [stashSave]);
 
@@ -191,6 +197,7 @@ export function App() {
       game.newGame(seed, choice);
       setEditing(false);
       setBoardGate(false);
+      setCoastForPlay(false);
       setMenuOpen(false);
     },
     [game],
@@ -203,6 +210,7 @@ export function App() {
       game.restore(save.snapshot);
       setEditing(false);
       setBoardGate(false);
+      setCoastForPlay(false);
       setMenuOpen(false);
     },
     [game],
@@ -221,6 +229,7 @@ export function App() {
     });
     setEditing(false);
     setBoardGate(false);
+    setCoastForPlay(true);
     setMenuOpen(false);
   }, [editor, game]);
 
@@ -938,8 +947,8 @@ export function App() {
       {editing && boardGate && (
         <EditorStart
           versions={editor.versions}
-          onBlank={(width, height, referenceUrl) => {
-            editor.openBlank(width, height);
+          onBlank={(width, height, referenceUrl, emptyOcean) => {
+            editor.openBlank(width, height, !emptyOcean);
             editor.setReference(referenceUrl);
             setBoardGate(false);
           }}

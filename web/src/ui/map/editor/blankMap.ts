@@ -4,7 +4,8 @@ import { isDict } from "../../../engine/model/types";
 import type { Rect } from "../geometry";
 import type { EditorMap } from "./editorModel";
 
-export function blankEditorMap(width: number, height: number): EditorMap {
+/** `worldLand` keeps the shared coastline. The default is an empty ocean. */
+export function blankEditorMap(width: number, height: number, worldLand = false): EditorMap {
   const w = Math.max(64, Math.round(width));
   const h = Math.max(64, Math.round(height));
   const meta: Dict = {
@@ -12,6 +13,7 @@ export function blankEditorMap(width: number, height: number): EditorMap {
     board: { x: 0, y: 0, w, h },
     turn_order: ["ussr", "ger", "uk", "jap", "usa"],
     starting_units: [],
+    ...(worldLand ? {} : { no_landmass: true }),
   };
   return {
     regions: [],

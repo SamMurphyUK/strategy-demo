@@ -1649,10 +1649,8 @@ export function drawProceduralUnit(
       drawBattleship(ctx, factionColor, unit, time, noFire, cues.battleship);
       break;
     case 'aaa':
-      drawAaaFlak(ctx, factionColor, unit, time);
-      break;
     case 'aa':
-      drawAnimatedUnitSprite(ctx, 'aa', factionColor, time);
+      drawAaaFlak(ctx, factionColor, unit, cues.helmet);
       break;
     case 'transport':
       drawNavalTransportToken(ctx, factionColor, time);
@@ -1665,7 +1663,8 @@ export function drawProceduralUnit(
     ctx.globalCompositeOperation = 'lighter';
     const muzzleBloomR = 18 * unit.animRecoil;
     const isTank = unit.type === 'tank' || unit.type === 'armor';
-    const muzzle = isTank ? tankMuzzle(cues.tank) : { x: 18, y: -2 };
+    const isAa = unit.type === 'aa' || unit.type === 'aaa';
+    const muzzle = isTank ? tankMuzzle(cues.tank) : isAa ? aaMuzzle(unit) : { x: 18, y: -2 };
     const flashX = muzzle.x;
     const flashY = muzzle.y;
     const mGrad = ctx.createRadialGradient(flashX, flashY, 2, flashX, flashY, muzzleBloomR);
@@ -3338,55 +3337,78 @@ function drawSuperTurret(
   ctx.restore();
 }
 
-function drawAaaFlak(ctx: CanvasRenderingContext2D, factionColor: string, unit: CombatUnit, time = 0) {
-  drawAmbientOcclusionShadow(ctx, 0, 8, 14, 4, 16);
+/** Resting elevation, then a steeper skyward angle while the gun is firing. */
+function aaTilt(unit: CombatUnit): number {
+  return unit.animRecoil > 0 || unit.animAnticipation > 0 ? -1.05 : -0.72;
+}
 
-  ctx.fillStyle = PALETTE.sandTan;
-  ctx.fillRect(-10, 2, 20, 6);
+/** Muzzle of the elevated AA barrel. The trunnion is at (0, -1) and the tube is 22px. */
+function aaMuzzle(unit: CombatUnit): { x: number; y: number } {
+  const tilt = aaTilt(unit);
+  return { x: Math.cos(tilt) * 22, y: -1 + Math.sin(tilt) * 22 };
+}
+
+/**
+ * A towed anti-aircraft gun: one wheel, a cruciform, a faction shield, and one barrel
+ * on the trunnion. The old twin tubes rotated around the ground point and came off the carriage.
+ */
+function drawAaaFlak(ctx: CanvasRenderingContext2D, factionColor: string, unit: CombatUnit, helmet: Helmet) {
+  drawAmbientOcclusionShadow(ctx, 2, 10, 16, 4, 18);
+
+  ctx.fillStyle = PALETTE.deepTaupe;
+  ctx.fillRect(-18, 6, 16, 3);
+  ctx.fillRect(8, 7, 10, 2);
   ctx.fillStyle = PALETTE.earthBrown;
-  for (let i = -9; i < 9; i += 5) {
-    ctx.fillRect(i, 2, 4, 3);
-  }
-
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(-5, -2, 10, 4);
+  ctx.fillRect(-20, 8, 4, 2);
+  ctx.fillRect(16, 8, 3, 2);
 
   ctx.save();
-  // Elevate steep skyward angle when firing or preparing AA
-  const isAAShooting = unit.animRecoil > 0 || unit.animAnticipation > 0;
-  const tilt = isAAShooting ? -1.25 : -0.8;
-  ctx.rotate(tilt);
-  ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(-2, -4, 18, 2);
-  ctx.fillRect(-2, -1, 18, 2);
+  ctx.translate(-1, 4);
+  ctx.fillStyle = PALETTE.earthBrown;
+  ctx.beginPath();
+  ctx.arc(0, 0, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = PALETTE.bunkerCharcoal;
+  ctx.lineWidth = 2;
+  ctx.stroke();
   ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(15, -5, 3, 4);
-  ctx.fillRect(15, -2, 3, 4);
+  ctx.fillRect(-5, -1, 10, 2);
+  ctx.fillRect(-1, -5, 2, 10);
+  ctx.restore();
+  ctx.fillStyle = PALETTE.navalSteel;
+  ctx.fillRect(-3, 2, 4, 4);
 
-  // Twin Muzzle Flash Burst when firing
+  ctx.fillStyle = factionColor;
+  ctx.fillRect(-3, -10, 6, 14);
+  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  ctx.fillRect(3, -8, 1, 10);
+
+  ctx.save();
+  ctx.translate(0, -1);
+  ctx.rotate(aaTilt(unit));
+  const kick = unit.animRecoil > 0 ? unit.animRecoil * 4 : 0;
+  ctx.fillStyle = PALETTE.navalSteel;
+  ctx.fillRect(-kick, -1.5, 22, 3);
+  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  ctx.fillRect(20 - kick, -3, 3, 6);
   if (unit.animRecoil > 0.15) {
-    const flashLen = 6 * unit.animRecoil;
-    // Barrel 1 muzzle flash
     ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillRect(18, -5, flashLen, 3);
-    // Barrel 2 muzzle flash
-    ctx.fillStyle = PALETTE.mustardBrass;
-    ctx.fillRect(18, -2, flashLen, 3);
-
-    // Muzzle bloom
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const bloom = ctx.createRadialGradient(20, -3, 1, 20, -3, 14 * unit.animRecoil);
-    bloom.addColorStop(0, 'rgba(255, 250, 200, 0.95)');
-    bloom.addColorStop(0.4, 'rgba(255, 180, 50, 0.6)');
-    bloom.addColorStop(1, 'rgba(200, 60, 20, 0)');
-    ctx.fillStyle = bloom;
-    ctx.beginPath();
-    ctx.arc(20, -3, 14 * unit.animRecoil, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    ctx.fillRect(23 - kick, -2, 5 * unit.animRecoil, 4);
   }
   ctx.restore();
+
+  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  ctx.fillRect(-16, 5, 3, 5);
+  ctx.fillRect(-12, 5, 3, 5);
+  ctx.fillStyle = PALETTE.deepTaupe;
+  ctx.fillRect(-16, 1, 7, 5);
+  ctx.fillStyle = factionColor;
+  ctx.fillRect(-17, -6, 8, 8);
+  ctx.fillStyle = PALETTE.khakiLeather;
+  ctx.fillRect(-17, -1, 8, 2);
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.fillRect(-15, -10, 5, 4);
+  drawHelmet(ctx, helmet, -12, -13, factionColor);
 }
 
 function drawDamageSmoke(ctx: CanvasRenderingContext2D, time: number) {

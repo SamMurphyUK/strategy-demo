@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { SculptTool } from "./landmass";
 import type { EditorTool, MapEditor, StrokeTolerance } from "./useMapEditor";
 
 const TOOLS: { tool: EditorTool; label: string; key: string; title: string }[] = [
@@ -11,6 +12,13 @@ const TOOLS: { tool: EditorTool; label: string; key: string; title: string }[] =
   { tool: "promote", label: "Promote", key: "P", title: "Click bare, decorative land to turn that island into a playable region." },
   { tool: "lattice", label: "Lattice", key: "G", title: "Paint the selected sea zone on the 8×8 grid. Square or triangle. Right-drag or Alt-drag erases. Shift holds the triangle brush." },
 ];
+
+const SCULPT_HINTS: Record<SculptTool, string> = {
+  pen: "Click vertices, or drag a freehand outline. Click the first point, double-click, or press Enter to close it.",
+  blob: "Drag to stamp an island. A click drops one circle. Overlaps weld when you bake.",
+  select: "Drag a shape to move it. The cream square scales it, the cream ring above it rotates it.",
+  vertex: "Drag a square to move that point. Click an edge midpoint to insert one.",
+};
 
 const HINTS: Record<EditorTool, string> = {
   select: "Click a region to edit it. Drag the amber diamond to move its unit anchor.",
@@ -32,6 +40,39 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
 
   return (
     <div className="editor-toolbar" role="toolbar" aria-label="Editor toolbar">
+      <div className="editor-toolbar-row">
+        <div className="segmented" role="group" aria-label="Stage">
+          <button
+            type="button"
+            className={editor.sculpting ? "active" : ""}
+            title="Draw and layer the coast. Cutting waits until you switch to Cut."
+            onClick={() => editor.setSculpting(true)}
+          >
+            Landmass
+          </button>
+          <button
+            type="button"
+            className={!editor.sculpting ? "active" : ""}
+            title="Slice the coast into territories and sea zones."
+            onClick={() => editor.enterCutting()}
+          >
+            Cut
+          </button>
+        </div>
+        {!editor.sculpting && <OpenCoastButton editor={editor} />}
+        <div className="segmented" role="group" aria-label="History">
+          <button type="button" onClick={editor.undo} disabled={!editor.canUndo} title="Undo (Ctrl+Z)">
+            Undo
+          </button>
+          <button type="button" onClick={editor.redo} disabled={!editor.canRedo} title="Redo (Ctrl+Shift+Z)">
+            Redo
+          </button>
+        </div>
+      </div>
+      {editor.sculpting ? (
+        <LandmassRow editor={editor} />
+      ) : (
+      <>
       <div className="editor-toolbar-row">
         <div className="segmented" role="group" aria-label="Layer">
           <button
@@ -63,14 +104,6 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
               {t.label} <kbd>{t.key}</kbd>
             </button>
           ))}
-        </div>
-        <div className="segmented" role="group" aria-label="History">
-          <button type="button" onClick={editor.undo} disabled={!editor.canUndo} title="Undo (Ctrl+Z)">
-            Undo
-          </button>
-          <button type="button" onClick={editor.redo} disabled={!editor.canRedo} title="Redo (Ctrl+Shift+Z)">
-            Redo
-          </button>
         </div>
       </div>
 
@@ -225,7 +258,134 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
           </>
         )}
       </div>
-      <p className="editor-toolbar-hint">{editor.status !== "" ? editor.status : HINTS[editor.tool]}</p>
+      </>
+      )}
+      <p className="editor-toolbar-hint">
+        {editor.status !== "" ? editor.status : editor.sculpting ? SCULPT_HINTS[editor.sculptTool] : HINTS[editor.tool]}
+      </p>
+    </div>
+  );
+}
+
+const SCULPT_TOOLS: { tool: SculptTool; label: string }[] = [
+  { tool: "pen", label: "Pen" },
+  { tool: "blob", label: "Blob" },
+  { tool: "select", label: "Transform" },
+  { tool: "vertex", label: "Vertex" },
+];
+
+function OpenCoastButton({ editor }: { editor: MapEditor }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button
+        type="button"
+        title="Install a landmass SVG as the coast and slice that shape."
+        onClick={() => fileRef.current?.click()}
+      >
+        Open landmass SVG
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".svg,image/svg+xml"
+        aria-label="Open landmass SVG"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) {
+            return;
+          }
+          void file.text().then((text) => editor.openCoastSvg(text));
+        }}
+      />
+    </>
+  );
+}
+
+function LandmassRow({ editor }: { editor: MapEditor }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const selected = editor.sculptShapes.find((shape) => shape.id === editor.sculptSelectedId) ?? null;
+  return (
+    <div className="editor-toolbar-row">
+          <div className="segmented" role="group" aria-label="Draft shape">
+            {SCULPT_TOOLS.map((item) => (
+              <button
+                key={item.tool}
+                type="button"
+                className={editor.sculptTool === item.tool ? "active" : ""}
+                onClick={() => editor.setSculptTool(item.tool)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {editor.sculptTool === "blob" && (
+            <label className="editor-toolbar-note" title="Radius of each stamped circle, in world units.">
+              Radius
+              <input
+                type="range"
+                min={4}
+                max={36}
+                step={1}
+                value={editor.blobRadius}
+                aria-label="Blob radius"
+                onChange={(e) => editor.setBlobRadius(Number(e.target.value))}
+              />
+            </label>
+          )}
+          <label className="editor-toolbar-note" title="Ramer-Douglas-Peucker tolerance. Higher drops more points.">
+            Simplify
+            <input
+              type="range"
+              min={0.5}
+              max={8}
+              step={0.5}
+              value={editor.sculptTolerance}
+              aria-label="Simplify tolerance"
+              onChange={(e) => editor.setSculptTolerance(Number(e.target.value))}
+            />
+          </label>
+          <button type="button" disabled={!selected} onClick={editor.toggleSculptHole}>
+            {selected?.hole ? "Make land" : "Make hole"}
+          </button>
+          <button type="button" disabled={!selected} onClick={editor.deleteSculptShape}>
+            Delete shape
+          </button>
+          <button type="button" onClick={() => fileRef.current?.click()}>
+            Import SVG
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".svg,image/svg+xml"
+            aria-label="Import SVG paths"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) {
+                return;
+              }
+              void file.text().then((text) => editor.importSculptSvg(text));
+            }}
+          />
+          <button type="button" disabled={editor.sculptShapes.length === 0} onClick={editor.bakeSculpt}>
+            Bake
+          </button>
+          <button type="button" disabled={editor.sculptShapes.length === 0} onClick={editor.downloadLandmassSvg}>
+            Download .svg
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={editor.sculptShapes.length === 0}
+            title="Bake this coast and open Cut. A changed coast replaces the territories. Undo brings them back."
+            onClick={editor.enterCutting}
+          >
+            Cut this landmass
+          </button>
     </div>
   );
 }
