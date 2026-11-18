@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://strategy-demo.local/schemas/rig-manifest.json",
+  "title": "RigManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "frameWidth", "frameHeight", "animations"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "frameWidth": { "type": "integer", "minimum": 1 },
+    "frameHeight": { "type": "integer", "minimum": 1 },
+    "animations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["walk", "idle", "fire"],
+      "properties": {
+        "walk": { "$ref": "#/$defs/socketTrack", "minItems": 8, "maxItems": 8 },
+        "idle": { "$ref": "#/$defs/socketTrack", "minItems": 2, "maxItems": 2 },
+        "fire": { "$ref": "#/$defs/socketTrack", "minItems": 3, "maxItems": 3 }
+      }
+    }
+  },
+  "$defs": {
+    "pixel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" }
+      }
+    },
+    "socketFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["torsoOffset", "headSocket", "weaponSocket", "hipSocket"],
+      "properties": {
+        "torsoOffset": { "$ref": "#/$defs/pixel" },
+        "headSocket": { "$ref": "#/$defs/pixel" },
+        "weaponSocket": { "$ref": "#/$defs/pixel" },
+        "hipSocket": { "$ref": "#/$defs/pixel" },
+        "weaponRecoilOffset": { "$ref": "#/$defs/pixel" },
+        "showMuzzleFlash": { "type": "boolean" }
+      }
+    },
+    "socketTrack": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/socketFrame" }
+    },
+    "partCategory": {
+      "enum": ["legs", "torso", "head", "weapon"]
+    },
+    "indexedImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "indices"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "indices": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 13 }
+        }
+      }
+    },
+    "modularPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "category", "spriteData", "width", "height", "anchor", "frameCount"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "category": { "$ref": "#/$defs/partCategory" },
+        "spriteData": { "$ref": "#/$defs/indexedImage" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "anchor": { "$ref": "#/$defs/pixel" },
+        "muzzleAnchor": { "$ref": "#/$defs/pixel" },
+        "frameCount": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

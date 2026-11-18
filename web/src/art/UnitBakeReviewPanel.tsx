@@ -264,6 +264,7 @@ export function UnitBakeReviewPanel() {
         </figure>
         <p className="sprite-generate-help">{help ?? note}</p>
       </details>
+      <div className="sprite-editor-end" aria-hidden="true" />
     </section>
   );
 }
@@ -272,20 +273,26 @@ const PANEL_CSS = `
 .unit-bake-review {
   position: fixed;
   z-index: 40;
-  inset: 12px;
+  top: 12px;
+  right: 12px;
+  bottom: 96px;
+  left: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 16px 12px;
+  padding: 16px 16px 0;
   background: #1c1917;
   color: #f5f0e6;
-  overflow: hidden;
+  overflow: auto;
   box-shadow: 0 0 0 1px #4b3d44;
+}
+.sprite-editor-end {
+  flex: none;
+  height: 220px;
 }
 .sprite-generate {
   flex: none;
-  max-height: 34%;
-  overflow: auto;
+  overflow: visible;
   border-top: 1px solid #4b3d44;
   padding-top: 8px;
 }

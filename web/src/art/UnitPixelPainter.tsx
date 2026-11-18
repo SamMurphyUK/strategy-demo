@@ -28,6 +28,7 @@ import {
   type Brush,
   type UnitPaintDocument,
 } from "./pixelPaint";
+import { PaperDollPanel } from "./PaperDollPanel";
 import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type RosterFactionId, type UnitSpriteSheetBlueprint } from "./skeletonSchema";
 
 const GRID = 48;
@@ -103,6 +104,7 @@ export function UnitPixelPainter({
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [painting, setPainting] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [rigOpen, setRigOpen] = useState(false);
   const history = useRef<HistoryStep[]>([]);
   const docRef = useRef(doc);
   const backupRef = useRef(backup);
@@ -202,6 +204,9 @@ export function UnitPixelPainter({
       }
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (target instanceof Element && target.closest(".rig-panel")) {
         return;
       }
       event.preventDefault();
@@ -505,6 +510,15 @@ export function UnitPixelPainter({
             Build the march
           </HintButton>
         )}
+        <ToolButton
+          hint={hint(
+            "Pin sockets on an eight-frame walk, swap the head, tunic, legs, and rifle, and bake a faction spritesheet. The pencil stays on the canvas below.",
+          )}
+          pressed={rigOpen}
+          onClick={() => setRigOpen((open) => !open)}
+        >
+          Skeleton rig
+        </ToolButton>
         {doc.layers && doc.editingLayer && (
           <HintButton
             hint={hint(
@@ -576,6 +590,7 @@ export function UnitPixelPainter({
           />
         </label>
       </div>
+      {rigOpen && <PaperDollPanel />}
 
       <div className="sprite-scroll">
       <div className="sprite-workspace">
@@ -957,8 +972,7 @@ const PAINTER_CSS = `
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
   color: #f5f0e6;
   font: 14px/1.4 "Segoe UI", sans-serif;
   letter-spacing: 0;
@@ -1043,9 +1057,8 @@ const PAINTER_CSS = `
   border: 1px solid #4b3d44;
 }
 .sprite-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  flex: none;
+  overflow: visible;
 }
 .sprite-workspace {
   display: grid;
