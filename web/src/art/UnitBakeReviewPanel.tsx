@@ -9,6 +9,7 @@ import {
   referencePlatesFor,
 } from "./bakeReview";
 import type { MilitaryStripKey, UnitSkeletonBlueprint } from "./skeletonSchema";
+import { FrameEditor } from "./FrameEditor";
 import { UnitPixelPainter, type PaintCommand } from "./UnitPixelPainter";
 import { FACTION_MILITARY_MAPPINGS } from "./starterParts";
 import type { UnitPaintDocument } from "./pixelPaint";
@@ -61,6 +62,7 @@ export function UnitBakeReviewPanel() {
   const [note, setNote] = useState("");
   const [help, setHelp] = useState<string | null>(null);
   const [paintCommand, setPaintCommand] = useState<PaintCommand | null>(null);
+  const [blockoutOpen, setBlockoutOpen] = useState(false);
   const candidateRef = useRef<HTMLCanvasElement>(null);
   const blueprintId = doc?.blueprint.blueprintId ?? "";
   const openedId = useRef(blueprintId);
@@ -185,85 +187,98 @@ export function UnitBakeReviewPanel() {
   return (
     <section className="unit-bake-review" aria-label="Sprite editor">
       <style>{PANEL_CSS}</style>
-      <UnitPixelPainter command={paintCommand} onDocument={setDoc} />
-      <details className="sprite-generate">
-        <summary
-          {...hint(
-            "Optional. Sends the drawing on the canvas to Retro Diffusion and brings back three recoloured attempts. The canvas stays as it is until you choose Paint over this picture.",
-          )}
-        >
-          Generate pictures from this drawing
-        </summary>
-        <p className="sprite-generate-lead">
-          This asks for three variations of the figure on the canvas. Pick one, keep it in the project, or paint over it by hand.
-          The dev server needs an API token, and a request spends credits.
-        </p>
-        <div className="sprite-generate-actions">
-          <button
-            type="button"
-            onClick={() => void bakeThree()}
-            disabled={busy || doc === null}
-            {...hint(
-              "Send the current 48 by 48 drawing and ask for three pictures. They show up here. Your canvas is left alone.",
-            )}
-          >
-            {busy ? "Working…" : "Generate 3 pictures"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void promote()}
-            disabled={busy || selected === null}
-            {...hint(
-              "Copy the selected picture into the project as the kept PNG for this unit. Later, Open kept picture can load it back onto the canvas.",
-            )}
-          >
-            Keep this picture
-          </button>
-          <button
-            type="button"
-            disabled={selected === null}
-            {...hint(
-              "Flatten the selected picture onto the 48 by 48 canvas so you can correct pixels with the pencil. Put the parts back returns to the separate pieces.",
-            )}
-            onClick={() => {
-              if (!doc || !selected) {
-                return;
-              }
-              setPaintCommand({
-                id: Date.now(),
-                action: "candidate",
-                blueprintId: doc.blueprint.blueprintId,
-                candidateBase64: selected.quantizedBase64,
-              });
-            }}
-          >
-            Paint over this picture
-          </button>
-        </div>
-        {candidates.length > 0 && (
-          <div className="sprite-generate-seeds" role="group" aria-label="Generated pictures">
-            {candidates.map((item, index) => (
+      <FrameEditor />
+      <button
+        type="button"
+        className="sprite-blockout-toggle"
+        aria-expanded={blockoutOpen}
+        onClick={() => setBlockoutOpen((open) => !open)}
+      >
+        {blockoutOpen ? "Hide the 48 × 48 blockout editor" : "48 × 48 blockout editor"}
+      </button>
+      {blockoutOpen && (
+        <>
+          <UnitPixelPainter command={paintCommand} onDocument={setDoc} />
+          <details className="sprite-generate">
+            <summary
+              {...hint(
+                "Optional. Sends the drawing on the canvas to Retro Diffusion and brings back three recoloured attempts. The canvas stays as it is until you choose Paint over this picture.",
+              )}
+            >
+              Generate pictures from this drawing
+            </summary>
+            <p className="sprite-generate-lead">
+              This asks for three variations of the figure on the canvas. Pick one, keep it in the project, or paint over it by hand.
+              The dev server needs an API token, and a request spends credits.
+            </p>
+            <div className="sprite-generate-actions">
               <button
-                key={item.seed}
                 type="button"
-                aria-pressed={item.seed === selectedSeed}
+                onClick={() => void bakeThree()}
+                disabled={busy || doc === null}
                 {...hint(
-                  `Picture ${index + 1}. Outline match ${item.silhouetteIoU.toFixed(2)}. 1.00 means the silhouette matches your drawing. Lower means the picture grew or shrank past it.`,
+                  "Send the current 48 by 48 drawing and ask for three pictures. They show up here. Your canvas is left alone.",
                 )}
-                onClick={() => setSelectedSeed(item.seed)}
               >
-                Picture {index + 1}
-                <small>match {item.silhouetteIoU.toFixed(2)}</small>
+                {busy ? "Working…" : "Generate 3 pictures"}
               </button>
-            ))}
-          </div>
-        )}
-        <figure>
-          <figcaption>{selected ? "Selected picture" : "A generated picture shows here"}</figcaption>
-          <canvas ref={candidateRef} width={48} height={48} />
-        </figure>
-        <p className="sprite-generate-help">{help ?? note}</p>
-      </details>
+              <button
+                type="button"
+                onClick={() => void promote()}
+                disabled={busy || selected === null}
+                {...hint(
+                  "Copy the selected picture into the project as the kept PNG for this unit. Later, Open kept picture can load it back onto the canvas.",
+                )}
+              >
+                Keep this picture
+              </button>
+              <button
+                type="button"
+                disabled={selected === null}
+                {...hint(
+                  "Flatten the selected picture onto the 48 by 48 canvas so you can correct pixels with the pencil. Put the parts back returns to the separate pieces.",
+                )}
+                onClick={() => {
+                  if (!doc || !selected) {
+                    return;
+                  }
+                  setPaintCommand({
+                    id: Date.now(),
+                    action: "candidate",
+                    blueprintId: doc.blueprint.blueprintId,
+                    candidateBase64: selected.quantizedBase64,
+                  });
+                }}
+              >
+                Paint over this picture
+              </button>
+            </div>
+            {candidates.length > 0 && (
+              <div className="sprite-generate-seeds" role="group" aria-label="Generated pictures">
+                {candidates.map((item, index) => (
+                  <button
+                    key={item.seed}
+                    type="button"
+                    aria-pressed={item.seed === selectedSeed}
+                    {...hint(
+                      `Picture ${index + 1}. Outline match ${item.silhouetteIoU.toFixed(2)}. 1.00 means the silhouette matches your drawing. Lower means the picture grew or shrank past it.`,
+                    )}
+                    onClick={() => setSelectedSeed(item.seed)}
+                  >
+                    Picture {index + 1}
+                    <small>match {item.silhouetteIoU.toFixed(2)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            <figure>
+              <figcaption>{selected ? "Selected picture" : "A generated picture shows here"}</figcaption>
+              <canvas ref={candidateRef} width={48} height={48} />
+            </figure>
+            <p className="sprite-generate-help">{help ?? note}</p>
+          </details>
+        </>
+      )}
       <div className="sprite-editor-end" aria-hidden="true" />
     </section>
   );
@@ -289,6 +304,17 @@ const PANEL_CSS = `
 .sprite-editor-end {
   flex: none;
   height: 220px;
+}
+.sprite-blockout-toggle {
+  flex: none;
+  align-self: flex-start;
+  font: 600 13px/1.3 "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 6px 10px;
+  background: #2a2420;
+  color: #f5f0e6;
+  border: 1px solid #4b3d44;
 }
 .sprite-generate {
   flex: none;

@@ -19,8 +19,6 @@ import {
   loadFrameOntoCurrent,
   nudgeLayer,
   paintAt,
-  placeRigFrame,
-  stampWalkStance,
   solidTorsoUnderWeapon,
   placeGroundOrigin,
   placeMuzzle,
@@ -33,8 +31,6 @@ import {
   type Brush,
   type UnitPaintDocument,
 } from "./pixelPaint";
-import { composeLayers } from "./paperDoll";
-import { PaperDollPanel } from "./PaperDollPanel";
 import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type RosterFactionId, type SpriteFrameKey, type UnitSpriteSheetBlueprint } from "./skeletonSchema";
 
 const GRID = 48;
@@ -110,7 +106,6 @@ export function UnitPixelPainter({
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [painting, setPainting] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
-  const [rigOpen, setRigOpen] = useState(false);
   const history = useRef<HistoryStep[]>([]);
   const docRef = useRef(doc);
   const backupRef = useRef(backup);
@@ -342,36 +337,6 @@ export function UnitPixelPainter({
     }
   };
 
-  const pullWalkStance = async () => {
-    try {
-      const response = await fetch("/assets/units/jap_walk.png");
-      if (!response.ok) {
-        throw new Error("The walk sheet is missing.");
-      }
-      const blob = await response.blob();
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("The walk sheet could not be read.");
-      }
-      ctx.drawImage(bitmap, 0, 0);
-      const image = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-      bitmap.close();
-      const stamped = stampWalkStance(doc, image.data, image.width, image.height);
-      if (stamped === doc) {
-        setNotice("Walk frame 0 had no pixels to place.");
-        return;
-      }
-      commit(stamped);
-      setNotice(`${FRAME_LABEL[doc.editingFrame]} now shows walk frame 0. Pencil and eraser change its pixels.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(toPaintFile(doc), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -567,15 +532,6 @@ export function UnitPixelPainter({
             Build the march
           </HintButton>
         )}
-        <ToolButton
-          hint={hint(
-            "Pin sockets on an eight-frame walk, swap the head, tunic, legs, and rifle, and bake a faction spritesheet. The pencil stays on the canvas below.",
-          )}
-          pressed={rigOpen}
-          onClick={() => setRigOpen((open) => !open)}
-        >
-          Skeleton rig
-        </ToolButton>
         {doc.layers && doc.editingLayer && (
           <HintButton
             hint={hint(
@@ -638,12 +594,6 @@ export function UnitPixelPainter({
             ))}
           </select>
         </label>
-        <HintButton
-          hint={hint("Put frame 0 of the walk onto the pose you are painting. The feet sit on the ground mark. Pencil and eraser change every pixel.")}
-          onClick={() => void pullWalkStance()}
-        >
-          Walk frame
-        </HintButton>
         {doc.layers && (
           <HintButton
             hint={hint(
@@ -697,26 +647,6 @@ export function UnitPixelPainter({
           />
         </label>
       </div>
-      {rigOpen && (
-        <PaperDollPanel
-          onDrawOnSprite={(manifest, parts) => {
-            try {
-              const placed = placeRigFrame(doc, composeLayers(manifest, parts, "walk", 0));
-              if (placed === doc) {
-                setNotice("The rig had no pixels to draw.");
-                return;
-              }
-              commit(withEditingLayer(placed, "torso"));
-              setNotice(
-                `${FRAME_LABEL[doc.editingFrame]} now has the legs, torso, head, and rifle. The torso is the body under the rifle. Paint it to close any hole.`,
-              );
-            } catch (error) {
-              setNotice(error instanceof Error ? error.message : String(error));
-            }
-          }}
-        />
-      )}
-
       <div className="sprite-scroll">
       <div className="sprite-workspace">
         <div className="sprite-tools" role="toolbar" aria-label="Tools">

@@ -1,0 +1,527 @@
+import { MILITARY } from "../ui/theme/militaryPalette";
+import { SPRITE_BAKE } from "../ui/map/figureGround";
+import {
+  FACTION_LUTS,
+  PART_CATEGORIES,
+  layoutWalkGrid,
+  quantizePixel,
+  retintWalkSlot,
+  type PartCategory,
+  type PixelPoint,
+} from "./paperDoll";
+
+/** Legs first, the weapon last. A later layer covers an earlier one. */
+export const LAYER_ORDER: readonly PartCategory[] = PART_CATEGORIES;
+
+export const LAYER_NAME: Record<PartCategory, string> = {
+  legs: "Legs",
+  torso: "Torso",
+  head: "Head",
+  weapon: "Weapon",
+};
+
+export type ClipKey = "idle" | "walk" | "fire";
+export const CLIP_KEYS: readonly ClipKey[] = ["idle", "walk", "fire"];
+export const CLIP_LABEL: Record<ClipKey, string> = {
+  idle: "Idle",
+  walk: "Walking",
+  fire: "Firing",
+};
+
+/** One frame at the sheet's own size. Each layer holds the semantic slots 0–13. */
+export interface SpriteFrame {
+  width: number;
+  height: number;
+  layers: Record<PartCategory, number[]>;
+  muzzle: PixelPoint | null;
+  flash: boolean;
+}
+
+export interface FrameClips {
+  unitId: string;
+  width: number;
+  height: number;
+  /** Where the boots stand. The game card puts this pixel on its ground line. */
+  feet: PixelPoint;
+  clips: Record<ClipKey, SpriteFrame[]>;
+}
+
+export interface SpriteFrameFile {
+  kind: "sprite-frame";
+  version: 1;
+  width: number;
+  height: number;
+  layers: Record<PartCategory, number[]>;
+  muzzle: PixelPoint | null;
+  flash: boolean;
+}
+
+export interface FrameClipsFile {
+  kind: "sprite-clips";
+  version: 1;
+  unitId: string;
+  width: number;
+  height: number;
+  feet: PixelPoint;
+  clips: Record<ClipKey, string[]>;
+}
+
+/**
+ * jap_walk.png's own colours, one slot each per layer, so splitting the sheet loses nothing.
+ * The same hex can sit in two slots: the helmet and the tunic share a colour, and so do the
+ * tunic shadow and the gun shadow.
+ */
+const SHEET_SLOT: Record<string, number> = {
+  a78a5e: 1,
+  a9a25d: 2,
+  "4b3d44": 3,
+  "645355": 4,
+  "846d59": 6,
+  ddcf99: 8,
+  b87a60: 10,
+  "4e5463": 12,
+};
+
+const SHEET_SLOT_ON: Partial<Record<PartCategory, Record<string, number>>> = {
+  head: { a9a25d: 11 },
+  weapon: { "4b3d44": 13, a78a5e: 7 },
+};
+
+/** Slot to colour for the sheet's own colours. Frame 0 drawn with this matches jap_walk.png pixel for pixel. */
+export const AS_DRAWN_LUT: readonly string[] = (() => {
+  const lut = [...FACTION_LUTS.JAP];
+  for (const [hex, slot] of Object.entries(SHEET_SLOT)) {
+    lut[slot] = `#${hex}`;
+  }
+  for (const table of Object.values(SHEET_SLOT_ON)) {
+    for (const [hex, slot] of Object.entries(table)) {
+      lut[slot] = `#${hex}`;
+    }
+  }
+  return lut;
+})();
+
+/** The sheet's colours keep their own slot. Anything else snaps to the nearest doll colour. */
+export function sheetSlot(r: number, g: number, b: number, a: number, layer: PartCategory): number {
+  if (a < 128) {
+    return 0;
+  }
+  const hex = [r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("");
+  const exact = SHEET_SLOT_ON[layer]?.[hex] ?? SHEET_SLOT[hex];
+  if (exact !== undefined) {
+    return exact;
+  }
+  const slot = quantizePixel(r, g, b, a, layer);
+  return slot === 0 ? 0 : retintWalkSlot(slot, layer);
+}
+
+export function emptyFrame(width: number, height: number): SpriteFrame {
+  const blank = () => new Array<number>(width * height).fill(0);
+  return {
+    width,
+    height,
+    layers: { legs: blank(), torso: blank(), head: blank(), weapon: blank() },
+    muzzle: null,
+    flash: false,
+  };
+}
+
+export function cloneFrame(frame: SpriteFrame): SpriteFrame {
+  return {
+    width: frame.width,
+    height: frame.height,
+    layers: {
+      legs: frame.layers.legs.slice(),
+      torso: frame.layers.torso.slice(),
+      head: frame.layers.head.slice(),
+      weapon: frame.layers.weapon.slice(),
+    },
+    muzzle: frame.muzzle ? { ...frame.muzzle } : null,
+    flash: frame.flash,
+  };
+}
+
+/**
+ * Split the 4×2 walk sheet into eight frames at full size.
+ * Every opaque sheet pixel lands on the layer the segmenter gave it, in the same place.
+ * Walking holds the eight frames. Idle starts as a copy of frame 0. Firing starts empty.
+ */
+export function clipsFromWalkSheet(rgba: Uint8ClampedArray, width: number, height: number, unitId: string): FrameClips {
+  const sheet = layoutWalkGrid(rgba, width, height);
+  const cell = sheet.height;
+  const walk: SpriteFrame[] = [];
+  for (let index = 0; index < 8; index += 1) {
+    const frame = emptyFrame(cell, cell);
+    for (let y = 0; y < cell; y += 1) {
+      for (let x = 0; x < cell; x += 1) {
+        const source = y * sheet.width + index * cell + x;
+        const offset = source * 4;
+        const alpha = sheet.rgba[offset + 3] ?? 0;
+        if (alpha < 128) {
+          continue;
+        }
+        const layer = sheet.mask[source] ?? "torso";
+        frame.layers[layer][y * cell + x] = sheetSlot(
+          sheet.rgba[offset] ?? 0,
+          sheet.rgba[offset + 1] ?? 0,
+          sheet.rgba[offset + 2] ?? 0,
+          alpha,
+          layer,
+        );
+      }
+    }
+    frame.muzzle = muzzleOf(frame);
+    walk.push(frame);
+  }
+  const first = walk[0] ?? emptyFrame(cell, cell);
+  return {
+    unitId,
+    width: cell,
+    height: cell,
+    feet: feetOf(first),
+    clips: { idle: [cloneFrame(first)], walk, fire: [] },
+  };
+}
+
+/** The bottom row of the figure, halfway between its outer pixels. */
+export function feetOf(frame: SpriteFrame): PixelPoint {
+  const flat = composite(frame);
+  for (let y = frame.height - 1; y >= 0; y -= 1) {
+    let left = -1;
+    let right = -1;
+    for (let x = 0; x < frame.width; x += 1) {
+      if ((flat[y * frame.width + x] ?? 0) !== 0) {
+        if (left < 0) left = x;
+        right = x;
+      }
+    }
+    if (left >= 0) {
+      return { x: Math.round((left + right) / 2), y };
+    }
+  }
+  return { x: Math.floor(frame.width / 2), y: frame.height - 1 };
+}
+
+/** The weapon pixel furthest right, then highest. */
+export function muzzleOf(frame: SpriteFrame): PixelPoint | null {
+  let best: PixelPoint | null = null;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      if ((frame.layers.weapon[y * frame.width + x] ?? 0) === 0) {
+        continue;
+      }
+      if (!best || x > best.x) {
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
+/** Flatten the layers. Legs, then torso, then head, then the weapon on top. */
+export function composite(frame: SpriteFrame): number[] {
+  const out = new Array<number>(frame.width * frame.height).fill(0);
+  for (const layer of LAYER_ORDER) {
+    const cells = frame.layers[layer];
+    for (let index = 0; index < out.length; index += 1) {
+      const slot = cells[index] ?? 0;
+      if (slot !== 0) {
+        out[index] = slot;
+      }
+    }
+  }
+  return out;
+}
+
+function inside(frame: SpriteFrame, x: number, y: number): boolean {
+  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < frame.width && y < frame.height;
+}
+
+/** Write one slot onto one layer. Slot 0 clears that layer's pixel. */
+export function paintCell(frame: SpriteFrame, layer: PartCategory, x: number, y: number, slot: number): SpriteFrame {
+  if (!inside(frame, x, y)) {
+    return frame;
+  }
+  const index = y * frame.width + x;
+  const next = Math.max(0, Math.min(13, Math.round(slot)));
+  if ((frame.layers[layer][index] ?? 0) === next) {
+    return frame;
+  }
+  const cells = frame.layers[layer].slice();
+  cells[index] = next;
+  return { ...frame, layers: { ...frame.layers, [layer]: cells } };
+}
+
+/** Clear the pixel on every layer, so the square is empty. */
+export function eraseCell(frame: SpriteFrame, x: number, y: number): SpriteFrame {
+  if (!inside(frame, x, y)) {
+    return frame;
+  }
+  const index = y * frame.width + x;
+  if (!LAYER_ORDER.some((layer) => (frame.layers[layer][index] ?? 0) !== 0)) {
+    return frame;
+  }
+  const layers = { ...frame.layers };
+  for (const layer of LAYER_ORDER) {
+    if ((layers[layer][index] ?? 0) !== 0) {
+      const cells = layers[layer].slice();
+      cells[index] = 0;
+      layers[layer] = cells;
+    }
+  }
+  return { ...frame, layers };
+}
+
+/** Slide one layer. Pixels pushed off the frame are dropped. */
+export function nudgeLayer(frame: SpriteFrame, layer: PartCategory, dx: number, dy: number): SpriteFrame {
+  const source = frame.layers[layer];
+  if ((dx === 0 && dy === 0) || !source.some((slot) => slot !== 0)) {
+    return frame;
+  }
+  const cells = new Array<number>(source.length).fill(0);
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const slot = source[y * frame.width + x] ?? 0;
+      const tx = x + dx;
+      const ty = y + dy;
+      if (slot !== 0 && tx >= 0 && ty >= 0 && tx < frame.width && ty < frame.height) {
+        cells[ty * frame.width + tx] = slot;
+      }
+    }
+  }
+  const moved = { ...frame, layers: { ...frame.layers, [layer]: cells } };
+  if (layer === "weapon" && frame.muzzle) {
+    moved.muzzle = { x: frame.muzzle.x + dx, y: frame.muzzle.y + dy };
+  }
+  return moved;
+}
+
+/**
+ * Paint the tunic behind the weapon. Every weapon pixel inside the torso's box
+ * gets the torso's most common colour underneath, so moving the weapon shows a body.
+ */
+export function fillTorsoUnderWeapon(frame: SpriteFrame): SpriteFrame {
+  const torso = frame.layers.torso;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = -1;
+  let maxY = -1;
+  const counts = new Map<number, number>();
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const slot = torso[y * frame.width + x] ?? 0;
+      if (slot === 0) {
+        continue;
+      }
+      counts.set(slot, (counts.get(slot) ?? 0) + 1);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  let fill = 0;
+  let most = 0;
+  for (const [slot, count] of counts) {
+    if (count > most) {
+      most = count;
+      fill = slot;
+    }
+  }
+  if (fill === 0) {
+    return frame;
+  }
+  let cells: number[] | null = null;
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const index = y * frame.width + x;
+      if ((frame.layers.weapon[index] ?? 0) === 0 || (torso[index] ?? 0) !== 0) {
+        continue;
+      }
+      cells ??= torso.slice();
+      cells[index] = fill;
+    }
+  }
+  return cells ? { ...frame, layers: { ...frame.layers, torso: cells } } : frame;
+}
+
+/** A starting point for the second idle frame: the head and torso rise one pixel. */
+export function breathFrom(frame: SpriteFrame): SpriteFrame {
+  return nudgeLayer(nudgeLayer(cloneFrame(frame), "head", 0, -1), "torso", 0, -1);
+}
+
+/** A starting point for a shot: the weapon kicks back two pixels and the flash shows. */
+export function shotFrom(frame: SpriteFrame): SpriteFrame {
+  return { ...nudgeLayer(cloneFrame(frame), "weapon", -2, 0), flash: true };
+}
+
+/** Put a picture onto one layer. It must be the frame's size. Clear pixels empty that layer. */
+export function placeLayerImage(
+  frame: SpriteFrame,
+  layer: PartCategory,
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+): SpriteFrame {
+  if (width !== frame.width || height !== frame.height) {
+    throw new Error(`The picture is ${width}×${height}. This frame is ${frame.width}×${frame.height}.`);
+  }
+  const cells = new Array<number>(width * height).fill(0);
+  for (let index = 0; index < cells.length; index += 1) {
+    const offset = index * 4;
+    cells[index] = sheetSlot(rgba[offset] ?? 0, rgba[offset + 1] ?? 0, rgba[offset + 2] ?? 0, rgba[offset + 3] ?? 0, layer);
+  }
+  const next = { ...frame, layers: { ...frame.layers, [layer]: cells } };
+  return layer === "weapon" ? { ...next, muzzle: muzzleOf(next) ?? frame.muzzle } : next;
+}
+
+const FLASH: readonly (readonly [number, number, string])[] = [
+  [1, 0, MILITARY.cream],
+  [2, 0, MILITARY.cream],
+  [3, 0, MILITARY.brass],
+  [1, -1, MILITARY.brass],
+  [2, 1, MILITARY.cream],
+];
+
+function writeHex(out: Uint8ClampedArray, offset: number, hex: string): void {
+  const rgb = Number.parseInt(hex.slice(1, 7), 16);
+  out[offset] = (rgb >> 16) & 255;
+  out[offset + 1] = (rgb >> 8) & 255;
+  out[offset + 2] = rgb & 255;
+  out[offset + 3] = 255;
+}
+
+/** The frame in a faction's colours, with the muzzle flash when the frame has one. */
+export function frameRgba(frame: SpriteFrame, lut: readonly string[]): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(frame.width * frame.height * 4);
+  const flat = composite(frame);
+  for (let index = 0; index < flat.length; index += 1) {
+    const hex = lut[flat[index] ?? 0];
+    if ((flat[index] ?? 0) !== 0 && hex) {
+      writeHex(out, index * 4, hex);
+    }
+  }
+  if (frame.flash && frame.muzzle) {
+    for (const [dx, dy, hex] of FLASH) {
+      const x = frame.muzzle.x + dx;
+      const y = frame.muzzle.y + dy;
+      if (inside(frame, x, y)) {
+        writeHex(out, (y * frame.width + x) * 4, hex);
+      }
+    }
+  }
+  return out;
+}
+
+/** The 80×56 game card. The feet pixel lands on the card's ground point. */
+export function cardRgba(frame: SpriteFrame, lut: readonly string[], feet: PixelPoint): Uint8ClampedArray {
+  const { width, height, originX, originY } = SPRITE_BAKE;
+  const out = new Uint8ClampedArray(width * height * 4);
+  const source = frameRgba(frame, lut);
+  const ox = originX - feet.x;
+  const oy = originY - feet.y;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const from = (y * frame.width + x) * 4;
+      if ((source[from + 3] ?? 0) === 0) {
+        continue;
+      }
+      const tx = x + ox;
+      const ty = y + oy;
+      if (tx < 0 || ty < 0 || tx >= width || ty >= height) {
+        continue;
+      }
+      out.set(source.subarray(from, from + 4), (ty * width + tx) * 4);
+    }
+  }
+  return out;
+}
+
+export function frameFileName(clip: ClipKey, index: number): string {
+  return `${clip}_${index}`;
+}
+
+export function toFrameFile(frame: SpriteFrame): SpriteFrameFile {
+  return {
+    kind: "sprite-frame",
+    version: 1,
+    width: frame.width,
+    height: frame.height,
+    layers: frame.layers,
+    muzzle: frame.muzzle,
+    flash: frame.flash,
+  };
+}
+
+export function toClipsFile(clips: FrameClips): FrameClipsFile {
+  return {
+    kind: "sprite-clips",
+    version: 1,
+    unitId: clips.unitId,
+    width: clips.width,
+    height: clips.height,
+    feet: clips.feet,
+    clips: {
+      idle: clips.clips.idle.map((_, index) => frameFileName("idle", index)),
+      walk: clips.clips.walk.map((_, index) => frameFileName("walk", index)),
+      fire: clips.clips.fire.map((_, index) => frameFileName("fire", index)),
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isPoint(value: unknown): value is PixelPoint {
+  return isRecord(value) && Number.isInteger(value.x) && Number.isInteger(value.y);
+}
+
+export function fromFrameFile(value: unknown): SpriteFrame {
+  if (!isRecord(value) || value.kind !== "sprite-frame" || value.version !== 1) {
+    throw new Error("That file is not a sprite frame.");
+  }
+  const width = value.width;
+  const height = value.height;
+  if (typeof width !== "number" || typeof height !== "number" || !isRecord(value.layers)) {
+    throw new Error("The sprite frame has no size or layers.");
+  }
+  const frame = emptyFrame(width, height);
+  for (const layer of LAYER_ORDER) {
+    const cells = value.layers[layer];
+    if (
+      !Array.isArray(cells) ||
+      cells.length !== width * height ||
+      !cells.every((slot) => Number.isInteger(slot) && slot >= 0 && slot <= 13)
+    ) {
+      throw new Error(`The ${layer} layer is not ${width}×${height} slots.`);
+    }
+    frame.layers[layer] = cells.slice() as number[];
+  }
+  frame.muzzle = isPoint(value.muzzle) ? { x: value.muzzle.x, y: value.muzzle.y } : null;
+  frame.flash = value.flash === true;
+  return frame;
+}
+
+export function readClipsFile(value: unknown): FrameClipsFile {
+  if (!isRecord(value) || value.kind !== "sprite-clips" || value.version !== 1 || !isRecord(value.clips) || !isPoint(value.feet)) {
+    throw new Error("That file is not a sprite clip list.");
+  }
+  const clips = {} as Record<ClipKey, string[]>;
+  for (const key of CLIP_KEYS) {
+    const names = value.clips[key];
+    if (!Array.isArray(names) || !names.every((name) => typeof name === "string" && /^(idle|walk|fire)_\d+$/.test(name))) {
+      throw new Error(`The ${CLIP_LABEL[key]} list is not frame names.`);
+    }
+    clips[key] = names as string[];
+  }
+  return {
+    kind: "sprite-clips",
+    version: 1,
+    unitId: String(value.unitId),
+    width: Number(value.width),
+    height: Number(value.height),
+    feet: { x: value.feet.x, y: value.feet.y },
+    clips,
+  };
+}

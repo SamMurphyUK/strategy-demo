@@ -6,7 +6,7 @@
 //
 // apply: "serve", so the production build never registers these routes. The token
 // stays in RD_API_TOKEN on the dev server. Paths resolve from the Vite root (web/).
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { activePalette } from "./militaryStrip.mjs";
@@ -15,6 +15,9 @@ import { decodeRgbaPng, encodeRgbaPng } from "./pngRgba.mjs";
 export const BAKE_ROUTE = "/__dev/bake-unit";
 export const PROMOTE_ROUTE = "/__dev/promote-candidate";
 export const SAVE_UNIT_ROUTE = "/__dev/save-unit";
+export const SAVE_FRAMES_ROUTE = "/__dev/save-frames";
+
+const FRAME_NAME = /^(idle|walk|fire)_\d+$/;
 export const MANIFEST_RELATIVE = path.join("assets", "candidates", "manifest.json");
 
 const RD_BASE = "https://api.retrodiffusion.ai/v2";
@@ -84,6 +87,11 @@ export function authoredUnitRelativePath(factionId, blueprintId) {
   const faction = rosterFaction(factionId);
   const blueprint = plainId("blueprintId", blueprintId);
   return path.join("assets", "units", "authored", faction, `${blueprint}.json`);
+}
+
+/** public/assets/units/frames/<unitId>/, relative to the Vite root. */
+export function framesRelativeDir(unitId) {
+  return path.join("public", "assets", "units", "frames", plainId("unitId", unitId));
 }
 
 /** public/assets/units/promoted/<factionId>/<blueprintId>.png */
@@ -511,6 +519,53 @@ export function bakeUnitPlugin() {
           await mkdir(path.dirname(target), { recursive: true });
           await writeFile(target, `${JSON.stringify(body, null, 2)}\n`, "utf8");
           return reply(res, 200, { ok: true, path: portable(relative) });
+        } catch (error) {
+          const http = httpError(error);
+          return reply(res, http.status, { ok: false, error: http.error });
+        }
+      });
+
+      server.middlewares.use(SAVE_FRAMES_ROUTE, async (req, res) => {
+        if (req.method !== "POST") {
+          return reply(res, 405, { ok: false, error: "Use POST." });
+        }
+        if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+          return reply(res, 415, { ok: false, error: "Send application/json." });
+        }
+        try {
+          const text = await readBody(req);
+          let body;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            return reply(res, 400, { ok: false, error: "The body is not valid JSON." });
+          }
+          if (body?.clips?.kind !== "sprite-clips" || !Array.isArray(body.frames)) {
+            return reply(res, 422, { ok: false, error: "The body is not a sprite clip list." });
+          }
+          const relativeDir = framesRelativeDir(body.clips.unitId);
+          const dir = resolveInsideRoot(root, relativeDir);
+          const keep = new Set(["clips.json"]);
+          await mkdir(dir, { recursive: true });
+          for (const item of body.frames) {
+            const name = String(item?.name ?? "");
+            if (!FRAME_NAME.test(name) || item?.frame?.kind !== "sprite-frame") {
+              return reply(res, 422, { ok: false, error: `"${name}" is not a frame name.` });
+            }
+            const png = Buffer.from(stripDataUrl(item.pngBase64 ?? ""), "base64");
+            decodeRgbaPng(png);
+            await writeFile(resolveInsideRoot(root, path.join(relativeDir, `${name}.json`)), `${JSON.stringify(item.frame)}\n`, "utf8");
+            await writeFile(resolveInsideRoot(root, path.join(relativeDir, `${name}.png`)), png);
+            keep.add(`${name}.json`);
+            keep.add(`${name}.png`);
+          }
+          for (const file of await readdir(dir)) {
+            if (!keep.has(file) && FRAME_NAME.test(file.replace(/\.(json|png)$/, ""))) {
+              await rm(resolveInsideRoot(root, path.join(relativeDir, file)));
+            }
+          }
+          await writeFile(resolveInsideRoot(root, path.join(relativeDir, "clips.json")), `${JSON.stringify(body.clips, null, 2)}\n`, "utf8");
+          return reply(res, 200, { ok: true, path: portable(relativeDir), frames: body.frames.length });
         } catch (error) {
           const http = httpError(error);
           return reply(res, http.status, { ok: false, error: http.error });
