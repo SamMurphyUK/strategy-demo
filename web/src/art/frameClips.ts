@@ -141,10 +141,13 @@ export function cloneFrame(frame: SpriteFrame): SpriteFrame {
   };
 }
 
+/** The fourth cell of the walk sheet. It leads the walk, and Idle starts as a copy of it. */
+const WALK_LEAD_CELL = 3;
+
 /**
  * Split the 4×2 walk sheet into eight frames at full size.
  * Every opaque sheet pixel lands on the layer the segmenter gave it, in the same place.
- * Walking holds the eight frames. Idle starts as a copy of frame 0. Firing starts empty.
+ * The fourth cell leads the walk. Idle starts as a copy of that frame. Firing starts empty.
  */
 export function clipsFromWalkSheet(rgba: Uint8ClampedArray, width: number, height: number, unitId: string): FrameClips {
   const sheet = layoutWalkGrid(rgba, width, height);
@@ -173,13 +176,14 @@ export function clipsFromWalkSheet(rgba: Uint8ClampedArray, width: number, heigh
     frame.muzzle = muzzleOf(frame);
     walk.push(frame);
   }
-  const first = walk[0] ?? emptyFrame(cell, cell);
+  const ordered = walk.slice(WALK_LEAD_CELL).concat(walk.slice(0, WALK_LEAD_CELL));
+  const first = ordered[0] ?? emptyFrame(cell, cell);
   return {
     unitId,
     width: cell,
     height: cell,
     feet: feetOf(first),
-    clips: { idle: [cloneFrame(first)], walk, fire: [] },
+    clips: { idle: [cloneFrame(first)], walk: ordered, fire: [] },
   };
 }
 
@@ -297,52 +301,89 @@ export function nudgeLayer(frame: SpriteFrame, layer: PartCategory, dx: number, 
 }
 
 /**
- * Paint the tunic behind the weapon. Every weapon pixel inside the torso's box
- * gets the torso's most common colour underneath, so moving the weapon shows a body.
+ * The weapon pixels that sit over the body with no torso drawn under them.
+ * A pixel counts when torso lies on both sides of it along its row, or above and below it in its column.
+ * A stock or barrel that pokes out past the body is left alone.
  */
-export function fillTorsoUnderWeapon(frame: SpriteFrame): SpriteFrame {
-  const torso = frame.layers.torso;
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = -1;
-  let maxY = -1;
-  const counts = new Map<number, number>();
-  for (let y = 0; y < frame.height; y += 1) {
-    for (let x = 0; x < frame.width; x += 1) {
-      const slot = torso[y * frame.width + x] ?? 0;
-      if (slot === 0) {
-        continue;
+export function cellsUnderWeapon(torso: readonly number[], weapon: readonly number[], width: number, height: number): number[] {
+  const body = torso.map((slot) => slot !== 0);
+  const out: number[] = [];
+  // A filled pixel can close a gap in its own row or column, so repeat until nothing new turns up.
+  for (;;) {
+    const rowMin = new Array<number>(height).fill(width);
+    const rowMax = new Array<number>(height).fill(-1);
+    const colMin = new Array<number>(width).fill(height);
+    const colMax = new Array<number>(width).fill(-1);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (!body[y * width + x]) {
+          continue;
+        }
+        rowMin[y] = Math.min(rowMin[y] ?? width, x);
+        rowMax[y] = Math.max(rowMax[y] ?? -1, x);
+        colMin[x] = Math.min(colMin[x] ?? height, y);
+        colMax[x] = Math.max(colMax[x] ?? -1, y);
       }
-      counts.set(slot, (counts.get(slot) ?? 0) + 1);
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+    }
+    const found: number[] = [];
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if ((weapon[index] ?? 0) === 0 || body[index]) {
+          continue;
+        }
+        const inRow = x > (rowMin[y] ?? width) && x < (rowMax[y] ?? -1);
+        const inColumn = y > (colMin[x] ?? height) && y < (colMax[x] ?? -1);
+        if (inRow || inColumn) {
+          found.push(index);
+        }
+      }
+    }
+    if (found.length === 0) {
+      return out.sort((a, b) => a - b);
+    }
+    for (const index of found) {
+      body[index] = true;
+      out.push(index);
     }
   }
+}
+
+/** The colour a layer uses most. 0 when the layer is empty. */
+export function commonSlot(cells: readonly number[]): number {
+  const counts = new Map<number, number>();
   let fill = 0;
   let most = 0;
-  for (const [slot, count] of counts) {
+  for (const slot of cells) {
+    if (slot === 0) {
+      continue;
+    }
+    const count = (counts.get(slot) ?? 0) + 1;
+    counts.set(slot, count);
     if (count > most) {
       most = count;
       fill = slot;
     }
   }
-  if (fill === 0) {
+  return fill;
+}
+
+/**
+ * Paint the tunic behind the weapon. Every weapon pixel over the body gets the torso's
+ * most common colour underneath, so moving the weapon shows a body.
+ */
+export function fillTorsoUnderWeapon(frame: SpriteFrame): SpriteFrame {
+  const torso = frame.layers.torso;
+  const fill = commonSlot(torso);
+  const under = fill === 0 ? [] : cellsUnderWeapon(torso, frame.layers.weapon, frame.width, frame.height);
+  if (under.length === 0) {
     return frame;
   }
-  let cells: number[] | null = null;
-  for (let y = minY; y <= maxY; y += 1) {
-    for (let x = minX; x <= maxX; x += 1) {
-      const index = y * frame.width + x;
-      if ((frame.layers.weapon[index] ?? 0) === 0 || (torso[index] ?? 0) !== 0) {
-        continue;
-      }
-      cells ??= torso.slice();
-      cells[index] = fill;
-    }
+  const cells = torso.slice();
+  for (const index of under) {
+    cells[index] = fill;
   }
-  return cells ? { ...frame, layers: { ...frame.layers, torso: cells } } : frame;
+  return { ...frame, layers: { ...frame.layers, torso: cells } };
 }
 
 /** A starting point for the second idle frame: the head and torso rise one pixel. */

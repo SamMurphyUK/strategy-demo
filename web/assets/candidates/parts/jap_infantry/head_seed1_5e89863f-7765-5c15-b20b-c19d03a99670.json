@@ -1,0 +1,12 @@
+{
+  "unitId": "jap_infantry",
+  "layer": "head",
+  "prompt": "a WWII german soldier head",
+  "seed": 1,
+  "taskId": "5e89863f-7765-5c15-b20b-c19d03a99670",
+  "cost": 0.12,
+  "width": 64,
+  "height": 64,
+  "picture": "assets/candidates/parts/jap_infantry/head_seed1_5e89863f-7765-5c15-b20b-c19d03a99670.png",
+  "createdAt": "2026-11-18T21:45:59.343Z"
+}

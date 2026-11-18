@@ -22,6 +22,12 @@ import { FACTION_LUTS } from "../../src/art/paperDoll";
 const png = decodeRgbaPng(readFileSync("public/assets/units/jap_walk.png"));
 const clips = clipsFromWalkSheet(png.data, png.width, png.height, "jap_infantry");
 
+/** Walk frame 0 is the fourth sheet cell, then the cycle continues. */
+function sheetCell(walkIndex: number): { x: number; y: number } {
+  const cell = (walkIndex + 3) % 8;
+  return { x: cell % 4, y: Math.floor(cell / 4) };
+}
+
 function opaqueInCell(cellX: number, cellY: number): number {
   let count = 0;
   for (let y = 0; y < 80; y += 1) {
@@ -41,7 +47,8 @@ describe("sprite frames from the walk sheet", () => {
     for (let index = 0; index < 8; index += 1) {
       const frame = clips.clips.walk[index];
       const painted = composite(frame!).filter((slot) => slot !== 0).length;
-      expect(painted).toBe(opaqueInCell(index % 4, Math.floor(index / 4)));
+      const cell = sheetCell(index);
+      expect(painted).toBe(opaqueInCell(cell.x, cell.y));
     }
     expect(opaqueInCell(0, 0)).toBe(871);
   });
@@ -49,8 +56,9 @@ describe("sprite frames from the walk sheet", () => {
   it("draws every walk frame in the sheet's own colours, pixel for pixel", () => {
     for (let index = 0; index < 8; index += 1) {
       const rgba = frameRgba(clips.clips.walk[index]!, AS_DRAWN_LUT);
-      const left = (index % 4) * 80;
-      const top = Math.floor(index / 4) * 80;
+      const cell = sheetCell(index);
+      const left = cell.x * 80;
+      const top = cell.y * 80;
       let mismatches = 0;
       for (let y = 0; y < 80; y += 1) {
         for (let x = 0; x < 80; x += 1) {
@@ -68,15 +76,15 @@ describe("sprite frames from the walk sheet", () => {
     }
   });
 
-  it("keeps both eyes on frame 0", () => {
-    const flat = composite(clips.clips.walk[0]!);
+  it("keeps both eyes on the sheet's first cell", () => {
+    const flat = composite(clips.clips.walk[5]!);
     const at = (x: number, y: number) => flat[y * 80 + x];
     expect(at(43, 27)).toBe(at(46, 27));
     expect(at(43, 27)).not.toBe(at(44, 27));
     expect(at(43, 28)).not.toBe(at(42, 28));
   });
 
-  it("starts Idle as a copy of walk frame 0 and Firing empty", () => {
+  it("starts Idle as a copy of the fourth sheet frame and Firing empty", () => {
     expect(clips.clips.idle).toHaveLength(1);
     expect(clips.clips.idle[0]?.layers).toEqual(clips.clips.walk[0]?.layers);
     expect(clips.clips.idle[0]?.layers.torso).not.toBe(clips.clips.walk[0]?.layers.torso);

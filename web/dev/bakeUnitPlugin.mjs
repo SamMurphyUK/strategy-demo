@@ -1,8 +1,12 @@
 // Dev-server only: bakes a unit blockout through Retro Diffusion, quantizes the
 // result onto the faction's military keys, and can promote one candidate.
+// It also saves the part rig, and repaints one part of it through Retro Diffusion's inpainting.
 //
 //   POST /__dev/bake-unit
 //   POST /__dev/promote-candidate
+//   POST /__dev/save-unit
+//   POST /__dev/save-rig
+//   POST /__dev/generate-part
 //
 // apply: "serve", so the production build never registers these routes. The token
 // stays in RD_API_TOKEN on the dev server. Paths resolve from the Vite root (web/).
@@ -15,9 +19,18 @@ import { decodeRgbaPng, encodeRgbaPng } from "./pngRgba.mjs";
 export const BAKE_ROUTE = "/__dev/bake-unit";
 export const PROMOTE_ROUTE = "/__dev/promote-candidate";
 export const SAVE_UNIT_ROUTE = "/__dev/save-unit";
-export const SAVE_FRAMES_ROUTE = "/__dev/save-frames";
+export const SAVE_RIG_ROUTE = "/__dev/save-rig";
+export const GENERATE_PART_ROUTE = "/__dev/generate-part";
 
 const FRAME_NAME = /^(idle|walk|fire)_\d+$/;
+const PART_ID = /^[a-z0-9_]+$/;
+const PART_LAYERS = new Set(["legs", "torso", "head", "weapon"]);
+/** The inpainting tool takes pictures up to this size, and prices each one the same. */
+const INPAINT_MAX_SIDE = 256;
+const INPAINT_POLL_MS = 3000;
+/** The tool's own estimate is about 150 seconds a picture. */
+const INPAINT_TIMEOUT_MS = 420_000;
+const MAX_PROMPT = 1000;
 export const MANIFEST_RELATIVE = path.join("assets", "candidates", "manifest.json");
 
 const RD_BASE = "https://api.retrodiffusion.ai/v2";
@@ -89,9 +102,47 @@ export function authoredUnitRelativePath(factionId, blueprintId) {
   return path.join("assets", "units", "authored", faction, `${blueprint}.json`);
 }
 
-/** public/assets/units/frames/<unitId>/, relative to the Vite root. */
-export function framesRelativeDir(unitId) {
-  return path.join("public", "assets", "units", "frames", plainId("unitId", unitId));
+/** public/assets/units/rigs/<unitId>/, relative to the Vite root. */
+export function rigRelativeDir(unitId) {
+  return path.join("public", "assets", "units", "rigs", plainId("unitId", unitId));
+}
+
+/** assets/candidates/parts/<unitId>/<layer>_seed<N>_<taskId>, without an extension. */
+export function partCandidateRelativeStem(unitId, layer, seed, taskId) {
+  if (!PART_LAYERS.has(layer)) {
+    throw new Error(`"${layer}" is not a layer`);
+  }
+  return path.join("assets", "candidates", "parts", plainId("unitId", unitId), `${layer}_${seedToken(seed)}_${plainId("taskId", taskId)}`);
+}
+
+/** How many pixels of a mask are open to repainting. The tool treats alpha above 12 as open. */
+export function maskCoverage(mask) {
+  const total = mask.width * mask.height;
+  let open = 0;
+  for (let index = 0; index < total; index += 1) {
+    if (mask.data[index * 4 + 3] > 12) {
+      open += 1;
+    }
+  }
+  return { open, total };
+}
+
+/** The file extension for a picture, from its first bytes. Null when it is not a picture. */
+export function pictureKind(bytes) {
+  const head = Buffer.from(bytes).subarray(0, 12);
+  if (head.length >= 8 && head.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return "png";
+  }
+  if (head.length >= 12 && head.toString("ascii", 0, 4) === "RIFF" && head.toString("ascii", 8, 12) === "WEBP") {
+    return "webp";
+  }
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return "jpeg";
+  }
+  if (head.length >= 4 && head.toString("ascii", 0, 4) === "GIF8") {
+    return "gif";
+  }
+  return null;
 }
 
 /** public/assets/units/promoted/<factionId>/<blueprintId>.png */
@@ -317,6 +368,64 @@ async function pollTask(token, taskId) {
   throw error;
 }
 
+function upstreamError(message, status = 502) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+/** POST to the inpainting tool. An empty suffix would run it and wait, so only /estimate and /tasks are used. */
+async function postInpainting(token, suffix, body) {
+  const response = await fetch(`${RD_BASE}/edit/tools/inpainting${suffix}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-RD-Token": token },
+    body: JSON.stringify(body),
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw upstreamError(errorText(json, response.status));
+  }
+  return json;
+}
+
+/** Poll GET /v2/edit/tasks/{task_id} until the picture is ready, then fetch it. */
+async function pollInpainting(token, taskId) {
+  const deadline = Date.now() + INPAINT_TIMEOUT_MS;
+  const url = `${RD_BASE}/edit/tasks/${encodeURIComponent(taskId)}`;
+  const lost = `Retro Diffusion keeps the result for 24 hours under task ${taskId}.`;
+  while (Date.now() < deadline) {
+    const response = await fetch(url, { headers: { "X-RD-Token": token } });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw upstreamError(`${errorText(json, response.status)} ${lost}`);
+    }
+    if (json.status === "failed") {
+      const detail = json.error?.message ?? json.error?.detail?.message ?? json.error;
+      throw upstreamError(`${typeof detail === "string" && detail !== "" ? detail : "Retro Diffusion marked the task failed."} A failed run is refunded.`);
+    }
+    if (json.status === "succeeded") {
+      const result = json.result ?? {};
+      const inline = Array.isArray(result.base64_images) ? result.base64_images[0] : null;
+      const hosted = Array.isArray(result.output_urls) ? result.output_urls[0] : null;
+      let bytes;
+      if (typeof inline === "string" && inline !== "") {
+        bytes = Buffer.from(stripDataUrl(inline), "base64");
+      } else if (typeof hosted === "string" && /^https:\/\//.test(hosted)) {
+        const picture = await fetch(hosted);
+        if (!picture.ok) {
+          throw upstreamError(`The picture was made but could not be fetched (${picture.status}). ${lost}`);
+        }
+        bytes = Buffer.from(await picture.arrayBuffer());
+      } else {
+        throw upstreamError(`Retro Diffusion succeeded without a picture. ${lost}`);
+      }
+      return { bytes, cost: quotedCost(result) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, INPAINT_POLL_MS));
+  }
+  throw upstreamError(`Retro Diffusion took longer than ${INPAINT_TIMEOUT_MS / 1000}s. ${lost}`, 504);
+}
+
 async function readManifest(file) {
   try {
     const text = await readFile(file, "utf8");
@@ -525,7 +634,7 @@ export function bakeUnitPlugin() {
         }
       });
 
-      server.middlewares.use(SAVE_FRAMES_ROUTE, async (req, res) => {
+      server.middlewares.use(SAVE_RIG_ROUTE, async (req, res) => {
         if (req.method !== "POST") {
           return reply(res, 405, { ok: false, error: "Use POST." });
         }
@@ -540,32 +649,185 @@ export function bakeUnitPlugin() {
           } catch {
             return reply(res, 400, { ok: false, error: "The body is not valid JSON." });
           }
-          if (body?.clips?.kind !== "sprite-clips" || !Array.isArray(body.frames)) {
-            return reply(res, 422, { ok: false, error: "The body is not a sprite clip list." });
+          if (body?.rig?.kind !== "part-rig" || !Array.isArray(body.rig.parts) || !Array.isArray(body.parts) || !Array.isArray(body.frames)) {
+            return reply(res, 422, { ok: false, error: "The body is not a rig with its parts and frames." });
           }
-          const relativeDir = framesRelativeDir(body.clips.unitId);
+          const relativeDir = rigRelativeDir(body.rig.unitId);
           const dir = resolveInsideRoot(root, relativeDir);
-          const keep = new Set(["clips.json"]);
-          await mkdir(dir, { recursive: true });
+          const files = [];
+          const partIds = new Set();
+          for (const item of body.parts) {
+            const id = String(item?.file?.id ?? "");
+            if (!PART_ID.test(id) || item?.file?.kind !== "rig-part") {
+              return reply(res, 422, { ok: false, error: `"${id}" is not a part.` });
+            }
+            const png = Buffer.from(stripDataUrl(item.pngBase64 ?? ""), "base64");
+            decodeRgbaPng(png);
+            partIds.add(id);
+            files.push([`part_${id}.json`, `${JSON.stringify(item.file)}\n`], [`part_${id}.png`, png]);
+          }
+          const unsaved = body.rig.parts.find((part) => !partIds.has(part?.id));
+          if (unsaved) {
+            return reply(res, 422, { ok: false, error: `The part "${unsaved?.id}" came without its drawings.` });
+          }
           for (const item of body.frames) {
             const name = String(item?.name ?? "");
-            if (!FRAME_NAME.test(name) || item?.frame?.kind !== "sprite-frame") {
+            if (!FRAME_NAME.test(name)) {
               return reply(res, 422, { ok: false, error: `"${name}" is not a frame name.` });
             }
             const png = Buffer.from(stripDataUrl(item.pngBase64 ?? ""), "base64");
             decodeRgbaPng(png);
-            await writeFile(resolveInsideRoot(root, path.join(relativeDir, `${name}.json`)), `${JSON.stringify(item.frame)}\n`, "utf8");
-            await writeFile(resolveInsideRoot(root, path.join(relativeDir, `${name}.png`)), png);
-            keep.add(`${name}.json`);
-            keep.add(`${name}.png`);
+            files.push([`${name}.png`, png]);
+          }
+          files.push(["rig.json", `${JSON.stringify(body.rig)}\n`]);
+          // Everything is checked before the first write, so a bad request leaves the folder as it was.
+          await mkdir(dir, { recursive: true });
+          const keep = new Set(files.map(([name]) => name));
+          for (const [name, content] of files) {
+            await writeFile(resolveInsideRoot(root, path.join(relativeDir, name)), content);
           }
           for (const file of await readdir(dir)) {
-            if (!keep.has(file) && FRAME_NAME.test(file.replace(/\.(json|png)$/, ""))) {
+            const stem = file.replace(/\.(json|png)$/, "");
+            if (!keep.has(file) && stem !== file && (FRAME_NAME.test(stem) || /^part_[a-z0-9_]+$/.test(stem))) {
               await rm(resolveInsideRoot(root, path.join(relativeDir, file)));
             }
           }
-          await writeFile(resolveInsideRoot(root, path.join(relativeDir, "clips.json")), `${JSON.stringify(body.clips, null, 2)}\n`, "utf8");
-          return reply(res, 200, { ok: true, path: portable(relativeDir), frames: body.frames.length });
+          return reply(res, 200, { ok: true, path: portable(relativeDir), parts: body.parts.length, frames: body.frames.length });
+        } catch (error) {
+          const http = httpError(error);
+          return reply(res, http.status, { ok: false, error: http.error });
+        }
+      });
+
+      // Repaint one part of the rig. The editor sends a picture of the soldier and a mask of the
+      // pixels the new part may cover. dryRunOnly asks the price and spends nothing. A paid run
+      // needs agreedCost, the price the editor showed, and stops when the price has gone up.
+      server.middlewares.use(GENERATE_PART_ROUTE, async (req, res) => {
+        if (req.method !== "POST") {
+          return reply(res, 405, { ok: false, error: "Use POST." });
+        }
+        if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+          return reply(res, 415, { ok: false, error: "Send application/json." });
+        }
+        const token = process.env.RD_API_TOKEN;
+        if (!token) {
+          return reply(res, 500, { ok: false, error: "RD_API_TOKEN is not set on the dev server." });
+        }
+        try {
+          const text = await readBody(req);
+          let body;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            return reply(res, 400, { ok: false, error: "The body is not valid JSON." });
+          }
+          const unitId = plainId("unitId", body.unitId);
+          const layer = String(body.layer ?? "");
+          if (!PART_LAYERS.has(layer)) {
+            return reply(res, 422, { ok: false, error: `"${layer}" is not a layer.` });
+          }
+          const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+          if (prompt === "" || prompt.length > MAX_PROMPT) {
+            return reply(res, 422, { ok: false, error: `Say what to draw, in ${MAX_PROMPT} characters or fewer.` });
+          }
+          if (!Number.isSafeInteger(body.seed) || body.seed < 0) {
+            return reply(res, 422, { ok: false, error: "The seed must be a whole number." });
+          }
+          const inputImage = stripDataUrl(body.inputBase64 ?? "");
+          const maskImage = stripDataUrl(body.maskBase64 ?? "");
+          let input;
+          let mask;
+          try {
+            input = decodeRgbaPng(Buffer.from(inputImage, "base64"));
+            mask = decodeRgbaPng(Buffer.from(maskImage, "base64"));
+          } catch (error) {
+            return reply(res, 422, { ok: false, error: `The picture or its mask could not be read: ${error.message}.` });
+          }
+          if (input.width !== mask.width || input.height !== mask.height) {
+            return reply(res, 422, {
+              ok: false,
+              error: `The picture is ${input.width}×${input.height} and its mask is ${mask.width}×${mask.height}.`,
+            });
+          }
+          if (input.width > INPAINT_MAX_SIDE || input.height > INPAINT_MAX_SIDE) {
+            return reply(res, 422, {
+              ok: false,
+              error: `The picture is ${input.width}×${input.height}. The tool takes ${INPAINT_MAX_SIDE}×${INPAINT_MAX_SIDE} at most.`,
+            });
+          }
+          const coverage = maskCoverage(mask);
+          if (coverage.open === 0 || coverage.open === coverage.total) {
+            return reply(res, 422, {
+              ok: false,
+              error: coverage.open === 0 ? "The mask opens no pixels to repaint." : "The mask opens the whole picture.",
+            });
+          }
+
+          const request = {
+            input_image: inputImage,
+            mask_image: maskImage,
+            prompt,
+            seed: Number(body.seed),
+            soft_inpaint: false,
+          };
+          const estimate = await postInpainting(token, "/estimate", request);
+          const cost = quotedCost(estimate);
+          const seconds = typeof estimate.estimate_seconds === "number" ? estimate.estimate_seconds : null;
+          if (body.dryRunOnly === true) {
+            return reply(res, 200, { ok: true, dryRun: true, cost, seconds, taskId: null, path: null });
+          }
+          if (cost === null || typeof body.agreedCost !== "number" || body.agreedCost + 1e-9 < cost) {
+            return reply(res, 409, {
+              ok: false,
+              cost,
+              error:
+                cost === null
+                  ? "Retro Diffusion gave no price, so nothing was run."
+                  : `This costs $${cost.toFixed(2)} and that price was not agreed. Check the price again.`,
+            });
+          }
+
+          // custom_id makes a retry of this one submission safe. A new click is a new run.
+          const submitted = await postInpainting(token, "/tasks", { ...request, custom_id: randomUUID() });
+          const taskId = submitted.task_id;
+          if (typeof taskId !== "string" || taskId === "") {
+            return reply(res, 502, { ok: false, error: "Retro Diffusion did not return a task id." });
+          }
+          const result = await pollInpainting(token, taskId);
+          const kind = pictureKind(result.bytes);
+          if (!kind) {
+            return reply(res, 502, { ok: false, error: `Retro Diffusion returned something that is not a picture. Task ${taskId}.` });
+          }
+          // The paid picture is on disk before anything reads it, with what was sent beside it.
+          const stem = partCandidateRelativeStem(unitId, layer, body.seed, taskId);
+          const rawRelative = `${stem}.${kind}`;
+          await mkdir(path.dirname(resolveInsideRoot(root, rawRelative)), { recursive: true });
+          await writeFile(resolveInsideRoot(root, rawRelative), result.bytes);
+          await writeFile(resolveInsideRoot(root, `${stem}.input.png`), Buffer.from(inputImage, "base64"));
+          await writeFile(resolveInsideRoot(root, `${stem}.mask.png`), Buffer.from(maskImage, "base64"));
+          const paid = result.cost ?? cost;
+          const record = {
+            unitId,
+            layer,
+            prompt,
+            seed: Number(body.seed),
+            taskId,
+            cost: paid,
+            width: input.width,
+            height: input.height,
+            picture: portable(rawRelative),
+            createdAt: new Date().toISOString(),
+          };
+          await writeFile(resolveInsideRoot(root, `${stem}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+          return reply(res, 200, {
+            ok: true,
+            dryRun: false,
+            cost: paid,
+            taskId,
+            path: portable(rawRelative),
+            mime: `image/${kind}`,
+            base64: result.bytes.toString("base64"),
+          });
         } catch (error) {
           const http = httpError(error);
           return reply(res, http.status, { ok: false, error: http.error });
