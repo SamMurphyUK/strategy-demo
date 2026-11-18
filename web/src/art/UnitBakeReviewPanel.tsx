@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MILITARY } from "../ui/theme/militaryPalette";
-import { SPRITE_BAKE } from "../ui/map/figureGround";
-import { blitBlueprintToSheet80x56, rasterBlueprintAlbedo } from "./blockoutCompiler";
+import { rasterBlueprintAlbedo } from "./blockoutCompiler";
 import {
   bakePrompt,
   factionHeroBlueprintId,
@@ -11,15 +10,14 @@ import {
 } from "./bakeReview";
 import type { MilitaryStripKey, UnitSkeletonBlueprint } from "./skeletonSchema";
 import { UnitPixelPainter, type PaintCommand } from "./UnitPixelPainter";
-import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS, STARTER_PARTS } from "./starterParts";
+import { FACTION_MILITARY_MAPPINGS } from "./starterParts";
+import type { UnitPaintDocument } from "./pixelPaint";
 
 interface BakedSeed {
   seed: number;
   silhouetteIoU: number;
   quantizedBase64: string;
 }
-
-const PARTS = new Map(Object.values(STARTER_PARTS).map((part) => [part.partId, part]));
 
 function paintAlbedo(canvas: HTMLCanvasElement, keys: readonly (MilitaryStripKey | null)[], width: number, height: number): void {
   const ctx = canvas.getContext("2d");
@@ -45,7 +43,7 @@ function paintAlbedo(canvas: HTMLCanvasElement, keys: readonly (MilitaryStripKey
 async function canvasPngBase64(canvas: HTMLCanvasElement): Promise<string> {
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) {
-    throw new Error("The blockout canvas is empty");
+    throw new Error("The drawing could not be sent");
   }
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
@@ -56,49 +54,27 @@ async function canvasPngBase64(canvas: HTMLCanvasElement): Promise<string> {
 }
 
 export function UnitBakeReviewPanel() {
-  const [blueprintId, setBlueprintId] = useState(STARTER_BLUEPRINTS[0]?.blueprintId ?? "");
+  const [doc, setDoc] = useState<UnitPaintDocument | null>(null);
   const [candidates, setCandidates] = useState<BakedSeed[]>([]);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [help, setHelp] = useState<string | null>(null);
   const [paintCommand, setPaintCommand] = useState<PaintCommand | null>(null);
-  const blockoutRef = useRef<HTMLCanvasElement>(null);
   const candidateRef = useRef<HTMLCanvasElement>(null);
-  const sheetRef = useRef<HTMLCanvasElement>(null);
-  const blueprint = useMemo(
-    () => STARTER_BLUEPRINTS.find((item) => item.blueprintId === blueprintId) ?? STARTER_BLUEPRINTS[0],
-    [blueprintId],
-  );
+  const blueprintId = doc?.blueprint.blueprintId ?? "";
+  const openedId = useRef(blueprintId);
   const selected = candidates.find((item) => item.seed === selectedSeed) ?? null;
 
   useEffect(() => {
-    if (!blueprint) {
+    if (openedId.current === blueprintId) {
       return;
     }
-    const blockout = blockoutRef.current;
-    const sheet = sheetRef.current;
-    if (!blockout || !sheet) {
-      return;
-    }
-    try {
-      const mapping = FACTION_MILITARY_MAPPINGS[blueprint.factionId];
-      const raster = rasterBlueprintAlbedo(blueprint, PARTS, mapping);
-      paintAlbedo(blockout, raster.albedoKeys, blueprint.canvasSize.width, blueprint.canvasSize.height);
-      const baked = blitBlueprintToSheet80x56(blueprint, PARTS, mapping);
-      const ctx = sheet.getContext("2d");
-      if (!ctx) {
-        return;
-      }
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, SPRITE_BAKE.width, SPRITE_BAKE.height);
-      ctx.drawImage(baked, 0, 0);
-      setCandidates([]);
-      setSelectedSeed(null);
-      setNote("");
-    } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
-    }
-  }, [blueprint]);
+    openedId.current = blueprintId;
+    setCandidates([]);
+    setSelectedSeed(null);
+    setNote("");
+  }, [blueprintId]);
 
   useEffect(() => {
     const canvas = candidateRef.current;
@@ -128,16 +104,22 @@ export function UnitBakeReviewPanel() {
   }, [selected]);
 
   const bakeThree = async () => {
-    if (!blueprint || !blockoutRef.current) {
+    if (!doc) {
       return;
     }
     setBusy(true);
-    setNote("Baking 3 seeds…");
+    setNote("Asking for three pictures of the drawing on the canvas…");
     try {
+      const blueprint = doc.blueprint;
+      const mapping = FACTION_MILITARY_MAPPINGS[blueprint.factionId];
+      const raster = rasterBlueprintAlbedo(blueprint, mapping);
+      const blockout = document.createElement("canvas");
+      blockout.width = blueprint.canvasSize.width;
+      blockout.height = blueprint.canvasSize.height;
+      paintAlbedo(blockout, raster.albedoKeys, blockout.width, blockout.height);
       const heroUrl = promotedPublicUrl(blueprint.factionId, factionHeroBlueprintId(blueprint.factionId));
       const hero = await fetch(heroUrl, { method: "HEAD" }).then((response) => response.ok).catch(() => false);
-      const raster = rasterBlueprintAlbedo(blueprint, PARTS, FACTION_MILITARY_MAPPINGS[blueprint.factionId]);
-      const blockoutBase64 = await canvasPngBase64(blockoutRef.current);
+      const blockoutBase64 = await canvasPngBase64(blockout);
       const baked: BakedSeed[] = [];
       for (const seed of freshSeeds(3)) {
         const response = await fetch("/__dev/bake-unit", {
@@ -147,7 +129,7 @@ export function UnitBakeReviewPanel() {
         });
         const json = await response.json().catch(() => ({}));
         if (!response.ok || json.ok === false) {
-          throw new Error(json.error || `Bake failed with ${response.status}`);
+          throw new Error(json.error || `The request failed (${response.status}).`);
         }
         baked.push({
           seed: json.seed,
@@ -157,7 +139,7 @@ export function UnitBakeReviewPanel() {
       }
       setCandidates(baked);
       setSelectedSeed(baked[0]?.seed ?? null);
-      setNote(`${baked.length} candidates saved.`);
+      setNote("Three pictures came back. Pick one, then keep it or paint over it.");
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
@@ -166,7 +148,7 @@ export function UnitBakeReviewPanel() {
   };
 
   const promote = async () => {
-    if (!blueprint || !selected) {
+    if (!doc || !selected) {
       return;
     }
     setBusy(true);
@@ -175,16 +157,16 @@ export function UnitBakeReviewPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          factionId: blueprint.factionId,
-          blueprintId: blueprint.blueprintId,
+          factionId: doc.blueprint.factionId,
+          blueprintId: doc.blueprint.blueprintId,
           seed: selected.seed,
         }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json.ok === false) {
-        throw new Error(json.error || `Promote failed with ${response.status}`);
+        throw new Error(json.error || `Keeping the picture failed (${response.status}).`);
       }
-      setNote(`Promoted ${blueprint.blueprintId} from seed ${selected.seed}.`);
+      setNote("Kept that picture in the project. Open kept picture can load it onto the canvas.");
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
@@ -192,98 +174,96 @@ export function UnitBakeReviewPanel() {
     }
   };
 
-  if (!blueprint) {
-    return null;
-  }
-
-  const width = blueprint.canvasSize.width;
-  const height = blueprint.canvasSize.height;
+  const hint = (text: string) => ({
+    title: text,
+    onMouseEnter: () => setHelp(text),
+    onMouseLeave: () => setHelp(null),
+    onFocus: () => setHelp(text),
+    onBlur: () => setHelp(null),
+  });
 
   return (
-    <section className="unit-bake-review" aria-label="Unit bake review">
+    <section className="unit-bake-review" aria-label="Sprite editor">
       <style>{PANEL_CSS}</style>
-      <header className="unit-bake-review-bar">
-        <label>
-          Blueprint
-          <select value={blueprint.blueprintId} onChange={(event) => setBlueprintId(event.target.value)}>
-            {STARTER_BLUEPRINTS.map((item) => (
-              <option key={item.blueprintId} value={item.blueprintId}>
-                {item.blueprintId}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" onClick={bakeThree} disabled={busy}>
-          Bake 3 Seeds
-        </button>
-        <button type="button" onClick={promote} disabled={busy || selected === null}>
-          Promote
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setPaintCommand({
-              id: Date.now(),
-              action: "edit",
-              blueprintId: blueprint.blueprintId,
-            })
-          }
+      <UnitPixelPainter command={paintCommand} onDocument={setDoc} />
+      <details className="sprite-generate">
+        <summary
+          {...hint(
+            "Optional. Sends the drawing on the canvas to Retro Diffusion and brings back three recoloured attempts. The canvas stays as it is until you choose Paint over this picture.",
+          )}
         >
-          Edit parts
-        </button>
-        <button
-          type="button"
-          disabled={selected === null}
-          onClick={() =>
-            setPaintCommand({
-              id: Date.now(),
-              action: "candidate",
-              blueprintId: blueprint.blueprintId,
-              candidateBase64: selected?.quantizedBase64 ?? null,
-            })
-          }
-        >
-          Touch up candidate
-        </button>
-        <p>{note}</p>
-      </header>
-      {candidates.length > 1 && (
-        <div className="unit-bake-review-seeds" role="group" aria-label="Seeds">
-          {candidates.map((item) => (
-            <button
-              key={item.seed}
-              type="button"
-              aria-pressed={item.seed === selectedSeed}
-              onClick={() => setSelectedSeed(item.seed)}
-            >
-              Seed {item.seed} · {item.silhouetteIoU.toFixed(3)}
-            </button>
-          ))}
+          Generate pictures from this drawing
+        </summary>
+        <p className="sprite-generate-lead">
+          This asks for three variations of the figure on the canvas. Pick one, keep it in the project, or paint over it by hand.
+          The dev server needs an API token, and a request spends credits.
+        </p>
+        <div className="sprite-generate-actions">
+          <button
+            type="button"
+            onClick={() => void bakeThree()}
+            disabled={busy || doc === null}
+            {...hint(
+              "Send the current 48 by 48 drawing and ask for three pictures. They show up here. Your canvas is left alone.",
+            )}
+          >
+            {busy ? "Working…" : "Generate 3 pictures"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void promote()}
+            disabled={busy || selected === null}
+            {...hint(
+              "Copy the selected picture into the project as the kept PNG for this unit. Later, Open kept picture can load it back onto the canvas.",
+            )}
+          >
+            Keep this picture
+          </button>
+          <button
+            type="button"
+            disabled={selected === null}
+            {...hint(
+              "Flatten the selected picture onto the 48 by 48 canvas so you can correct pixels with the pencil. Put the parts back returns to the separate pieces.",
+            )}
+            onClick={() => {
+              if (!doc || !selected) {
+                return;
+              }
+              setPaintCommand({
+                id: Date.now(),
+                action: "candidate",
+                blueprintId: doc.blueprint.blueprintId,
+                candidateBase64: selected.quantizedBase64,
+              });
+            }}
+          >
+            Paint over this picture
+          </button>
         </div>
-      )}
-      <div className="unit-bake-review-row">
+        {candidates.length > 0 && (
+          <div className="sprite-generate-seeds" role="group" aria-label="Generated pictures">
+            {candidates.map((item, index) => (
+              <button
+                key={item.seed}
+                type="button"
+                aria-pressed={item.seed === selectedSeed}
+                {...hint(
+                  `Picture ${index + 1}. Outline match ${item.silhouetteIoU.toFixed(2)}. 1.00 means the silhouette matches your drawing. Lower means the picture grew or shrank past it.`,
+                )}
+                onClick={() => setSelectedSeed(item.seed)}
+              >
+                Picture {index + 1}
+                <small>match {item.silhouetteIoU.toFixed(2)}</small>
+              </button>
+            ))}
+          </div>
+        )}
         <figure>
-          <figcaption>Blockout</figcaption>
-          <canvas ref={blockoutRef} width={width} height={height} style={pixelSize(width, height)} />
+          <figcaption>{selected ? "Selected picture" : "A generated picture shows here"}</figcaption>
+          <canvas ref={candidateRef} width={48} height={48} />
         </figure>
-        <figure>
-          <figcaption>
-            Candidate
-            {selected ? ` · silhouette IoU ${selected.silhouetteIoU.toFixed(3)}` : ""}
-          </figcaption>
-          <canvas ref={candidateRef} width={width} height={height} style={pixelSize(width, height)} />
-        </figure>
-        <figure>
-          <figcaption>Sheet (40, 52)</figcaption>
-          <canvas
-            ref={sheetRef}
-            width={SPRITE_BAKE.width}
-            height={SPRITE_BAKE.height}
-            style={pixelSize(SPRITE_BAKE.width, SPRITE_BAKE.height)}
-          />
-        </figure>
-      </div>
-      <UnitPixelPainter command={paintCommand} />
+        <p className="sprite-generate-help">{help ?? note}</p>
+      </details>
     </section>
   );
 }
@@ -292,39 +272,77 @@ const PANEL_CSS = `
 .unit-bake-review {
   position: fixed;
   z-index: 40;
-  inset: 16px;
+  inset: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
+  padding: 16px 16px 12px;
   background: #1c1917;
   color: #f5f0e6;
-  overflow: auto;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px #4b3d44;
 }
-.unit-bake-review-bar, .unit-bake-review-seeds, .unit-bake-review-row {
+.sprite-generate {
+  flex: none;
+  max-height: 34%;
+  overflow: auto;
+  border-top: 1px solid #4b3d44;
+  padding-top: 8px;
+}
+.sprite-generate summary {
+  cursor: pointer;
+  font: 600 15px/1.4 "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+.sprite-generate-lead, .sprite-generate-help, .sprite-generate figcaption {
+  margin: 8px 0;
+  color: #a99c8d;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.sprite-generate-actions, .sprite-generate-seeds {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
 }
-.unit-bake-review figure {
-  margin: 0;
+.sprite-generate button {
+  font: 13px/1.3 "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 6px 10px;
+  background: #2a2420;
+  color: #f5f0e6;
+  border: 1px solid #4b3d44;
 }
-.unit-bake-review figcaption {
-  margin-bottom: 6px;
+.sprite-generate button:hover:not(:disabled) {
+  border-color: #ddcf99;
 }
-.unit-bake-review canvas {
-  background: #3a342c;
+.sprite-generate button[aria-pressed="true"] {
+  border-color: #ddcf99;
+  background: #4b3d44;
+}
+.sprite-generate button small {
+  display: block;
+  color: #ddcf99;
+  font-size: 11px;
+}
+.sprite-generate canvas {
+  width: 192px;
+  height: 192px;
   image-rendering: pixelated;
+  background: #c8c2b6;
+  box-shadow: inset 0 0 0 1px #1c1917;
 }
-.unit-bake-review button[aria-pressed="true"] {
-  outline: 2px solid #ddcf99;
+.sprite-generate figure {
+  margin: 8px 0 0;
+}
+.sprite-generate-help {
+  min-height: 2.8em;
+  padding: 8px 10px;
+  background: #2a2420;
+  color: #f5f0e6;
 }
 `;
-
-function pixelSize(width: number, height: number): { width: number; height: number; imageRendering: "pixelated" } {
-  return { width: width * 4, height: height * 4, imageRendering: "pixelated" };
-}
 
 function bakeBody(
   blueprint: UnitSkeletonBlueprint,
@@ -338,7 +356,7 @@ function bakeBody(
     blueprintId: blueprint.blueprintId,
     width: blueprint.canvasSize.width,
     height: blueprint.canvasSize.height,
-    prompt: bakePrompt(blueprint, STARTER_PARTS),
+    prompt: bakePrompt(blueprint),
     blockoutBase64,
     albedoKeys,
     referencePlatePaths: referencePlatesFor(blueprint, heroAvailable),

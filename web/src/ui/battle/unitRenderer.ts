@@ -1,5 +1,16 @@
 // Frontline 1941 - Tactical Combat Unit & Battlefield Visual Renderer
 import {
+  barrelRecoilPx,
+  infantryKick,
+  MARCH_RIFLE_RAD,
+  marchCycle,
+  stepSin,
+  tankKick,
+  tankVibe,
+  trackScroll,
+  turretSwivelRad,
+} from "./figureGait";
+import {
   CombatUnit,
   TheaterId,
   GroundCrater,
@@ -1583,12 +1594,11 @@ export function drawProceduralUnit(
   if (!isCasualty) {
     const isHeavyMechanized = unit.type === 'tank' || unit.type === 'artillery';
     if (isHeavyMechanized && unit.animRecoil > 0) {
-      const baseKick = -unit.animRecoil * 5.2;
-      const shudder = Math.sin(unit.animRecoil * Math.PI * 7) * (unit.animRecoil * 2.2);
-      recoilX = baseKick + shudder;
-      recoilY = isStaticMount ? 0 : bob + Math.cos(unit.animRecoil * Math.PI * 5) * (unit.animRecoil * 1.4);
+      const kick = tankKick(unit.animRecoil);
+      recoilX = kick.x;
+      recoilY = isStaticMount ? 0 : bob + kick.y;
     } else if (unit.animRecoil > 0) {
-      recoilX = -unit.animRecoil * 3.5;
+      recoilX = infantryKick(unit.animRecoil);
       recoilY = isStaticMount ? 0 : bob;
     }
   }
@@ -1838,10 +1848,11 @@ function drawInfantry(
 
   // 1. OPENING DEPLOYMENT MARCHING ANIMATION: Walking gait bob & leg swinging
   if (unit.isMarching) {
-    const marchBob = Math.abs(Math.sin(time * 11 + unit.animBobOffset)) * 2.5;
+    const gait = marchCycle(time, unit.animBobOffset);
+    const marchBob = gait.bob;
     ctx.translate(0, -marchBob);
 
-    const legSwing = Math.sin(time * 11 + unit.animBobOffset) * 3.5;
+    const legSwing = gait.legSwing;
     // Boots
     ctx.fillStyle = PALETTE.bunkerCharcoal;
     ctx.fillRect(-4 + legSwing, 4, 3, 5);
@@ -1869,7 +1880,7 @@ function drawInfantry(
     // Rifle carried at slope on shoulder while marching
     ctx.save();
     ctx.translate(1, -6);
-    ctx.rotate(-0.4);
+    ctx.rotate(MARCH_RIFLE_RAD);
     ctx.fillStyle = PALETTE.earthBrown;
     ctx.fillRect(-2, -2, 8, 3);
     ctx.fillStyle = PALETTE.navalSteel;
@@ -2043,7 +2054,7 @@ function drawArtillery(ctx: CanvasRenderingContext2D, factionColor: string, unit
   // Crewman boots firmly planted on the ground (or walking if marching)
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   if (unit.isMarching) {
-    const marchLeg = Math.sin(time * 11 + unit.animBobOffset) * 2;
+    const marchLeg = stepSin(time, unit.animBobOffset) * 2;
     ctx.fillRect(-20 + marchLeg, 4, 3, 5);
     ctx.fillRect(-16 - marchLeg, 4, 3, 5);
   } else {
@@ -2163,14 +2174,14 @@ function drawTank(
 
   // Marching vibration
   if (unit.isMarching) {
-    const marchVibe = Math.sin(time * 18 + unit.animBobOffset) * 0.6;
+    const marchVibe = tankVibe(time, unit.animBobOffset);
     ctx.translate(0, marchVibe);
   }
 
   // Ready station turret swivel
   let turretAngle = 0;
   if (unit.readyAnimProgress !== undefined && unit.readyAnimProgress >= 0) {
-    turretAngle = Math.sin(unit.readyAnimProgress * Math.PI * 2) * 0.14;
+    turretAngle = turretSwivelRad(unit.readyAnimProgress);
   }
 
   drawAmbientOcclusionShadow(ctx, 0, 11, half + 8, 8, half * 2);
@@ -2186,7 +2197,7 @@ function drawTank(
 
   if (unit.isMarching) {
     ctx.fillStyle = PALETTE.deepTaupe;
-    const trackTick = Math.floor((time * 24) % 6);
+    const trackTick = trackScroll(time);
     for (let tx = -half + 1 + trackTick; tx <= half - 2; tx += 6) {
       ctx.fillRect(tx, 3, 2, 8);
     }
@@ -2251,7 +2262,7 @@ function drawTank(
   if (unit.animAnticipation > 0) {
     ctx.rotate(-0.08);
   }
-  const barrelRecoil = unit.animRecoil > 0 ? unit.animRecoil * 4.2 : 0;
+  const barrelRecoil = barrelRecoilPx(unit.animRecoil);
   const bore = cue.barrel > 14 ? 4 : 3;
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(t.right - 2 - barrelRecoil, t.gunY, cue.barrel, bore);

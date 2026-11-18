@@ -43,6 +43,7 @@ import { isActiveFaction } from "./tokenStyle";
 import { nextFacingHold, type FacingHold, type FacingStacks } from "./uprightSprites";
 import { extractHostileFrontlineSegments, reliefRegions, scarTargets } from "./terrainRelief";
 import { moveUnitsPayload } from "./stackMove";
+import { MotionTestLevel } from "../../art/MotionTestLevel";
 import { UnitBakeReviewPanel } from "../../art/UnitBakeReviewPanel";
 import { MainMenu } from "./menu/MainMenu";
 import { readCampaignSaves, writeCampaignSave, type CampaignSave } from "./menu/campaignSave";
@@ -985,6 +986,7 @@ export function App() {
     )}
     <Soundboard />
     {import.meta.env.DEV && new URLSearchParams(window.location.search).get("bake") === "1" && <UnitBakeReviewPanel />}
+    {import.meta.env.DEV && new URLSearchParams(window.location.search).get("anim") === "1" && <MotionTestLevel />}
     {battleOnScreen && (
       <div className="combat-cover">
         <BattleScreen

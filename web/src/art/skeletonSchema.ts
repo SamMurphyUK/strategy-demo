@@ -21,7 +21,7 @@ export type RosterFactionId = "GER" | "USSR" | "UK" | "US" | "JAP" | "MINOR";
 export type UnitCategory = "land" | "air" | "sea";
 
 /**
- * Recolour slots inside a part. Each faction maps these onto a MilitaryStripKey.
+ * Recolour slots inside a frame. Each faction maps these onto a MilitaryStripKey.
  * There is no outline slot.
  */
 export type PaletteSlotKey =
@@ -35,62 +35,20 @@ export type PaletteSlotKey =
 
 export type FactionMilitaryMapping = Record<PaletteSlotKey, MilitaryStripKey>;
 
-export type PartSlotType =
-  | "head"
-  | "torso"
-  | "arms"
-  | "weapon"
-  | "legs"
-  | "hull"
-  | "turret"
-  | "barrel"
-  | "chassis"
-  | "fuselage"
-  | "wings"
-  | "superstructure";
-
 /** Feet on the live 80×56 sheet. figureGround.ts uses the same point (SPRITE_BAKE). */
 export const SHEET_FOOT_ANCHOR: Vec2 = { x: 40, y: 52 };
 
-/**
- * Rest-pose motion for a live drawer. A promoted flat PNG cannot elevate or recoil;
- * it can only flip and flash at muzzlePoint.
- */
-export interface NodeArticulation {
-  role: "turret" | "barrel";
-  pivotOffset: Vec2;
-  minDeg: number;
-  maxDeg: number;
-  recoilPx: number;
-}
+export const SPRITE_FRAME_KEYS = ["idle", "move_1", "move_2", "fire"] as const;
 
-export interface PartAsset {
-  partId: string;
-  slotType: PartSlotType;
-  label: string;
-  width: number;
-  height: number;
-  localPivot: Vec2;
-  pixelGrid: (PaletteSlotKey | null)[][];
-  promptFragment: string;
-}
+export type SpriteFrameKey = (typeof SPRITE_FRAME_KEYS)[number];
 
-export interface SkeletonNode {
-  nodeId: string;
-  partId: string;
-  parentId: string | null;
-  anchorInParent: Vec2;
-  rotationDeg: number;
-  zIndex: number;
-  articulation?: NodeArticulation;
-  slotOverrides?: Partial<Record<PaletteSlotKey, PaletteSlotKey>>;
-}
+export type SpriteFrameGrid = (PaletteSlotKey | null)[][];
 
 /**
- * Authored unit art. blueprintId is unique per drawing.
+ * One unit, four flat poses. Slots re-skin through FACTION_MILITARY_MAPPINGS.
  * unitTypeId is the UNIT_DEFINITIONS key and is not a filename.
  */
-export interface UnitSkeletonBlueprint {
+export interface UnitSpriteSheetBlueprint {
   blueprintId: string;
   unitTypeId: string;
   factionId: RosterFactionId;
@@ -98,10 +56,14 @@ export interface UnitSkeletonBlueprint {
   canvasSize: { width: 48 | 64; height: 48 | 64 };
   groundOrigin: Vec2;
   sheetFootAnchor: Vec2;
-  /** Static muzzle flash once a flat PNG is promoted. */
   muzzlePoint?: Vec2;
   nativeFacing: "right" | "left";
-  nodes: SkeletonNode[];
+  /** Whole-sprite kick, in canvas pixels, applied on the fire pose. */
+  recoilOffsetPx: number;
+  frames: Record<SpriteFrameKey, SpriteFrameGrid>;
   referencePlatePaths?: string[];
   historicalEraTag: string;
 }
+
+/** Older name for the sprite sheet. The node tree is gone. */
+export type UnitSkeletonBlueprint = UnitSpriteSheetBlueprint;

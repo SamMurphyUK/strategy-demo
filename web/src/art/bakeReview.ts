@@ -1,4 +1,4 @@
-import type { PartAsset, RosterFactionId, UnitSkeletonBlueprint } from "./skeletonSchema";
+import type { RosterFactionId, UnitSpriteSheetBlueprint } from "./skeletonSchema";
 
 /** The promoted infantry sheet is the faction's style reference for later bakes. */
 const HERO_BLUEPRINT: Record<RosterFactionId, string> = {
@@ -29,7 +29,7 @@ export function promotedPublicUrl(factionId: RosterFactionId, blueprintId: strin
  * At most nine images go to Retro Diffusion.
  */
 export function referencePlatesFor(
-  blueprint: UnitSkeletonBlueprint,
+  blueprint: UnitSpriteSheetBlueprint,
   heroAvailable: boolean,
 ): string[] {
   const own = (blueprint.referencePlatePaths ?? []).filter((plate) => plate !== "");
@@ -38,12 +38,9 @@ export function referencePlatesFor(
   return plates.slice(0, 9);
 }
 
-/** Historical line plus each part's fragment. The picture sits on a plain white field. */
-export function bakePrompt(blueprint: UnitSkeletonBlueprint, parts: Record<string, PartAsset>): string {
-  const fragments = blueprint.nodes
-    .map((node) => parts[node.partId]?.promptFragment ?? "")
-    .filter((fragment) => fragment !== "");
-  return `${blueprint.historicalEraTag}. ${fragments.join(". ")}. Plain white background.`;
+/** Historical line for the idle frame. The picture sits on a plain white field. */
+export function bakePrompt(blueprint: UnitSpriteSheetBlueprint): string {
+  return `${blueprint.historicalEraTag}. Plain white background.`;
 }
 
 export function freshSeeds(count: number): number[] {

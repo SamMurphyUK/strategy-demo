@@ -1,23 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { assertBlockoutFitsSheet, rasterBlueprintAlbedo, resolveNodeTransforms } from "../../src/art/blockoutCompiler";
+import { assertBlockoutFitsSheet, rasterBlueprintAlbedo } from "../../src/art/blockoutCompiler";
+import { topLayerAt } from "../../src/art/infantryMarch";
 import {
   documentFromBlueprint,
+  duplicateFrameToNext,
   flattenBlockout,
   flattenRgba,
   fromPaintFile,
   paintAt,
-  partCellAt,
   placeGroundOrigin,
   slotHex,
   toPaintFile,
+  withEditingLayer,
   withFaction,
 } from "../../src/art/pixelPaint";
-import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS, STARTER_PARTS } from "../../src/art/starterParts";
+import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS } from "../../src/art/starterParts";
 import { MILITARY } from "../../src/ui/theme/militaryPalette";
 import { authoredUnitRelativePath } from "../../dev/bakeUnitPlugin.mjs";
 
 const infantry = STARTER_BLUEPRINTS.find((blueprint) => blueprint.blueprintId === "ger_infantry_43");
 const tank = STARTER_BLUEPRINTS.find((blueprint) => blueprint.blueprintId === "ger_tank_pz4");
+
+function firstOpaque(grid: readonly (readonly (string | null)[])[]): { x: number; y: number } {
+  for (let y = 0; y < grid.length; y++) {
+    const row = grid[y] ?? [];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] != null) {
+        return { x, y };
+      }
+    }
+  }
+  throw new Error("empty frame");
+}
 
 describe("pixel painter", () => {
   it("re-skins from the faction mapping and leaves the slot grid alone", () => {
@@ -26,47 +40,49 @@ describe("pixel painter", () => {
     if (!infantry) {
       throw new Error("missing infantry blueprint");
     }
-    const german = documentFromBlueprint(infantry, STARTER_PARTS);
+    const german = documentFromBlueprint(infantry);
     const american = withFaction(german, "US");
     expect(american.blueprint.factionId).toBe("US");
-    expect(american.parts.inf_legs_stride.pixelGrid).toEqual(german.parts.inf_legs_stride.pixelGrid);
-    expect(STARTER_PARTS.inf_legs_stride.pixelGrid[10][0]).toBe("wood_or_leather");
+    expect(american.blueprint.frames.idle).toEqual(german.blueprint.frames.idle);
+    expect(infantry.frames.idle).toEqual(german.blueprint.frames.idle);
   });
 
-  it("paints one part cell and keeps the tank barrel joint", () => {
+  it("paints one cell of the open frame and keeps the fire kick", () => {
     if (!infantry || !tank) {
       throw new Error("missing starter blueprint");
     }
-    const figure = documentFromBlueprint(infantry, STARTER_PARTS);
-    expect(partCellAt(figure, "legs", 19, 45)).toEqual({ x: 0, y: 10 });
-    const painted = paintAt({ ...figure, editingNodeId: "legs" }, 19, 45, "insignia_accent");
-    expect(painted.parts.inf_legs_stride.pixelGrid[10][0]).toBe("insignia_accent");
-    expect(painted.parts.inf_torso_tunic.pixelGrid).toEqual(figure.parts.inf_torso_tunic.pixelGrid);
-    expect(STARTER_PARTS.inf_legs_stride.pixelGrid[10][0]).toBe("wood_or_leather");
+    const figure = documentFromBlueprint(infantry);
+    expect(figure.layers).not.toBeNull();
+    const cell = firstOpaque(figure.blueprint.frames.idle);
+    const owner = figure.layers && topLayerAt(figure.layers.idle, cell.x, cell.y);
+    if (!owner) {
+      throw new Error("the first pixel has no layer");
+    }
+    const before = figure.blueprint.frames.idle[cell.y]?.[cell.x];
+    const painted = paintAt(withEditingLayer(figure, owner), cell.x, cell.y, "insignia_accent");
+    expect(painted.blueprint.frames.idle[cell.y]?.[cell.x]).toBe("insignia_accent");
+    expect(painted.blueprint.frames.move_1).toEqual(figure.blueprint.frames.move_1);
+    expect(infantry.frames.idle[cell.y]?.[cell.x]).toBe(before);
+    expect(painted.blueprint.recoilOffsetPx).toBe(1);
 
-    const armour = documentFromBlueprint(tank, STARTER_PARTS);
-    const touched = paintAt({ ...armour, editingNodeId: "hull" }, 24, 36, "insignia_accent");
-    expect(touched.blueprint.nodes.find((node) => node.nodeId === "barrel")?.articulation).toEqual({
-      role: "barrel",
-      pivotOffset: { x: 0, y: 0 },
-      minDeg: -12,
-      maxDeg: 5,
-      recoilPx: 3,
-    });
-    expect(touched.blueprint.nodes.find((node) => node.nodeId === "turret")?.articulation?.role).toBe("turret");
+    const armour = documentFromBlueprint(tank);
+    expect(armour.layers).toBeNull();
+    expect(armour.blueprint.recoilOffsetPx).toBe(2);
+    const copied = duplicateFrameToNext(armour);
+    expect(copied.editingFrame).toBe("move_1");
+    expect(copied.blueprint.frames.move_1).toEqual(armour.blueprint.frames.idle);
   });
 
-  it("flattens the blockout onto the same pixels and drops articulation", () => {
+  it("keeps the idle pixels when the sheet is already flat", () => {
     if (!infantry) {
       throw new Error("missing infantry blueprint");
     }
-    const figure = documentFromBlueprint(infantry, STARTER_PARTS);
+    const figure = documentFromBlueprint(infantry);
     const mapping = FACTION_MILITARY_MAPPINGS.GER;
-    const original = rasterBlueprintAlbedo(figure.blueprint, new Map(Object.entries(figure.parts)), mapping);
+    const original = rasterBlueprintAlbedo(figure.blueprint, mapping);
     const flat = flattenBlockout(figure);
-    const collapsed = rasterBlueprintAlbedo(flat.blueprint, new Map(Object.entries(flat.parts)), mapping);
+    const collapsed = rasterBlueprintAlbedo(flat.blueprint, mapping);
     expect(flat.flat).toBe(true);
-    expect(flat.blueprint.nodes).toHaveLength(1);
     expect(collapsed.albedoKeys).toEqual(original.albedoKeys);
   });
 
@@ -74,17 +90,14 @@ describe("pixel painter", () => {
     if (!infantry) {
       throw new Error("missing infantry blueprint");
     }
-    const figure = documentFromBlueprint(infantry, STARTER_PARTS);
+    const figure = documentFromBlueprint(infantry);
     const mapping = FACTION_MILITARY_MAPPINGS.GER;
-    const before = rasterBlueprintAlbedo(figure.blueprint, new Map(Object.entries(figure.parts)), mapping);
+    const before = rasterBlueprintAlbedo(figure.blueprint, mapping);
     const moved = placeGroundOrigin(figure, 24, 46);
-    const after = rasterBlueprintAlbedo(moved.blueprint, new Map(Object.entries(moved.parts)), mapping);
+    const after = rasterBlueprintAlbedo(moved.blueprint, mapping);
     expect(after.albedoKeys).toEqual(before.albedoKeys);
     expect(moved.blueprint.groundOrigin).toEqual({ x: 24, y: 46 });
     expect(assertBlockoutFitsSheet(moved.blueprint).y).toBe(6);
-    expect(resolveNodeTransforms(moved.blueprint).get("legs")?.worldPivot).toEqual(
-      resolveNodeTransforms(figure.blueprint).get("legs")?.worldPivot,
-    );
 
     const rgba = new Uint8ClampedArray(48 * 48 * 4);
     rgba[0] = 0x7d;
@@ -92,13 +105,19 @@ describe("pixel painter", () => {
     rgba[2] = 0x62;
     rgba[3] = 255;
     const candidate = flattenRgba(figure, rgba, 48, 48, mapping);
-    expect(candidate.parts.ger_infantry_43_flat.pixelGrid[0][0]).toBe("wood_or_leather");
-    expect(candidate.parts.ger_infantry_43_flat.pixelGrid[0][1]).toBeNull();
+    expect(candidate.blueprint.frames.idle[0]?.[0]).toBe("wood_or_leather");
+    expect(candidate.blueprint.frames.idle[0]?.[1]).toBeNull();
+    expect(candidate.blueprint.frames.move_1).toEqual(figure.blueprint.frames.move_1);
     expect(() => flattenRgba(figure, rgba, 2, 2, mapping)).toThrow(/does not match/);
 
     const file = toPaintFile(candidate);
     const imported = fromPaintFile(JSON.parse(JSON.stringify(file)));
-    expect(imported.parts.ger_infantry_43_flat.pixelGrid[0][0]).toBe("wood_or_leather");
+    expect(imported.blueprint.frames.idle[0]?.[0]).toBe("wood_or_leather");
+    expect(imported.layers?.idle.legs[0]?.[0]).toBe("wood_or_leather");
+    const stripped = JSON.parse(JSON.stringify(file)) as { layers?: unknown; editingLayer?: unknown };
+    delete stripped.layers;
+    delete stripped.editingLayer;
+    expect(fromPaintFile(stripped).layers).toBeNull();
     expect(() => fromPaintFile({ kind: "other" })).toThrow(/unit paint/);
   });
 });

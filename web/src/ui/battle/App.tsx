@@ -21,6 +21,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {getConfig} from './constants';
+import {decayRecoil} from './figureGait';
 import BackgroundMusic from './utils/BackgroundMusic';
 import {
   createFixedStepper,
@@ -3504,7 +3505,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
     // Update active unit anim recoil & sinking ship simulation
     const updateUnitSimulation = (u: CombatUnit) => {
-      if (u.animRecoil > 0) u.animRecoil = Math.max(0, u.animRecoil - deltaTime * 2.4);
+      if (u.animRecoil > 0) u.animRecoil = decayRecoil(u.animRecoil, deltaTime);
 
       // Carrier moving forward / floating back movement
       if (u.type === 'carrier') {

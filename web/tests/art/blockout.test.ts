@@ -1,19 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  assertBlockoutFitsSheet,
-  evaluateCandidateAgainstBlockout,
-  rasterBlueprintAlbedo,
-  resolveNodeTransforms,
-} from "../../src/art/blockoutCompiler";
+import { assertBlockoutFitsSheet, compileBlueprintFrame, evaluateCandidateAgainstBlockout } from "../../src/art/blockoutCompiler";
 import {
   SHEET_FOOT_ANCHOR,
   type FactionMilitaryMapping,
   type PaletteSlotKey,
-  type PartAsset,
-  type SkeletonNode,
-  type UnitSkeletonBlueprint,
+  type SpriteFrameGrid,
+  type UnitSpriteSheetBlueprint,
 } from "../../src/art/skeletonSchema";
 import { MILITARY } from "../../src/ui/theme/militaryPalette";
 import { candidateRelativePath, resolveInsideRoot } from "../../dev/bakeUnitPlugin.mjs";
@@ -32,46 +26,25 @@ function mapping(fill: FactionMilitaryMapping[PaletteSlotKey] = "crimson"): Fact
   return Object.fromEntries(SLOTS.map((slot) => [slot, fill])) as FactionMilitaryMapping;
 }
 
-function grid(width: number, height: number, slot: PaletteSlotKey | null): (PaletteSlotKey | null)[][] {
+function grid(width: number, height: number, slot: PaletteSlotKey | null = null): SpriteFrameGrid {
   return Array.from({ length: height }, () => Array.from({ length: width }, () => slot));
 }
 
-function part(partId: string, width: number, height: number, slot: PaletteSlotKey): PartAsset {
-  return {
-    partId,
-    slotType: "hull",
-    label: partId,
-    width,
-    height,
-    localPivot: { x: 0, y: 0 },
-    pixelGrid: grid(width, height, slot),
-    promptFragment: partId,
-  };
-}
-
-function blueprint(nodes: SkeletonNode[], ground = { x: 24, y: 46 }): UnitSkeletonBlueprint {
+function sheet(framesIdle: SpriteFrameGrid, ground = { x: 24, y: 46 }, size: { width: 48 | 64; height: 48 | 64 } = { width: 48, height: 48 }): UnitSpriteSheetBlueprint {
+  const blank = grid(size.width, size.height);
   return {
     blueprintId: "ger_tank_a",
     unitTypeId: "tank",
     factionId: "GER",
     category: "land",
-    canvasSize: { width: 48, height: 48 },
+    canvasSize: size,
     groundOrigin: ground,
     sheetFootAnchor: { ...SHEET_FOOT_ANCHOR },
     muzzlePoint: { x: 40, y: 40 },
     nativeFacing: "right",
-    nodes,
+    recoilOffsetPx: 2,
+    frames: { idle: framesIdle, move_1: blank, move_2: blank, fire: blank },
     historicalEraTag: "1943",
-  };
-}
-
-function node(partial: Partial<SkeletonNode> & Pick<SkeletonNode, "nodeId" | "partId">): SkeletonNode {
-  return {
-    parentId: null,
-    anchorInParent: { x: 0, y: 0 },
-    rotationDeg: 0,
-    zIndex: 0,
-    ...partial,
   };
 }
 
@@ -98,82 +71,49 @@ describe("blockout compiler", () => {
     expect(SHEET_FOOT_ANCHOR).toEqual({ x: 40, y: 52 });
   });
 
-  it("places a low-z child on its parent before anyone paints", () => {
-    const bp = blueprint([
-      node({ nodeId: "hull", partId: "hull", zIndex: 10 }),
-      node({
-        nodeId: "gun",
-        partId: "gun",
-        parentId: "hull",
-        anchorInParent: { x: 4, y: 0 },
-        zIndex: 0,
-      }),
-    ]);
-    const parts = new Map<string, PartAsset>([
-      ["hull", part("hull", 2, 1, "primary_uniform_or_hull")],
-      ["gun", part("gun", 1, 1, "metallic_brass_or_track")],
-    ]);
+  it("maps a frame's slots straight onto faction colours", () => {
+    const idle = grid(48, 48);
+    idle[46][24] = "primary_uniform_or_hull";
+    idle[46][28] = "metallic_brass_or_track";
     const colors = mapping();
     colors.metallic_brass_or_track = "brass";
-    const { albedoKeys } = rasterBlueprintAlbedo(bp, parts, colors);
+    const { albedoKeys } = compileBlueprintFrame(sheet(idle), "idle", colors);
     const at = (x: number, y: number) => albedoKeys[y * 48 + x];
     expect(at(24, 46)).toBe("crimson");
     expect(at(28, 46)).toBe("brass");
-    const transforms = resolveNodeTransforms(bp);
-    expect(transforms.get("gun")?.worldPivot).toEqual({ x: 28, y: 46 });
+    expect(albedoKeys.filter((key) => key != null)).toHaveLength(2);
   });
 
-  it("keeps a rotated solid rectangle filled", () => {
-    const square = part("plate", 5, 5, "primary_uniform_or_hull");
-    square.localPivot = { x: 2, y: 2 };
-    const bp = blueprint([
-      node({ nodeId: "plate", partId: "plate", anchorInParent: { x: 0, y: -8 }, rotationDeg: 20 }),
-    ]);
-    const { albedoKeys } = rasterBlueprintAlbedo(bp, new Map([["plate", square]]), mapping());
-    const opaque = albedoKeys.filter((key) => key != null).length;
-    expect(opaque).toBeGreaterThanOrEqual(25);
-    let holes = 0;
-    for (let y = 1; y < 47; y++) {
-      for (let x = 1; x < 47; x++) {
-        const index = y * 48 + x;
-        if (albedoKeys[index] != null) {
-          continue;
-        }
-        const enclosed = [index - 1, index + 1, index - 48, index + 48].every((neighbor) => albedoKeys[neighbor] != null);
-        if (enclosed) {
-          holes += 1;
-        }
+  it("keeps a solid block filled, with no holes from a transform", () => {
+    const idle = grid(48, 48);
+    for (let y = 20; y < 25; y++) {
+      for (let x = 10; x < 15; x++) {
+        idle[y][x] = "primary_uniform_or_hull";
       }
     }
-    expect(holes).toBe(0);
+    const { albedoKeys } = compileBlueprintFrame(sheet(idle), "idle", mapping());
+    expect(albedoKeys.filter((key) => key != null)).toHaveLength(25);
   });
 
-  it("throws on a cycle, a missing part, and a strip key that is not in the palette", () => {
-    const cyclic = blueprint([
-      node({ nodeId: "a", partId: "p", parentId: "b" }),
-      node({ nodeId: "b", partId: "p", parentId: "a" }),
-    ]);
-    expect(() => resolveNodeTransforms(cyclic)).toThrow(/cycle/i);
+  it("throws on a missing frame and a strip key that is not in the palette", () => {
+    const idle = grid(48, 48);
+    idle[46][24] = "primary_uniform_or_hull";
+    const brokenFrame = sheet(idle);
+    brokenFrame.frames = { ...brokenFrame.frames, fire: grid(2, 2) };
+    expect(() => compileBlueprintFrame(brokenFrame, "fire", mapping())).toThrow(/48×48/);
 
-    const missing = blueprint([node({ nodeId: "hull", partId: "gone" })]);
-    expect(() => rasterBlueprintAlbedo(missing, new Map(), mapping())).toThrow(/missing part/i);
-
-    const bp = blueprint([node({ nodeId: "hull", partId: "hull" })]);
-    const parts = new Map([["hull", part("hull", 1, 1, "primary_uniform_or_hull")]]);
     const broken = mapping();
     (broken as { primary_uniform_or_hull?: string }).primary_uniform_or_hull = "soviet_green";
-    expect(() => rasterBlueprintAlbedo(bp, parts, broken as FactionMilitaryMapping)).toThrow(/MilitaryStripKey/);
+    expect(() => compileBlueprintFrame(sheet(idle), "idle", broken as FactionMilitaryMapping)).toThrow(/MilitaryStripKey/);
   });
 
   it("rejects a blockout that would eat the outline margin on the 80×56 sheet", () => {
-    const fitted = blueprint([node({ nodeId: "hull", partId: "hull" })]);
-    expect(assertBlockoutFitsSheet(fitted)).toEqual({ x: 16, y: 6 });
+    expect(assertBlockoutFitsSheet(sheet(grid(48, 48)))).toEqual({ x: 16, y: 6 });
 
-    const tall = blueprint([], { x: 24, y: 46 });
-    tall.canvasSize = { width: 48, height: 64 };
+    const tall = sheet(grid(48, 64), { x: 24, y: 46 }, { width: 48, height: 64 });
     expect(() => assertBlockoutFitsSheet(tall)).toThrow(/80×56/);
 
-    const lowFeet = blueprint([], { x: 24, y: 20 });
+    const lowFeet = sheet(grid(48, 48), { x: 24, y: 20 });
     expect(() => assertBlockoutFitsSheet(lowFeet)).toThrow(/margin/);
   });
 

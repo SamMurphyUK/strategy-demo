@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rasterBlueprintAlbedo } from "../src/art/blockoutCompiler.ts";
 import { bakePrompt, factionHeroBlueprintId, referencePlatesFor } from "../src/art/bakeReview.ts";
-import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS, STARTER_PARTS } from "../src/art/starterParts.ts";
+import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS } from "../src/art/starterParts.ts";
 import { MILITARY } from "../src/ui/theme/militaryPalette.ts";
 import { encodeRgbaPng } from "../dev/pngRgba.mjs";
 
@@ -98,8 +98,7 @@ async function heroAvailable(factionId) {
 }
 
 function blockoutPng(blueprint) {
-  const parts = new Map(Object.values(STARTER_PARTS).map((part) => [part.partId, part]));
-  const raster = rasterBlueprintAlbedo(blueprint, parts, FACTION_MILITARY_MAPPINGS[blueprint.factionId]);
+  const raster = rasterBlueprintAlbedo(blueprint, FACTION_MILITARY_MAPPINGS[blueprint.factionId]);
   const rgba = new Uint8ClampedArray(raster.albedoKeys.length * 4);
   for (let i = 0; i < raster.albedoKeys.length; i++) {
     const key = raster.albedoKeys[i];
@@ -155,7 +154,7 @@ export async function main(argv = process.argv.slice(2)) {
         blueprintId: blueprint.blueprintId,
         width: blueprint.canvasSize.width,
         height: blueprint.canvasSize.height,
-        prompt: bakePrompt(blueprint, STARTER_PARTS),
+        prompt: bakePrompt(blueprint),
         blockoutBase64: blockout.base64,
         albedoKeys: blockout.albedoKeys,
         referencePlatePaths: plates,

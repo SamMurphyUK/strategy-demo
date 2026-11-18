@@ -4,19 +4,13 @@ import type {
   FactionMilitaryMapping,
   MilitaryStripKey,
   PaletteSlotKey,
-  SkeletonNode,
-  UnitSkeletonBlueprint,
+  SpriteFrameKey,
+  UnitSpriteSheetBlueprint,
   Vec2,
 } from "./skeletonSchema";
-import { MILITARY_STRIP_KEYS } from "./skeletonSchema";
+import { MILITARY_STRIP_KEYS, SPRITE_FRAME_KEYS } from "./skeletonSchema";
 
 const SHEET_MARGIN = 1;
-
-export interface ResolvedNode {
-  node: SkeletonNode;
-  worldPivot: Vec2;
-  rotRad: number;
-}
 
 export interface BlockoutRaster {
   albedoKeys: (MilitaryStripKey | null)[];
@@ -24,22 +18,14 @@ export interface BlockoutRaster {
 }
 
 export interface CompiledBlockout extends BlockoutRaster {
-  canvas: OffscreenCanvas;
-}
-
-interface PlacedPart {
-  node: SkeletonNode;
-  worldPivot: Vec2;
-  rotRad: number;
-  cos: number;
-  sin: number;
+  canvas: OffscreenCanvas | null;
 }
 
 /**
  * Where the blockout's groundOrigin lands on the 80×56 sheet.
  * Throws when that rectangle would touch the outer pixel, which figureGround.ts needs for the ink ring.
  */
-export function assertBlockoutFitsSheet(blueprint: UnitSkeletonBlueprint): Vec2 {
+export function assertBlockoutFitsSheet(blueprint: UnitSpriteSheetBlueprint): Vec2 {
   const { width, height } = blueprint.canvasSize;
   const { x: footX, y: footY } = blueprint.groundOrigin;
   if (!Number.isInteger(footX) || !Number.isInteger(footY)) {
@@ -68,180 +54,72 @@ export function assertBlockoutFitsSheet(blueprint: UnitSkeletonBlueprint): Vec2 
   return offset;
 }
 
-/**
- * Parents first, then children. A cycle or a missing parent throws.
- * zIndex is not a parent order: a child with a lower zIndex still hangs off its parent.
- */
-export function resolveNodeTransforms(blueprint: UnitSkeletonBlueprint): Map<string, ResolvedNode> {
-  const nodeById = new Map<string, SkeletonNode>();
-  for (const node of blueprint.nodes) {
-    if (nodeById.has(node.nodeId)) {
-      throw new Error(`Skeleton node "${node.nodeId}" is listed twice`);
-    }
-    nodeById.set(node.nodeId, node);
-  }
-
-  const resolved = new Map<string, ResolvedNode>();
-  const visiting = new Set<string>();
-
-  const visit = (nodeId: string): ResolvedNode => {
-    const cached = resolved.get(nodeId);
-    if (cached) {
-      return cached;
-    }
-    const node = nodeById.get(nodeId);
-    if (!node) {
-      throw new Error(`Skeleton node "${nodeId}" is missing`);
-    }
-    if (visiting.has(nodeId)) {
-      throw new Error(`Skeleton cycle at node "${nodeId}"`);
-    }
-    visiting.add(nodeId);
-
-    let parentPivot: Vec2;
-    let parentRot = 0;
-    if (node.parentId === null) {
-      parentPivot = blueprint.groundOrigin;
-    } else {
-      if (!nodeById.has(node.parentId)) {
-        throw new Error(`Skeleton node "${nodeId}" parents missing node "${node.parentId}"`);
-      }
-      const parent = visit(node.parentId);
-      parentPivot = parent.worldPivot;
-      parentRot = parent.rotRad;
-    }
-
-    const cos = Math.cos(parentRot);
-    const sin = Math.sin(parentRot);
-    const { x: ax, y: ay } = node.anchorInParent;
-    const worldPivot = {
-      x: parentPivot.x + ax * cos - ay * sin,
-      y: parentPivot.y + ax * sin + ay * cos,
-    };
-    const entry: ResolvedNode = {
-      node,
-      worldPivot,
-      rotRad: parentRot + (node.rotationDeg * Math.PI) / 180,
-    };
-    visiting.delete(nodeId);
-    resolved.set(nodeId, entry);
-    return entry;
-  };
-
-  for (const node of blueprint.nodes) {
-    visit(node.nodeId);
-  }
-  return resolved;
-}
-
-function slotKey(node: SkeletonNode, slot: PaletteSlotKey): PaletteSlotKey {
-  return node.slotOverrides?.[slot] ?? slot;
-}
-
-function stripKeyFor(
-  mapping: FactionMilitaryMapping,
-  node: SkeletonNode,
-  slot: PaletteSlotKey,
-): MilitaryStripKey {
-  const key = mapping[slotKey(node, slot)];
-  if (key === undefined || !Object.prototype.hasOwnProperty.call(MILITARY, key)) {
-    throw new Error(`Skeleton node "${node.nodeId}" has no MilitaryStripKey for slot "${slot}"`);
+function stripKeyFor(mapping: FactionMilitaryMapping, slot: PaletteSlotKey, militaryStrip: Record<string, string>): MilitaryStripKey {
+  const key = mapping[slot];
+  if (key === undefined || !Object.prototype.hasOwnProperty.call(militaryStrip, key)) {
+    throw new Error(`Slot "${slot}" has no MilitaryStripKey`);
   }
   return key;
 }
 
 /**
- * Inverse-sampled flat albedo. Destination pixels look up a source pixel, so a rotated solid
- * rectangle does not punch holes the way a forward round-and-stamp does.
- * No outline ink is written here.
+ * Map one frame's slots onto faction colours. The grid is already flat, so there is no parent walk.
+ * Opaque pixels must land inside [1..78, 1..54] once groundOrigin sits on (40, 52).
  */
-export function rasterBlueprintAlbedo(
-  blueprint: UnitSkeletonBlueprint,
-  partAssets: Map<string, { width: number; height: number; localPivot: Vec2; pixelGrid: (PaletteSlotKey | null)[][] }>,
+export function compileBlueprintFrame(
+  blueprint: UnitSpriteSheetBlueprint,
+  frameKey: SpriteFrameKey,
   factionMapping: FactionMilitaryMapping,
-): BlockoutRaster {
-  const sheetBlitOffset = assertBlockoutFitsSheet(blueprint);
+  militaryStrip: Record<MilitaryStripKey, string> = MILITARY,
+): CompiledBlockout {
+  if (!SPRITE_FRAME_KEYS.includes(frameKey)) {
+    throw new Error(`Unknown frame "${frameKey}"`);
+  }
+  const frame = blueprint.frames[frameKey];
   const { width, height } = blueprint.canvasSize;
-  const resolved = resolveNodeTransforms(blueprint);
-  const paintOrder = [...resolved.values()].sort((a, b) => a.node.zIndex - b.node.zIndex);
-
+  if (!frame || frame.length !== height || frame.some((row) => row.length !== width)) {
+    throw new Error(`Frame "${frameKey}" is not a ${width}×${height} grid`);
+  }
+  const sheetBlitOffset = assertBlockoutFitsSheet(blueprint);
   const albedoKeys: (MilitaryStripKey | null)[] = new Array(width * height).fill(null);
-
-  for (const entry of paintOrder) {
-    const part = partAssets.get(entry.node.partId);
-    if (!part) {
-      throw new Error(`Skeleton node "${entry.node.nodeId}" references missing part "${entry.node.partId}"`);
-    }
-    if (part.pixelGrid.length !== part.height || part.pixelGrid.some((row) => row.length !== part.width)) {
-      throw new Error(`Part "${entry.node.partId}" pixelGrid does not match ${part.width}×${part.height}`);
-    }
-    const placed: PlacedPart = {
-      node: entry.node,
-      worldPivot: entry.worldPivot,
-      rotRad: entry.rotRad,
-      cos: Math.cos(entry.rotRad),
-      sin: Math.sin(entry.rotRad),
-    };
-    stampPart(albedoKeys, width, height, placed, part, factionMapping);
-  }
-
-  return { albedoKeys, sheetBlitOffset };
-}
-
-function stampPart(
-  albedoKeys: (MilitaryStripKey | null)[],
-  canvasW: number,
-  canvasH: number,
-  placed: PlacedPart,
-  part: { width: number; height: number; localPivot: Vec2; pixelGrid: (PaletteSlotKey | null)[][] },
-  factionMapping: FactionMilitaryMapping,
-): void {
-  const { cos, sin, worldPivot, node } = placed;
-  const { x: pivotX, y: pivotY } = part.localPivot;
-  const corners = [
-    { x: 0, y: 0 },
-    { x: part.width - 1, y: 0 },
-    { x: 0, y: part.height - 1 },
-    { x: part.width - 1, y: part.height - 1 },
-  ];
-  let minX = canvasW;
-  let minY = canvasH;
-  let maxX = -1;
-  let maxY = -1;
-  for (const corner of corners) {
-    const dx = corner.x - pivotX;
-    const dy = corner.y - pivotY;
-    const destX = worldPivot.x + dx * cos - dy * sin;
-    const destY = worldPivot.y + dx * sin + dy * cos;
-    minX = Math.min(minX, destX);
-    minY = Math.min(minY, destY);
-    maxX = Math.max(maxX, destX);
-    maxY = Math.max(maxY, destY);
-  }
-  const xStart = Math.max(0, Math.floor(minX) - 1);
-  const yStart = Math.max(0, Math.floor(minY) - 1);
-  const xEnd = Math.min(canvasW - 1, Math.ceil(maxX) + 1);
-  const yEnd = Math.min(canvasH - 1, Math.ceil(maxY) + 1);
-
-  for (let y = yStart; y <= yEnd; y++) {
-    for (let x = xStart; x <= xEnd; x++) {
-      const relX = x - worldPivot.x;
-      const relY = y - worldPivot.y;
-      const srcX = Math.round(relX * cos + relY * sin + pivotX);
-      const srcY = Math.round(-relX * sin + relY * cos + pivotY);
-      if (srcX < 0 || srcY < 0 || srcX >= part.width || srcY >= part.height) {
-        continue;
-      }
-      const slot = part.pixelGrid[srcY]?.[srcX];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const slot = frame[y]?.[x];
       if (slot == null) {
         continue;
       }
-      albedoKeys[y * canvasW + x] = stripKeyFor(factionMapping, node, slot);
+      const sheetX = x + sheetBlitOffset.x;
+      const sheetY = y + sheetBlitOffset.y;
+      if (sheetX < SHEET_MARGIN || sheetY < SHEET_MARGIN || sheetX > SPRITE_BAKE.width - 1 - SHEET_MARGIN || sheetY > SPRITE_BAKE.height - 1 - SHEET_MARGIN) {
+        throw new Error(`Frame "${frameKey}" pixel (${x}, ${y}) leaves the ink margin`);
+      }
+      albedoKeys[y * width + x] = stripKeyFor(factionMapping, slot, militaryStrip);
     }
   }
+  if (typeof OffscreenCanvas === "undefined") {
+    return { albedoKeys, sheetBlitOffset, canvas: null };
+  }
+  const canvas = new OffscreenCanvas(width, height);
+  paintAlbedo(canvas, albedoKeys, width, height, militaryStrip);
+  return { canvas, albedoKeys, sheetBlitOffset };
 }
 
-function paintAlbedo(canvas: OffscreenCanvas, keys: readonly (MilitaryStripKey | null)[], width: number, height: number): void {
+/** Idle frame, as strip keys. Callers that used to pass a part map now pass the sheet alone. */
+export function rasterBlueprintAlbedo(
+  blueprint: UnitSpriteSheetBlueprint,
+  factionMapping: FactionMilitaryMapping,
+): BlockoutRaster {
+  const compiled = compileBlueprintFrame(blueprint, "idle", factionMapping);
+  return { albedoKeys: compiled.albedoKeys, sheetBlitOffset: compiled.sheetBlitOffset };
+}
+
+function paintAlbedo(
+  canvas: OffscreenCanvas,
+  keys: readonly (MilitaryStripKey | null)[],
+  width: number,
+  height: number,
+  militaryStrip: Record<MilitaryStripKey, string>,
+): void {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) {
     throw new Error("The blockout canvas has no 2D context");
@@ -255,7 +133,7 @@ function paintAlbedo(canvas: OffscreenCanvas, keys: readonly (MilitaryStripKey |
       image.data[offset + 3] = 0;
       continue;
     }
-    const hex = MILITARY[key];
+    const hex = militaryStrip[key];
     const rgb = Number.parseInt(hex.slice(1), 16);
     image.data[offset] = (rgb >> 16) & 255;
     image.data[offset + 1] = (rgb >> 8) & 255;
@@ -265,32 +143,19 @@ function paintAlbedo(canvas: OffscreenCanvas, keys: readonly (MilitaryStripKey |
   ctx.putImageData(image, 0, 0);
 }
 
-/** Rasterise the rest pose, then paint it. Articulation is stored on the nodes and is not applied here. */
-export function compileBlueprintBlockout(
-  blueprint: UnitSkeletonBlueprint,
-  partAssets: Map<string, { width: number; height: number; localPivot: Vec2; pixelGrid: (PaletteSlotKey | null)[][] }>,
-  factionMapping: FactionMilitaryMapping,
-): CompiledBlockout {
-  const raster = rasterBlueprintAlbedo(blueprint, partAssets, factionMapping);
-  if (typeof OffscreenCanvas === "undefined") {
-    throw new Error("OffscreenCanvas is not available");
-  }
-  const { width, height } = blueprint.canvasSize;
-  const canvas = new OffscreenCanvas(width, height);
-  paintAlbedo(canvas, raster.albedoKeys, width, height);
-  return { canvas, albedoKeys: raster.albedoKeys, sheetBlitOffset: raster.sheetBlitOffset };
-}
-
 /**
- * Place the blockout so groundOrigin sits on sheetFootAnchor, then run figureGround.ts once.
+ * Place the idle frame so groundOrigin sits on sheetFootAnchor, then run figureGround.ts once.
  * The albedo buffer stays free of outline ink so this pass is the only dilation.
  */
 export function blitBlueprintToSheet80x56(
-  blueprint: UnitSkeletonBlueprint,
-  partAssets: Map<string, { width: number; height: number; localPivot: Vec2; pixelGrid: (PaletteSlotKey | null)[][] }>,
+  blueprint: UnitSpriteSheetBlueprint,
   factionMapping: FactionMilitaryMapping,
+  frameKey: SpriteFrameKey = "idle",
 ): OffscreenCanvas {
-  const compiled = compileBlueprintBlockout(blueprint, partAssets, factionMapping);
+  const compiled = compileBlueprintFrame(blueprint, frameKey, factionMapping);
+  if (!compiled.canvas || typeof OffscreenCanvas === "undefined") {
+    throw new Error("OffscreenCanvas is not available");
+  }
   const sheet = new OffscreenCanvas(SPRITE_BAKE.width, SPRITE_BAKE.height);
   const ctx = sheet.getContext("2d", { willReadFrequently: true });
   if (!ctx) {

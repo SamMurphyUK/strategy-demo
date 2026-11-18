@@ -1,9 +1,16 @@
+import {
+  buildMarch,
+  emptyLayerStack,
+  framesFromLayers,
+  type InfantryLayerFrames,
+} from "./infantryMarch";
 import type {
   FactionMilitaryMapping,
   PaletteSlotKey,
-  PartAsset,
   RosterFactionId,
-  UnitSkeletonBlueprint,
+  SpriteFrameGrid,
+  SpriteFrameKey,
+  UnitSpriteSheetBlueprint,
 } from "./skeletonSchema";
 
 /**
@@ -91,34 +98,76 @@ function parseGrid(rows: string[]): (PaletteSlotKey | null)[][] {
   );
 }
 
+function authoredPart(
+  partId: string,
+  slotType: string,
+  label: string,
+  localPivot: { x: number; y: number },
+  rows: string[],
+) {
+  const width = rows[0]?.length ?? 0;
+  if (width === 0 || rows.some((row) => row.length !== width)) {
+    throw new Error(`${partId} has uneven rows`);
+  }
+  return {
+    partId,
+    slotType,
+    label,
+    width,
+    height: rows.length,
+    localPivot,
+    pixelGrid: parseGrid(rows),
+    promptFragment: "wool trousers and leather boots, both toes pointing right",
+  };
+}
+
 // ============================================================================
 // STARTER PART ASSETS (Flat Albedo — #1A1614 outline added by figureGround.ts)
 // ============================================================================
 
-export const STARTER_PARTS: Record<string, PartAsset> = {
+const SOURCE_PARTS = {
   // --- INFANTRY PARTS (Native Facing: Right) ---
-  inf_legs_stride: {
-    partId: "inf_legs_stride",
-    slotType: "legs",
-    label: "Infantry Stride Legs & Boots",
-    width: 10,
-    height: 11,
-    localPivot: { x: 5, y: 10 },
-    pixelGrid: parseGrid([
-      "..PPPPPP..",
-      "..PPPPPP..",
-      "..PP..PP..",
-      ".PP....PP.",
-      ".PP....PP.",
-      ".SS....SS.",
-      ".SS....SS.",
-      ".WW....WW.",
-      ".WW....WW.",
-      "WWW....WWW",
-      "WWW....WWW",
-    ]),
-    promptFragment: "wool trousers, puttees, leather combat boots in marching stance",
-  },
+  // Both boots keep the toe on the right. Reach lifts the trailing boot.
+  // Pass brings the feet together and lifts one. Plant is the idle stance.
+  inf_legs_plant: authoredPart("inf_legs_plant", "legs", "Planted boots, toes right", { x: 5, y: 10 }, [
+    "..PPPPPP...",
+    "..PPPPPP...",
+    "..PP..PP...",
+    ".PP....PP..",
+    ".PP....PP..",
+    ".SS....SS..",
+    ".SS....SS..",
+    "..WW..WW...",
+    "..WWW.WWW..",
+    "..WWW.WWWW.",
+    "..WWW.WWWW.",
+  ]),
+  inf_legs_reach: authoredPart("inf_legs_reach", "legs", "Reaching step, toes right", { x: 5, y: 10 }, [
+    "..PPPPPP....",
+    "..PPPPPP....",
+    "..PP...PP...",
+    ".PP....PPP..",
+    ".PP....PPP..",
+    ".SS....SS...",
+    ".SS...SSS...",
+    "..WW...WWW..",
+    "..WWW..WWW..",
+    "..WWW...WWW.",
+    ".......WWWW.",
+  ]),
+  inf_legs_pass: authoredPart("inf_legs_pass", "legs", "Passing step, toes right", { x: 5, y: 10 }, [
+    "...PPPP....",
+    "...PPPP....",
+    "..PPPPPP...",
+    "..PP..PP...",
+    "..SS..SS...",
+    "..SS..SS...",
+    "...W..WW...",
+    "...WW.WWW..",
+    "...WW.WWW..",
+    "...WW..WW..",
+    "......WWW..",
+  ]),
 
   inf_torso_tunic: {
     partId: "inf_torso_tunic",
@@ -337,146 +386,163 @@ export const STARTER_PARTS: Record<string, PartAsset> = {
   },
 };
 
-// ============================================================================
-// STARTER UNIT SKELETON BLUEPRINTS (Fits 80x56 Sheet at Foot Anchor 40, 52)
-// ============================================================================
+const CANVAS = 48;
+const GROUND = { x: 24, y: 45 };
 
-function makeInfantryBlueprint(
-  blueprintId: string,
-  factionId: RosterFactionId,
-  headPartId: string,
-  historicalEraTag: string,
-): UnitSkeletonBlueprint {
+interface Stamp {
+  partId: keyof typeof SOURCE_PARTS;
+  pivotX: number;
+  pivotY: number;
+}
+
+function emptyGrid(): SpriteFrameGrid {
+  return Array.from({ length: CANVAS }, () => Array.from({ length: CANVAS }, () => null));
+}
+
+function stamp(grid: SpriteFrameGrid, item: Stamp): void {
+  const part = SOURCE_PARTS[item.partId];
+  for (let y = 0; y < part.height; y++) {
+    for (let x = 0; x < part.width; x++) {
+      const slot = part.pixelGrid[y]?.[x];
+      if (slot == null) {
+        continue;
+      }
+      const destX = item.pivotX + (x - part.localPivot.x);
+      const destY = item.pivotY + (y - part.localPivot.y);
+      if (destX < 0 || destY < 0 || destX >= CANVAS || destY >= CANVAS) {
+        continue;
+      }
+      const row = grid[destY];
+      if (row) {
+        row[destX] = slot;
+      }
+    }
+  }
+}
+
+function composite(stamps: Stamp[]): SpriteFrameGrid {
+  const grid = emptyGrid();
+  for (const item of stamps) {
+    stamp(grid, item);
+  }
+  return grid;
+}
+
+function stampPart(partId: keyof typeof SOURCE_PARTS, pivotX: number, pivotY: number): SpriteFrameGrid {
+  const grid = emptyGrid();
+  stamp(grid, { partId, pivotX, pivotY });
+  return grid;
+}
+
+function infantryLayers(headPartId: keyof typeof SOURCE_PARTS): InfantryLayerFrames {
+  const idle = {
+    legs: stampPart("inf_legs_plant", GROUND.x, GROUND.y),
+    torso: stampPart("inf_torso_tunic", GROUND.x, GROUND.y - 9),
+    head: stampPart(headPartId, GROUND.x, GROUND.y - 18),
+    hands_weapon: stampPart("inf_arms_rifle_ready", GROUND.x - 1, GROUND.y - 15),
+  };
+  return buildMarch(
+    {
+      idle,
+      move_1: { ...emptyLayerStack(CANVAS, CANVAS), legs: stampPart("inf_legs_reach", GROUND.x, GROUND.y) },
+      move_2: { ...emptyLayerStack(CANVAS, CANVAS), legs: stampPart("inf_legs_pass", GROUND.x, GROUND.y) },
+      fire: emptyLayerStack(CANVAS, CANVAS),
+    },
+    GROUND.x,
+  );
+}
+
+function tankStamps(hullPartId: keyof typeof SOURCE_PARTS): Stamp[] {
+  return [
+    { partId: "tank_tracks_standard", pivotX: GROUND.x, pivotY: GROUND.y },
+    { partId: hullPartId, pivotX: GROUND.x, pivotY: GROUND.y - 6 },
+    { partId: "tank_barrel_75mm", pivotX: GROUND.x + 5, pivotY: GROUND.y - 16 },
+    { partId: "tank_turret_medium", pivotX: GROUND.x - 1, pivotY: GROUND.y - 13 },
+  ];
+}
+
+function movePixels(
+  source: SpriteFrameGrid,
+  place: (x: number, y: number, slot: PaletteSlotKey) => { x: number; y: number },
+): SpriteFrameGrid {
+  const next = emptyGrid();
+  for (let y = 0; y < CANVAS; y++) {
+    for (let x = 0; x < CANVAS; x++) {
+      const slot = source[y]?.[x];
+      if (slot == null) {
+        continue;
+      }
+      const dest = place(x, y, slot);
+      if (dest.x < 0 || dest.y < 0 || dest.x >= CANVAS || dest.y >= CANVAS) {
+        continue;
+      }
+      const row = next[dest.y];
+      if (row) {
+        row[dest.x] = slot;
+      }
+    }
+  }
+  return next;
+}
+
+function tankFrames(hullPartId: keyof typeof SOURCE_PARTS): Record<SpriteFrameKey, SpriteFrameGrid> {
+  const idle = composite(tankStamps(hullPartId));
   return {
-    blueprintId,
-    unitTypeId: "infantry",
-    factionId,
-    category: "land",
-    canvasSize: { width: 48, height: 48 },
-    // Feet at (24, 45) leave two canvas rows under the boots. On the 80×56 sheet that is y=52, with room for the ink ring.
-    groundOrigin: { x: 24, y: 45 },
-    sheetFootAnchor: { x: 40, y: 52 },
-    muzzlePoint: { x: 36, y: 24 },
-    nativeFacing: "right",
-    historicalEraTag,
-    nodes: [
-      {
-        nodeId: "legs",
-        partId: "inf_legs_stride",
-        parentId: null,
-        anchorInParent: { x: 0, y: 0 },
-        rotationDeg: 0,
-        zIndex: 10,
-      },
-      {
-        nodeId: "torso",
-        partId: "inf_torso_tunic",
-        parentId: "legs",
-        anchorInParent: { x: 0, y: -9 },
-        rotationDeg: 0,
-        zIndex: 20,
-      },
-      {
-        nodeId: "head",
-        partId: headPartId,
-        parentId: "torso",
-        anchorInParent: { x: 0, y: -9 },
-        rotationDeg: 0,
-        zIndex: 30,
-      },
-      {
-        nodeId: "weapon",
-        partId: "inf_arms_rifle_ready",
-        parentId: "torso",
-        anchorInParent: { x: -1, y: -6 },
-        rotationDeg: 0,
-        zIndex: 40,
-      },
-    ],
+    idle,
+    move_1: movePixels(idle, (x, y, slot) => ({ x: x + (slot === "metallic_brass_or_track" ? 1 : 0), y })),
+    move_2: movePixels(idle, (x, y) => ({ x, y: y + 1 })),
+    fire: movePixels(idle, (x, y, slot) => ({ x: x - (slot === "metallic_steel" ? 2 : 0), y })),
   };
 }
 
-function makeTankBlueprint(
+function makeSheet(
   blueprintId: string,
   factionId: RosterFactionId,
-  hullPartId: string,
+  unitTypeId: "infantry" | "tank",
+  frames: Record<SpriteFrameKey, SpriteFrameGrid>,
   historicalEraTag: string,
-): UnitSkeletonBlueprint {
+  muzzlePoint: { x: number; y: number },
+): UnitSpriteSheetBlueprint {
   return {
     blueprintId,
-    unitTypeId: "tank",
+    unitTypeId,
     factionId,
     category: "land",
-    canvasSize: { width: 48, height: 48 },
-    // Treads rest at y=45, so they land on sheet y=52. The barrel stays inside the sheet's right margin.
-    groundOrigin: { x: 24, y: 45 },
+    canvasSize: { width: CANVAS, height: CANVAS },
+    groundOrigin: { ...GROUND },
     sheetFootAnchor: { x: 40, y: 52 },
-    muzzlePoint: { x: 44, y: 27 },
+    muzzlePoint,
     nativeFacing: "right",
+    recoilOffsetPx: unitTypeId === "tank" ? 2 : 1,
+    frames,
     historicalEraTag,
-    nodes: [
-      {
-        nodeId: "tracks",
-        partId: "tank_tracks_standard",
-        parentId: null,
-        anchorInParent: { x: 0, y: 0 },
-        rotationDeg: 0,
-        zIndex: 10,
-      },
-      {
-        nodeId: "hull",
-        partId: hullPartId,
-        parentId: "tracks",
-        anchorInParent: { x: 0, y: -6 },
-        rotationDeg: 0,
-        zIndex: 20,
-      },
-      {
-        nodeId: "turret",
-        partId: "tank_turret_medium",
-        parentId: "hull",
-        anchorInParent: { x: -1, y: -7 },
-        rotationDeg: 0,
-        zIndex: 30,
-        articulation: {
-          role: "turret",
-          pivotOffset: { x: 0, y: 0 },
-          minDeg: 0,
-          maxDeg: 0,
-          recoilPx: 0,
-        },
-      },
-      {
-        nodeId: "barrel",
-        partId: "tank_barrel_75mm",
-        parentId: "turret",
-        anchorInParent: { x: 6, y: -3 },
-        rotationDeg: 0,
-        zIndex: 25,
-        articulation: {
-          role: "barrel",
-          pivotOffset: { x: 0, y: 0 },
-          minDeg: -12,
-          maxDeg: 5,
-          recoilPx: 3,
-        },
-      },
-    ],
   };
 }
 
-export const STARTER_BLUEPRINTS: UnitSkeletonBlueprint[] = [
-  makeInfantryBlueprint("ger_infantry_43", "GER", "inf_head_stahlhelm", "1943 Wehrmacht Heer infantryman"),
-  makeInfantryBlueprint("ussr_infantry_43", "USSR", "inf_head_ssh40", "1943 Red Army rifleman"),
-  makeInfantryBlueprint("uk_infantry_43", "UK", "inf_head_brodie", "1943 British Commonwealth infantryman"),
-  makeInfantryBlueprint("us_infantry_43", "US", "inf_head_brodie", "1943 US Army GI rifleman"),
-  makeInfantryBlueprint("jap_infantry_43", "JAP", "inf_head_type90", "1943 Imperial Japanese Army rifleman"),
-  makeInfantryBlueprint("minor_infantry_43", "MINOR", "inf_head_brodie", "1943 Allied/Axis minor power infantryman"),
+export const STARTER_INFANTRY_LAYERS: Record<string, InfantryLayerFrames> = {};
 
-  makeTankBlueprint("ger_tank_pz4", "GER", "tank_hull_box", "1943 German Panzer IV Ausf. H medium tank"),
-  makeTankBlueprint("ussr_tank_t34", "USSR", "tank_hull_sloped", "1943 Soviet T-34/76 medium tank"),
-  makeTankBlueprint("uk_tank_cromwell", "UK", "tank_hull_box", "1944 British Cromwell Mk IV cruiser tank"),
-  makeTankBlueprint("us_tank_sherman", "US", "tank_hull_sloped", "1943 US M4A1 Sherman medium tank"),
-  makeTankBlueprint("jap_tank_chi_ha", "JAP", "tank_hull_sloped", "1943 Japanese Type 97 Chi-Ha Kai medium tank"),
-  makeTankBlueprint("minor_tank_lt38", "MINOR", "tank_hull_box", "1942 European light-medium tank"),
+function makeInfantry(
+  blueprintId: string,
+  factionId: RosterFactionId,
+  headPartId: keyof typeof SOURCE_PARTS,
+  historicalEraTag: string,
+): UnitSpriteSheetBlueprint {
+  const layers = infantryLayers(headPartId);
+  STARTER_INFANTRY_LAYERS[blueprintId] = layers;
+  return makeSheet(blueprintId, factionId, "infantry", framesFromLayers(layers), historicalEraTag, { x: 36, y: 24 });
+}
+
+export const STARTER_BLUEPRINTS: UnitSpriteSheetBlueprint[] = [
+  makeInfantry("ger_infantry_43", "GER", "inf_head_stahlhelm", "1943 Wehrmacht Heer infantryman"),
+  makeInfantry("ussr_infantry_43", "USSR", "inf_head_ssh40", "1943 Red Army rifleman"),
+  makeInfantry("uk_infantry_43", "UK", "inf_head_brodie", "1943 British Commonwealth infantryman"),
+  makeInfantry("us_infantry_43", "US", "inf_head_brodie", "1943 US Army GI rifleman"),
+  makeInfantry("jap_infantry_43", "JAP", "inf_head_type90", "1943 Imperial Japanese Army rifleman"),
+  makeInfantry("minor_infantry_43", "MINOR", "inf_head_brodie", "1943 Allied/Axis minor power infantryman"),
+  makeSheet("ger_tank_pz4", "GER", "tank", tankFrames("tank_hull_box"), "1943 German Panzer IV Ausf. H medium tank", { x: 44, y: 27 }),
+  makeSheet("ussr_tank_t34", "USSR", "tank", tankFrames("tank_hull_sloped"), "1943 Soviet T-34/76 medium tank", { x: 44, y: 27 }),
+  makeSheet("uk_tank_cromwell", "UK", "tank", tankFrames("tank_hull_box"), "1944 British Cromwell Mk IV cruiser tank", { x: 44, y: 27 }),
+  makeSheet("us_tank_sherman", "US", "tank", tankFrames("tank_hull_sloped"), "1943 US M4A1 Sherman medium tank", { x: 44, y: 27 }),
+  makeSheet("jap_tank_chi_ha", "JAP", "tank", tankFrames("tank_hull_sloped"), "1943 Japanese Type 97 Chi-Ha Kai medium tank", { x: 44, y: 27 }),
+  makeSheet("minor_tank_lt38", "MINOR", "tank", tankFrames("tank_hull_box"), "1942 European light-medium tank", { x: 44, y: 27 }),
 ];

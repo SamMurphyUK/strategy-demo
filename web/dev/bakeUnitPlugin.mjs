@@ -19,7 +19,7 @@ export const MANIFEST_RELATIVE = path.join("assets", "candidates", "manifest.jso
 
 const RD_BASE = "https://api.retrodiffusion.ai/v2";
 const POLL_MS = 1500;
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 180_000;
 const MAX_BYTES = 24 * 1024 * 1024;
 const MAX_REFERENCES = 9;
 
@@ -226,19 +226,46 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function quotedCost(payload) {
+  const value = payload?.balance_cost ?? payload?.cost ?? payload?.result?.balance_cost;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function errorText(json, status) {
+  const detail = json?.error ?? json?.message;
+  if (typeof detail === "string" && detail !== "") {
+    return detail;
+  }
+  const issues = detail?.details?.issues;
+  if (Array.isArray(issues) && issues.length > 0) {
+    const lines = issues.map((issue) => {
+      const where = Array.isArray(issue.location) ? issue.location.join(".") : "";
+      return where ? `${where}: ${issue.message}` : issue.message;
+    });
+    return lines.join("; ");
+  }
+  if (detail && typeof detail === "object" && typeof detail.message === "string") {
+    return detail.message;
+  }
+  return `Retro Diffusion returned ${status}`;
+}
+
 async function postInference(token, body, idempotencyKey) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-RD-Token": token,
+  };
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey;
+  }
   const response = await fetch(`${RD_BASE}/inferences`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-RD-Token": token,
-      "Idempotency-Key": idempotencyKey,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(json?.message || json?.error || `Retro Diffusion returned ${response.status}`);
+    const error = new Error(errorText(json, response.status));
     error.status = 502;
     throw error;
   }
@@ -247,7 +274,7 @@ async function postInference(token, body, idempotencyKey) {
 
 /**
  * Poll GET /v2/inferences/tasks/{task_id} until succeeded or failed.
- * The clock stops at 60s.
+ * The clock stops at 180s.
  */
 async function pollTask(token, taskId) {
   const deadline = Date.now() + TIMEOUT_MS;
@@ -266,18 +293,18 @@ async function pollTask(token, taskId) {
       error.status = 502;
       throw error;
     }
-    if (status === "succeeded") {
+      if (status === "succeeded") {
       const image = json.result?.base64_images?.[0];
       if (!image) {
         const error = new Error("Retro Diffusion succeeded without an image");
         error.status = 502;
         throw error;
       }
-      return { image: stripDataUrl(image), cost: json.cost ?? null };
+      return { image: stripDataUrl(image), cost: quotedCost(json.result) ?? quotedCost(json) };
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
-  const error = new Error("Retro Diffusion timed out after 60s");
+  const error = new Error("Retro Diffusion timed out after 180s");
   error.status = 504;
   throw error;
 }
@@ -374,21 +401,24 @@ export function bakeUnitPlugin() {
           }
 
           const inference = {
-            model: "rd_pro__default",
+            prompt_style: "rd_pro__default",
             prompt,
             width,
             height,
+            num_images: 1,
             input_image: inputImage,
-            reference_images: referenceImages,
             remove_bg: true,
             upscale_output_factor: 1,
             strength: typeof body.strength === "number" ? body.strength : 0.5,
             seed: body.seed,
           };
+          if (referenceImages.length > 0) {
+            inference.reference_images = referenceImages;
+          }
 
-          const costCheck = await postInference(token, { ...inference, check_cost: true }, randomUUID());
+          const costCheck = await postInference(token, { ...inference, check_cost: true }, null);
           if (body.dryRunOnly === true) {
-            return reply(res, 200, { ok: true, dryRun: true, cost: costCheck.cost ?? costCheck, taskId: null, path: null });
+            return reply(res, 200, { ok: true, dryRun: true, cost: quotedCost(costCheck), taskId: null, path: null });
           }
 
           const seed = seedToken(body.seed);

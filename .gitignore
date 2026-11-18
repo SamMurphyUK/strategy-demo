@@ -10,6 +10,10 @@ export_credentials.cfg
 # Imported translations (automatically generated from CSV files)
 *.translation
 
+# Local secrets. Retro Diffusion's token lives in web/.env.local.
+.env.local
+.env.*.local
+
 # Mono-specific ignores
 .mono/
 data_*/

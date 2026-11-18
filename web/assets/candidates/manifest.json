@@ -1,0 +1,43 @@
+{
+  "candidates": [
+    {
+      "factionId": "GER",
+      "blueprintId": "ger_infantry_43",
+      "seed": 1,
+      "raw": "assets/candidates/GER/ger_infantry_43_seed1.raw.png",
+      "quantized": "assets/candidates/GER/ger_infantry_43_seed1.quantized.png",
+      "silhouetteIoU": 0.2849162011173184,
+      "promoted": false,
+      "promotedPath": null,
+      "taskId": "d945c561-7ae2-4b02-9273-6c86a2419e1b",
+      "cost": 0.18,
+      "updatedAt": "2026-11-17T15:41:36.519Z"
+    },
+    {
+      "factionId": "GER",
+      "blueprintId": "ger_infantry_43",
+      "seed": 2,
+      "raw": "assets/candidates/GER/ger_infantry_43_seed2.raw.png",
+      "quantized": "assets/candidates/GER/ger_infantry_43_seed2.quantized.png",
+      "silhouetteIoU": 0.287378640776699,
+      "promoted": true,
+      "promotedPath": "public/assets/units/promoted/GER/ger_infantry_43.png",
+      "taskId": "9dfd130d-e324-4c5f-8a8a-c17909b2e7a5",
+      "cost": 0.18,
+      "updatedAt": "2026-11-17T15:43:00.538Z"
+    },
+    {
+      "factionId": "GER",
+      "blueprintId": "ger_infantry_43",
+      "seed": 3,
+      "raw": "assets/candidates/GER/ger_infantry_43_seed3.raw.png",
+      "quantized": "assets/candidates/GER/ger_infantry_43_seed3.quantized.png",
+      "silhouetteIoU": 0.24509803921568626,
+      "promoted": false,
+      "promotedPath": null,
+      "taskId": "682d5141-5898-4945-be9b-42e38fcb53e0",
+      "cost": 0.18,
+      "updatedAt": "2026-11-17T15:45:09.043Z"
+    }
+  ]
+}
