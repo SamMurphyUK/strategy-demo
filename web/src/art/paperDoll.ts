@@ -722,6 +722,29 @@ export function importQuantizedPart(
   };
 }
 
+/** Paint one semantic slot on a part frame. Slot 0 clears the pixel. */
+export function paintPartCell(part: ModularPart, frameIndex: number, x: number, y: number, slot: number): ModularPart {
+  const frame = part.frames[frameIndex] ?? (frameIndex === 0 ? part.spriteData : undefined);
+  if (!frame || x < 0 || y < 0 || x >= frame.width || y >= frame.height) {
+    return part;
+  }
+  const index = y * frame.width + x;
+  const nextSlot = Math.max(0, Math.min(13, snap(slot)));
+  if ((frame.indices[index] ?? 0) === nextSlot) {
+    return part;
+  }
+  const indices = frame.indices.slice();
+  indices[index] = nextSlot;
+  const image = { ...frame, indices };
+  const frames = part.frames.slice();
+  frames[frameIndex] = image;
+  return {
+    ...part,
+    frames,
+    spriteData: frameIndex === 0 ? image : part.spriteData,
+  };
+}
+
 function blitIndexed(dest: IndexedImage, sprite: IndexedImage, anchor: PixelPoint, target: PixelPoint): void {
   const originX = snap(target.x - anchor.x);
   const originY = snap(target.y - anchor.y);
@@ -765,6 +788,39 @@ export function composeFrame(
     y: socket.weaponSocket.y + recoil.y,
   });
   return dest;
+}
+
+/** The same assembly as composeFrame, with each part kept in its own picture. */
+export function composeLayers(
+  manifest: RigManifest,
+  parts: Record<PartCategory, ModularPart>,
+  animation: AnimationState,
+  frameIndex: number,
+): { width: number; height: number; layers: Record<PartCategory, number[]> } {
+  const socket = manifest.animations[animation][frameIndex];
+  if (!socket) {
+    throw new Error(`Missing ${animation} frame ${frameIndex}.`);
+  }
+  const count = manifest.frameWidth * manifest.frameHeight;
+  const layers: Record<PartCategory, number[]> = {
+    legs: new Array<number>(count).fill(0),
+    torso: new Array<number>(count).fill(0),
+    head: new Array<number>(count).fill(0),
+    weapon: new Array<number>(count).fill(0),
+  };
+  const cell = (indices: number[]): IndexedImage => ({ width: manifest.frameWidth, height: manifest.frameHeight, indices });
+  const legFrame = animation === "walk" ? frameIndex : 0;
+  const legs = parts.legs.frames[legFrame] ?? parts.legs.spriteData;
+  const legAnchor = parts.legs.frameAnchors?.[legFrame] ?? parts.legs.anchor;
+  const recoil = socket.weaponRecoilOffset ?? { x: 0, y: 0 };
+  blitIndexed(cell(layers.legs), legs, legAnchor, socket.hipSocket);
+  blitIndexed(cell(layers.torso), parts.torso.spriteData, parts.torso.anchor, socket.hipSocket);
+  blitIndexed(cell(layers.head), parts.head.spriteData, parts.head.anchor, socket.headSocket);
+  blitIndexed(cell(layers.weapon), parts.weapon.spriteData, parts.weapon.anchor, {
+    x: socket.weaponSocket.x + recoil.x,
+    y: socket.weaponSocket.y + recoil.y,
+  });
+  return { width: manifest.frameWidth, height: manifest.frameHeight, layers };
 }
 
 function writeHex(data: Uint8ClampedArray, offset: number, hex: string, alpha = 255): void {

@@ -1,4 +1,4 @@
-import { separateFigure, SPRITE_BAKE } from "../ui/map/figureGround";
+import { SPRITE_BAKE } from "../ui/map/figureGround";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import type {
   FactionMilitaryMapping,
@@ -143,10 +143,7 @@ function paintAlbedo(
   ctx.putImageData(image, 0, 0);
 }
 
-/**
- * Place the idle frame so groundOrigin sits on sheetFootAnchor, then run figureGround.ts once.
- * The albedo buffer stays free of outline ink so this pass is the only dilation.
- */
+/** Place the frame so groundOrigin sits on sheetFootAnchor. The figure is the painted pixels, with no ink ring. */
 export function blitBlueprintToSheet80x56(
   blueprint: UnitSpriteSheetBlueprint,
   factionMapping: FactionMilitaryMapping,
@@ -163,9 +160,6 @@ export function blitBlueprintToSheet80x56(
   }
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(compiled.canvas, compiled.sheetBlitOffset.x, compiled.sheetBlitOffset.y);
-  const image = ctx.getImageData(0, 0, SPRITE_BAKE.width, SPRITE_BAKE.height);
-  separateFigure(image.data, SPRITE_BAKE.width, SPRITE_BAKE.height);
-  ctx.putImageData(image, 0, 0);
   return sheet;
 }
 

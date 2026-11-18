@@ -11,6 +11,7 @@ import {
   extractRig,
   floodMask,
   importQuantizedPart,
+  paintPartCell,
   maskFromRgba,
   maskPixelsInRect,
   nudgeSocket,
@@ -23,6 +24,7 @@ import {
   layoutWalkGrid,
   type AnimationState,
   type FactionPresetId,
+  type IndexedImage,
   type ModularPart,
   type PartCategory,
   type PixelPoint,
@@ -73,7 +75,11 @@ const EMPTY_SELECTION: Record<PartCategory, string> = {
   weapon: "",
 };
 
-export function PaperDollPanel() {
+export function PaperDollPanel({
+  onDrawOnSprite,
+}: {
+  onDrawOnSprite?: (manifest: RigManifest, parts: Record<PartCategory, ModularPart>) => void;
+}) {
   const [sheet, setSheet] = useState<ReferenceSheet | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [brush, setBrush] = useState<MaskBrush>("head");
@@ -96,6 +102,8 @@ export function PaperDollPanel() {
   const [playFrame, setPlayFrame] = useState(0);
   const [pin, setPin] = useState<Pin>("head");
   const [importCategory, setImportCategory] = useState<PartCategory>("head");
+  const [editingPart, setEditingPart] = useState<PartCategory | null>(null);
+  const [partFrame, setPartFrame] = useState<number | null>(null);
   const [notice, setNotice] = useState("Load an 8-frame walk, then paint or select the pixels in each area.");
   const rigRef = useRef<HTMLCanvasElement>(null);
   const markRef = useRef<HTMLCanvasElement>(null);
@@ -818,27 +826,97 @@ export function PaperDollPanel() {
             <div className="rig-grid" style={{ backgroundSize: `${previewScale}px ${previewScale}px` }} />
           </div>
           <div className="rig-assembly">
-            {PART_CATEGORIES.map((category) => (
-              <label key={category}>
-                {MASK_LABEL[category]}
-                <select
-                  aria-label={MASK_LABEL[category]}
-                  value={selected[category]}
-                  onChange={(event) => setSelected({ ...selected, [category]: event.target.value })}
-                >
-                  <option value="">Choose</option>
-                  {parts
-                    .filter((part) => part.category === category)
-                    .map((part) => (
-                      <option key={part.id} value={part.id}>
-                        {part.name}
-                      </option>
-                    ))}
-                </select>
-                {assembly && <PartThumb part={assembly[category]} lut={lut} />}
-              </label>
-            ))}
+            {PART_CATEGORIES.map((category) => {
+              const part = assembly?.[category];
+              const shown = part ? partImage(part, animation, playFrame, partFrame) : null;
+              return (
+                <div key={category} className="rig-part">
+                  <label>
+                    {MASK_LABEL[category]}
+                    <select
+                      aria-label={MASK_LABEL[category]}
+                      value={selected[category]}
+                      onChange={(event) => setSelected({ ...selected, [category]: event.target.value })}
+                    >
+                      <option value="">Choose</option>
+                      {parts
+                        .filter((item) => item.category === category)
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {part && shown && <PartThumb image={shown} lut={lut} />}
+                  <button type="button" aria-pressed={editingPart === category} disabled={!part} onClick={() => setEditingPart(category)}>
+                    Edit
+                  </button>
+                  <label className="sprite-open">
+                    Upload
+                    <input
+                      type="file"
+                      accept="image/png,.png"
+                      aria-label={`Upload ${MASK_LABEL[category]}`}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        void readPng(file).then((image) => {
+                          if (!image) {
+                            return;
+                          }
+                          try {
+                            const imported = importQuantizedPart(
+                              part?.id ?? `${category}_${parts.length + 1}`,
+                              part?.name ?? MASK_LABEL[category],
+                              category,
+                              image.data,
+                              image.width,
+                              image.height,
+                            );
+                            setParts((current) => mergeParts(current, [imported]));
+                            setSelected((current) => ({ ...current, [category]: imported.id }));
+                            setEditingPart(category);
+                            setNotice(`${MASK_LABEL[category]} replaced from the picture.`);
+                          } catch (error) {
+                            setNotice(error instanceof Error ? error.message : String(error));
+                          }
+                        });
+                      }}
+                    />
+                  </label>
+                </div>
+              );
+            })}
           </div>
+          {onDrawOnSprite && (
+            <button
+              type="button"
+              disabled={!manifest || !assembly}
+              onClick={() => {
+                if (manifest && assembly) {
+                  onDrawOnSprite(manifest, assembly);
+                }
+              }}
+            >
+              Draw on the sprite
+            </button>
+          )}
+          {assembly && editingPart && (
+            <PartStudio
+              part={assembly[editingPart]}
+              lut={lut}
+              frameIndex={shownPartFrame(assembly[editingPart], animation, playFrame, partFrame)}
+              onFrame={(index) => {
+                setPlaying(false);
+                setPartFrame(index);
+              }}
+              onChange={(next) => {
+                setPlaying(false);
+                setParts((current) => current.map((item) => (item.id === next.id ? next : item)));
+              }}
+            />
+          )}
         </div>
       </div>
       <div className="rig-palette">
@@ -914,7 +992,7 @@ export function PaperDollPanel() {
   );
 }
 
-function PartThumb({ part, lut }: { part: ModularPart; lut: readonly string[] }) {
+function PartThumb({ image, lut }: { image: IndexedImage; lut: readonly string[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -922,12 +1000,163 @@ function PartThumb({ part, lut }: { part: ModularPart; lut: readonly string[] })
     if (!canvas || !ctx) {
       return;
     }
-    canvas.width = part.spriteData.width;
-    canvas.height = part.spriteData.height;
+    canvas.width = image.width;
+    canvas.height = image.height;
     ctx.imageSmoothingEnabled = false;
-    putPixels(ctx, paintIndexed(part.spriteData, lut), part.spriteData.width, part.spriteData.height);
-  }, [part, lut]);
-  return <canvas ref={ref} className="rig-thumb" width={part.width} height={part.height} aria-hidden="true" />;
+    putPixels(ctx, paintIndexed(image, lut), image.width, image.height);
+  }, [image, lut]);
+  return <canvas ref={ref} className="rig-thumb" width={image.width} height={image.height} aria-hidden="true" />;
+}
+
+function shownPartFrame(part: ModularPart, animation: AnimationState, playFrame: number, pinned: number | null): number {
+  if (part.frameCount <= 1) {
+    return 0;
+  }
+  if (pinned !== null) {
+    return Math.max(0, Math.min(part.frames.length - 1, pinned));
+  }
+  if (animation !== "walk") {
+    return 0;
+  }
+  const count = part.frames.length;
+  return ((playFrame % count) + count) % count;
+}
+
+function partImage(part: ModularPart, animation: AnimationState, playFrame: number, pinned: number | null): IndexedImage {
+  return part.frames[shownPartFrame(part, animation, playFrame, pinned)] ?? part.spriteData;
+}
+
+function PartStudio({
+  part,
+  lut,
+  frameIndex,
+  onFrame,
+  onChange,
+}: {
+  part: ModularPart;
+  lut: readonly string[];
+  frameIndex: number;
+  onFrame: (index: number) => void;
+  onChange: (part: ModularPart) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const partRef = useRef(part);
+  const stroking = useRef(false);
+  const undo = useRef<ModularPart[]>([]);
+  const [slot, setSlot] = useState(2);
+  const ink = useRef(slot);
+  partRef.current = part;
+  const image = part.frames[frameIndex] ?? part.spriteData;
+  const scale = 8;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) {
+      return;
+    }
+    canvas.width = image.width;
+    canvas.height = image.height;
+    ctx.imageSmoothingEnabled = false;
+    putPixels(ctx, paintIndexed(image, lut), image.width, image.height);
+  }, [image, lut]);
+  const paint = (x: number, y: number) => {
+    const current = partRef.current;
+    if (!stroking.current) {
+      undo.current.push(current);
+      if (undo.current.length > 40) {
+        undo.current.shift();
+      }
+      stroking.current = true;
+    }
+    const next = paintPartCell(current, frameIndex, x, y, ink.current);
+    if (next !== current) {
+      onChange(next);
+    }
+  };
+  return (
+    <div className="rig-part-edit">
+      <p className="rig-note">
+        {part.frameCount > 1
+          ? `${part.name}, frame ${frameIndex + 1} of ${part.frameCount}. Walk shows this step. Idle and fire use the standing legs.`
+          : `${part.name} is one picture. It rides every frame.`}
+      </p>
+      {part.frameCount > 1 && (
+        <div className="rig-frames" role="toolbar" aria-label={`${part.name} frames`}>
+          {part.frames.map((_, index) => (
+            <button key={index} type="button" aria-pressed={index === frameIndex} onClick={() => onFrame(index)}>
+              {index}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="rig-frame" style={{ width: image.width * scale, height: image.height * scale }}>
+        <canvas
+          ref={canvasRef}
+          className="rig-canvas"
+          width={image.width}
+          height={image.height}
+          aria-label={`Edit ${part.name}`}
+          onContextMenu={(event) => event.preventDefault()}
+          onPointerDown={(event) => {
+            const pixel = pixelOf(event.currentTarget, event.clientX, event.clientY);
+            if (!pixel) {
+              return;
+            }
+            ink.current = event.button === 2 || slot === 0 ? 0 : slot;
+            try {
+              event.currentTarget.setPointerCapture(event.pointerId);
+            } catch {
+              // A synthetic event can refuse capture.
+            }
+            paint(pixel.x, pixel.y);
+          }}
+          onPointerMove={(event) => {
+            if (!stroking.current) {
+              return;
+            }
+            const pixel = pixelOf(event.currentTarget, event.clientX, event.clientY);
+            if (pixel) {
+              paint(pixel.x, pixel.y);
+            }
+          }}
+          onPointerUp={() => {
+            stroking.current = false;
+          }}
+        />
+        <div className="rig-grid" style={{ backgroundSize: `${scale}px ${scale}px` }} />
+      </div>
+      <div className="rig-tools">
+        <label>
+          Colour
+          <select
+            aria-label="Segment colour"
+            value={slot === 0 ? 2 : slot}
+            onChange={(event) => setSlot(Number(event.target.value))}
+          >
+            {SLOT_LABELS.slice(1).map((label, index) => (
+              <option key={label} value={index + 1}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" aria-pressed={slot === 0} onClick={() => setSlot(slot === 0 ? 2 : 0)}>
+          Eraser
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const previous = undo.current.pop();
+            if (previous) {
+              onChange(previous);
+            }
+          }}
+        >
+          Undo
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function assemble(parts: readonly ModularPart[], selected: Record<PartCategory, string>): Record<PartCategory, ModularPart> | null {
@@ -1355,6 +1584,18 @@ const RIG_CSS = `
 .rig-panel button[aria-pressed="true"] {
   background: #d9d0c3;
   color: #1c1917;
+}
+.rig-part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 72px;
+}
+.rig-part-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 .rig-thumb {
   width: 48px;

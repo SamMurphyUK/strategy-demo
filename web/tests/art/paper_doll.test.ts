@@ -12,6 +12,7 @@ import {
   nearestSemanticSlot,
   nudgeSocket,
   paintMaskPixels,
+  paintPartCell,
   quantizePixel,
   rebuildPartsFromMask,
   retintWalkParts,
@@ -153,6 +154,15 @@ describe("paper doll rig", () => {
     expect(floodMask(sample.mask, sample.rgba, sample.width, 20, 24, 0, { x: 10, y: 3 })).toHaveLength(25);
     expect(maskPixelsInRect(sample.mask, sample.rgba, sample.width, 20, 24, 0, { x: 8, y: 1 }, { x: 12, y: 5 })).toHaveLength(25);
     expect(floodMask(sample.mask, sample.rgba, sample.width, 20, 24, 0, { x: 0, y: 0 })).toEqual([{ x: 0, y: 0 }]);
+    const legs = extracted.parts.find((part) => part.category === "legs");
+    if (!legs) {
+      throw new Error("missing legs");
+    }
+    const paintedLeg = paintPartCell(legs, 1, 0, 0, 9);
+    expect(paintedLeg.frames[1]?.indices[0]).toBe(9);
+    expect(paintedLeg.spriteData).toBe(legs.spriteData);
+    expect(paintPartCell(paintedLeg, 1, 0, 0, 9)).toBe(paintedLeg);
+    expect(paintPartCell(legs, 0, -1, 0, 9)).toBe(legs);
   });
 });
 

@@ -16,7 +16,12 @@ import {
   duplicateLayerToNext,
   flattenRgba,
   fromPaintFile,
+  loadFrameOntoCurrent,
+  nudgeLayer,
   paintAt,
+  placeRigFrame,
+  stampWalkStance,
+  solidTorsoUnderWeapon,
   placeGroundOrigin,
   placeMuzzle,
   saveMotionSprite,
@@ -28,8 +33,9 @@ import {
   type Brush,
   type UnitPaintDocument,
 } from "./pixelPaint";
+import { composeLayers } from "./paperDoll";
 import { PaperDollPanel } from "./PaperDollPanel";
-import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type RosterFactionId, type UnitSpriteSheetBlueprint } from "./skeletonSchema";
+import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type RosterFactionId, type SpriteFrameKey, type UnitSpriteSheetBlueprint } from "./skeletonSchema";
 
 const GRID = 48;
 const ZOOMS = [6, 8, 12] as const;
@@ -199,22 +205,43 @@ export function UnitPixelPainter({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== "z") {
-        return;
-      }
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
         return;
       }
       if (target instanceof Element && target.closest(".rig-panel")) {
         return;
       }
-      event.preventDefault();
-      undo();
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      const current = docRef.current;
+      if (!current.layers || !current.editingLayer) {
+        return;
+      }
+      const step = ARROW_STEP[event.key];
+      if (step) {
+        event.preventDefault();
+        commit(nudgeLayer(current, step[0], step[1]));
+        return;
+      }
+      if (event.key === "[" || event.key === "]") {
+        event.preventDefault();
+        const index = INFANTRY_LAYER_KEYS.indexOf(current.editingLayer);
+        const direction = event.key === "]" ? 1 : -1;
+        const next = INFANTRY_LAYER_KEYS[(index + direction + INFANTRY_LAYER_KEYS.length) % INFANTRY_LAYER_KEYS.length];
+        if (!next) {
+          return;
+        }
+        setDoc(withEditingLayer(current, next));
+        setNotice(`Painting ${LAYER_LABEL[next]}.`);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo]);
+  }, [undo, commit]);
 
   useEffect(() => {
     drawGrid(gridRef.current, pinRef.current, doc);
@@ -225,7 +252,7 @@ export function UnitPixelPainter({
   const editingLabel = FRAME_LABEL[doc.editingFrame];
   const layerLabel = doc.layers && doc.editingLayer ? LAYER_LABEL[doc.editingLayer] : null;
   const modeLine = layerLabel
-    ? `Painting ${layerLabel} on ${editingLabel}. The other layers are dimmed, and this one is drawn on top. Both boots point right.`
+    ? `Painting ${layerLabel} on ${editingLabel}. Legs, then torso, then head, then the rifle on top. Arrow keys move this layer. [ and ] change layer.`
     : `Painting ${editingLabel}. Duplicate it onto the next frame, then nudge the treads by a pixel or two.`;
   const helpLine = hoverHelp ?? (notice || modeLine);
   const brushLabel = brush === "eraser" ? "Eraser" : `${SLOT_LABEL[brush]} ${slotHex(mapping, brush)}`;
@@ -310,6 +337,36 @@ export function UnitPixelPainter({
         throw new Error(json.error || `Save failed with ${response.status}`);
       }
       setNotice(`Saved this drawing in the project at ${json.path}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const pullWalkStance = async () => {
+    try {
+      const response = await fetch("/assets/units/jap_walk.png");
+      if (!response.ok) {
+        throw new Error("The walk sheet is missing.");
+      }
+      const blob = await response.blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("The walk sheet could not be read.");
+      }
+      ctx.drawImage(bitmap, 0, 0);
+      const image = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+      bitmap.close();
+      const stamped = stampWalkStance(doc, image.data, image.width, image.height);
+      if (stamped === doc) {
+        setNotice("Walk frame 0 had no pixels to place.");
+        return;
+      }
+      commit(stamped);
+      setNotice(`${FRAME_LABEL[doc.editingFrame]} now shows walk frame 0. Pencil and eraser change its pixels.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
@@ -557,6 +614,56 @@ export function UnitPixelPainter({
         </HintButton>
         <label
           className="sprite-open"
+          {...hint("Copy another pose onto the frame you are painting. Idle can start from a step, then you change the pixels.")}
+        >
+          Load sprite
+          <select
+            aria-label="Load sprite"
+            defaultValue=""
+            onChange={(event) => {
+              const source = event.target.value as SpriteFrameKey;
+              event.target.value = "";
+              if (!SPRITE_FRAME_KEYS.includes(source) || source === doc.editingFrame) {
+                return;
+              }
+              commit(loadFrameOntoCurrent(doc, source));
+              setNotice(`${FRAME_LABEL[source]} is now on ${FRAME_LABEL[doc.editingFrame]}. Edit it into this pose.`);
+            }}
+          >
+            <option value="">Choose a frame</option>
+            {SPRITE_FRAME_KEYS.filter((frame) => frame !== doc.editingFrame).map((frame) => (
+              <option key={frame} value={frame}>
+                {FRAME_LABEL[frame]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <HintButton
+          hint={hint("Put frame 0 of the walk onto the pose you are painting. The feet sit on the ground mark. Pencil and eraser change every pixel.")}
+          onClick={() => void pullWalkStance()}
+        >
+          Walk frame
+        </HintButton>
+        {doc.layers && (
+          <HintButton
+            hint={hint(
+              "Fill the tunic behind the rifle on this pose, and select the torso. The rifle stays on top. A step or a shot then shows the body instead of a hole.",
+            )}
+            onClick={() => {
+              const filled = solidTorsoUnderWeapon(doc);
+              if (filled === doc && doc.editingLayer === "torso") {
+                setNotice("The tunic already sits under the rifle.");
+                return;
+              }
+              commit(filled.editingLayer === "torso" ? filled : withEditingLayer(filled, "torso"));
+              setNotice(`Painting the torso on ${FRAME_LABEL[doc.editingFrame]}. It is the body under the rifle.`);
+            }}
+          >
+            Torso under rifle
+          </HintButton>
+        )}
+        <label
+          className="sprite-open"
           {...hint(
             doc.layers
               ? "Open a picture you have already separated, onto the layer and pose you are painting. It needs to be 48 by 48."
@@ -590,7 +697,25 @@ export function UnitPixelPainter({
           />
         </label>
       </div>
-      {rigOpen && <PaperDollPanel />}
+      {rigOpen && (
+        <PaperDollPanel
+          onDrawOnSprite={(manifest, parts) => {
+            try {
+              const placed = placeRigFrame(doc, composeLayers(manifest, parts, "walk", 0));
+              if (placed === doc) {
+                setNotice("The rig had no pixels to draw.");
+                return;
+              }
+              commit(withEditingLayer(placed, "torso"));
+              setNotice(
+                `${FRAME_LABEL[doc.editingFrame]} now has the legs, torso, head, and rifle. The torso is the body under the rifle. Paint it to close any hole.`,
+              );
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : String(error));
+            }
+          }}
+        />
+      )}
 
       <div className="sprite-scroll">
       <div className="sprite-workspace">
@@ -598,7 +723,7 @@ export function UnitPixelPainter({
           <ToolButton
             pressed={tool === "brush" && brush !== "eraser"}
             hint={hint(
-              `Pencil. Paint ${brush === "eraser" ? "the selected colour" : brushLabel} onto ${layerLabel ? `${layerLabel} on ${editingLabel}` : editingLabel}. Click or drag across squares. Dimmed layers are not changed.`,
+              `Pencil. Paint ${brush === "eraser" ? "the selected colour" : brushLabel} onto ${layerLabel ? `${layerLabel} on ${editingLabel}` : editingLabel}. The rifle stays above the tunic, the tunic above the legs.`,
             )}
             onClick={() => {
               setTool("brush");
@@ -612,7 +737,7 @@ export function UnitPixelPainter({
           </ToolButton>
           <ToolButton
             pressed={tool === "brush" && brush === "eraser"}
-            hint={hint(`Eraser. Clear a pixel on ${layerLabel ? `${layerLabel} on ${editingLabel}` : editingLabel}. The square goes back to empty on that layer.`)}
+            hint={hint(`Eraser. Delete the pixel you see on ${editingLabel}. The square goes empty, including colour that sits on another layer.`)}
             onClick={() => {
               setTool("brush");
               setBrush("eraser");
@@ -718,11 +843,11 @@ export function UnitPixelPainter({
           </div>
           <section
             className="sprite-game"
-            {...hint("The sprite as the game will hold it: 80 by 56, feet on the ground line, with a dark outline around the figure.")}
+            {...hint("The sprite as the game will hold it: 80 by 56, feet on the ground line.")}
           >
             <h3>In the game</h3>
             <canvas ref={sheetRef} className="sprite-sheet" width={SPRITE_BAKE.width} height={SPRITE_BAKE.height} />
-            <p className="sprite-side-lead">{sheetNote || "Feet on the ground line. Dark outline around the figure."}</p>
+            <p className="sprite-side-lead">{sheetNote || "Feet on the ground line."}</p>
           </section>
         </div>
 
@@ -731,7 +856,7 @@ export function UnitPixelPainter({
             <h3>{doc.layers ? "Layers" : "Frames"}</h3>
             <p className="sprite-side-lead">
               {doc.layers && doc.editingLayer
-                ? `${LAYER_LABEL[doc.editingLayer]} on ${FRAME_LABEL[doc.editingFrame]}. Paint the legs for each step, both boots pointing right. Build the march moves the head, the tunic, and the rifle.`
+                ? `${LAYER_LABEL[doc.editingLayer]} on ${FRAME_LABEL[doc.editingFrame]}. Legs under the tunic, head above it, rifle above everything. Move this layer with the arrow keys, then paint the tunic into the gap.`
                 : `${FRAME_LABEL[doc.editingFrame]}. Idle, two steps, and the shot. A country recolours the slots. It does not move the pixels.`}
             </p>
           </section>
@@ -835,11 +960,8 @@ function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null
   if (doc.layers && doc.editingLayer) {
     const stack = doc.layers[doc.editingFrame];
     for (const layer of LAYER_PAINT_ORDER) {
-      if (layer !== doc.editingLayer) {
-        paintLayer(image, stack[layer], mapping, 80);
-      }
+      paintLayer(image, stack[layer], mapping, 255);
     }
-    paintLayer(image, stack[doc.editingLayer], mapping, 255);
   } else {
     let keys: (MilitaryStripKey | null)[] = [];
     try {
@@ -880,7 +1002,7 @@ function drawSheet(canvas: HTMLCanvasElement | null, doc: UnitPaintDocument, set
     );
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(sheet, 0, 0);
-    setSheetNote(`${FRAME_LABEL[doc.editingFrame]}. Feet on the ground line. Dark outline around the figure.`);
+    setSheetNote(`${FRAME_LABEL[doc.editingFrame]}. Feet on the ground line.`);
   } catch (error) {
     setSheetNote(error instanceof Error ? error.message : String(error));
   }
@@ -913,16 +1035,23 @@ function writePixel(data: Uint8ClampedArray, offset: number, hex: string, alpha:
 
 function layerHint(layer: InfantryLayerKey): string {
   if (layer === "legs") {
-    return "Trousers and boots. Draw both feet with the toes pointing right. Move 1 is the long step. Move 2 brings the feet together, one boot off the ground.";
+    return "Hips and boots, under the tunic. Arrow keys move them on this pose.";
   }
   if (layer === "torso") {
-    return "Tunic and webbing. Build the march shifts this by a pixel. You can repaint it after.";
+    return "The body, above the legs and under the head and the rifle. Move the rifle aside, then paint the tunic into the gap so a later pose has no hole.";
   }
   if (layer === "head") {
-    return "Helmet and face. On the reaching step it stays a pixel behind the tunic. On the shot it stays put.";
+    return "Helmet and face, above the tunic and under the rifle.";
   }
-  return "Hands and the rifle. This layer covers the tunic in the game. The shot pulls it back two pixels.";
+  return "Hands and the rifle, above every other layer. Arrow keys move it on this pose. Paint the tunic into the gap it leaves.";
 }
+
+const ARROW_STEP: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
 
 function stampPin(ctx: CanvasRenderingContext2D, x: number, y: number, hex: string): void {
   ctx.fillStyle = hex;
@@ -1049,7 +1178,7 @@ const PAINTER_CSS = `
   color: #a99c8d;
   font-size: 12px;
 }
-.sprite-titlebar select {
+.sprite-titlebar select, .sprite-open select {
   min-width: 180px;
   padding: 6px 8px;
   background: #2a2420;

@@ -2,16 +2,23 @@ import {
   INFANTRY_LAYER_KEYS,
   buildMarch,
   cloneLayerFrames,
+  cloneLayerStack,
+  emptyGrid,
+  gridHasInk,
+  shiftGrid,
   emptyLayerStack,
   framesFromLayers,
   type InfantryLayerFrames,
   type InfantryLayerKey,
+  type InfantryLayerStack,
 } from "./infantryMarch";
 import { MILITARY } from "../ui/theme/militaryPalette";
+import { layoutWalkGrid, type PartCategory } from "./paperDoll";
 import { STARTER_INFANTRY_LAYERS } from "./starterParts";
-import { SHEET_FOOT_ANCHOR, SPRITE_FRAME_KEYS } from "./skeletonSchema";
+import { MILITARY_STRIP_KEYS, SHEET_FOOT_ANCHOR, SPRITE_FRAME_KEYS } from "./skeletonSchema";
 import type {
   FactionMilitaryMapping,
+  MilitaryStripKey,
   PaletteSlotKey,
   RosterFactionId,
   SpriteFrameGrid,
@@ -139,6 +146,423 @@ export function withEditingLayer(doc: UnitPaintDocument, layer: InfantryLayerKey
   return { ...doc, editingLayer: layer };
 }
 
+const WALK_SLOT: Record<MilitaryStripKey, PaletteSlotKey> = {
+  cream: "skin_stand_in",
+  tan: "skin_stand_in",
+  terracotta: "skin_stand_in",
+  bone: "skin_stand_in",
+  brass: "primary_uniform_or_hull",
+  olive: "primary_uniform_or_hull",
+  feldgrau: "primary_uniform_or_hull",
+  sage: "primary_uniform_or_hull",
+  spruce: "primary_uniform_or_hull",
+  khaki: "secondary_trim_or_webbing",
+  brown: "wood_or_leather",
+  taupe: "secondary_trim_or_webbing",
+  charcoal: "secondary_trim_or_webbing",
+  plum: "insignia_accent",
+  steel: "metallic_steel",
+  crimson: "insignia_accent",
+};
+
+const WALK_LAYER: Record<PartCategory, InfantryLayerKey> = {
+  head: "head",
+  torso: "torso",
+  legs: "legs",
+  weapon: "hands_weapon",
+};
+
+/** Semantic rig slots 1–13, in the same order as the paper-doll palette. */
+const SEMANTIC_SLOT: readonly (PaletteSlotKey | null)[] = [
+  null,
+  "primary_uniform_or_hull",
+  "primary_uniform_or_hull",
+  "secondary_trim_or_webbing",
+  "secondary_trim_or_webbing",
+  "insignia_accent",
+  "wood_or_leather",
+  "wood_or_leather",
+  "skin_stand_in",
+  "skin_stand_in",
+  "skin_stand_in",
+  "primary_uniform_or_hull",
+  "metallic_steel",
+  "metallic_brass_or_track",
+];
+
+/**
+ * Put frame 0 of an 8-frame walk onto the pose being painted.
+ * The feet sit on the ground mark. The picture is split into the four body layers.
+ */
+export function stampWalkStance(
+  doc: UnitPaintDocument,
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+): UnitPaintDocument {
+  const sheet = layoutWalkGrid(rgba, width, height);
+  const frameWidth = sheet.width / 8;
+  const frameHeight = sheet.height;
+  let minX = frameWidth;
+  let minY = frameHeight;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < frameHeight; y += 1) {
+    for (let x = 0; x < frameWidth; x += 1) {
+      if ((sheet.rgba[(y * sheet.width + x) * 4 + 3] ?? 0) < 128) {
+        continue;
+      }
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) {
+    return doc;
+  }
+  const srcW = maxX - minX + 1;
+  const srcH = maxY - minY + 1;
+  let bootMin = maxX;
+  let bootMax = minX;
+  for (let x = minX; x <= maxX; x += 1) {
+    if ((sheet.rgba[(maxY * sheet.width + x) * 4 + 3] ?? 0) >= 128) {
+      if (x < bootMin) bootMin = x;
+      if (x > bootMax) bootMax = x;
+    }
+  }
+  const footX = Math.round((bootMin + bootMax) / 2);
+  const fx = footX - minX;
+  const fy = maxY - minY;
+  const { width: canvasW, height: canvasH } = doc.blueprint.canvasSize;
+  const ground = doc.blueprint.groundOrigin;
+  let dstH = Math.min(srcH, ground.y + 1, canvasH);
+  let dstW = Math.max(1, Math.min(srcW, canvasW, Math.round(srcW * (dstH / srcH))));
+  const placement = () => {
+    const dfx = Math.min(dstW - 1, Math.floor((fx * dstW) / srcW));
+    const dfy = Math.min(dstH - 1, Math.floor((fy * dstH) / srcH));
+    return { dfx, dfy, x0: ground.x - dfx, y0: ground.y - dfy };
+  };
+  let placed = placement();
+  let guard = dstW + dstH;
+  while (
+    guard > 0 &&
+    (placed.x0 < 0 || placed.y0 < 0 || placed.x0 + dstW > canvasW || placed.y0 + dstH > canvasH)
+  ) {
+    if (placed.x0 < 0 || placed.x0 + dstW > canvasW) {
+      dstW = Math.max(1, dstW - 1);
+    } else {
+      dstH = Math.max(1, dstH - 1);
+    }
+    placed = placement();
+    guard -= 1;
+  }
+  const read = (sx: number, sy: number): PaletteSlotKey | null => {
+    const offset = (sy * sheet.width + sx) * 4;
+    if ((sheet.rgba[offset + 3] ?? 0) < 128) {
+      return null;
+    }
+    const key = nearestStrip(sheet.rgba[offset] ?? 0, sheet.rgba[offset + 1] ?? 0, sheet.rgba[offset + 2] ?? 0);
+    if (key === "charcoal" && charcoalRim(sheet.rgba, sheet.width, frameWidth, sx, sy)) {
+      return null;
+    }
+    return WALK_SLOT[key];
+  };
+  const sample = (dx: number, dy: number) => ({
+    sx: minX + Math.min(srcW - 1, Math.floor((dx * srcW) / dstW)),
+    sy: minY + Math.min(srcH - 1, Math.floor((dy * srcH) / dstH)),
+  });
+  let muzzle: Vec2 | null = null;
+  const noteMuzzle = (category: PartCategory | null, x: number, y: number) => {
+    if (category !== "weapon") {
+      return;
+    }
+    if (!muzzle || x > muzzle.x || (x === muzzle.x && y < muzzle.y)) {
+      muzzle = { x, y };
+    }
+  };
+  const aim = (next: UnitPaintDocument): UnitPaintDocument =>
+    muzzle ? { ...next, blueprint: { ...next.blueprint, muzzlePoint: muzzle } } : next;
+  if (doc.layers) {
+    const layers = cloneLayerFrames(doc.layers);
+    const stack = emptyLayerStack(canvasW, canvasH);
+    for (let dy = 0; dy < dstH; dy += 1) {
+      for (let dx = 0; dx < dstW; dx += 1) {
+        const { sx, sy } = sample(dx, dy);
+        const slot = read(sx, sy);
+        const x = placed.x0 + dx;
+        const y = placed.y0 + dy;
+        if (!slot || !insideCanvas(doc, x, y)) {
+          continue;
+        }
+        const category = sheet.mask[sy * sheet.width + sx] ?? null;
+        noteMuzzle(category, x, y);
+        writeCell(stack, category ? WALK_LAYER[category] : "torso", x, y, slot);
+      }
+    }
+    layers[doc.editingFrame] = stack;
+    return aim(withLayers(doc, layers, doc.editingFrame));
+  }
+  const grid = emptyGrid(canvasW, canvasH);
+  for (let dy = 0; dy < dstH; dy += 1) {
+    for (let dx = 0; dx < dstW; dx += 1) {
+      const { sx, sy } = sample(dx, dy);
+      const slot = read(sx, sy);
+      const x = placed.x0 + dx;
+      const y = placed.y0 + dy;
+      const row = grid[y];
+      if (!slot || !row || !insideCanvas(doc, x, y)) {
+        continue;
+      }
+      noteMuzzle(sheet.mask[sy * sheet.width + sx] ?? null, x, y);
+      row[x] = slot;
+    }
+  }
+  return aim({
+    ...doc,
+    blueprint: {
+      ...doc.blueprint,
+      frames: { ...doc.blueprint.frames, [doc.editingFrame]: grid },
+    },
+  });
+}
+
+/**
+ * Draw the four assembled rig parts onto the pose being painted.
+ * The tunic is filled in behind the rifle, so a shift does not open a hole.
+ */
+export function placeRigFrame(
+  doc: UnitPaintDocument,
+  cells: { width: number; height: number; layers: Record<PartCategory, number[]> },
+): UnitPaintDocument {
+  const opaqueAt = (x: number, y: number) =>
+    PART_ORDER.some((category) => (cells.layers[category][y * cells.width + x] ?? 0) !== 0);
+  let minX = cells.width;
+  let minY = cells.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < cells.height; y += 1) {
+    for (let x = 0; x < cells.width; x += 1) {
+      if (!opaqueAt(x, y)) {
+        continue;
+      }
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY || !doc.layers) {
+    return doc;
+  }
+  let bootMin = maxX;
+  let bootMax = minX;
+  let foundBoot = false;
+  for (let x = minX; x <= maxX; x += 1) {
+    const legs = cells.layers.legs[maxY * cells.width + x] ?? 0;
+    const any = legs !== 0 || opaqueAt(x, maxY);
+    if (!any) {
+      continue;
+    }
+    foundBoot = true;
+    if (x < bootMin) bootMin = x;
+    if (x > bootMax) bootMax = x;
+  }
+  if (!foundBoot) {
+    return doc;
+  }
+  const srcW = maxX - minX + 1;
+  const srcH = maxY - minY + 1;
+  const fx = Math.round((bootMin + bootMax) / 2) - minX;
+  const fy = maxY - minY;
+  const { width: canvasW, height: canvasH } = doc.blueprint.canvasSize;
+  const ground = doc.blueprint.groundOrigin;
+  let dstH = Math.min(srcH, ground.y + 1, canvasH);
+  let dstW = Math.max(1, Math.min(srcW, canvasW, Math.round(srcW * (dstH / srcH))));
+  const placement = () => {
+    const dfx = Math.min(dstW - 1, Math.floor((fx * dstW) / srcW));
+    const dfy = Math.min(dstH - 1, Math.floor((fy * dstH) / srcH));
+    return { x0: ground.x - dfx, y0: ground.y - dfy };
+  };
+  let placed = placement();
+  let guard = dstW + dstH;
+  while (
+    guard > 0 &&
+    (placed.x0 < 0 || placed.y0 < 0 || placed.x0 + dstW > canvasW || placed.y0 + dstH > canvasH)
+  ) {
+    if (placed.x0 < 0 || placed.x0 + dstW > canvasW) {
+      dstW = Math.max(1, dstW - 1);
+    } else {
+      dstH = Math.max(1, dstH - 1);
+    }
+    placed = placement();
+    guard -= 1;
+  }
+  const layers = cloneLayerFrames(doc.layers);
+  const stack = emptyLayerStack(canvasW, canvasH);
+  let muzzle: Vec2 | null = null;
+  for (let dy = 0; dy < dstH; dy += 1) {
+    for (let dx = 0; dx < dstW; dx += 1) {
+      const sx = minX + Math.min(srcW - 1, Math.floor((dx * srcW) / dstW));
+      const sy = minY + Math.min(srcH - 1, Math.floor((dy * srcH) / dstH));
+      const x = placed.x0 + dx;
+      const y = placed.y0 + dy;
+      if (!insideCanvas(doc, x, y)) {
+        continue;
+      }
+      for (const category of PART_ORDER) {
+        const semantic = cells.layers[category][sy * cells.width + sx] ?? 0;
+        const slot = SEMANTIC_SLOT[semantic] ?? null;
+        if (!slot) {
+          continue;
+        }
+        writeCell(stack, WALK_LAYER[category], x, y, slot);
+        if (category === "weapon" && (!muzzle || x > muzzle.x || (x === muzzle.x && y < muzzle.y))) {
+          muzzle = { x, y };
+        }
+      }
+    }
+  }
+  const filled = bodyUnderWeapon(stack) ?? stack;
+  layers[doc.editingFrame] = filled;
+  const next = withLayers(doc, layers, doc.editingFrame);
+  return muzzle ? { ...next, blueprint: { ...next.blueprint, muzzlePoint: muzzle } } : next;
+}
+
+/** Paint the tunic into every empty cell the rifle covers inside the body. */
+export function solidTorsoUnderWeapon(doc: UnitPaintDocument): UnitPaintDocument {
+  if (!doc.layers) {
+    return doc;
+  }
+  const filled = bodyUnderWeapon(doc.layers[doc.editingFrame]);
+  if (!filled) {
+    return doc;
+  }
+  const layers = cloneLayerFrames(doc.layers);
+  layers[doc.editingFrame] = filled;
+  return withLayers(doc, layers, doc.editingFrame);
+}
+
+const PART_ORDER: readonly PartCategory[] = ["legs", "torso", "head", "weapon"];
+
+function bodyUnderWeapon(stack: InfantryLayerStack): InfantryLayerStack | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = -1;
+  let maxY = -1;
+  const counts = new Map<PaletteSlotKey, number>();
+  const torso = stack.torso;
+  const height = torso.length;
+  const width = torso[0]?.length ?? 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const slot = torso[y]?.[x];
+      if (slot == null) {
+        continue;
+      }
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      counts.set(slot, (counts.get(slot) ?? 0) + 1);
+    }
+  }
+  if (maxX < minX) {
+    return null;
+  }
+  let ink: PaletteSlotKey = "primary_uniform_or_hull";
+  let best = 0;
+  for (const [slot, count] of counts) {
+    if (count > best) {
+      best = count;
+      ink = slot;
+    }
+  }
+  const next = cloneLayerStack(stack);
+  let changed = false;
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      if (next.hands_weapon[y]?.[x] == null || next.torso[y]?.[x] != null) {
+        continue;
+      }
+      const row = next.torso[y];
+      if (!row) {
+        continue;
+      }
+      row[x] = ink;
+      changed = true;
+    }
+  }
+  return changed ? next : null;
+}
+
+function writeCell(stack: InfantryLayerStack, layer: InfantryLayerKey, x: number, y: number, slot: PaletteSlotKey): void {
+  const row = stack[layer][y];
+  if (row) {
+    row[x] = slot;
+  }
+}
+
+function nearestStrip(r: number, g: number, b: number): MilitaryStripKey {
+  let best: MilitaryStripKey = "feldgrau";
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const key of MILITARY_STRIP_KEYS) {
+    const rgb = Number.parseInt(MILITARY[key].slice(1), 16);
+    const dr = r - ((rgb >> 16) & 255);
+    const dg = g - ((rgb >> 8) & 255);
+    const db = b - (rgb & 255);
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = key;
+    }
+  }
+  return best;
+}
+
+function charcoalRim(rgba: Uint8ClampedArray, sheetWidth: number, frameWidth: number, x: number, y: number): boolean {
+  const neighbors = [
+    [x - 1, y],
+    [x + 1, y],
+    [x, y - 1],
+    [x, y + 1],
+  ];
+  return neighbors.some(([nx, ny]) => {
+    if (nx === undefined || ny === undefined || nx < 0 || ny < 0 || nx >= frameWidth) {
+      return true;
+    }
+    return (rgba[(ny * sheetWidth + nx) * 4 + 3] ?? 0) < 128;
+  });
+}
+
+/** Copy an existing pose onto the frame being painted. The open frame stays selected. */
+export function loadFrameOntoCurrent(doc: UnitPaintDocument, source: SpriteFrameKey): UnitPaintDocument {
+  if (source === doc.editingFrame) {
+    return doc;
+  }
+  if (doc.layers) {
+    const layers = cloneLayerFrames(doc.layers);
+    const from = doc.layers[source];
+    layers[doc.editingFrame] = {
+      legs: cloneGrid(from.legs),
+      torso: cloneGrid(from.torso),
+      head: cloneGrid(from.head),
+      hands_weapon: cloneGrid(from.hands_weapon),
+    };
+    return withLayers(doc, layers, doc.editingFrame);
+  }
+  return {
+    ...doc,
+    blueprint: {
+      ...doc.blueprint,
+      frames: {
+        ...doc.blueprint.frames,
+        [doc.editingFrame]: cloneGrid(doc.blueprint.frames[source]),
+      },
+    },
+  };
+}
+
 /** Copy the open frame onto the next pose and select that pose. */
 export function duplicateFrameToNext(doc: UnitPaintDocument): UnitPaintDocument {
   const next = nextFrame(doc.editingFrame);
@@ -202,6 +626,23 @@ export function placeMuzzle(doc: UnitPaintDocument, x: number, y: number): UnitP
   return { ...doc, blueprint: { ...doc.blueprint, muzzlePoint: { x, y } } };
 }
 
+/** Slide the layer being painted, on this pose only. Pixels that leave the canvas are dropped. */
+export function nudgeLayer(doc: UnitPaintDocument, dx: number, dy: number): UnitPaintDocument {
+  if (!doc.layers || !doc.editingLayer || (dx === 0 && dy === 0)) {
+    return doc;
+  }
+  const source = doc.layers[doc.editingFrame][doc.editingLayer];
+  if (!gridHasInk(source)) {
+    return doc;
+  }
+  const layers = cloneLayerFrames(doc.layers);
+  layers[doc.editingFrame] = {
+    ...layers[doc.editingFrame],
+    [doc.editingLayer]: shiftGrid(source, dx, dy),
+  };
+  return withLayers(doc, layers, doc.editingFrame);
+}
+
 /** Paint one cell of the open layer, or of the flat frame when the unit has no layers. */
 export function paintAt(doc: UnitPaintDocument, canvasX: number, canvasY: number, brush: Brush): UnitPaintDocument {
   if (!insideCanvas(doc, canvasX, canvasY)) {
@@ -210,7 +651,19 @@ export function paintAt(doc: UnitPaintDocument, canvasX: number, canvasY: number
   const slot = brush === "eraser" ? null : brush;
   if (doc.layers && doc.editingLayer) {
     const layers = cloneLayerFrames(doc.layers);
-    const grid = layers[doc.editingFrame][doc.editingLayer];
+    const stack = layers[doc.editingFrame];
+    if (brush === "eraser") {
+      let changed = false;
+      for (const layer of INFANTRY_LAYER_KEYS) {
+        const row = stack[layer][canvasY];
+        if (row && row[canvasX] != null) {
+          row[canvasX] = null;
+          changed = true;
+        }
+      }
+      return changed ? withLayers(doc, layers, doc.editingFrame) : doc;
+    }
+    const grid = stack[doc.editingLayer];
     const row = grid[canvasY];
     if (!row) {
       return doc;
