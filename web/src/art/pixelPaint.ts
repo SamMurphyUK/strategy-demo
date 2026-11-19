@@ -1,20 +1,28 @@
 import {
-  INFANTRY_LAYER_KEYS,
-  buildMarch,
-  cloneLayerFrames,
+  ARCHETYPES,
+  ARCHETYPE_LAYERS,
+  archetypeForUnitType,
+  buildAnimation,
+  cloneFrames,
+  cloneStack,
+  emptyFrames,
+  flattenFrames,
+  isArchetype,
+  type ArchetypeKey,
+  type LayerFrames,
+} from "./archetypeLayers";
+import { ARCHETYPE_STARTERS, archetypeStarter } from "./archetypeStarters";
+import {
   cloneLayerStack,
-  emptyGrid,
   gridHasInk,
   shiftGrid,
   emptyLayerStack,
-  framesFromLayers,
-  type InfantryLayerFrames,
   type InfantryLayerKey,
   type InfantryLayerStack,
 } from "./infantryMarch";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import { layoutWalkGrid, type PartCategory } from "./paperDoll";
-import { STARTER_INFANTRY_LAYERS } from "./starterParts";
+import { STARTER_BLUEPRINTS, STARTER_INFANTRY_LAYERS } from "./starterParts";
 import { MILITARY_STRIP_KEYS, SHEET_FOOT_ANCHOR, SPRITE_FRAME_KEYS } from "./skeletonSchema";
 import type {
   FactionMilitaryMapping,
@@ -63,17 +71,22 @@ export interface UnitPaintFile {
   version: 1;
   flat: boolean;
   editingFrame: SpriteFrameKey;
-  editingLayer: InfantryLayerKey | null;
+  editingLayer: string | null;
   blueprint: UnitSpriteSheetBlueprint;
-  layers: InfantryLayerFrames | null;
+  layers: LayerFrames | null;
+  /** The skeleton the layers belong to. Files saved before the other skeletons existed leave it out. */
+  archetype?: ArchetypeKey;
 }
 
 export interface UnitPaintDocument {
   blueprint: UnitSpriteSheetBlueprint;
   editingFrame: SpriteFrameKey;
-  editingLayer: InfantryLayerKey | null;
+  /** A layer of this unit's skeleton, or null when the unit is four flat frames. */
+  editingLayer: string | null;
   flat: boolean;
-  layers: InfantryLayerFrames | null;
+  /** The authoring layers. The game only reads blueprint.frames, which these flatten into. */
+  layers: LayerFrames | null;
+  archetype: ArchetypeKey;
 }
 
 const CANVAS = 48;
@@ -84,47 +97,102 @@ export function slotHex(mapping: FactionMilitaryMapping, slot: PaletteSlotKey): 
 
 export function documentFromBlueprint(blueprint: UnitSpriteSheetBlueprint): UnitPaintDocument {
   const source = STARTER_INFANTRY_LAYERS[blueprint.blueprintId];
-  const layers = source ? cloneLayerFrames(source) : null;
-  const next = cloneBlueprint(blueprint);
-  if (layers) {
-    next.frames = framesFromLayers(layers);
+  if (source) {
+    return documentFromLayers(blueprint, "infantry", source);
   }
   return {
-    blueprint: next,
+    blueprint: cloneBlueprint(blueprint),
     editingFrame: "idle",
-    editingLayer: layers ? "legs" : null,
+    editingLayer: null,
     flat: false,
-    layers,
+    layers: null,
+    archetype: archetypeForUnitType(blueprint.unitTypeId) ?? "infantry",
   };
 }
 
-export function blankDocument(factionId: RosterFactionId): UnitPaintDocument {
-  const layers = {
-    idle: emptyLayerStack(CANVAS, CANVAS),
-    move_1: emptyLayerStack(CANVAS, CANVAS),
-    move_2: emptyLayerStack(CANVAS, CANVAS),
-    fire: emptyLayerStack(CANVAS, CANVAS),
+/** Open a unit whose poses are drawn in the layers of one skeleton. The flat frames are composited from them. */
+export function documentFromLayers(blueprint: UnitSpriteSheetBlueprint, archetype: ArchetypeKey, source: LayerFrames): UnitPaintDocument {
+  const layers = cloneFrames(archetype, source);
+  const next = cloneBlueprint(blueprint);
+  next.frames = flattenFrames(archetype, layers);
+  return {
+    blueprint: next,
+    editingFrame: "idle",
+    editingLayer: ARCHETYPE_LAYERS[archetype][0] ?? null,
+    flat: false,
+    layers,
+    archetype,
   };
+}
+
+/** The six riflemen, then one layered starter for each other skeleton, then the flat tanks of the other countries. */
+export function starterBlueprints(): UnitSpriteSheetBlueprint[] {
+  const layered = layeredStarterBlueprints();
+  return [
+    ...STARTER_BLUEPRINTS.filter((item) => item.unitTypeId === "infantry"),
+    ...layered.values(),
+    ...STARTER_BLUEPRINTS.filter((item) => item.unitTypeId !== "infantry" && !layered.has(item.blueprintId)),
+  ];
+}
+
+/** Open a starter by id. A layered starter wins over a flat one with the same id. */
+export function starterDocument(blueprintId: string): UnitPaintDocument | null {
+  const layered = archetypeStarter(blueprintId);
+  if (layered) {
+    return documentFromLayers(layered.blueprint, layered.archetype, layered.layers);
+  }
+  const flat = STARTER_BLUEPRINTS.find((item) => item.blueprintId === blueprintId);
+  return flat ? documentFromBlueprint(flat) : null;
+}
+
+function layeredStarterBlueprints(): Map<string, UnitSpriteSheetBlueprint> {
+  return new Map(ARCHETYPE_STARTERS.map((item) => [item.blueprint.blueprintId, item.blueprint]));
+}
+
+/**
+ * An empty sprite on one skeleton. With no arguments past the country it is the empty rifleman.
+ * unitTypeId is the UNIT_DEFINITIONS key. It defaults to the first unit drawn on that skeleton.
+ */
+export function blankDocument(factionId: RosterFactionId, archetype: ArchetypeKey = "infantry", unitTypeId?: string): UnitPaintDocument {
+  const definition = ARCHETYPES[archetype];
+  const layers = emptyFrames(archetype, CANVAS, CANVAS);
+  const infantry = archetype === "infantry";
   return {
     blueprint: {
       blueprintId: "custom_unit",
-      unitTypeId: "infantry",
+      unitTypeId: unitTypeId && archetypeForUnitType(unitTypeId) === archetype ? unitTypeId : (definition.unitTypes[0] ?? "infantry"),
       factionId,
-      category: "land",
+      category: definition.category,
       canvasSize: { width: CANVAS, height: CANVAS },
       groundOrigin: { x: 24, y: 45 },
       sheetFootAnchor: { ...SHEET_FOOT_ANCHOR },
-      muzzlePoint: { x: 36, y: 24 },
+      muzzlePoint: infantry ? { x: 36, y: 24 } : undefined,
       nativeFacing: "right",
-      recoilOffsetPx: 1,
-      frames: framesFromLayers(layers),
+      recoilOffsetPx: infantry ? 1 : 0,
+      frames: flattenFrames(archetype, layers),
       historicalEraTag: "custom unit",
     },
     editingFrame: "idle",
-    editingLayer: "legs",
+    editingLayer: ARCHETYPE_LAYERS[archetype][0] ?? null,
     flat: false,
     layers,
+    archetype,
   };
+}
+
+/**
+ * Say which unit the sprite is. A type on the same skeleton keeps the drawing: a field gun can become a flak gun.
+ * A type on another skeleton starts an empty sprite, because the layers do not carry over.
+ */
+export function withUnitType(doc: UnitPaintDocument, unitTypeId: string): UnitPaintDocument {
+  const archetype = archetypeForUnitType(unitTypeId);
+  if (!archetype || unitTypeId === doc.blueprint.unitTypeId) {
+    return doc;
+  }
+  if (archetype !== doc.archetype) {
+    return blankDocument(doc.blueprint.factionId, archetype, unitTypeId);
+  }
+  return { ...doc, blueprint: { ...doc.blueprint, unitTypeId, category: ARCHETYPES[archetype].category } };
 }
 
 /** Faction changes the swatches. The slot grids stay put. */
@@ -139,8 +207,8 @@ export function withEditingFrame(doc: UnitPaintDocument, frame: SpriteFrameKey):
   return { ...doc, editingFrame: frame };
 }
 
-export function withEditingLayer(doc: UnitPaintDocument, layer: InfantryLayerKey): UnitPaintDocument {
-  if (!doc.layers || !INFANTRY_LAYER_KEYS.includes(layer)) {
+export function withEditingLayer(doc: UnitPaintDocument, layer: string): UnitPaintDocument {
+  if (!doc.layers || !ARCHETYPE_LAYERS[doc.archetype].includes(layer)) {
     return doc;
   }
   return { ...doc, editingLayer: layer };
@@ -283,8 +351,11 @@ export function stampWalkStance(
   };
   const aim = (next: UnitPaintDocument): UnitPaintDocument =>
     muzzle ? { ...next, blueprint: { ...next.blueprint, muzzlePoint: muzzle } } : next;
+  if (doc.layers && doc.archetype !== "infantry") {
+    return doc;
+  }
   if (doc.layers) {
-    const layers = cloneLayerFrames(doc.layers);
+    const layers = cloneFrames(doc.archetype, doc.layers);
     const stack = emptyLayerStack(canvasW, canvasH);
     for (let dy = 0; dy < dstH; dy += 1) {
       for (let dx = 0; dx < dstW; dx += 1) {
@@ -328,7 +399,7 @@ export function stampWalkStance(
 }
 
 /**
- * Draw the four assembled rig parts onto the pose being painted.
+ * Draw the four assembled rig parts onto the pose being painted. Infantry only.
  * The tunic is filled in behind the rifle, so a shift does not open a hole.
  */
 export function placeRigFrame(
@@ -352,7 +423,7 @@ export function placeRigFrame(
       if (y > maxY) maxY = y;
     }
   }
-  if (maxX < minX || maxY < minY || !doc.layers) {
+  if (maxX < minX || maxY < minY || !doc.layers || doc.archetype !== "infantry") {
     return doc;
   }
   let bootMin = maxX;
@@ -398,7 +469,7 @@ export function placeRigFrame(
     placed = placement();
     guard -= 1;
   }
-  const layers = cloneLayerFrames(doc.layers);
+  const layers = cloneFrames(doc.archetype, doc.layers);
   const stack = emptyLayerStack(canvasW, canvasH);
   let muzzle: Vec2 | null = null;
   for (let dy = 0; dy < dstH; dy += 1) {
@@ -429,16 +500,16 @@ export function placeRigFrame(
   return muzzle ? { ...next, blueprint: { ...next.blueprint, muzzlePoint: muzzle } } : next;
 }
 
-/** Paint the tunic into every empty cell the rifle covers inside the body. */
+/** Paint the tunic into every empty cell the rifle covers inside the body. Infantry only. */
 export function solidTorsoUnderWeapon(doc: UnitPaintDocument): UnitPaintDocument {
-  if (!doc.layers) {
+  if (!doc.layers || doc.archetype !== "infantry") {
     return doc;
   }
-  const filled = bodyUnderWeapon(doc.layers[doc.editingFrame]);
+  const filled = bodyUnderWeapon(doc.layers[doc.editingFrame] as InfantryLayerStack);
   if (!filled) {
     return doc;
   }
-  const layers = cloneLayerFrames(doc.layers);
+  const layers = cloneFrames(doc.archetype, doc.layers);
   layers[doc.editingFrame] = filled;
   return withLayers(doc, layers, doc.editingFrame);
 }
@@ -541,14 +612,8 @@ export function loadFrameOntoCurrent(doc: UnitPaintDocument, source: SpriteFrame
     return doc;
   }
   if (doc.layers) {
-    const layers = cloneLayerFrames(doc.layers);
-    const from = doc.layers[source];
-    layers[doc.editingFrame] = {
-      legs: cloneGrid(from.legs),
-      torso: cloneGrid(from.torso),
-      head: cloneGrid(from.head),
-      hands_weapon: cloneGrid(from.hands_weapon),
-    };
+    const layers = cloneFrames(doc.archetype, doc.layers);
+    layers[doc.editingFrame] = cloneStack(doc.archetype, doc.layers[source]);
     return withLayers(doc, layers, doc.editingFrame);
   }
   return {
@@ -579,13 +644,8 @@ export function duplicateFrameToNext(doc: UnitPaintDocument): UnitPaintDocument 
       },
     };
   }
-  const layers = cloneLayerFrames(doc.layers);
-  layers[next] = {
-    legs: cloneGrid(doc.layers[doc.editingFrame].legs),
-    torso: cloneGrid(doc.layers[doc.editingFrame].torso),
-    head: cloneGrid(doc.layers[doc.editingFrame].head),
-    hands_weapon: cloneGrid(doc.layers[doc.editingFrame].hands_weapon),
-  };
+  const layers = cloneFrames(doc.archetype, doc.layers);
+  layers[next] = cloneStack(doc.archetype, doc.layers[doc.editingFrame]);
   return withLayers(doc, layers, next);
 }
 
@@ -594,21 +654,41 @@ export function duplicateLayerToNext(doc: UnitPaintDocument): UnitPaintDocument 
   if (!doc.layers || !doc.editingLayer) {
     return doc;
   }
+  const source = doc.layers[doc.editingFrame][doc.editingLayer];
+  if (!source) {
+    return doc;
+  }
   const next = nextFrame(doc.editingFrame);
-  const layers = cloneLayerFrames(doc.layers);
+  const layers = cloneFrames(doc.archetype, doc.layers);
   layers[next] = {
     ...layers[next],
-    [doc.editingLayer]: cloneGrid(doc.layers[doc.editingFrame][doc.editingLayer]),
+    [doc.editingLayer]: cloneGrid(source),
   };
   return withLayers({ ...doc, editingFrame: next }, layers, next);
 }
 
-/** Place the idle head, tunic, and rifle onto the other three poses. Leg drawings on those poses stay. */
+/** Place the idle head, tunic, and rifle onto the other three poses. Leg drawings on those poses stay. Infantry only. */
 export function buildMarchDocument(doc: UnitPaintDocument): UnitPaintDocument {
+  if (doc.archetype !== "infantry") {
+    return doc;
+  }
+  return buildAnimationDocument(doc);
+}
+
+/**
+ * Write Move 1, Move 2, and Fire from the idle layers, by the rules of this unit's skeleton.
+ * Every layer moves by whole pixels. A rifleman gets the march, and keeps a leg drawing already on a step.
+ */
+export function buildAnimationDocument(doc: UnitPaintDocument): UnitPaintDocument {
   if (!doc.layers) {
     return doc;
   }
-  return withLayers(doc, buildMarch(doc.layers, doc.blueprint.groundOrigin.x), doc.editingFrame);
+  const layers = buildAnimation(doc.archetype, doc.layers, {
+    unitTypeId: doc.blueprint.unitTypeId,
+    groundX: doc.blueprint.groundOrigin.x,
+    muzzlePoint: doc.blueprint.muzzlePoint ?? null,
+  });
+  return withLayers(doc, layers, doc.editingFrame);
 }
 
 /** Move the foot pin. The painted frames stay where they are. */
@@ -632,10 +712,10 @@ export function nudgeLayer(doc: UnitPaintDocument, dx: number, dy: number): Unit
     return doc;
   }
   const source = doc.layers[doc.editingFrame][doc.editingLayer];
-  if (!gridHasInk(source)) {
+  if (!source || !gridHasInk(source)) {
     return doc;
   }
-  const layers = cloneLayerFrames(doc.layers);
+  const layers = cloneFrames(doc.archetype, doc.layers);
   layers[doc.editingFrame] = {
     ...layers[doc.editingFrame],
     [doc.editingLayer]: shiftGrid(source, dx, dy),
@@ -650,12 +730,12 @@ export function paintAt(doc: UnitPaintDocument, canvasX: number, canvasY: number
   }
   const slot = brush === "eraser" ? null : brush;
   if (doc.layers && doc.editingLayer) {
-    const layers = cloneLayerFrames(doc.layers);
+    const layers = cloneFrames(doc.archetype, doc.layers);
     const stack = layers[doc.editingFrame];
     if (brush === "eraser") {
       let changed = false;
-      for (const layer of INFANTRY_LAYER_KEYS) {
-        const row = stack[layer][canvasY];
+      for (const layer of ARCHETYPE_LAYERS[doc.archetype]) {
+        const row = stack[layer]?.[canvasY];
         if (row && row[canvasX] != null) {
           row[canvasX] = null;
           changed = true;
@@ -663,8 +743,7 @@ export function paintAt(doc: UnitPaintDocument, canvasX: number, canvasY: number
       }
       return changed ? withLayers(doc, layers, doc.editingFrame) : doc;
     }
-    const grid = stack[doc.editingLayer];
-    const row = grid[canvasY];
+    const row = stack[doc.editingLayer]?.[canvasY];
     if (!row) {
       return doc;
     }
@@ -712,7 +791,7 @@ export function flattenRgba(
     grid.push(row);
   }
   if (doc.layers && doc.editingLayer) {
-    const layers = cloneLayerFrames(doc.layers);
+    const layers = cloneFrames(doc.archetype, doc.layers);
     layers[doc.editingFrame] = {
       ...layers[doc.editingFrame],
       [doc.editingLayer]: grid,
@@ -757,6 +836,7 @@ export function toPaintFile(doc: UnitPaintDocument): UnitPaintFile {
     editingLayer: doc.editingLayer,
     blueprint: doc.blueprint,
     layers: doc.layers,
+    archetype: doc.archetype,
   };
 }
 
@@ -776,22 +856,26 @@ export function fromPaintFile(value: unknown): UnitPaintDocument {
     : "idle";
   const width = blueprint.canvasSize.width;
   const height = blueprint.canvasSize.height;
-  const layers = readLayers(value.layers, width, height);
+  // A file from before the other skeletons says nothing, so the unit type decides. Every layered file of that age is a rifleman.
+  const archetype = isArchetype(value.archetype) ? value.archetype : (archetypeForUnitType(blueprint.unitTypeId) ?? "infantry");
+  const layers = readLayers(value.layers, archetype, width, height);
   const next = cloneBlueprint(blueprint);
   if (layers) {
-    next.frames = framesFromLayers(layers);
+    next.frames = flattenFrames(archetype, layers);
   }
-  const editingLayer = layers && INFANTRY_LAYER_KEYS.includes(value.editingLayer as InfantryLayerKey)
-    ? (value.editingLayer as InfantryLayerKey)
-    : layers
-      ? "legs"
-      : null;
+  const stack = ARCHETYPE_LAYERS[archetype];
+  const editingLayer = !layers
+    ? null
+    : typeof value.editingLayer === "string" && stack.includes(value.editingLayer)
+      ? value.editingLayer
+      : (stack[0] ?? null);
   return {
     blueprint: next,
     editingFrame,
     editingLayer,
     flat: value.flat === true,
     layers,
+    archetype,
   };
 }
 
@@ -828,14 +912,14 @@ function insideCanvas(doc: UnitPaintDocument, x: number, y: number): boolean {
   return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < width && y < height;
 }
 
-function withLayers(doc: UnitPaintDocument, layers: InfantryLayerFrames, frame: SpriteFrameKey): UnitPaintDocument {
+function withLayers(doc: UnitPaintDocument, layers: LayerFrames, frame: SpriteFrameKey): UnitPaintDocument {
   return {
     ...doc,
     editingFrame: frame,
     layers,
     blueprint: {
       ...doc.blueprint,
-      frames: framesFromLayers(layers),
+      frames: flattenFrames(doc.archetype, layers),
     },
   };
 }
@@ -845,25 +929,25 @@ function nextFrame(frame: SpriteFrameKey): SpriteFrameKey {
   return SPRITE_FRAME_KEYS[(index + 1) % SPRITE_FRAME_KEYS.length] ?? "move_1";
 }
 
-function readLayers(value: unknown, width: number, height: number): InfantryLayerFrames | null {
+function readLayers(value: unknown, archetype: ArchetypeKey, width: number, height: number): LayerFrames | null {
   if (value == null) {
     return null;
   }
   if (!isRecord(value)) {
     throw new Error("The unit JSON has no layers.");
   }
-  const frames = {} as InfantryLayerFrames;
+  const frames = emptyFrames(archetype, width, height);
   for (const frame of SPRITE_FRAME_KEYS) {
     const stack = value[frame];
     if (!isRecord(stack)) {
       throw new Error(`The ${frame} layers are missing.`);
     }
-    frames[frame] = emptyLayerStack(width, height);
-    for (const layer of INFANTRY_LAYER_KEYS) {
-      if (!isGrid(stack[layer], width, height)) {
+    for (const layer of ARCHETYPE_LAYERS[archetype]) {
+      const grid = stack[layer];
+      if (!isGrid(grid, width, height)) {
         throw new Error(`The ${layer} layer on ${frame} is not a ${width}×${height} grid.`);
       }
-      frames[frame][layer] = cloneGrid(stack[layer]);
+      frames[frame][layer] = cloneGrid(grid);
     }
   }
   return frames;

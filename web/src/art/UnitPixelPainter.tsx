@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import { SPRITE_BAKE } from "../ui/map/figureGround";
-import { INFANTRY_LAYER_KEYS, LAYER_LABEL, LAYER_PAINT_ORDER, type InfantryLayerKey } from "./infantryMarch";
-import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS } from "./starterParts";
+import { ARCHETYPES, ARCHETYPE_LAYERS, UNIT_TYPE_LABEL, layerInfo, layerLabel } from "./archetypeLayers";
+import { ARCHETYPE_STARTERS } from "./archetypeStarters";
+import { FACTION_MILITARY_MAPPINGS } from "./starterParts";
 import { blitBlueprintToSheet80x56, compileBlueprintFrame } from "./blockoutCompiler";
 import {
   FRAME_LABEL,
@@ -10,8 +11,7 @@ import {
   ROSTER_FACTIONS,
   SLOT_LABEL,
   blankDocument,
-  buildMarchDocument,
-  documentFromBlueprint,
+  buildAnimationDocument,
   duplicateFrameToNext,
   duplicateLayerToNext,
   flattenRgba,
@@ -24,10 +24,13 @@ import {
   placeMuzzle,
   saveMotionSprite,
   slotHex,
+  starterBlueprints,
+  starterDocument,
   toPaintFile,
   withEditingFrame,
   withEditingLayer,
   withFaction,
+  withUnitType,
   type Brush,
   type UnitPaintDocument,
 } from "./pixelPaint";
@@ -36,6 +39,11 @@ import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type Ros
 const GRID = 48;
 const ZOOMS = [6, 8, 12] as const;
 const HISTORY_LIMIT = 40;
+/** How strongly the layers you are not painting show while they are dimmed, out of 255. */
+const DIMMED_ALPHA = 84;
+/** The riflemen, a layered starter for each other skeleton, then the flat tanks. */
+const STARTERS = starterBlueprints();
+const UNIT_TYPE_KEYS = Object.keys(UNIT_TYPE_LABEL);
 
 interface HistoryStep {
   doc: UnitPaintDocument;
@@ -56,6 +64,7 @@ const UNIT_TITLE: Record<string, string> = {
   jap_tank_chi_ha: "Type 97 Chi-Ha",
   minor_tank_lt38: "LT vz. 38",
   custom_unit: "New sprite",
+  ...Object.fromEntries(ARCHETYPE_STARTERS.map((item) => [item.blueprint.blueprintId, item.title])),
 };
 
 const FACTION_NAME: Record<RosterFactionId, string> = {
@@ -92,8 +101,9 @@ export function UnitPixelPainter({
   command: PaintCommand | null;
   onDocument?: (doc: UnitPaintDocument) => void;
 }) {
-  const [doc, setDoc] = useState<UnitPaintDocument>(() => documentFromBlueprint(STARTER_BLUEPRINTS[0]));
+  const [doc, setDoc] = useState<UnitPaintDocument>(() => starterDocument(STARTERS[0]?.blueprintId ?? "") ?? blankDocument("GER"));
   const [backup, setBackup] = useState<UnitPaintDocument | null>(null);
+  const [dimOthers, setDimOthers] = useState(true);
   const [brush, setBrush] = useState<Brush>("primary_uniform_or_hull");
   const [tool, setTool] = useState<"brush" | "ground" | "muzzle">("brush");
   const [sheetNote, setSheetNote] = useState("");
@@ -161,11 +171,10 @@ export function UnitPixelPainter({
     if (!command || command.id === 0) {
       return;
     }
-    const blueprint = STARTER_BLUEPRINTS.find((item) => item.blueprintId === command.blueprintId);
-    if (!blueprint) {
+    const next = starterDocument(command.blueprintId);
+    if (!next) {
       return;
     }
-    const next = documentFromBlueprint(blueprint);
     if (command.action === "candidate" && command.candidateBase64) {
       const base64 = command.candidateBase64;
       void flattenCandidate(base64, next)
@@ -177,7 +186,7 @@ export function UnitPixelPainter({
           setDoc(flat);
           setNotice(
             flat.layers && flat.editingLayer
-              ? `The generated picture is on the ${LAYER_LABEL[flat.editingLayer]} layer. Erase the parts that belong on the other layers.`
+              ? `The generated picture is on the ${layerLabel(flat.archetype, flat.editingLayer)} layer. Erase the parts that belong on the other layers.`
               : "The generated picture is on this frame.",
           );
         })
@@ -191,7 +200,7 @@ export function UnitPixelPainter({
     backupRef.current = null;
     setBackup(null);
     setDoc(next);
-    setNotice(`Opened the ${unitTitle(blueprint)}.`);
+    setNotice(`Opened the ${unitTitle(next.blueprint)}.`);
   }, [command, remember]);
 
   useEffect(() => {
@@ -224,14 +233,15 @@ export function UnitPixelPainter({
       }
       if (event.key === "[" || event.key === "]") {
         event.preventDefault();
-        const index = INFANTRY_LAYER_KEYS.indexOf(current.editingLayer);
+        const stack = ARCHETYPE_LAYERS[current.archetype];
+        const index = stack.indexOf(current.editingLayer);
         const direction = event.key === "]" ? 1 : -1;
-        const next = INFANTRY_LAYER_KEYS[(index + direction + INFANTRY_LAYER_KEYS.length) % INFANTRY_LAYER_KEYS.length];
+        const next = stack[(index + direction + stack.length) % stack.length];
         if (!next) {
           return;
         }
         setDoc(withEditingLayer(current, next));
-        setNotice(`Painting ${LAYER_LABEL[next]}.`);
+        setNotice(`Painting ${layerLabel(current.archetype, next)}.`);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -239,31 +249,48 @@ export function UnitPixelPainter({
   }, [undo, commit]);
 
   useEffect(() => {
-    drawGrid(gridRef.current, pinRef.current, doc);
+    drawGrid(gridRef.current, pinRef.current, doc, dimOthers);
     drawSheet(sheetRef.current, doc, setSheetNote);
-  }, [doc]);
+  }, [doc, dimOthers]);
 
   const mapping = FACTION_MILITARY_MAPPINGS[doc.blueprint.factionId];
   const editingLabel = FRAME_LABEL[doc.editingFrame];
-  const layerLabel = doc.layers && doc.editingLayer ? LAYER_LABEL[doc.editingLayer] : null;
-  const modeLine = layerLabel
-    ? `Painting ${layerLabel} on ${editingLabel}. Legs, then torso, then head, then the rifle on top. Arrow keys move this layer. [ and ] change layer.`
+  const skeleton = ARCHETYPES[doc.archetype];
+  const openLayer = doc.layers && doc.editingLayer ? layerLabel(doc.archetype, doc.editingLayer) : null;
+  const stackLine = `${skeleton.layers.map((layer) => layer.label).join(", then ")}, bottom to top`;
+  const modeLine = openLayer
+    ? `Painting ${openLayer} on ${editingLabel}. ${stackLine}. Arrow keys move this layer. [ and ] change layer.`
     : `Painting ${editingLabel}. Duplicate it onto the next frame, then nudge the treads by a pixel or two.`;
   const helpLine = hoverHelp ?? (notice || modeLine);
   const brushLabel = brush === "eraser" ? "Eraser" : `${SLOT_LABEL[brush]} ${slotHex(mapping, brush)}`;
   const toolLabel = tool === "ground" ? "Feet" : tool === "muzzle" ? "Muzzle" : brush === "eraser" ? "Eraser" : "Pencil";
 
-  const units = STARTER_BLUEPRINTS.some((item) => item.blueprintId === doc.blueprint.blueprintId)
-    ? STARTER_BLUEPRINTS
-    : [...STARTER_BLUEPRINTS, doc.blueprint];
+  const units = STARTERS.some((item) => item.blueprintId === doc.blueprint.blueprintId) ? STARTERS : [...STARTERS, doc.blueprint];
+  const unitTypes = UNIT_TYPE_KEYS.includes(doc.blueprint.unitTypeId) ? UNIT_TYPE_KEYS : [...UNIT_TYPE_KEYS, doc.blueprint.unitTypeId];
 
   const openUnit = (blueprintId: string) => {
-    const blueprint = STARTER_BLUEPRINTS.find((item) => item.blueprintId === blueprintId);
-    if (!blueprint) {
+    const next = starterDocument(blueprintId);
+    if (!next) {
       return;
     }
-    commit(documentFromBlueprint(blueprint), null);
-    setNotice(`Opened the ${unitTitle(blueprint)}.`);
+    commit(next, null);
+    setNotice(`Opened the ${unitTitle(next.blueprint)}. ${next.layers ? `It is drawn in ${ARCHETYPE_LAYERS[next.archetype].length} layers.` : "It is four flat frames."}`);
+  };
+
+  const changeUnitType = (unitTypeId: string) => {
+    const current = docRef.current;
+    const next = withUnitType(current, unitTypeId);
+    if (next === current) {
+      return;
+    }
+    const name = (UNIT_TYPE_LABEL[unitTypeId] ?? unitTypeId).toLowerCase();
+    if (next.archetype === current.archetype) {
+      commit(next);
+      setNotice(`This sprite is now filed as ${name}. The drawing stays. Build Animation uses that unit's rules.`);
+      return;
+    }
+    commit(next, null);
+    setNotice(`Empty ${name}, on the ${ARCHETYPES[next.archetype].label.toLowerCase()} skeleton. ${blankLine(next)} Undo brings the last sprite back.`);
   };
 
   const applyPointer = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -307,17 +334,21 @@ export function UnitPixelPainter({
     const next = duplicateLayerToNext(current);
     commit(next);
     setNotice(
-      `${LAYER_LABEL[current.editingLayer]} on ${FRAME_LABEL[current.editingFrame]} was copied onto ${FRAME_LABEL[next.editingFrame]}. The other layers stay.`,
+      `${layerLabel(current.archetype, current.editingLayer)} on ${FRAME_LABEL[current.editingFrame]} was copied onto ${FRAME_LABEL[next.editingFrame]}. The other layers stay.`,
     );
   };
 
-  const buildMarch = () => {
+  const buildAnimation = () => {
     const current = docRef.current;
     if (!current.layers) {
       return;
     }
-    commit(buildMarchDocument(current));
-    setNotice("The march is built. Move 1 reaches, Move 2 drops a pixel, and Fire pulls the rifle back. Leg drawings already on those poses stay.");
+    if (!ARCHETYPE_LAYERS[current.archetype].some((layer) => current.layers?.idle[layer]?.some((row) => row.some((slot) => slot != null)))) {
+      setNotice("Idle is empty. Paint the Idle layers first. Build Animation writes the other three poses from them.");
+      return;
+    }
+    commit(buildAnimationDocument(current));
+    setNotice(`The animation is built from Idle. ${ARCHETYPES[current.archetype].motion}`);
   };
 
   const save = async () => {
@@ -369,7 +400,7 @@ export function UnitPixelPainter({
       commit(flattenRgba(current, image.data, image.width, image.height, mapping), current);
       setNotice(
         current.layers && current.editingLayer
-          ? `The kept picture is on the ${LAYER_LABEL[current.editingLayer]} layer of ${FRAME_LABEL[current.editingFrame]}. Erase the parts that belong on the other layers.`
+          ? `The kept picture is on the ${layerLabel(current.archetype, current.editingLayer)} layer of ${FRAME_LABEL[current.editingFrame]}. Erase the parts that belong on the other layers.`
           : `The kept picture is on ${FRAME_LABEL[current.editingFrame]}. The other three frames are unchanged.`,
       );
     } catch (error) {
@@ -387,7 +418,7 @@ export function UnitPixelPainter({
       const current = docRef.current;
       commit(flattenRgba(current, image.data, image.width, image.height, FACTION_MILITARY_MAPPINGS[current.blueprint.factionId]), current);
       const where = current.layers && current.editingLayer
-        ? `the ${LAYER_LABEL[current.editingLayer]} layer of ${FRAME_LABEL[current.editingFrame]}`
+        ? `the ${layerLabel(current.archetype, current.editingLayer)} layer of ${FRAME_LABEL[current.editingFrame]}`
         : FRAME_LABEL[current.editingFrame];
       setNotice(`${file.name} is on ${where}. Erase the parts that belong elsewhere.`);
     } catch (error) {
@@ -421,6 +452,20 @@ export function UnitPixelPainter({
             {units.map((item) => (
               <option key={item.blueprintId} value={item.blueprintId}>
                 {unitTitle(item)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          {...hint(
+            "Which unit this sprite is. A type on the same skeleton keeps the drawing: a field gun can become a flak gun. A type on another skeleton starts an empty sprite with that skeleton's layers.",
+          )}
+        >
+          Type
+          <select value={doc.blueprint.unitTypeId} onChange={(event) => changeUnitType(event.target.value)}>
+            {unitTypes.map((unitTypeId) => (
+              <option key={unitTypeId} value={unitTypeId}>
+                {UNIT_TYPE_LABEL[unitTypeId] ?? unitTypeId}
               </option>
             ))}
           </select>
@@ -465,20 +510,34 @@ export function UnitPixelPainter({
       </div>
       {doc.layers && (
         <div className="sprite-frames" role="toolbar" aria-label="Layers">
-          {INFANTRY_LAYER_KEYS.map((layer) => (
+          {skeleton.layers.map((layer) => (
             <button
-              key={layer}
+              key={layer.key}
               type="button"
-              aria-pressed={doc.editingLayer === layer}
-              {...hint(layerHint(layer))}
+              aria-pressed={doc.editingLayer === layer.key}
+              {...hint(layer.hint)}
               onClick={() => {
-                setDoc(withEditingLayer(doc, layer));
-                setNotice(`Painting ${LAYER_LABEL[layer]}.`);
+                setDoc(withEditingLayer(doc, layer.key));
+                setNotice(`Painting ${layer.label}.`);
               }}
             >
-              {LAYER_LABEL[layer]}
+              {layer.label}
             </button>
           ))}
+          <button
+            type="button"
+            className="sprite-dim"
+            aria-pressed={dimOthers}
+            {...hint(
+              "Fade the layers you are not painting, so the open layer stands out and shows in full where another layer covers it. This only changes the editor. The game sprite on the right stays whole.",
+            )}
+            onClick={() => {
+              setDimOthers(!dimOthers);
+              setNotice(dimOthers ? "Every layer shows at full strength, in paint order." : `Only ${openLayer ?? "the open layer"} shows at full strength.`);
+            }}
+          >
+            Dim other layers
+          </button>
         </div>
       )}
 
@@ -505,11 +564,13 @@ export function UnitPixelPainter({
         )}
         <HintButton
           hint={hint(
-            "Clear the canvas and start an empty 48 by 48 sprite for the country selected above. The unit you had open stays in the list.",
+            "Clear the canvas and start an empty 48 by 48 sprite of the type and country selected above. The unit you had open stays in the list.",
           )}
           onClick={() => {
-            commit(blankDocument(docRef.current.blueprint.factionId), null);
-            setNotice("Empty soldier. Paint the legs, torso, head, and the hands with the rifle, then build the march.");
+            const current = docRef.current;
+            const next = blankDocument(current.blueprint.factionId, current.archetype, current.blueprint.unitTypeId);
+            commit(next, null);
+            setNotice(`Empty ${(UNIT_TYPE_LABEL[next.blueprint.unitTypeId] ?? next.blueprint.unitTypeId).toLowerCase()}. ${blankLine(next)}`);
           }}
         >
           New sprite
@@ -525,21 +586,21 @@ export function UnitPixelPainter({
         {doc.layers && (
           <HintButton
             hint={hint(
-              "Place the idle head, tunic, and rifle onto Move 1, Move 2, and Fire. A leg drawing already on Move 1 or Move 2 stays. Fire plants the idle boots a little wider, toes still pointing right.",
+              doc.archetype === "infantry"
+                ? "Place the idle head, tunic, and rifle onto Move 1, Move 2, and Fire. A leg drawing already on Move 1 or Move 2 stays. Fire plants the idle boots a little wider, toes still pointing right."
+                : `Write Move 1, Move 2, and Fire from the Idle layers. Layers shift by whole pixels and nothing turns. ${skeleton.motion} What is on those three poses now is replaced.`,
             )}
-            onClick={buildMarch}
+            onClick={buildAnimation}
           >
-            Build the march
+            Build Animation
           </HintButton>
         )}
         {doc.layers && doc.editingLayer && (
           <HintButton
-            hint={hint(
-              `Copy the ${LAYER_LABEL[doc.editingLayer]} layer onto the next pose and select that pose. The other three layers on that pose stay.`,
-            )}
+            hint={hint(`Copy the ${openLayer} layer onto the next pose and select that pose. The other layers on that pose stay.`)}
             onClick={duplicateLayer}
           >
-            Copy layer → next
+            {"Copy Layer -> Next Pose"}
           </HintButton>
         )}
         <HintButton
@@ -594,7 +655,7 @@ export function UnitPixelPainter({
             ))}
           </select>
         </label>
-        {doc.layers && (
+        {doc.layers && doc.archetype === "infantry" && (
           <HintButton
             hint={hint(
               "Fill the tunic behind the rifle on this pose, and select the torso. The rifle stays on top. A step or a shot then shows the body instead of a hole.",
@@ -653,7 +714,7 @@ export function UnitPixelPainter({
           <ToolButton
             pressed={tool === "brush" && brush !== "eraser"}
             hint={hint(
-              `Pencil. Paint ${brush === "eraser" ? "the selected colour" : brushLabel} onto ${layerLabel ? `${layerLabel} on ${editingLabel}` : editingLabel}. The rifle stays above the tunic, the tunic above the legs.`,
+              `Pencil. Paint ${brush === "eraser" ? "the selected colour" : brushLabel} onto ${openLayer ? `${openLayer} on ${editingLabel}. Layers further along the row stay on top of it` : editingLabel}.`,
             )}
             onClick={() => {
               setTool("brush");
@@ -688,7 +749,9 @@ export function UnitPixelPainter({
           </ToolButton>
           <ToolButton
             pressed={tool === "muzzle"}
-            hint={hint("Muzzle. Click where a gun flash should appear. This places the crimson mark.")}
+            hint={hint(
+              "Muzzle. Click the tip of the gun on the Idle pose. This places the crimson mark. Build Animation paints the flash there on Fire for a tank, an aircraft, and a ship.",
+            )}
             onClick={() => setTool("muzzle")}
           >
             <span aria-hidden="true">◎</span>
@@ -786,9 +849,14 @@ export function UnitPixelPainter({
             <h3>{doc.layers ? "Layers" : "Frames"}</h3>
             <p className="sprite-side-lead">
               {doc.layers && doc.editingLayer
-                ? `${LAYER_LABEL[doc.editingLayer]} on ${FRAME_LABEL[doc.editingFrame]}. Legs under the tunic, head above it, rifle above everything. Move this layer with the arrow keys, then paint the tunic into the gap.`
+                ? `${openLayer} on ${FRAME_LABEL[doc.editingFrame]}. ${layerInfo(doc.archetype, doc.editingLayer)?.hint ?? ""}`
                 : `${FRAME_LABEL[doc.editingFrame]}. Idle, two steps, and the shot. A country recolours the slots. It does not move the pixels.`}
             </p>
+            {doc.layers && (
+              <p className="sprite-side-lead">
+                {skeleton.label} skeleton: {stackLine}. Fits {skeleton.footprint.width} by {skeleton.footprint.height} pixels beside the 26-pixel rifleman.
+              </p>
+            )}
           </section>
           <section>
             <h3>Colours</h3>
@@ -876,7 +944,14 @@ function unitTitle(blueprint: Pick<UnitSpriteSheetBlueprint, "blueprintId" | "hi
   return UNIT_TITLE[blueprint.blueprintId] ?? blueprint.historicalEraTag ?? blueprint.blueprintId;
 }
 
-function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null, doc: UnitPaintDocument): void {
+/** What to paint first on an empty sprite, by skeleton. */
+function blankLine(doc: UnitPaintDocument): string {
+  const labels = ARCHETYPES[doc.archetype].layers.map((layer) => layer.label.toLowerCase());
+  const facing = doc.archetype === "aircraft" ? "from above, nose to the right" : doc.archetype === "ship" ? "in side profile, bow to the right" : "facing right";
+  return `Paint the Idle pose ${facing}: ${labels.join(", ")}. Then Build Animation.`;
+}
+
+function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null, doc: UnitPaintDocument, dimOthers: boolean): void {
   if (!grid || !pins) {
     return;
   }
@@ -889,8 +964,26 @@ function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null
   const image = ctx.createImageData(GRID, GRID);
   if (doc.layers && doc.editingLayer) {
     const stack = doc.layers[doc.editingFrame];
-    for (const layer of LAYER_PAINT_ORDER) {
-      paintLayer(image, stack[layer], mapping, 255);
+    const order = ARCHETYPE_LAYERS[doc.archetype];
+    if (dimOthers) {
+      // Onion skin: the other layers go down faded, in paint order, and the open layer goes over them in full.
+      for (const layer of order) {
+        const cells = stack[layer];
+        if (cells && layer !== doc.editingLayer) {
+          paintLayer(image, cells, mapping, DIMMED_ALPHA);
+        }
+      }
+      const open = stack[doc.editingLayer];
+      if (open) {
+        paintLayer(image, open, mapping, 255);
+      }
+    } else {
+      for (const layer of order) {
+        const cells = stack[layer];
+        if (cells) {
+          paintLayer(image, cells, mapping, 255);
+        }
+      }
     }
   } else {
     let keys: (MilitaryStripKey | null)[] = [];
@@ -961,19 +1054,6 @@ function writePixel(data: Uint8ClampedArray, offset: number, hex: string, alpha:
   data[offset + 1] = (rgb >> 8) & 255;
   data[offset + 2] = rgb & 255;
   data[offset + 3] = alpha;
-}
-
-function layerHint(layer: InfantryLayerKey): string {
-  if (layer === "legs") {
-    return "Hips and boots, under the tunic. Arrow keys move them on this pose.";
-  }
-  if (layer === "torso") {
-    return "The body, above the legs and under the head and the rifle. Move the rifle aside, then paint the tunic into the gap so a later pose has no hole.";
-  }
-  if (layer === "head") {
-    return "Helmet and face, above the tunic and under the rifle.";
-  }
-  return "Hands and the rifle, above every other layer. Arrow keys move it on this pose. Paint the tunic into the gap it leaves.";
 }
 
 const ARROW_STEP: Record<string, [number, number]> = {
@@ -1066,8 +1146,12 @@ const PAINTER_CSS = `
 }
 .sprite-frames {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 0 14px 8px;
+}
+.sprite-frames .sprite-dim {
+  margin-left: 18px;
 }
 .sprite-frames button {
   font: 13px/1.3 "Segoe UI", sans-serif;

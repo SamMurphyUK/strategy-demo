@@ -54,8 +54,22 @@ async function canvasPngBase64(canvas: HTMLCanvasElement): Promise<string> {
   return btoa(binary);
 }
 
+interface SavedCandidate {
+  factionId: string;
+  unitTypeId?: string;
+  blueprintId: string;
+  seed: number;
+  quantized: string;
+  silhouetteIoU: number | null;
+  promoted?: boolean;
+}
+
+const FACTION_ORDER = ["GER", "USSR", "UK", "US", "JAP"];
+
 export function UnitBakeReviewPanel() {
   const [doc, setDoc] = useState<UnitPaintDocument | null>(null);
+  const [saved, setSaved] = useState<SavedCandidate[]>([]);
+  const [galleryKey, setGalleryKey] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<BakedSeed[]>([]);
   const [selectedSeed, setSelectedSeed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,6 +81,21 @@ export function UnitBakeReviewPanel() {
   const blueprintId = doc?.blueprint.blueprintId ?? "";
   const openedId = useRef(blueprintId);
   const selected = candidates.find((item) => item.seed === selectedSeed) ?? null;
+
+  useEffect(() => {
+    let cancel = false;
+    fetch("/__dev/bake-candidates")
+      .then((response) => response.json())
+      .then((json) => {
+        if (!cancel && Array.isArray(json.candidates)) {
+          setSaved(json.candidates);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (openedId.current === blueprintId) {
@@ -184,9 +213,48 @@ export function UnitBakeReviewPanel() {
     onBlur: () => setHelp(null),
   });
 
+  const galleryPick = saved.find((item) => galleryId(item) === galleryKey) ?? null;
+  const grouped = FACTION_ORDER.map((factionId) => ({
+    factionId,
+    items: saved.filter((item) => item.factionId === factionId),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <section className="unit-bake-review" aria-label="Sprite editor">
       <style>{PANEL_CSS}</style>
+      <details className="overnight-gallery" open={saved.length > 0}>
+        <summary>Overnight batch ({saved.length})</summary>
+        {saved.length === 0 && <p className="sprite-generate-lead">No overnight pictures yet.</p>}
+        {grouped.map((group) => (
+          <div key={group.factionId}>
+            <h2>{group.factionId}</h2>
+            <div className="overnight-row">
+              {group.items.map((item) => (
+                <button
+                  key={galleryId(item)}
+                  type="button"
+                  aria-pressed={galleryId(item) === galleryKey}
+                  onClick={() => setGalleryKey(galleryId(item))}
+                >
+                  <img src={`/__dev/bake-file?path=${encodeURIComponent(item.quantized)}`} alt="" width={48} height={48} />
+                  <small>
+                    {item.unitTypeId ?? item.blueprintId} {item.seed}
+                    {item.silhouetteIoU == null ? "" : ` · ${item.silhouetteIoU.toFixed(2)}`}
+                  </small>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        {galleryPick && (
+          <figure>
+            <figcaption>
+              {galleryPick.factionId} {galleryPick.unitTypeId ?? galleryPick.blueprintId} seed {galleryPick.seed}
+            </figcaption>
+            <img src={`/__dev/bake-file?path=${encodeURIComponent(galleryPick.quantized)}`} alt="" width={192} height={192} />
+          </figure>
+        )}
+      </details>
       <FrameEditor />
       <button
         type="button"
@@ -305,6 +373,14 @@ const PANEL_CSS = `
   flex: none;
   height: 220px;
 }
+.overnight-gallery { flex: none; }
+.overnight-gallery h2 { margin: 12px 0 6px; font: 600 14px/1.2 "Segoe UI", sans-serif; }
+.overnight-gallery summary { cursor: pointer; font: 600 15px/1.4 "Segoe UI", sans-serif; }
+.overnight-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.overnight-row button { width: 96px; padding: 4px; background: #2a2420; color: #f5f0e6; border: 1px solid #4b3d44; }
+.overnight-row button[aria-pressed="true"] { border-color: #ddcf99; }
+.overnight-row img, .overnight-gallery figure img { image-rendering: pixelated; background: #c8c2b6; }
+.overnight-row small { display: block; color: #ddcf99; font-size: 10px; }
 .sprite-blockout-toggle {
   flex: none;
   align-self: flex-start;
@@ -376,6 +452,10 @@ const PANEL_CSS = `
   color: #f5f0e6;
 }
 `;
+
+function galleryId(item: SavedCandidate): string {
+  return `${item.factionId}:${item.blueprintId}:${item.seed}`;
+}
 
 function bakeBody(
   blueprint: UnitSkeletonBlueprint,

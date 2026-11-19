@@ -469,6 +469,43 @@ export function bakeUnitPlugin() {
     configureServer(server) {
       const root = server.config.root;
 
+      server.middlewares.use("/__dev/bake-candidates", async (req, res) => {
+        if (req.method !== "GET") {
+          return reply(res, 405, { ok: false, error: "Use GET." });
+        }
+        try {
+          const manifest = await readManifest(resolveInsideRoot(root, MANIFEST_RELATIVE));
+          return reply(res, 200, manifest);
+        } catch (error) {
+          const http = httpError(error);
+          return reply(res, http.status, { ok: false, error: http.error });
+        }
+      });
+
+      server.middlewares.use("/__dev/bake-file", async (req, res) => {
+        if (req.method !== "GET") {
+          return reply(res, 405, { ok: false, error: "Use GET." });
+        }
+        const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "";
+        const rel = new URLSearchParams(query).get("path") ?? "";
+        const normal = rel.replaceAll("\\", "/");
+        if (!normal.startsWith("assets/candidates/") || !normal.endsWith(".png") || normal.includes("..")) {
+          return reply(res, 422, { ok: false, error: "Path must be a candidate PNG." });
+        }
+        try {
+          const bytes = await readFile(resolveInsideRoot(root, normal));
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "image/png");
+          res.end(bytes);
+        } catch (error) {
+          if (error?.code === "ENOENT") {
+            return reply(res, 404, { ok: false, error: "That candidate is not on disk." });
+          }
+          const http = httpError(error);
+          return reply(res, http.status, { ok: false, error: http.error });
+        }
+      });
+
       server.middlewares.use(BAKE_ROUTE, async (req, res) => {
         if (req.method !== "POST") {
           return reply(res, 405, { ok: false, error: "Use POST." });

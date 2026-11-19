@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { compileBlueprintFrame } from "./blockoutCompiler";
 import { poseFiring, poseFrameAt, poseStep } from "./motionPreview";
 import { FRAME_LABEL, loadMotionSprite } from "./pixelPaint";
+import type { ArchetypeKey } from "./archetypeLayers";
+import { ARCHETYPE_STARTERS } from "./archetypeStarters";
 import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS } from "./starterParts";
 import type { UnitSpriteSheetBlueprint } from "./skeletonSchema";
 import { MILITARY } from "../ui/theme/militaryPalette";
@@ -15,10 +17,25 @@ interface Actor {
   phase: number;
 }
 
+const SKELETON_DETAIL: Record<ArchetypeKey, string> = {
+  infantry: "the march",
+  tank: "tread, bounce, and recoil",
+  mech_infantry: "tread and a lifting body",
+  artillery: "settle and recoil",
+  aircraft: "propeller and guns",
+  ship: "foam, swell, and broadside",
+};
+
+/** One lane for each skeleton. Every lane plays the four flat frames and nothing else. */
 const FIELD: Omit<Actor, "depth">[] = [
-  actor("ger-idle", "ger_infantry_43", "German rifleman", "four frames", 0),
-  actor("ussr-idle", "ussr_infantry_43", "Soviet rifleman", "four frames", 2),
-  actor("pz4-idle", "ger_tank_pz4", "Panzer IV", "tracks and a kick", 1),
+  actor("ger-idle", "ger_infantry_43", "German rifleman", SKELETON_DETAIL.infantry, 0),
+  ...ARCHETYPE_STARTERS.map((item, index) => ({
+    id: item.blueprint.blueprintId,
+    blueprint: item.blueprint,
+    name: item.title,
+    detail: SKELETON_DETAIL[item.archetype],
+    phase: (index + 1) % 3,
+  })),
 ];
 
 function actor(id: string, blueprintId: string, name: string, detail: string, phase: number): Omit<Actor, "depth"> {
@@ -33,7 +50,7 @@ function withDepths(actors: Omit<Actor, "depth">[]): Actor[] {
   const count = actors.length;
   return actors.map((item, index) => ({
     ...item,
-    depth: count === 1 ? 0.7 : 0.28 + (0.56 * index) / (count - 1),
+    depth: count === 1 ? 0.7 : 0.2 + (0.72 * index) / (count - 1),
   }));
 }
 
@@ -112,10 +129,10 @@ export function MotionTestLevel() {
 
       ctx.fillStyle = MILITARY.bone;
       ctx.fillRect(0, 0, cssW, grounds[0] ?? 0);
-      actors.forEach((_item, index) => {
+      actors.forEach((item, index) => {
         const top = grounds[index] ?? 0;
         const bottom = grounds[index + 1] ?? cssH;
-        ctx.fillStyle = bands[index % bands.length] ?? MILITARY.brown;
+        ctx.fillStyle = item.blueprint.category === "sea" ? MILITARY.steel : (bands[index % bands.length] ?? MILITARY.brown);
         ctx.fillRect(0, top, cssW, bottom - top);
       });
 
@@ -158,7 +175,8 @@ export function MotionTestLevel() {
         }
 
         const specks = dust.get(item.id) ?? [];
-        if (!firing && (pose === "move_1" || pose === "move_2") && lastStep.get(item.id) !== step) {
+        const onLand = item.blueprint.category === "land";
+        if (onLand && !firing && (pose === "move_1" || pose === "move_2") && lastStep.get(item.id) !== step) {
           specks.push({ x: footX - facing * 8, y: groundY - 1, life: 6 });
         }
         lastStep.set(item.id, step);
@@ -237,8 +255,8 @@ export function MotionTestLevel() {
       </header>
       <canvas ref={canvasRef} />
       <p className="motion-test-note">
-        Idle, move 1, idle, move 2, eleven poses a second. The figure steps one pixel at a time. Fire kicks back and flashes.
-        Space pauses.
+        One lane for each skeleton: infantry, tank, mechanised infantry, artillery, aircraft, ship. Idle, move 1, idle, move 2,
+        eleven poses a second. The figure steps one pixel at a time. Fire kicks back and flashes. Space pauses.
       </p>
       <style>{STYLE}</style>
     </section>

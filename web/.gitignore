@@ -2,3 +2,9 @@ node_modules/
 dist/
 .env.local
 .env.*.local
+
+# Generated 256px reference plates. A second copy is written to Downloads/Reference Images.
+reference_plates/
+
+# Faction sheets converted from Downloads/references for the overnight slicer.
+reference_sheets/
