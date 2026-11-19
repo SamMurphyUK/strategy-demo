@@ -1,8 +1,8 @@
 // The static base map, painted once onto an offscreen canvas and blitted every frame.
 //
-//   Layer 0  slate water with cached pixel wave bands, then a shallow shelf and sand edge
+//   Layer 0  dark slate water with cached pixel wave bands, then stepped shelf shallows and a sand edge
 //   Layer 1  muted faction land, a 4×4 dither, and a light paper grain
-//   Layer 2  inner sepia shade along every territory's inside edge
+//   Layer 2  inner sepia shade along every territory's inside edge, then the coast bevel (light top-left)
 //   Layer 3  territory borders and the coastline ink
 //
 // Everything here is slow (blur, clip, thousands of segments), so none of it runs per frame. The live
@@ -29,6 +29,7 @@ import {
   type Seam,
   sharedEdges,
 } from "./mapBakeMath";
+import { coastBevel, DEEP_SEA_SHARE, mixHex, SHELF_GROW, shelfBands } from "./coastRelief";
 import { sunkTerritoryFill } from "./figureGround";
 import {
   BORDER_PASSES,
@@ -62,11 +63,21 @@ export interface Baked {
 const GRAIN_SIZE = 256;
 /** How strongly the paper grain is multiplied into the land. */
 const LAND_GRAIN_ALPHA = 0.35;
-/** Ocean from the 16-colour strip. The tested `SEA_BASE_COLOR` stays the parchment-era constant. */
-const WATER = MILITARY.steel;
-const WAVE_DEEP = MILITARY.spruce;
-const WAVE_FOAM = MILITARY.spruce;
+/**
+ * Open ocean: slate from the 16-colour strip, pulled toward charcoal so the shelf reads lighter against it.
+ * The tested `SEA_BASE_COLOR` stays the parchment-era constant.
+ */
+const WATER = mixHex(MILITARY.steel, MILITARY.charcoal, DEEP_SEA_SHARE);
+/** Sea-zone seams stay full spruce, so zone edges still read on the darker water. */
+const SEAM = MILITARY.spruce;
+/** Wave dashes: spruce eased toward the water, so the darker sea is not busier than the old one. */
+const WAVE_DEEP = mixHex(WATER, MILITARY.spruce, 0.45);
+const WAVE_FOAM = WAVE_DEEP;
+/** Shallows are laid over the open sea in stacked bands (see `shelfBands`). */
 const SHELF = MILITARY.spruce;
+/** Coastal bevel: a pale edge toward the light, a dark one away from it. */
+const BEVEL_HIGHLIGHT = { color: MILITARY.cream, alpha: 0.3 };
+const BEVEL_SHADOW = { color: MILITARY.charcoal, alpha: 0.4 };
 const SAND = MILITARY.tan;
 const INNER_SHADE = MILITARY.charcoal;
 /** Faction land from the strip. `FACTION_TINT` remains the tested parchment palette. */
@@ -177,6 +188,54 @@ function segmentsPath(segments: [number, number, number, number][]): Path2D {
   return path;
 }
 
+/** Shelf sheet resolution, in pixels per map unit. It is all soft gradient, so it needs no more. */
+const SHELF_SHEET_SCALE = 2;
+const shelfSheets = new WeakMap<object, { key: string; sheet: HTMLCanvasElement }>();
+
+/**
+ * The sea's depth steps as a transparent sheet over the whole world: the land silhouette, blurred at each
+ * step's spread and laid in the shelf colour. The world wraps, so the silhouette is drawn a world to the
+ * left and right as well, and the shelf carries across the seam. Cached per land shape, since it does not
+ * depend on the bake scale or on who owns what. Returns null where the canvas has no blur filter.
+ */
+function shelfSheet(
+  owner: object,
+  bounds: Rect,
+  paintLand: (g: CanvasRenderingContext2D) => void,
+): HTMLCanvasElement | null {
+  const key = `${bounds.x},${bounds.y},${bounds.w},${bounds.h}`;
+  const hit = shelfSheets.get(owner);
+  if (hit?.key === key) {
+    return hit.sheet;
+  }
+  const w = Math.max(1, Math.ceil(bounds.w * SHELF_SHEET_SCALE));
+  const h = Math.max(1, Math.ceil(bounds.h * SHELF_SHEET_SCALE));
+  const sheet = document.createElement("canvas");
+  sheet.width = w;
+  sheet.height = h;
+  const out = sheet.getContext("2d")!;
+  if (typeof out.filter !== "string") {
+    return null;
+  }
+  const mask = document.createElement("canvas");
+  mask.width = w;
+  mask.height = h;
+  const g = mask.getContext("2d")!;
+  g.fillStyle = SHELF;
+  g.strokeStyle = SHELF;
+  for (const dx of [-bounds.w, 0, bounds.w]) {
+    g.setTransform(w / bounds.w, 0, 0, h / bounds.h, (-bounds.x + dx) * (w / bounds.w), -bounds.y * (h / bounds.h));
+    paintLand(g);
+  }
+  for (const band of shelfBands()) {
+    out.filter = `blur(${band.sigma * SHELF_SHEET_SCALE}px)`;
+    out.globalAlpha = band.alpha;
+    out.drawImage(mask, 0, 0);
+  }
+  shelfSheets.set(owner, { key, sheet });
+  return sheet;
+}
+
 export function bakeTerrain(input: BakeInput, scale: number): Baked {
   const { bounds, land } = input;
   const canvas = document.createElement("canvas");
@@ -222,10 +281,31 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   ctx.imageSmoothingEnabled = true;
   toWorld();
   ctx.lineWidth = SEA_SEAM_WIDTH;
-  ctx.strokeStyle = WAVE_DEEP;
+  ctx.strokeStyle = SEAM;
   ctx.stroke(segmentsPath(sharedEdges(seaRegions.map((r) => shapeOf(r, input)), seam, 2)));
 
-  // Shallow shelf and sand edge, stroked before the land fill so only the seaward half remains.
+  // Depth steps: the shelf sheet, built once per land shape and blitted. Land is painted over it below.
+  const shelf = shelfSheet(land ?? input.paths, bounds, (g) => {
+    // The stroke fattens the silhouette, so a thin island still gets a shelf the blur does not wash out.
+    g.lineWidth = SHELF_GROW * 2;
+    g.lineJoin = "round";
+    if (land) {
+      g.fill(land.masterLandPath);
+      g.stroke(land.masterLandPath);
+      return;
+    }
+    const union = new Path2D();
+    for (const region of landRegions) {
+      union.addPath(input.paths.get(region.id)!);
+    }
+    g.fill(union, "evenodd");
+    g.stroke(union);
+  });
+  if (shelf) {
+    ctx.drawImage(shelf, bounds.x, bounds.y, bounds.w, bounds.h);
+  }
+
+  // Sand edge, stroked before the land fill so only the seaward half remains.
   const coast = land
     ? runsPath(ringsOf(land.polygons).flatMap((ring) => ringRuns(ring, seam)))
     : landRegions.length > 0
@@ -235,9 +315,6 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     ctx.save();
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    ctx.strokeStyle = SHELF;
-    ctx.lineWidth = 12 / sx;
-    ctx.stroke(coast);
     ctx.strokeStyle = SAND;
     ctx.lineWidth = 5 / sx;
     ctx.stroke(coast);
@@ -328,6 +405,31 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     ctx.restore();
   }
 
+  // Coast bevel, light from the top-left: a pale band inside the up-left edges, a dark one inside the
+  // down-right edges. The coast path slides toward or away from the light and is clipped to the land, so
+  // only the inland side survives. It sits past the coastline ink and over the inner shade, which it
+  // lifts on the lit side and deepens on the far side. Land cut from the master SVG only: the rough
+  // cutters have no true coast, and their outlines would bevel the borders between territories.
+  if (land && coast) {
+    const bevel = coastBevel(sx, (COAST_INK.width / 2) * sx);
+    ctx.save();
+    ctx.clip(land.masterLandPath);
+    ctx.lineWidth = bevel.band / sx;
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "round";
+    const lay = (tone: { color: string; alpha: number }, dx: number, dy: number) => {
+      ctx.save();
+      ctx.translate(dx / sx, dy / sy);
+      ctx.globalAlpha = tone.alpha;
+      ctx.strokeStyle = tone.color;
+      ctx.stroke(coast);
+      ctx.restore();
+    };
+    lay(BEVEL_SHADOW, bevel.shadow.dx, bevel.shadow.dy);
+    lay(BEVEL_HIGHLIGHT, bevel.highlight.dx, bevel.highlight.dy);
+    ctx.restore();
+  }
+
   // Layer 3: borders two territories share, smudge then ink, kept off the water; then the coastline.
   ctx.save();
   if (land) {
@@ -351,7 +453,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
 }
 
 /** Bump when the baked paint changes, so a live view throws away the old bitmap. */
-export const BAKE_PAINT = 2;
+export const BAKE_PAINT = 3;
 
 /** Owns the cached base map. Create one per map view. */
 export class TerrainBake {

@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from "vite";
 import { bakeUnitPlugin } from "./dev/bakeUnitPlugin.mjs";
 import { publicDirPlugin } from "./dev/publicDirPlugin.mjs";
 import { saveMapPlugin } from "./dev/saveMapPlugin.mjs";
+import { unitStampsPlugin } from "./dev/unitStampsPlugin.mjs";
 
 export default defineConfig(({ mode }) => {
   // Vite only forwards VITE_ keys to the client. The bake plugin reads the token
@@ -20,6 +21,7 @@ export default defineConfig(({ mode }) => {
     publicDirPlugin(),
     saveMapPlugin({ file: "../demomap01.json" }),
     bakeUnitPlugin(),
+    unitStampsPlugin(),
   ],
   server: {
     // Bind IPv4 explicitly. On this machine localhost resolves to 127.0.0.1, and Vite's

@@ -39,6 +39,24 @@ import {
   rosterCues,
 } from '../theme/factionRoster';
 import type { BakedScenery } from './scenery/sceneryBake';
+import { toneCurve } from './scenery/toneCurve';
+import {
+  paintCrater,
+  paintGrid,
+  paintParapet,
+  paintTrench,
+  paintWire,
+  squashPaint,
+} from './scenery/groundPerspective';
+import { decalRadii } from './scenery/perspective';
+import {
+  GROUND_BOTTOM,
+  GROUND_TOP,
+  groundMate,
+  LAND_GRID_ALPHA,
+  LAND_GROUND_WASH,
+  type Paint,
+} from './scenery/sceneryPaint';
 
 /**
  * STRICT 16-COLOR VINTAGE MILITARY PALETTE
@@ -95,6 +113,14 @@ interface SkyKeyframe {
   top: RGB;
   mid: RGB;
   horizon: RGB;
+  /**
+   * What the sky does to the ground. `ambient` multiplies the baked scenery (cool and dark at night,
+   * warm and bright at noon). `rim` is the colour of a soft screen glow on the side of the sun or moon,
+   * `rimK` how strong it is.
+   */
+  ambient: RGB;
+  rim: RGB;
+  rimK: number;
 }
 
 const SKY_KEYFRAMES: SkyKeyframe[] = [
@@ -104,6 +130,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [116, 140, 165],
     mid: [195, 185, 155],
     horizon: [228, 218, 160],
+    ambient: [255, 252, 244],
+    rim: [255, 238, 190],
+    rimK: 0.1,
   },
   // 0.35: Late Afternoon
   {
@@ -111,6 +140,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [104, 124, 146],
     mid: [204, 168, 122],
     horizon: [232, 186, 114],
+    ambient: [255, 236, 208],
+    rim: [255, 208, 140],
+    rimK: 0.16,
   },
   // 0.46: Warm Golden-Orange Sunset
   {
@@ -118,6 +150,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [94, 60, 84],
     mid: [214, 112, 54],
     horizon: [244, 166, 58],
+    ambient: [226, 172, 152],
+    rim: [255, 160, 72],
+    rimK: 0.36,
   },
   // 0.54: Twilight into Nightfall
   {
@@ -125,6 +160,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [46, 36, 52],
     mid: [54, 58, 76],
     horizon: [72, 82, 98],
+    ambient: [138, 122, 160],
+    rim: [232, 124, 76],
+    rimK: 0.22,
   },
   // 0.68: Deep Navy / Charcoal Night
   {
@@ -132,6 +170,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [22, 24, 32],
     mid: [30, 36, 48],
     horizon: [40, 50, 64],
+    ambient: [88, 106, 162],
+    rim: [150, 182, 232],
+    rimK: 0.12,
   },
   // 0.86: Soft Dawn / First Light
   {
@@ -139,6 +180,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [34, 40, 56],
     mid: [82, 64, 82],
     horizon: [142, 92, 84],
+    ambient: [136, 118, 152],
+    rim: [255, 150, 112],
+    rimK: 0.22,
   },
   // 0.94: Golden Sunrise
   {
@@ -146,6 +190,9 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [86, 108, 128],
     mid: [186, 142, 106],
     horizon: [226, 186, 130],
+    ambient: [250, 214, 178],
+    rim: [255, 202, 132],
+    rimK: 0.26,
   },
   // 1.00: Wrap around to High Noon
   {
@@ -153,10 +200,21 @@ const SKY_KEYFRAMES: SkyKeyframe[] = [
     top: [116, 140, 165],
     mid: [195, 185, 155],
     horizon: [228, 218, 160],
+    ambient: [255, 252, 244],
+    rim: [255, 238, 190],
+    rimK: 0.1,
   },
 ];
 
-function getSkyColors(cycle: number): {top: RGB; mid: RGB; horizon: RGB} {
+/** The sky, and the light it throws on the ground, at one point of the 60 second cycle. */
+function getSkyState(cycle: number): {
+  top: RGB;
+  mid: RGB;
+  horizon: RGB;
+  ambient: RGB;
+  rim: RGB;
+  rimK: number;
+} {
   for (let i = 0; i < SKY_KEYFRAMES.length - 1; i++) {
     const k1 = SKY_KEYFRAMES[i];
     const k2 = SKY_KEYFRAMES[i + 1];
@@ -166,14 +224,281 @@ function getSkyColors(cycle: number): {top: RGB; mid: RGB; horizon: RGB} {
         top: lerpRGB(k1.top, k2.top, t),
         mid: lerpRGB(k1.mid, k2.mid, t),
         horizon: lerpRGB(k1.horizon, k2.horizon, t),
+        ambient: lerpRGB(k1.ambient, k2.ambient, t),
+        rim: lerpRGB(k1.rim, k2.rim, t),
+        rimK: k1.rimK + (k2.rimK - k1.rimK) * t,
       };
     }
   }
-  return {
-    top: SKY_KEYFRAMES[0].top,
-    mid: SKY_KEYFRAMES[0].mid,
-    horizon: SKY_KEYFRAMES[0].horizon,
-  };
+  const first = SKY_KEYFRAMES[0];
+  return { top: first.top, mid: first.mid, horizon: first.horizon, ambient: first.ambient, rim: first.rim, rimK: first.rimK };
+}
+
+function getSkyColors(cycle: number): {top: RGB; mid: RGB; horizon: RGB} {
+  const {top, mid, horizon} = getSkyState(cycle);
+  return {top, mid, horizon};
+}
+
+// ============================================================================
+// BACKDROP LIGHTING: the sky lights the baked ground, skyline and edge
+// ============================================================================
+
+const SKY_CYCLE_SECONDS = 60;
+const SKY_HORIZON_Y = 114;
+const SKY_BOARD_WIDTH = 1280;
+
+function skyCycle(time: number): number {
+  return (((time % SKY_CYCLE_SECONDS) + SKY_CYCLE_SECONDS) % SKY_CYCLE_SECONDS) / SKY_CYCLE_SECONDS;
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/** Board x of the sun for a point of the cycle, or null when it is down. Mirrors the skybox. */
+function sunBoardX(cycle: number, width: number): number | null {
+  const p = cycle >= 0.86 ? (cycle - 0.86) / 0.68 : cycle <= 0.54 ? (cycle + 0.14) / 0.68 : -1;
+  return p >= 0 && p <= 1 ? Math.round(50 + p * (width - 100)) : null;
+}
+
+/** Board x of the moon, or null. Mirrors the skybox. */
+function moonBoardX(cycle: number, width: number): number | null {
+  if (cycle < 0.48 || cycle > 0.94) return null;
+  return Math.round(60 + ((cycle - 0.48) / 0.46) * (width - 120));
+}
+
+export interface SkyLight {
+  /** Multiplied over the baked layers. */
+  ambient: RGB;
+  /** Screen glows, one per body in the sky: the sun and the moon trade places over dusk and dawn. */
+  rims: { x: number; color: RGB; k: number }[];
+  /** Coarse key. Two lights with the same key look the same, so the lit copy is rebuilt only when it changes. */
+  key: string;
+}
+
+/** The light the sky throws on the ground at this time. Driven by SKY_KEYFRAMES. */
+export function skyLight(time: number, width = SKY_BOARD_WIDTH): SkyLight {
+  const cycle = skyCycle(time);
+  const state = getSkyState(cycle);
+  const rims: SkyLight['rims'] = [];
+  const sunX = sunBoardX(cycle, width);
+  if (sunX !== null) {
+    const weight = cycle >= 0.86 ? clamp01((cycle - 0.86) / 0.08) : cycle <= 0.46 ? 1 : clamp01((0.54 - cycle) / 0.08);
+    if (weight > 0.01) rims.push({x: sunX, color: state.rim, k: state.rimK * weight});
+  }
+  const moonX = moonBoardX(cycle, width);
+  if (moonX !== null) {
+    const weight = clamp01((cycle - 0.48) / 0.08) * clamp01((0.94 - cycle) / 0.08);
+    if (weight > 0.01) rims.push({x: moonX, color: state.rim, k: state.rimK * weight * 0.8});
+  }
+  const key = `${state.ambient.map((c) => c >> 2).join(',')}|${rims
+    .map((r) => `${Math.round(r.x / 32)},${r.color.map((c) => c >> 3).join(',')},${Math.round(r.k * 40)}`)
+    .join(';')}`;
+  return {ambient: state.ambient, rims, key};
+}
+
+/** Soft glow centred on the sun or moon, as wide as the sky and half as tall. */
+function fillRims(g: CanvasRenderingContext2D, light: SkyLight, originY: number, scale: number, rimX: (x: number) => number) {
+  for (const rim of light.rims) {
+    if (rim.k < 0.005) continue;
+    g.save();
+    g.translate(rimX(rim.x) * scale, (SKY_HORIZON_Y - originY) * scale);
+    g.scale(1, 0.55);
+    const radius = 560 * scale;
+    const glow = g.createRadialGradient(0, 0, 0, 0, 0, radius);
+    glow.addColorStop(0, `rgba(${rim.color[0]},${rim.color[1]},${rim.color[2]},${rim.k})`);
+    glow.addColorStop(0.45, `rgba(${rim.color[0]},${rim.color[1]},${rim.color[2]},${rim.k * 0.42})`);
+    glow.addColorStop(1, `rgba(${rim.color[0]},${rim.color[1]},${rim.color[2]},0)`);
+    g.fillStyle = glow;
+    g.fillRect(-radius, -radius, radius * 2, radius * 2);
+    g.restore();
+  }
+}
+
+interface LitCopy {
+  canvas: HTMLCanvasElement;
+  key: string;
+}
+
+/** One cached lit copy per baked layer. The WeakMap lets it go when the bake does. */
+const litCopies = new WeakMap<HTMLCanvasElement, LitCopy>();
+
+/**
+ * A copy of a baked layer with the sky's light on it: multiplied by the ambient colour, then a soft screen
+ * glow on the sun's or moon's side, then cut back to the layer's own alpha so the transparent sky above a
+ * skyline stays transparent. Rebuilt only when the quantised light changes.
+ */
+function litCopy(layer: HTMLCanvasElement, originY: number, scale: number, light: SkyLight): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const key = `${originY}|${scale}|${light.key}`;
+  let entry = litCopies.get(layer);
+  if (!entry) {
+    const canvas = document.createElement('canvas');
+    canvas.width = layer.width;
+    canvas.height = layer.height;
+    entry = {canvas, key: ''};
+    litCopies.set(layer, entry);
+  }
+  if (entry.key === key) return entry.canvas;
+  const g = entry.canvas.getContext('2d');
+  if (!g) return null;
+  const {width, height} = entry.canvas;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = 'copy';
+  g.drawImage(layer, 0, 0);
+  g.globalCompositeOperation = 'multiply';
+  g.fillStyle = rgbStr(light.ambient);
+  g.fillRect(0, 0, width, height);
+  g.globalCompositeOperation = 'screen';
+  fillRims(g, light, originY, scale, (x) => x);
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(layer, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  entry.key = key;
+  return entry.canvas;
+}
+
+export interface LightOptions {
+  /** Bitmap pixels per board pixel of the layer. 1 unless it was baked larger. */
+  scale?: number;
+}
+
+/**
+ * Draws a baked layer at board position (x, y) with the sky's light on it. The layer is drawn at its
+ * board size whatever its bake scale. Units are drawn later and are not lit by this.
+ */
+export function lightScenery(
+  ctx: CanvasRenderingContext2D,
+  layer: HTMLCanvasElement,
+  x: number,
+  y: number,
+  time: number,
+  options: LightOptions = {},
+): void {
+  const scale = options.scale ?? 1;
+  const w = layer.width / scale;
+  const h = layer.height / scale;
+  const lit = litCopy(layer, y, scale, skyLight(time, SKY_BOARD_WIDTH)) ?? layer;
+  const smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = scale > 1;
+  ctx.drawImage(lit, x, y, w, h);
+  ctx.imageSmoothingEnabled = smooth;
+}
+
+export interface HorizonView {
+  /** Bitmap pixels per board pixel of the baked skyline. */
+  scale?: number;
+  /** Board pixels to slide the skyline sideways, for camera parallax. The bare edge is filled with a mirror. */
+  shiftX?: number;
+}
+
+/** The lit skyline, slid by `shiftX`. The strip it uncovers is a mirror of the skyline's own edge, so no gap shows. */
+function drawHorizonLayer(ctx: CanvasRenderingContext2D, layer: CanvasImageSource, time: number, view?: HorizonView) {
+  if (typeof HTMLCanvasElement === 'undefined' || !(layer instanceof HTMLCanvasElement)) {
+    ctx.drawImage(layer, 0, 0);
+    return;
+  }
+  const scale = view?.scale ?? 1;
+  const w = layer.width / scale;
+  const h = layer.height / scale;
+  const lit = litCopy(layer, 0, scale, skyLight(time, SKY_BOARD_WIDTH)) ?? layer;
+  const shift = Math.max(-w / 4, Math.min(w / 4, view?.shiftX ?? 0));
+  const smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = scale > 1;
+  const d = Math.abs(shift);
+  // The trailing skyline must not poke out past the board edge it is trailing behind.
+  if (d > 0.01) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.clip();
+  }
+  ctx.drawImage(lit, shift, 0, w, h);
+  if (d > 0.01) {
+    if (shift > 0) {
+      ctx.translate(shift, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(lit, 0, 0, d * scale, h * scale, 0, 0, d, h);
+    } else {
+      ctx.translate(2 * w + shift, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(lit, (w - d) * scale, 0, d * scale, h * scale, w - d, 0, d, h);
+    }
+    ctx.restore();
+  }
+  ctx.imageSmoothingEnabled = smooth;
+}
+
+/** Lights an opaque rectangle that is drawn live (open water, the coastal strip): multiply, then the glow. */
+function lightRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, time: number) {
+  const light = skyLight(time, SKY_BOARD_WIDTH);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = rgbStr(light.ambient);
+  ctx.fillRect(x, y, w, h);
+  ctx.globalCompositeOperation = 'screen';
+  fillRims(ctx, light, 0, 1, (rx) => rx);
+  ctx.restore();
+}
+
+/**
+ * Mist along the horizon in the sky's own horizon colour: a smooth gradient, thickest on the horizon
+ * line, thinning up into the skyline and down the far ground. Never past 0.36, the old haze's strength.
+ */
+export function drawHorizonMist(ctx: CanvasRenderingContext2D, width: number, time: number) {
+  const {horizon} = getSkyState(skyCycle(time));
+  const top = SKY_HORIZON_Y - 30;
+  const bottom = SKY_HORIZON_Y + 110;
+  const mist = ctx.createLinearGradient(0, top, 0, bottom);
+  const stop = (a: number) => `rgba(${horizon[0]},${horizon[1]},${horizon[2]},${a})`;
+  mist.addColorStop(0, stop(0));
+  mist.addColorStop(30 / 140, stop(0.34));
+  mist.addColorStop(0.5, stop(0.15));
+  mist.addColorStop(0.78, stop(0.04));
+  mist.addColorStop(1, stop(0));
+  ctx.save();
+  ctx.fillStyle = mist;
+  ctx.fillRect(0, top, width, bottom - top);
+  ctx.restore();
+}
+
+let moonSprite: HTMLCanvasElement | null = null;
+
+/** A crescent moon with a genuinely transparent dark side: the cutout is destination-out on its own canvas. */
+function moonCrescent(): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (moonSprite) return moonSprite;
+  const canvas = document.createElement('canvas');
+  canvas.width = 24;
+  canvas.height = 24;
+  const g = canvas.getContext('2d');
+  if (!g) return null;
+  g.fillStyle = PALETTE.sandCream;
+  g.beginPath();
+  g.arc(12, 12, 6, 0, Math.PI * 2);
+  g.fill();
+  g.globalCompositeOperation = 'destination-out';
+  g.beginPath();
+  g.arc(14, 11, 5, 0, Math.PI * 2);
+  g.fill();
+  moonSprite = canvas;
+  return canvas;
+}
+
+/** Draws the moon at (x, y) at the current globalAlpha. */
+function drawMoonCrescent(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  const sprite = moonCrescent();
+  if (sprite) {
+    ctx.drawImage(sprite, x - 12, y - 12);
+    return;
+  }
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // ============================================================================
@@ -225,6 +550,7 @@ export function drawSkyboxAndTreeline(
   width: number,
   time: number,
   bakedHorizon?: CanvasImageSource,
+  horizonView?: HorizonView,
 ) {
   const horizonY = 114;
   const cycleSeconds = 60;
@@ -330,18 +656,10 @@ export function drawSkyboxAndTreeline(
     ctx.fill();
     ctx.restore();
 
-    // Glowing Moon crescent disc
+    // Moon crescent. The dark side is cut out of the sprite, so the night sky shows through it.
     ctx.save();
     ctx.globalAlpha = moonAlpha;
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, 6, 0, Math.PI * 2);
-    ctx.fill();
-    // Crescent cutout
-    ctx.fillStyle = PALETTE.bunkerCharcoal;
-    ctx.beginPath();
-    ctx.arc(moonX + 2, moonY - 1, 5, 0, Math.PI * 2);
-    ctx.fill();
+    drawMoonCrescent(ctx, moonX, moonY);
     ctx.restore();
   }
 
@@ -375,7 +693,7 @@ export function drawSkyboxAndTreeline(
 
   // 7. HORIZON FOREST SILHOUETTE, or the region's baked skyline
   if (bakedHorizon) {
-    ctx.drawImage(bakedHorizon, 0, 0);
+    drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
   } else {
     drawForestSilhouette(ctx, width, horizonY);
   }
@@ -480,6 +798,7 @@ export function drawSeaSkyboxAndHorizon(
   width: number,
   time: number,
   bakedHorizon?: CanvasImageSource,
+  horizonView?: HorizonView,
 ) {
   const horizonY = 114;
   const cycleSeconds = 60;
@@ -584,14 +903,7 @@ export function drawSeaSkyboxAndHorizon(
 
     ctx.save();
     ctx.globalAlpha = moonAlpha;
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = PALETTE.bunkerCharcoal;
-    ctx.beginPath();
-    ctx.arc(moonX + 2, moonY - 1, 5, 0, Math.PI * 2);
-    ctx.fill();
+    drawMoonCrescent(ctx, moonX, moonY);
     ctx.restore();
   }
 
@@ -656,7 +968,7 @@ export function drawSeaSkyboxAndHorizon(
 
   // 7. OCCASIONAL DISTANT ROCKY & TROPICAL PIXEL ISLANDS ON HORIZON (Zero Trees!)
   if (bakedHorizon) {
-    ctx.drawImage(bakedHorizon, 0, 0);
+    drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
   } else {
     drawDistantSeaIslands(ctx, width, horizonY);
   }
@@ -823,13 +1135,14 @@ export function drawOpenOceanBattlefield(
   bloodPuddles?: BloodPuddle[],
   casualtyRecords?: CasualtyRecord[],
   sea?: Extract<BakedScenery, { kind: 'sea' }>,
+  horizonView?: HorizonView,
 ) {
   const look = sea?.look;
   const swellScale = look?.swell ?? 1;
   const phase = look?.phase ?? 0;
 
   // 1. Dynamic open sea skybox with distant islands & animated seagulls (Zero Trees!)
-  drawSeaSkyboxAndHorizon(ctx, width, time, sea?.horizon);
+  drawSeaSkyboxAndHorizon(ctx, width, time, sea?.horizon, sea ? {scale: sea.scale, ...horizonView} : horizonView);
 
   const horizonY = 114;
 
@@ -922,6 +1235,10 @@ export function drawOpenOceanBattlefield(
   }
   ctx.setLineDash([]);
   ctx.restore();
+
+  // 5b. The sky's light on the water, then mist on the horizon.
+  lightRect(ctx, 0, horizonY, width, height - horizonY, time);
+  drawHorizonMist(ctx, width, time);
 
   // 6. Underwater Depth-Charge Churns & Ocean Impact Vortices (Dynamic Craters on Sea)
   if (dynamicCraters && dynamicCraters.length > 0) {
@@ -1018,6 +1335,15 @@ export function drawOpenOceanBattlefield(
   }
 }
 
+/** How the backdrop is seen. The default is the plain view the combat screen has always had. */
+export interface BackdropView {
+  /**
+   * Board pixels to slide the skyline sideways, for camera parallax. 0 draws it where it was baked. The
+   * skyline is decoration: units, hit tests and the zoom anchor all use board coordinates and ignore it.
+   */
+  horizonShiftX?: number;
+}
+
 export function drawWWIIBattlefield(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -1028,98 +1354,133 @@ export function drawWWIIBattlefield(
   bloodPuddles?: BloodPuddle[],
   casualtyRecords?: CasualtyRecord[],
   scenery?: BakedScenery | null,
+  view?: BackdropView,
 ) {
+  const horizonView: HorizonView = {shiftX: view?.horizonShiftX ?? 0};
+
   // If theater is NAVY TEST or AIR STRIKE TEST: Render full open-sea maritime battleground
   if (theater === 'navy_test' || theater === 'air_strike_test' || scenery?.kind === 'sea') {
     const sea = scenery?.kind === 'sea' ? scenery : undefined;
-    drawOpenOceanBattlefield(ctx, width, height, time, dynamicCraters, bloodPuddles, casualtyRecords, sea);
+    drawOpenOceanBattlefield(ctx, width, height, time, dynamicCraters, bloodPuddles, casualtyRecords, sea, horizonView);
     return;
   }
 
   if (scenery?.kind === 'land') {
+    const bakedView: HorizonView = {...horizonView, scale: scenery.scale};
     if (scenery.island) {
-      drawSeaSkyboxAndHorizon(ctx, width, time, scenery.horizon);
+      drawSeaSkyboxAndHorizon(ctx, width, time, scenery.horizon, bakedView);
     } else {
-      drawSkyboxAndTreeline(ctx, width, time, scenery.horizon);
+      drawSkyboxAndTreeline(ctx, width, time, scenery.horizon, bakedView);
     }
-    ctx.drawImage(scenery.ground, 0, 114);
+    // The sky lights the field. Craters and blood dug during the fight go on after, unlit.
+    lightScenery(ctx, scenery.ground, 0, 114, time, {scale: scenery.scale});
     drawBattleScars(ctx, scenery.dirt, dynamicCraters, bloodPuddles, casualtyRecords);
+    drawHorizonMist(ctx, width, time);
     return;
   }
 
   // 1. Render Skybox: Sea skybox with islands & seagulls for Pacific, or Treeline for land theaters
   if (theater === 'pacific') {
-    drawSeaSkyboxAndHorizon(ctx, width, time);
+    drawSeaSkyboxAndHorizon(ctx, width, time, undefined, horizonView);
   } else {
     drawSkyboxAndTreeline(ctx, width, time);
   }
 
-  // 2. Base Terrain Fill based on Theater (Y: 114 to 530)
-  let baseColor: string = PALETTE.oliveDrab;
-  let secColor: string = PALETTE.fieldSage;
-  let dirtColor: string = PALETTE.earthBrown;
-
-  if (theater === 'eastern') {
-    baseColor = PALETTE.feldgrau;
-    secColor = PALETTE.trenchMudBone;
-    dirtColor = PALETTE.deepTaupe;
-  } else if (theater === 'north_africa') {
-    baseColor = PALETTE.sandTan;
-    secColor = PALETTE.sandCream;
-    dirtColor = PALETTE.terracotta;
-  } else if (theater === 'pacific') {
-    baseColor = PALETTE.sandCream;
-    secColor = PALETTE.fieldSage;
-    dirtColor = PALETTE.sandTan;
+  // 2. The field. Baked once per theatre; drawn straight when there is no document to bake on.
+  const tones = fallbackTones(theater);
+  const baked = fallbackGround(theater, width);
+  if (baked) {
+    lightScenery(ctx, baked, 0, GROUND_TOP, time);
+  } else {
+    paintFallbackGround(ctx, width, tones);
   }
 
-  // Draw ground layer (Y: 114 to 530)
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 114, width, 416);
+  drawBattleScars(ctx, tones.dirt, dynamicCraters, bloodPuddles, casualtyRecords);
+  drawHorizonMist(ctx, width, time);
+}
 
-  // Tactical terrain patches (mottled top-down camo / fields)
-  ctx.fillStyle = secColor;
+/**
+ * The strip below the board: the baked inland edge in the sky's light, or the animated sea. The combat screen
+ * and the field preview both call this where they used to blit `scenery.edge` or call `drawAnimatedSea` themselves.
+ */
+export function drawSceneryEdge(
+  ctx: CanvasRenderingContext2D,
+  scenery: BakedScenery | null | undefined,
+  width: number,
+  height: number,
+  time: number,
+) {
+  if (scenery?.kind === 'land' && scenery.edge) {
+    lightScenery(ctx, scenery.edge, 0, 525, time, {scale: scenery.scale});
+  } else {
+    drawAnimatedSea(ctx, width, height, time);
+  }
+}
+
+interface FallbackTones {
+  base: string;
+  patch: string;
+  dirt: string;
+}
+
+function fallbackTones(theater: TheaterId): FallbackTones {
+  if (theater === 'eastern') {
+    return { base: PALETTE.feldgrau, patch: PALETTE.trenchMudBone, dirt: PALETTE.deepTaupe };
+  }
+  if (theater === 'north_africa') {
+    return { base: PALETTE.sandTan, patch: PALETTE.sandCream, dirt: PALETTE.terracotta };
+  }
+  if (theater === 'pacific') {
+    return { base: PALETTE.sandCream, patch: PALETTE.fieldSage, dirt: PALETTE.sandTan };
+  }
+  return { base: PALETTE.oliveDrab, patch: PALETTE.fieldSage, dirt: PALETTE.earthBrown };
+}
+
+/**
+ * The plain theatre field, in the same one-point perspective as the region ground:
+ * trench, parapet, wire and grid lean toward the vanishing point, craters lie flat.
+ * Painted in board coordinates.
+ */
+function paintFallbackGround(ctx: Paint, width: number, tones: FallbackTones): void {
+  const flat = squashPaint(ctx);
+
+  // A gray undercoat, then the biome colour at a wash, so the grass sits back from a 1px unit mark.
+  ctx.fillStyle = groundMate(tones.base);
+  ctx.fillRect(0, GROUND_TOP, width, GROUND_BOTTOM - GROUND_TOP);
+  ctx.globalAlpha = LAND_GROUND_WASH;
+  ctx.fillStyle = tones.base;
+  ctx.fillRect(0, GROUND_TOP, width, GROUND_BOTTOM - GROUND_TOP);
+
+  // Mottled patches of field, flattened toward the horizon.
+  flat.fillStyle = tones.patch;
   for (let gx = 0; gx < width; gx += 64) {
     for (let gy = 120; gy < 520; gy += 48) {
       const hash = Math.sin(gx * 12.9898 + gy * 78.233) * 43758.5453;
       const noise = hash - Math.floor(hash);
       if (noise > 0.55) {
-        ctx.fillRect(gx + 4, gy + 4, 32, 20);
+        flat.fillRect(gx + 4, gy + 4, 32, 20);
       }
     }
   }
+  ctx.globalAlpha = 1;
 
-  // Transversal supply road behind the frontline rank headers
-  ctx.fillStyle = dirtColor;
-  ctx.fillRect(0, 115, width, 6);
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  // Supply road along the horizon, behind the frontline rank headers.
+  flat.fillStyle = groundMate(tones.dirt);
+  flat.fillRect(0, 115, width, 6);
+  ctx.globalAlpha = LAND_GROUND_WASH;
+  flat.fillStyle = tones.dirt;
+  flat.fillRect(0, 115, width, 6);
+  ctx.globalAlpha = 1;
+  flat.fillStyle = PALETTE.bunkerCharcoal;
   for (let rx = 10; rx < width; rx += 24) {
-    ctx.fillRect(rx, 116, 8, 4);
+    flat.fillRect(rx, 116, 8, 4);
   }
 
-  // Tactical Map Grid Coordinates
-  ctx.strokeStyle = PALETTE.deepTaupe;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 8]);
-  for (let gx = 100; gx < width; gx += 110) {
-    ctx.beginPath();
-    ctx.moveTo(gx, 90);
-    ctx.lineTo(gx, 520);
-    ctx.stroke();
-  }
-  for (let gy = 150; gy < 520; gy += 90) {
-    ctx.beginPath();
-    ctx.moveTo(40, gy);
-    ctx.lineTo(width - 40, gy);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+  paintGrid(ctx, width, PALETTE.deepTaupe, LAND_GRID_ALPHA);
 
-  // 3. Frontline Trenches & Fortifications
-  drawTrenchLine(ctx, 470, 130, 390);
-  drawTrenchLine(ctx, 810, 130, 390);
+  paintTrench(ctx, 470, false);
+  paintTrench(ctx, 810, false);
 
-  // 4. Shell Craters across No-Man's Land (Pre-existing static craters with ambient occlusion)
   const craters = [
     {x: 520, y: 360, r: 16},
     {x: 760, y: 380, r: 14},
@@ -1129,12 +1490,35 @@ export function drawWWIIBattlefield(
     {x: 490, y: 420, r: 10},
     {x: 790, y: 430, r: 11},
   ];
-  craters.forEach((c) => {
-    drawSingleCrater(ctx, c.x, c.y, c.r, c.r * 0.7, dirtColor);
-  });
+  for (const c of craters) paintCrater(ctx, c.x, c.y, c.r, tones.dirt);
 
-  drawBattleScars(ctx, dirtColor, dynamicCraters, bloodPuddles, casualtyRecords);
-  drawWireAndSandbags(ctx);
+  paintWire(ctx);
+  paintParapet(ctx, 470, -15);
+  paintParapet(ctx, 810, 5);
+  // The far haze is drawn live, smooth, by drawHorizonMist.
+}
+
+const fallbackGroundCache = new Map<string, HTMLCanvasElement>();
+
+function fallbackGround(theater: TheaterId, width: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const key = `${theater}|${width}`;
+  const hit = fallbackGroundCache.get(key);
+  if (hit) return hit;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = GROUND_BOTTOM - GROUND_TOP;
+  const g = canvas.getContext('2d');
+  if (!g) return null;
+  g.imageSmoothingEnabled = false;
+  g.translate(0, -GROUND_TOP);
+  paintFallbackGround(g, width, fallbackTones(theater));
+  // Same post-bake tone curve as the region fields.
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const painted = g.getImageData(0, 0, canvas.width, canvas.height);
+  g.putImageData(new ImageData(toneCurve(painted.data), canvas.width, canvas.height), 0, 0);
+  fallbackGroundCache.set(key, canvas);
+  return canvas;
 }
 
 /** Craters, blood and oil left by the fight. Drawn over the field, under the units. */
@@ -1150,7 +1534,8 @@ function drawBattleScars(
     dynamicCraters.forEach((dc) => {
       const alpha = dc.alpha !== undefined ? dc.alpha : 1.0;
       if (alpha > 0.001) {
-        drawSingleCrater(ctx, dc.x, dc.y, dc.rx, dc.ry, dirtColor, alpha);
+        const { rx, ry } = decalRadii(dc.rx, dc.y);
+        drawSingleCrater(ctx, dc.x, dc.y, rx, ry, dirtColor, alpha);
       }
     });
   }
@@ -1163,16 +1548,17 @@ function drawBattleScars(
       ctx.globalAlpha = Math.max(0, Math.min(1, rec.fluidAlpha));
       const fx = Math.round(rec.x);
       const fy = Math.round(rec.y + 4);
+      const fluid = decalRadii(rec.fluidRx, fy);
 
       if (rec.fluidType === 'oil') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
         ctx.beginPath();
-        ctx.ellipse(fx, fy, rec.fluidRx, rec.fluidRy, 0, 0, Math.PI * 2);
+        ctx.ellipse(fx, fy, fluid.rx, fluid.ry, 0, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = PALETTE.deepTaupe;
         ctx.beginPath();
-        ctx.ellipse(fx, fy - 1, rec.fluidRx * 0.7, rec.fluidRy * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(fx, fy - 1, fluid.rx * 0.7, fluid.ry * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // Subtle rainbow sheen flecks
@@ -1183,12 +1569,12 @@ function drawBattleScars(
       } else {
         ctx.fillStyle = PALETTE.crimson;
         ctx.beginPath();
-        ctx.ellipse(fx, fy, rec.fluidRx, rec.fluidRy, 0, 0, Math.PI * 2);
+        ctx.ellipse(fx, fy, fluid.rx, fluid.ry, 0, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = PALETTE.plum;
         ctx.beginPath();
-        ctx.ellipse(fx, fy, rec.fluidRx * 0.55, rec.fluidRy * 0.55, 0, 0, Math.PI * 2);
+        ctx.ellipse(fx, fy, fluid.rx * 0.55, fluid.ry * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -1200,14 +1586,15 @@ function drawBattleScars(
     bloodPuddles.forEach((p) => {
       ctx.save();
       ctx.globalAlpha = p.alpha;
+      const pool = decalRadii(p.rx, p.y);
       if (p.type === 'oil') {
         ctx.fillStyle = PALETTE.bunkerCharcoal;
         ctx.beginPath();
-        ctx.ellipse(p.x, p.y, p.rx, p.ry, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.x, p.y, pool.rx, pool.ry, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = PALETTE.deepTaupe;
         ctx.beginPath();
-        ctx.ellipse(p.x, p.y - 1, p.rx * 0.7, p.ry * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.x, p.y - 1, pool.rx * 0.7, pool.ry * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = PALETTE.navalSteel;
         ctx.fillRect(Math.round(p.x - 3), Math.round(p.y), 3, 1.5);
@@ -1216,42 +1603,17 @@ function drawBattleScars(
       } else {
         ctx.fillStyle = p.color;
         ctx.beginPath();
-        ctx.ellipse(p.x, p.y, p.rx, p.ry, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.x, p.y, pool.rx, pool.ry, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = PALETTE.plum;
         ctx.beginPath();
-        ctx.ellipse(p.x, p.y, p.rx * 0.55, p.ry * 0.55, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.x, p.y, pool.rx * 0.55, pool.ry * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
     });
   }
 
-}
-
-function drawWireAndSandbags(ctx: CanvasRenderingContext2D) {
-  // 5. Barbed Wire Obstacles across No-Man's Land
-  ctx.fillStyle = PALETTE.earthBrown;
-  for (let wy = 350; wy <= 510; wy += 35) {
-    ctx.fillRect(620, wy, 3, 5);
-    ctx.fillRect(660, wy, 3, 5);
-    ctx.strokeStyle = PALETTE.feldgrau;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(615, wy + 2);
-    ctx.lineTo(665, wy + 4);
-    ctx.moveTo(615, wy + 4);
-    ctx.lineTo(665, wy + 2);
-    ctx.stroke();
-  }
-
-  // 6. Sandbag Revetments along frontline edges
-  drawSandbags(ctx, 455, 140, 18);
-  drawSandbags(ctx, 455, 260, 18);
-  drawSandbags(ctx, 455, 380, 18);
-  drawSandbags(ctx, 815, 140, 18);
-  drawSandbags(ctx, 815, 260, 18);
-  drawSandbags(ctx, 815, 380, 18);
 }
 
 function drawSingleCrater(
@@ -1300,29 +1662,6 @@ function drawSingleCrater(
   ctx.fill();
 
   ctx.restore();
-}
-
-function drawTrenchLine(ctx: CanvasRenderingContext2D, x: number, startY: number, height: number) {
-  ctx.fillStyle = PALETTE.deepTaupe;
-  ctx.fillRect(x - 6, startY, 12, height);
-  ctx.fillStyle = PALETTE.earthBrown;
-  for (let ty = startY + 4; ty < startY + height; ty += 12) {
-    ctx.fillRect(x - 4, ty, 8, 4);
-  }
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(x - 6, startY, 2, height);
-}
-
-function drawSandbags(ctx: CanvasRenderingContext2D, x: number, y: number, count: number) {
-  for (let i = 0; i < count; i++) {
-    const sy = y + i * 8;
-    ctx.fillStyle = PALETTE.sandTan;
-    ctx.fillRect(x, sy, 7, 5);
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillRect(x + 1, sy + 1, 5, 2);
-    ctx.fillStyle = PALETTE.earthBrown;
-    ctx.fillRect(x, sy + 4, 7, 1);
-  }
 }
 
 /**
@@ -1374,6 +1713,9 @@ export function drawAnimatedSea(
     const waveEdge = Math.sin(time * 3 + x * 0.05) * 3 + surfLapping;
     ctx.fillRect(x, seaTop + 14 + waveEdge, 10, 3);
   }
+
+  // The same sky that lights the field lights the water.
+  lightRect(ctx, 0, seaTop, width, height - seaTop, time);
 }
 
 // ============================================================================

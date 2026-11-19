@@ -1,0 +1,32 @@
+{
+  "cards": [
+    {
+      "factionId": "UK",
+      "unitTypeId": "tank",
+      "blueprintId": "uk_tank_cromwell",
+      "card": "assets/units/cards/UK/tank.png",
+      "layered": "assets/layered/UK/tank.json",
+      "cell": {
+        "width": 80,
+        "height": 56
+      },
+      "beats": [
+        "idle",
+        "move_1",
+        "idle_2",
+        "move_2",
+        "fire_windup",
+        "fire_peak",
+        "fire_recover",
+        "idle_settle"
+      ],
+      "fps": 11,
+      "footAnchor": {
+        "x": 40,
+        "y": 52
+      },
+      "displayDivisor": 3,
+      "outline": "drawn at display time"
+    }
+  ]
+}

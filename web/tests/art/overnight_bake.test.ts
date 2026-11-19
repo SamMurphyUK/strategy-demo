@@ -15,7 +15,12 @@ import {
 } from "../../scripts/historicalUnits.mjs";
 import {
   INPUT_STRENGTH,
+  LANDED_AIR_STRENGTH,
+  LANDED_AIRCRAFT,
+  LANDED_CANVAS,
   STYLE_LIMITS,
+  airborneQuantizedPath,
+  buildLandedQueue,
   buildQueue,
   candidatePaths,
   biasGreysToHull,
@@ -24,8 +29,11 @@ import {
   canvasFor,
   inferenceBody,
   jobKey,
+  landedPrompt,
+  paintTailDragger,
   parseOvernightArgs,
   placeOnCanvas,
+  sampleAirframeColours,
   spentUsd,
   styleFor,
   upsertStyled,
@@ -42,6 +50,8 @@ describe("overnight bake", () => {
       faction: null,
       style: null,
       except: null,
+      landedAir: false,
+      only: null,
     });
     expect(parseOvernightArgs(["--run", "--seeds", "3", "--max-usd", "9.50"])).toEqual({
       run: true,
@@ -52,6 +62,8 @@ describe("overnight bake", () => {
       faction: null,
       style: null,
       except: null,
+      landedAir: false,
+      only: null,
     });
     expect(parseOvernightArgs(["--faction", "GER", "--unit", "battleship", "--style", "rd_lite__simple"])).toMatchObject({
       faction: "GER",
@@ -327,5 +339,225 @@ describe("overnight bake", () => {
     clearStrays(rgba, width, height, 9);
     expect(alpha(3, 3)).toBe(0);
     expect(alpha(1, 1)).toBe(255);
+  });
+});
+
+describe("landed air", () => {
+  const landedWrapper = (name: string) =>
+    `side-profile pixel art game sprite, PLATFORMER STYLE, facing right, flat orthographic side view, parked on ground on extended main landing gear wheels and rear tailwheel, tail-dragger stance angled slightly nose-up, single isolated aircraft on transparent background, PLATFORMER STYLE POSE, ${name}, crisp 1px pixel clusters, flat cel shading, limited color palette, no anti-aliasing, no drop shadow, no ground floor, no text`;
+
+  it("prices a dry run of two seeds, and one airframe when asked", () => {
+    expect(parseOvernightArgs(["--landed-air"])).toMatchObject({
+      run: false,
+      seeds: 2,
+      maxUsd: 9.5,
+      landedAir: true,
+      only: null,
+    });
+    expect(parseOvernightArgs(["--landed-air", "--seeds", "1", "--only", "US:fighter", "--max-usd", "1"])).toEqual({
+      run: false,
+      seeds: 1,
+      maxUsd: 1,
+      limit: null,
+      unit: null,
+      faction: null,
+      style: null,
+      except: null,
+      landedAir: true,
+      only: "US:fighter",
+    });
+    expect(() => parseOvernightArgs(["--only", "US:fighter"])).toThrow(/--landed-air/);
+    expect(() => parseOvernightArgs(["--landed-air", "--faction", "US"])).toThrow(/--only/);
+  });
+
+  it("asks for the historical airframe in a side-profile tail-dragger prompt", () => {
+    expect(landedPrompt("US", "fighter")).toBe(landedWrapper("North American P-51D Mustang fighter"));
+    expect(landedPrompt("UK", "tac_bomber")).toContain("Fairey Barracuda torpedo dive bomber");
+    expect(landedPrompt("GER", "bomber")).toContain("Heinkel He 111 twin-engine bomber");
+    const prompt = landedPrompt("JAP", "fighter");
+    expect(prompt).toContain("PLATFORMER STYLE");
+    expect(prompt).toContain("tail-dragger");
+    expect(prompt).not.toContain("top-down");
+    expect(prompt).not.toContain("T shape");
+    const jobs = buildLandedQueue(1);
+    expect(jobs.map((job) => job.prompt)).toEqual(
+      FACTIONS.flatMap((factionId) =>
+        (["fighter", "tac_bomber", "bomber"] as const).map((unitTypeId) => landedWrapper(LANDED_AIRCRAFT[factionId][unitTypeId])),
+      ),
+    );
+  });
+
+  it("queues the fifteen airframes and can stop at one", () => {
+    expect(buildLandedQueue(2)).toHaveLength(30);
+    const jobs = buildLandedQueue(2, "US:fighter");
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toMatchObject({
+      factionId: "US",
+      unitTypeId: "fighter_landed",
+      airType: "fighter",
+      blueprintId: "us_fighter_landed",
+      seed: 1,
+      style: "rd_fast__default",
+      strength: LANDED_AIR_STRENGTH,
+      landed: true,
+    });
+    expect(jobs[1].seed).toBe(2);
+    expect(() => buildLandedQueue(1, "US:tank")).toThrow(/fighter, tac_bomber, and bomber/);
+    expect(() => buildLandedQueue(1, "ITA:fighter")).toThrow(/Unknown faction ITA/);
+  });
+
+  it("sends a 48×48 tail-dragger to RD Fast at strength 0.62", () => {
+    const [job] = buildLandedQueue(1, "us:fighter");
+    const body = inferenceBody({
+      style: job.style,
+      prompt: job.prompt,
+      width: LANDED_CANVAS.width,
+      height: LANDED_CANVAS.height,
+      inputImage: "aaaa",
+      seed: job.seed,
+      checkCost: true,
+      strength: job.strength,
+    });
+    expect(body).toMatchObject({
+      prompt_style: "rd_fast__default",
+      strength: 0.62,
+      width: 48,
+      height: 48,
+      num_images: 1,
+      remove_bg: true,
+      upscale_output_factor: 1,
+      bypass_prompt_expansion: true,
+      check_cost: true,
+      seed: 1,
+    });
+    expect(body.prompt).toContain("North American P-51D Mustang fighter");
+    expect("reference_images" in body).toBe(false);
+    expect(body.input_image).toBe("aaaa");
+  });
+
+  it("saves the landed picture beside the airborne one and leaves that row alone", () => {
+    const [landed] = buildLandedQueue(1, "US:fighter");
+    const [airborne] = buildQueue(1, "fighter", "US");
+    expect(candidatePaths(landed).raw.replace(/\\/g, "/")).toBe("assets/candidates/US/us_fighter_landed_seed1.raw.png");
+    expect(candidatePaths(landed).quantized.replace(/\\/g, "/")).toBe("assets/candidates/US/us_fighter_landed_seed1.quantized.png");
+    expect(candidatePaths(airborne).quantized.replace(/\\/g, "/")).toBe("assets/candidates/US/us_fighter_seed1.quantized.png");
+    expect(jobKey(landed, LANDED_CANVAS)).not.toBe(jobKey(airborne, { width: 160, height: 176 }));
+    const airborneRow = {
+      factionId: "US",
+      unitTypeId: "fighter",
+      blueprintId: "us_fighter",
+      seed: 1,
+      promptStyle: "rd_core__simple",
+      cost: 0.1,
+    };
+    let manifest = upsertStyled({ candidates: [] }, airborneRow);
+    manifest = upsertStyled(manifest, {
+      factionId: "US",
+      unitTypeId: "fighter_landed",
+      blueprintId: "us_fighter_landed",
+      seed: 1,
+      promptStyle: "rd_fast__default",
+      cost: 0.03,
+    });
+    expect(manifest.candidates).toHaveLength(2);
+    expect(manifest.candidates[0]).toMatchObject(airborneRow);
+  });
+
+  it("copies colours from the outlined airborne sprite, not a landed one", () => {
+    const manifest = {
+      candidates: [
+        {
+          factionId: "US",
+          unitTypeId: "fighter",
+          blueprintId: "us_fighter",
+          quantized: "assets/candidates/US/us_fighter_seed1.quantized.png",
+          silhouetteIoU: 0.9,
+        },
+        {
+          factionId: "US",
+          unitTypeId: "fighter",
+          blueprintId: "us_fighter",
+          quantized: "assets/candidates/US/us_fighter_seed1.outlined.quantized.png",
+          silhouetteIoU: 0.4,
+          grade: "outlined",
+        },
+        {
+          factionId: "US",
+          unitTypeId: "fighter_landed",
+          blueprintId: "us_fighter_landed",
+          quantized: "assets/candidates/US/us_fighter_landed_seed1.quantized.png",
+          promoted: true,
+          promotedPath: "assets/units/us_fighter_landed.png",
+          silhouetteIoU: 1,
+        },
+      ],
+    };
+    expect(airborneQuantizedPath(manifest, "US", "fighter")).toBe(
+      "assets/candidates/US/us_fighter_seed1.outlined.quantized.png",
+    );
+    const promoted = {
+      candidates: [
+        {
+          factionId: "US",
+          unitTypeId: "fighter",
+          blueprintId: "us_fighter",
+          promoted: true,
+          promotedPath: "assets/units/us_fighter.png",
+          quantized: "assets/candidates/US/us_fighter_seed1.quantized.png",
+        },
+      ],
+    };
+    expect(airborneQuantizedPath(promoted, "US", "fighter")).toBe("assets/units/us_fighter.png");
+  });
+
+  it("paints a right-facing tail-dragger with the sampled colours and no ground", () => {
+    const painted = paintTailDragger({ hull: "olive", trim: "khaki", canopy: "steel", accent: "crimson" });
+    expect(painted.width).toBe(48);
+    expect(painted.height).toBe(48);
+    const keys = painted.albedoKeys;
+    const meanY = (pick: (x: number) => boolean) => {
+      let sum = 0;
+      let count = 0;
+      keys.forEach((key, index) => {
+        if (!key || !pick(index % 48)) return;
+        sum += Math.floor(index / 48);
+        count += 1;
+      });
+      return sum / count;
+    };
+    expect(meanY((x) => x >= 40)).toBeLessThan(meanY((x) => x <= 12));
+    let maxX = -1;
+    let wheel = false;
+    const used = new Set<string>();
+    keys.forEach((key, index) => {
+      if (!key) return;
+      used.add(key);
+      const x = index % 48;
+      const y = Math.floor(index / 48);
+      if (x > maxX) maxX = x;
+      if (y >= 40) wheel = true;
+    });
+    expect(maxX).toBeGreaterThanOrEqual(44);
+    expect(wheel).toBe(true);
+    expect(keys[0]).toBeNull();
+    expect(keys[47]).toBeNull();
+    expect(keys[47 * 48]).toBeNull();
+    expect(keys[47 * 48 + 47]).toBeNull();
+    for (let y = 44; y < 48; y++) {
+      for (let x = 0; x < 48; x++) expect(keys[y * 48 + x]).toBeNull();
+    }
+    expect([...used].sort()).toEqual(["crimson", "khaki", "olive", "steel"]);
+    const oliveAt = painted.rgba.findIndex(
+      (_, index) => index % 4 === 0 && painted.rgba[index] === 125 && painted.rgba[index + 1] === 123 && painted.rgba[index + 2] === 98,
+    );
+    expect(oliveAt).toBeGreaterThanOrEqual(0);
+    expect(painted.rgba[oliveAt + 3]).toBe(255);
+  });
+
+  it("reads an olive hull and a red spinner off the airborne picture", () => {
+    const rgba = new Uint8ClampedArray(8 * 8 * 4);
+    for (let i = 0; i < 48; i++) rgba.set([125, 123, 98, 255], i * 4);
+    for (let i = 48; i < 64; i++) rgba.set([156, 82, 78, 255], i * 4);
+    expect(sampleAirframeColours(rgba, 8, 8, "US")).toMatchObject({ hull: "olive", accent: "crimson" });
   });
 });

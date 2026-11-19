@@ -7,6 +7,9 @@
     "build": "npm run build --prefix web",
     "typecheck": "npm run typecheck --prefix web",
     "rebuild-map-geometry": "npm run rebuild-map-geometry --prefix web",
-    "normalize-land-svg": "npm run normalize-land-svg --prefix web --"
+    "normalize-land-svg": "npm run normalize-land-svg --prefix web --",
+    "vectorize:units": "npm run vectorize:units --prefix web --",
+    "polish:units": "npm run polish:units --prefix web --",
+    "stamp:units": "npm run stamp:units --prefix web --"
   }
 }

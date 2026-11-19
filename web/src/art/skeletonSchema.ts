@@ -21,10 +21,10 @@ export type RosterFactionId = "GER" | "USSR" | "UK" | "US" | "JAP" | "MINOR";
 export type UnitCategory = "land" | "air" | "sea";
 
 /**
- * Recolour slots inside a frame. Each faction maps these onto a MilitaryStripKey.
+ * The slots a country recolours. Each faction maps these onto a MilitaryStripKey.
  * There is no outline slot.
  */
-export type PaletteSlotKey =
+export type BrushSlotKey =
   | "primary_uniform_or_hull"
   | "secondary_trim_or_webbing"
   | "metallic_steel"
@@ -33,7 +33,47 @@ export type PaletteSlotKey =
   | "skin_stand_in"
   | "insignia_accent";
 
-export type FactionMilitaryMapping = Record<PaletteSlotKey, MilitaryStripKey>;
+/** Every value a pixel can hold: a recolour slot or a fixed emblem colour. */
+export type PaletteSlotKey = BrushSlotKey | EmblemSlotKey;
+
+/**
+ * Fixed colours for national emblems. They are not in the faction mappings: every country gets the
+ * same strip key from EMBLEM_STRIP, so a red star stays red and a roundel stays blue whichever
+ * country the sprite is filed under. The Stamp tool writes them. See emblems.ts.
+ */
+export type EmblemSlotKey =
+  | "emblem_dark"
+  | "emblem_red"
+  | "emblem_red_light"
+  | "emblem_white"
+  | "emblem_white_shade"
+  | "emblem_blue";
+
+export const EMBLEM_SLOT_KEYS: readonly EmblemSlotKey[] = [
+  "emblem_dark",
+  "emblem_red",
+  "emblem_red_light",
+  "emblem_white",
+  "emblem_white_shade",
+  "emblem_blue",
+];
+
+/** The strip key each emblem slot always resolves to. */
+export const EMBLEM_STRIP: Record<EmblemSlotKey, MilitaryStripKey> = {
+  emblem_dark: "charcoal",
+  emblem_red: "crimson",
+  emblem_red_light: "terracotta",
+  emblem_white: "cream",
+  emblem_white_shade: "bone",
+  emblem_blue: "steel",
+};
+
+export type FactionMilitaryMapping = Record<BrushSlotKey, MilitaryStripKey>;
+
+/** The strip key a slot paints with. An emblem slot ignores the country. */
+export function stripKeyOfSlot(mapping: FactionMilitaryMapping, slot: PaletteSlotKey): MilitaryStripKey {
+  return slot in EMBLEM_STRIP ? EMBLEM_STRIP[slot as EmblemSlotKey] : mapping[slot as BrushSlotKey];
+}
 
 /** Feet on the live 80×56 sheet. figureGround.ts uses the same point (SPRITE_BAKE). */
 export const SHEET_FOOT_ANCHOR: Vec2 = { x: 40, y: 52 };
@@ -44,6 +84,16 @@ export type SpriteFrameKey = (typeof SPRITE_FRAME_KEYS)[number];
 
 export type SpriteFrameGrid = (PaletteSlotKey | null)[][];
 
+/** How far Build Animation moves the layers, in plate pixels. */
+export interface MotionShifts {
+  /** The rise or drop of the body on the second step, on the swell, and under a shot. */
+  bobPx: number;
+  /** The gun's full kick. A turret, a carriage, and an airframe take half of it. */
+  recoilPx: number;
+  /** How far the steel links and the propeller dashes step. */
+  treadStride: number;
+}
+
 /**
  * One unit, four flat poses. Slots re-skin through FACTION_MILITARY_MAPPINGS.
  * unitTypeId is the UNIT_DEFINITIONS key and is not a filename.
@@ -53,7 +103,15 @@ export interface UnitSpriteSheetBlueprint {
   unitTypeId: string;
   factionId: RosterFactionId;
   category: UnitCategory;
-  canvasSize: { width: 48 | 64; height: 48 | 64 };
+  /** The size the unit is drawn at. A baked plate keeps its own size. The first starters are 48 square. */
+  canvasSize: { width: number; height: number };
+  /**
+   * Plate pixels to one card pixel. A plate that carries it is scaled onto the 80×56 card by this whole number.
+   * A blueprint without it is copied onto the card at its own size.
+   */
+  displayDivisor?: number;
+  /** A blueprint without it moves by the 48-pixel amounts: bob 1, recoil 2, stride 1. */
+  motion?: MotionShifts;
   groundOrigin: Vec2;
   sheetFootAnchor: Vec2;
   muzzlePoint?: Vec2;

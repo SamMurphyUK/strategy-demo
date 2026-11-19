@@ -10,6 +10,20 @@ import {
   type Ocean,
   type SeaScene,
 } from "./regionScene";
+import {
+  groundLayout,
+  paintCrater,
+  paintGrid,
+  paintGroundHaze,
+  paintParapet,
+  paintSkyHaze,
+  paintTrench,
+  paintTrenchClusters,
+  paintWire,
+  planRows,
+  squashPaint,
+  stripAt,
+} from "./groundPerspective";
 
 export type Paint = Pick<
   CanvasRenderingContext2D,
@@ -65,6 +79,42 @@ export function groundTones(scene: LandScene): GroundTones {
   if (scene.island === "pacific") return { base: P.cream, patch: P.tan, dirt: P.khaki, accent: P.sage };
   if (scene.island === "atlantic") return { base: P.sage, patch: P.olive, dirt: P.brown, accent: P.bone };
   return BIOME_GROUND[scene.biome];
+}
+
+/** How much of a grass or road colour stays on top of a gray of the same lightness. */
+export const LAND_GROUND_WASH = 0.76;
+/** Dotted range grid, drawn over the floor. Low enough that a 1px unit mark wins. */
+export const LAND_GRID_ALPHA = 0.18;
+
+const GROUND_GRAYS = [P.bone, P.feldgrau, P.taupe];
+
+function channelLuma(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+}
+
+/** The palette gray closest in lightness, so a wash desaturates without inventing a new colour. */
+export function groundMate(hex: string): string {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  let best: string = P.bone;
+  let gap = Infinity;
+  const luma = channelLuma(hex);
+  for (const gray of GROUND_GRAYS) {
+    const next = Math.abs(channelLuma(gray) - luma);
+    if (next < gap) {
+      best = gray;
+      gap = next;
+    }
+  }
+  return best;
+}
+
+/** A solid grass or road mark, pulled slightly toward gray. */
+function layQuiet(ctx: Paint, color: string, x: number, y: number, w: number, h: number): void {
+  rect(ctx, groundMate(color), x, y, w, h);
+  ctx.globalAlpha = LAND_GROUND_WASH;
+  rect(ctx, color, x, y, w, h);
+  ctx.globalAlpha = 1;
 }
 
 function rect(ctx: Paint, color: string, x: number, y: number, w: number, h: number): void {
@@ -125,6 +175,13 @@ function paintRidge(ctx: Paint, rand: Rand, width: number, base: number, color: 
   }
   points.push(width, base);
   poly(ctx, color, points);
+  // Slopes that face the top-left light get a lighter crest, the others a darker one.
+  const light = rampSlot(color, 1);
+  const dark = rampSlot(color, -1);
+  for (let i = 2; i + 3 < points.length - 2; i += 2) {
+    const rising = points[i + 3] < points[i + 1];
+    line(ctx, rising ? light : dark, rising ? 2 : 1, [points[i], points[i + 1], points[i + 2], points[i + 3]]);
+  }
 }
 
 function paintFarTerrain(ctx: Paint, scene: LandScene, rand: Rand, width: number): void {
@@ -268,6 +325,45 @@ const STYLE: Record<Culture, BuildingStyle> = {
   oceanic: { walls: [P.khaki, P.brown, P.tan], roof: P.brass, windows: P.charcoal },
 };
 
+// Light comes from the top left, like the unit art. These two helpers step a palette colour one slot
+// lighter or darker, so a wall's sunny edge and shaded side are still colours off the 16 strip.
+const BY_LUMA = Object.values(P).sort((a, b) => channelLuma(a) - channelLuma(b));
+const slotCache = new Map<string, string>();
+
+/** The palette colour that is at least 14 lighter (dir 1) or darker (dir -1), as close in colour as can be. */
+export function rampSlot(color: string, dir: 1 | -1): string {
+  const key = `${dir}${color}`;
+  const hit = slotCache.get(key);
+  if (hit) return hit;
+  const base = channelLuma(color);
+  const n = Number.parseInt(color.slice(1), 16);
+  let best: string = dir > 0 ? BY_LUMA[BY_LUMA.length - 1] : BY_LUMA[0];
+  let bestScore = Infinity;
+  for (const other of BY_LUMA) {
+    const gap = (channelLuma(other) - base) * dir;
+    if (gap < 14) continue;
+    const m = Number.parseInt(other.slice(1), 16);
+    const apart = Math.hypot(((n >> 16) & 255) - ((m >> 16) & 255), ((n >> 8) & 255) - ((m >> 8) & 255), (n & 255) - (m & 255));
+    const score = gap + apart * 0.5;
+    if (score < bestScore) {
+      best = other;
+      bestScore = score;
+    }
+  }
+  slotCache.set(key, best);
+  return best;
+}
+
+/** Sunny left edge, shaded right side, shadow under the eave, and a short shadow cast on the ground. */
+function paintRelief(ctx: Paint, wall: string, x: number, top: number, w: number, h: number): void {
+  if (w < 6 || h < 6) return;
+  const dark = rampSlot(wall, -1);
+  rect(ctx, dark, x, top, w, 1);
+  rect(ctx, rampSlot(wall, 1), x, top + 1, 1, h - 1);
+  rect(ctx, dark, x + w - 2, top + 1, 2, h - 1);
+  rect(ctx, P.charcoal, x + w, HORIZON_Y - 3, Math.min(14, 3 + h * 0.3), 2);
+}
+
 function paintWindows(ctx: Paint, color: string, x: number, top: number, w: number, h: number): void {
   for (let wy = top + 3; wy < top + h - 3; wy += 5) {
     for (let wx = x + 2; wx < x + w - 2; wx += 4) rect(ctx, color, wx, wy, 1, 2);
@@ -292,6 +388,7 @@ function paintBuilding(ctx: Paint, culture: Culture, x: number, w: number, h: nu
         poly(ctx, roof, [x - 1, top, x + 3, top - pitch * 0.6, x + w - 3, top - pitch * 0.6, x + w + 1, top]);
       } else {
         poly(ctx, roof, [x - 1, top, x + w / 2, top - pitch, x + w + 1, top]);
+        if (!far) poly(ctx, rampSlot(roof, 1), [x - 1, top, x + w / 2, top - pitch, x + w / 2, top]);
       }
       if (culture === "british") rect(ctx, far ? roof : P.brown, x + w - 5, top - pitch - 4, 3, pitch);
       if (culture === "german" && !far) {
@@ -303,12 +400,14 @@ function paintBuilding(ctx: Paint, culture: Culture, x: number, w: number, h: nu
     case "russian": {
       rect(ctx, wall, x, top, w, h);
       poly(ctx, roof, [x - 1, top, x + w / 2, top - w * 0.3, x + w + 1, top]);
+      if (!far) poly(ctx, rampSlot(roof, 1), [x - 1, top, x + w / 2, top - w * 0.3, x + w / 2, top]);
       break;
     }
     case "mediterranean":
     case "latin": {
       rect(ctx, wall, x, top, w, h);
       poly(ctx, roof, [x - 1, top, x + w / 2, top - w * 0.18, x + w + 1, top]);
+      if (!far) poly(ctx, rampSlot(roof, 1), [x - 1, top, x + w / 2, top - w * 0.18, x + w / 2, top]);
       break;
     }
     case "arab":
@@ -349,7 +448,11 @@ function paintBuilding(ctx: Paint, culture: Culture, x: number, w: number, h: nu
       break;
     }
   }
-  if (!far) paintWindows(ctx, style.windows, x, top, w, h);
+  if (!far) {
+    const chinese = culture === "chinese" || culture === "japanese";
+    paintRelief(ctx, wall, chinese ? x + 1 : x, chinese ? top + 2 : top, chinese ? w - 2 : w, chinese ? h - 2 : h);
+    paintWindows(ctx, style.windows, x, top, w, h);
+  }
 }
 
 /** The tall building a town gathers round: spire, minaret, pagoda, onion dome, water tower. */
@@ -782,7 +885,7 @@ function paintRow(
 }
 
 /** Everything above the board: far hills, trees, the settlement skyline and its landmarks. */
-export function paintHorizon(ctx: Paint, scene: LandScene, width: number): void {
+export function paintHorizon(ctx: Paint, scene: LandScene, width: number, options: { haze?: boolean } = {}): void {
   const rand = sceneRandom(scene.seed ^ 0x51a7);
   const look = SKYLINE[scene.settlement];
   const marks = landmarkSlots(scene, width);
@@ -808,6 +911,8 @@ export function paintHorizon(ctx: Paint, scene: LandScene, width: number): void 
   }
   if (scene.hasFactory) paintChimneys(ctx, width * 0.4 + between(rand, -60, 60), rand);
 
+  // The baked battle backdrop turns this off: the live horizon mist is smooth and follows the sky.
+  if (options.haze !== false) paintSkyHaze(ctx, width);
   if (!scene.island) paintEmbankment(ctx, groundTones(scene), width);
 }
 
@@ -849,45 +954,11 @@ function paintEmbankment(ctx: Paint, tones: GroundTones, width: number): void {
 // GROUND: the field the two armies stand on (y 114 to 530)
 // ============================================================================
 
-function paintCrater(ctx: Paint, x: number, y: number, r: number, dirt: string): void {
-  oval(ctx, dirt, x, y, r + 3, r * 0.7 + 2);
-  oval(ctx, P.taupe, x, y, r, r * 0.7);
-  oval(ctx, P.charcoal, x - 0.5, y - 0.5, r * 0.55, r * 0.35);
-}
+// The plan below is painted flat and squeezed toward the horizon by `squashPaint`. Anything that
+// runs away from the viewer (streets, paddy bunds, trenches) is laid out along rays instead.
 
-function paintTrench(ctx: Paint, x: number, top: number, height: number, urban: boolean): void {
-  if (urban) {
-    for (let y = top; y < top + height; y += 7) {
-      rect(ctx, P.terracotta, x - 7 + ((y / 7) % 2) * 3, y, 10, 5);
-      rect(ctx, P.brown, x - 7 + ((y / 7) % 2) * 3, y + 4, 10, 1);
-    }
-    rect(ctx, P.charcoal, x - 8, top, 2, height);
-    return;
-  }
-  rect(ctx, P.taupe, x - 6, top, 12, height);
-  for (let ty = top + 4; ty < top + height; ty += 12) rect(ctx, P.brown, x - 4, ty, 8, 4);
-  rect(ctx, P.charcoal, x - 6, top, 2, height);
-}
-
-function paintSandbags(ctx: Paint, x: number, y: number, count: number): void {
-  for (let i = 0; i < count; i++) {
-    const sy = y + i * 8;
-    rect(ctx, P.tan, x, sy, 7, 5);
-    rect(ctx, P.cream, x + 1, sy + 1, 5, 2);
-    rect(ctx, P.brown, x, sy + 4, 7, 1);
-  }
-}
-
-function paintWire(ctx: Paint): void {
-  for (let wy = 350; wy <= 510; wy += 35) {
-    rect(ctx, P.brown, WIRE.left + 10, wy, 3, 5);
-    rect(ctx, P.brown, WIRE.left + 50, wy, 3, 5);
-    line(ctx, P.feldgrau, 1, [WIRE.left + 5, wy + 2, WIRE.left + 55, wy + 4]);
-    line(ctx, P.feldgrau, 1, [WIRE.left + 5, wy + 4, WIRE.left + 55, wy + 2]);
-  }
-}
-
-function paintBiomeTexture(ctx: Paint, scene: LandScene, tones: GroundTones, rand: Rand, width: number): void {
+function paintBiomeTexture(raw: Paint, scene: LandScene, tones: GroundTones, rand: Rand, width: number): void {
+  const ctx = squashPaint(raw);
   const top = GROUND_TOP + 8;
   const bottom = GROUND_BOTTOM - 6;
   const biome = scene.island === "pacific" ? "desert" : scene.biome;
@@ -941,11 +1012,21 @@ function paintBiomeTexture(ctx: Paint, scene: LandScene, tones: GroundTones, ran
       for (let i = 0; i < 60; i++) oval(ctx, pick(rand, [tones.patch, tones.accent, P.olive]), between(rand, 0, width), between(rand, top, bottom), between(rand, 4, 12), between(rand, 2, 6));
       break;
     case "paddy":
+      // Cells follow the rays, so the plan reaches well past the board to fill the far corners.
       for (let y = top; y < bottom; y += 34) {
-        for (let x = 0; x < width; x += 74) {
-          if (rand() < 0.6) rect(ctx, tones.patch, x + 3, y + 3, 68, 28);
-          rect(ctx, tones.dirt, x, y, 74, 2);
-          rect(ctx, tones.dirt, x, y, 2, 34);
+        for (let x = -3300; x < width + 3300; x += 74) {
+          const wet = rand() < 0.6;
+          planRows(y, y + 34, (sy, plan) => {
+            const cell = stripAt(x, x + 74, sy);
+            if (cell.x > width || cell.x + cell.width < 0) return;
+            if (wet && plan >= y + 3 && plan < y + 31) {
+              const paddy = stripAt(x + 3, x + 71, sy);
+              rect(raw, tones.patch, paddy.x, sy, paddy.width, 1);
+            }
+            if (plan < y + 2) rect(raw, tones.dirt, cell.x, sy, cell.width, 1);
+            const bund = stripAt(x, x + 2, sy);
+            rect(raw, tones.dirt, bund.x, sy, bund.width, 1);
+          });
         }
       }
       break;
@@ -959,21 +1040,28 @@ function paintBiomeTexture(ctx: Paint, scene: LandScene, tones: GroundTones, ran
   }
 }
 
-function paintStreets(ctx: Paint, tones: GroundTones, rand: Rand, width: number, dense: boolean): void {
+function paintStreets(raw: Paint, tones: GroundTones, rand: Rand, width: number, dense: boolean): void {
+  const ctx = squashPaint(raw);
   const pave = dense ? P.feldgrau : tones.dirt;
   const kerb = dense ? P.taupe : P.brown;
   const avenues = dense ? [229, 367, 505] : [298];
   for (const y of avenues) {
-    rect(ctx, pave, 0, y - 5, width, 10);
-    rect(ctx, kerb, 0, y - 6, width, 1);
-    rect(ctx, kerb, 0, y + 5, width, 1);
+    layQuiet(ctx, pave, 0, y - 5, width, 10);
+    layQuiet(ctx, kerb, 0, y - 6, width, 1);
+    layQuiet(ctx, kerb, 0, y + 5, width, 1);
     if (dense) for (let x = 0; x < width; x += 22) rect(ctx, P.bone, x, y, 10, 1);
   }
+  // Side streets run away from the viewer, so they narrow and lean toward the vanishing point.
   const streets = dense ? [40, 300, 560, 720, 980, 1240] : [640];
   for (const x of streets) {
-    rect(ctx, pave, x - 4, GROUND_TOP + 8, 8, GROUND_BOTTOM - GROUND_TOP - 8);
-    rect(ctx, kerb, x - 5, GROUND_TOP + 8, 1, GROUND_BOTTOM - GROUND_TOP - 8);
-    rect(ctx, kerb, x + 4, GROUND_TOP + 8, 1, GROUND_BOTTOM - GROUND_TOP - 8);
+    planRows(GROUND_TOP + 8, GROUND_BOTTOM, (y) => {
+      const road = stripAt(x - 4, x + 4, y);
+      layQuiet(raw, pave, road.x, y, road.width, 1);
+      const near = stripAt(x - 5, x - 4, y);
+      layQuiet(raw, kerb, near.x, y, near.width, 1);
+      const far = stripAt(x + 4, x + 5, y);
+      layQuiet(raw, kerb, far.x, y, far.width, 1);
+    });
   }
   if (dense) {
     for (let i = 0; i < 40; i++) rect(ctx, P.bone, between(rand, 0, width), between(rand, 130, 520), 6, 4);
@@ -1008,7 +1096,7 @@ function paintRubble(ctx: Paint, rand: Rand, width: number, count: number): void
 function paintFarm(ctx: Paint, scene: LandScene, tones: GroundTones, rand: Rand, width: number): void {
   for (let i = 0; i < 2; i++) {
     const y = between(rand, 160, 500);
-    rect(ctx, tones.dirt, 0, y, width, 3);
+    layQuiet(ctx, tones.dirt, 0, y, width, 3);
   }
   const x = between(rand, NO_MANS_LAND.left + 20, WIRE.left - 50);
   const y = between(rand, 150, 280);
@@ -1019,50 +1107,48 @@ function paintFarm(ctx: Paint, scene: LandScene, tones: GroundTones, rand: Rand,
 }
 
 /** The battlefield floor: biome texture, the settlement's streets and ruins, trenches and wire. */
-export function paintGround(ctx: Paint, scene: LandScene, width: number): void {
+export function paintGround(ctx: Paint, scene: LandScene, width: number, options: { haze?: boolean } = {}): void {
   const rand = sceneRandom(scene.seed ^ 0x6e0d);
   const tones = groundTones(scene);
   const urban = scene.settlement === "capital" || scene.settlement === "city";
+  const flat = squashPaint(ctx);
 
-  rect(ctx, tones.base, 0, GROUND_TOP, width, GROUND_BOTTOM - GROUND_TOP);
+  layQuiet(ctx, tones.base, 0, GROUND_TOP, width, GROUND_BOTTOM - GROUND_TOP);
+  ctx.globalAlpha = LAND_GROUND_WASH;
   paintBiomeTexture(ctx, scene, tones, rand, width);
+  ctx.globalAlpha = 1;
 
-  rect(ctx, tones.dirt, 0, GROUND_TOP + 1, width, 6);
-  for (let rx = 10; rx < width; rx += 24) rect(ctx, P.charcoal, rx, GROUND_TOP + 2, 8, 4);
+  layQuiet(flat, tones.dirt, 0, GROUND_TOP + 1, width, 6);
+  for (let rx = 10; rx < width; rx += 24) rect(flat, P.charcoal, rx, GROUND_TOP + 2, 8, 4);
 
   if (urban) {
     paintStreets(ctx, tones, rand, width, true);
-    paintRuins(ctx, scene.culture, rand, scene.settlement === "capital" ? 6 : 4);
-    paintRubble(ctx, rand, width, scene.settlement === "capital" ? 140 : 90);
+    paintRuins(flat, scene.culture, rand, scene.settlement === "capital" ? 6 : 4);
+    paintRubble(flat, rand, width, scene.settlement === "capital" ? 140 : 90);
   } else if (scene.settlement === "town") {
     paintStreets(ctx, tones, rand, width, false);
-    paintRuins(ctx, scene.culture, rand, 2);
-    paintRubble(ctx, rand, width, 30);
+    paintRuins(flat, scene.culture, rand, 2);
+    paintRubble(flat, rand, width, 30);
   } else if (scene.settlement === "village") {
-    paintFarm(ctx, scene, tones, rand, width);
+    paintFarm(flat, scene, tones, rand, width);
   }
 
-  for (let gx = 100; gx < width; gx += 110) {
-    for (let y = GROUND_TOP + 8; y < 520; y += 10) rect(ctx, P.taupe, gx, y, 1, 2);
-  }
-  for (let gy = 150; gy < 520; gy += 90) {
-    for (let x = 40; x < width - 40; x += 10) rect(ctx, P.taupe, x, gy, 2, 1);
-  }
+  paintGrid(ctx, width, P.taupe, LAND_GRID_ALPHA);
 
-  paintTrench(ctx, 470, 130, 390, urban);
-  paintTrench(ctx, 810, 130, 390, urban);
+  // This region's own trenches, craters and bag clusters, from its seed.
+  const layout = groundLayout(scene.seed);
+  const [leftLine, rightLine] = layout.trenches;
+  paintTrench(ctx, leftLine.centre, urban, leftLine.bend);
+  paintTrench(ctx, rightLine.centre, urban, rightLine.bend);
 
-  const craters = [
-    { x: 520, y: 360, r: 16 }, { x: 760, y: 380, r: 14 }, { x: 640, y: 440, r: 20 },
-    { x: 580, y: 490, r: 12 }, { x: 700, y: 495, r: 15 }, { x: 490, y: 420, r: 10 }, { x: 790, y: 430, r: 11 },
-  ];
-  for (const c of craters) paintCrater(ctx, c.x + between(rand, -8, 8), c.y + between(rand, -6, 6), c.r, tones.dirt);
+  for (const c of layout.craters) paintCrater(ctx, c.x + between(rand, -8, 8), c.y + between(rand, -6, 6), c.r, tones.dirt);
 
   paintWire(ctx);
-  for (const y of [140, 260, 380]) {
-    paintSandbags(ctx, 455, y, 18);
-    paintSandbags(ctx, 815, y, 18);
-  }
+  paintParapet(ctx, leftLine.centre, -15, leftLine.bend);
+  paintParapet(ctx, rightLine.centre, 5, rightLine.bend);
+  paintTrenchClusters(ctx, layout);
+
+  if (options.haze !== false) paintGroundHaze(ctx, width);
 }
 
 // ============================================================================

@@ -87,7 +87,7 @@ import {beginCampaignVictory, campaignMusicMuted, endCampaignVictory, setCampaig
 import {
   drawProceduralUnit,
   drawWWIIBattlefield,
-  drawAnimatedSea,
+  drawSceneryEdge,
   drawOffshoreBattleship,
   drawBloodSplatters,
   drawFlyingDebris,
@@ -4199,12 +4199,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
     // 2. Draw Animated Sea at the edge of the troop lines (for land theaters), or an inland region's land
     if (!isMaritime) {
-      const scenery = sceneryRef.current;
-      if (scenery?.kind === 'land' && scenery.edge) {
-        ctx.drawImage(scenery.edge, 0, 525);
-      } else {
-        drawAnimatedSea(ctx, canvasWidth, canvasHeight, time);
-      }
+      drawSceneryEdge(ctx, sceneryRef.current, canvasWidth, canvasHeight, time);
     }
 
     // 2a. Draw Offshore Support Battleship in European Test (Coast / Forest)

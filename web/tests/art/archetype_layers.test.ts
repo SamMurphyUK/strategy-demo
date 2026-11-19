@@ -409,15 +409,16 @@ describe("layered starters", () => {
       for (const pose of MOVES) {
         // A gun on its carriage does not march: the brief keeps every artillery layer still on Move 1.
         // A propeller that is not painted in steel has nothing to step, so that Move 1 matches Idle too.
-        const gear = item.archetype === "tank" ? item.layers.idle.tracks : item.archetype === "mech_infantry" ? item.layers.idle.wheels_tracks : null;
+        const gear =
+          item.archetype === "tank" ? item.layers.idle.tracks : item.archetype === "mech_infantry" ? item.layers.idle.wheels_tracks : null;
         const still =
           (item.archetype === "artillery" && pose === "move_1") ||
           (item.archetype === "aircraft" &&
             pose === "move_1" &&
-            stepBlur(item.layers.idle.engines_props).every((row, y) => row.every((slot, x) => slot === item.layers.idle.engines_props[y][x]))) ||
-          (gear != null &&
-            pose === "move_1" &&
-            stepHighlights(gear).every((row, y) => row.every((slot, x) => slot === gear[y][x])));
+            stepBlur(item.layers.idle.engines_props).every((row, y) =>
+              row.every((slot, x) => slot === item.layers.idle.engines_props[y][x]),
+            )) ||
+          (gear != null && pose === "move_1" && stepHighlights(gear).every((row, y) => row.every((slot, x) => slot === gear[y][x])));
         if (still) {
           expect(item.blueprint.frames[pose], item.title).toEqual(item.blueprint.frames.idle);
           continue;
@@ -481,7 +482,8 @@ describe("layered starters", () => {
 describe("painting any skeleton", () => {
   it("lists the riflemen, the candidate sprites, and the tanks that have no outlined picture", () => {
     const ids = starterBlueprints().map((item) => item.blueprintId);
-    const flatTanks = STARTER_BLUEPRINTS.filter((item) => item.unitTypeId !== "infantry" && !ids.includes(item.blueprintId));
+    const layered = new Set(ARCHETYPE_STARTERS.map((item) => item.blueprint.blueprintId));
+    const flatTanks = STARTER_BLUEPRINTS.filter((item) => item.unitTypeId !== "infantry" && !layered.has(item.blueprintId));
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(6 + ARCHETYPE_STARTERS.length + flatTanks.length);
     expect(ids.slice(0, 6).every((id) => id.includes("_infantry_"))).toBe(true);

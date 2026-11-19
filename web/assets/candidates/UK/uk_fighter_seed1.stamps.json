@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/UK/uk_fighter_seed1.outlined.polished.png",
+  "width": 160,
+  "height": 176,
+  "stamps": [
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 17,
+      "x": 63,
+      "y": 63,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

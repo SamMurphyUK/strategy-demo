@@ -6,6 +6,10 @@
 // Without --confirm every matching blueprint is sent with dryRunOnly so Retro Diffusion
 // only runs check_cost. With --confirm the same request is paid for and written.
 // A promoted faction hero PNG is reference_images[0] when that file is already on disk.
+//
+//   npm run bake:candidates -- --landed-air --only US:fighter --run
+//
+// --landed-air bakes the side-profile aircraft. It prices with check_cost until --run.
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,6 +141,11 @@ async function postBake(body) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  if (argv.includes("--landed-air")) {
+    const { bakeLandedAir, parseOvernightArgs } = await import("./overnightBake.mjs");
+    const landed = parseOvernightArgs(argv);
+    return bakeLandedAir({ seeds: landed.seeds, only: landed.only, maxUsd: landed.maxUsd, run: landed.run });
+  }
   const args = parseBakeArgs(argv);
   const blueprints = selectBlueprints(STARTER_BLUEPRINTS, args);
   if (blueprints.length === 0) {

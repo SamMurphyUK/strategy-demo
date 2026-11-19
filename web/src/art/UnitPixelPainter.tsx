@@ -1,10 +1,24 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import { SPRITE_BAKE } from "../ui/map/figureGround";
-import { ARCHETYPES, ARCHETYPE_LAYERS, UNIT_TYPE_LABEL, layerInfo, layerLabel } from "./archetypeLayers";
+import { ARCHETYPES, ARCHETYPE_LAYERS, UNIT_TYPE_LABEL, archetypeForUnitType, layerInfo, layerLabel, shiftsForDivisor } from "./archetypeLayers";
 import { ARCHETYPE_STARTERS } from "./archetypeStarters";
 import { FACTION_MILITARY_MAPPINGS } from "./starterParts";
 import { blitBlueprintToSheet80x56, compileBlueprintFrame } from "./blockoutCompiler";
+import { EDITOR_SHARED_CSS, SwatchPalette } from "./editorShared";
+import {
+  fromLayeredFile,
+  layeredUnitRelativePath,
+  normalizePlateGrain,
+  readUnitFile,
+  saveMotionDocument,
+  savesAsLayeredUnit,
+  toLayeredFile,
+} from "./layeredUnit";
+import { EMBLEMS, emblemBitmap, emblemById, emblemForFaction, type EmblemId, type StampCell } from "./emblems";
+import { VehicleGeneratePanel } from "./VehicleGeneratePanel";
+import { VehiclePartsPanel } from "./VehiclePartsPanel";
+import { hasParts } from "./vehicleParts";
 import {
   FRAME_LABEL,
   PALETTE_SLOT_KEYS,
@@ -12,33 +26,82 @@ import {
   SLOT_LABEL,
   blankDocument,
   buildAnimationDocument,
+  cardBlockMask,
   duplicateFrameToNext,
   duplicateLayerToNext,
+  fitPlate,
   flattenRgba,
-  fromPaintFile,
+  isPlate,
+  linkStripes,
   loadFrameOntoCurrent,
+  maskCount,
+  moveRegionToLayer,
   nudgeLayer,
   paintAt,
+  plateDocument,
+  plateProblems,
+  plateShifts,
+  polygonMask,
+  rectMask,
   solidTorsoUnderWeapon,
   placeGroundOrigin,
   placeMuzzle,
-  saveMotionSprite,
   slotHex,
   starterBlueprints,
+  stampEmblemAt,
+  stampPreviewCells,
   starterDocument,
+  tagSteel,
   toPaintFile,
+  withDisplayDivisor,
   withEditingFrame,
   withEditingLayer,
   withFaction,
+  withMotionShifts,
   withUnitType,
   type Brush,
+  type CellMask,
   type UnitPaintDocument,
 } from "./pixelPaint";
-import { SPRITE_FRAME_KEYS, type MilitaryStripKey, type PaletteSlotKey, type RosterFactionId, type SpriteFrameKey, type UnitSpriteSheetBlueprint } from "./skeletonSchema";
+import { autoGrainLabel, deupscaleToNativeArtPixels, detectPixelBlockSize, resolveGrainBlock, type GrainOverride } from "./pixelGrain";
+import {
+  EMBLEM_SLOT_KEYS,
+  SPRITE_FRAME_KEYS,
+  type MilitaryStripKey,
+  type MotionShifts,
+  type PaletteSlotKey,
+  type RosterFactionId,
+  type SpriteFrameKey,
+  type UnitSpriteSheetBlueprint,
+  type Vec2,
+} from "./skeletonSchema";
 
-const GRID = 48;
-const ZOOMS = [6, 8, 12] as const;
+/** Screen pixels to one canvas pixel. A plate several hundred pixels wide opens at a low step and scrolls. */
+const ZOOMS = [1, 2, 3, 4, 6, 8, 12] as const;
+type Zoom = (typeof ZOOMS)[number];
+/** The widest the canvas opens at before it needs the scroll bars. */
+const OPEN_WIDTH = 780;
+/** Below this many screen pixels a cell, the pixel gridlines are left off. */
+const GRIDLINE_ZOOM = 4;
 const HISTORY_LIMIT = 40;
+type Tool = "brush" | "ground" | "muzzle" | "select" | "lasso" | "steel" | "stamp";
+
+interface SavedPlate {
+  factionId: RosterFactionId;
+  unitTypeId: string;
+  path: string;
+}
+
+/** The largest step, up to 8, at which the whole canvas shows without scrolling. */
+function openingZoom(width: number): Zoom {
+  let best: Zoom = 1;
+  for (const step of ZOOMS) {
+    if (step <= 8 && width * step <= OPEN_WIDTH) {
+      best = step;
+    }
+  }
+  return best;
+}
 /** How strongly the layers you are not painting show while they are dimmed, out of 255. */
 const DIMMED_ALPHA = 84;
 /** The riflemen, a layered starter for each other skeleton, then the flat tanks. */
@@ -85,6 +148,12 @@ const SLOT_HELP: Record<PaletteSlotKey, string> = {
   wood_or_leather: "Boots, belts, and rifle wood.",
   skin_stand_in: "Face and hands.",
   insignia_accent: "A small mark: a collar tab, a star, or a roundel.",
+  emblem_dark: "Fixed. The black of a national emblem. It is the same in every country.",
+  emblem_red: "Fixed. The red of a national emblem. It is the same in every country.",
+  emblem_red_light: "Fixed. The lit edge of a red emblem.",
+  emblem_white: "Fixed. The white of a national emblem.",
+  emblem_white_shade: "Fixed. The shaded edge of a white emblem.",
+  emblem_blue: "Fixed. The blue of a national emblem.",
 };
 
 export interface PaintCommand {
@@ -105,14 +174,29 @@ export function UnitPixelPainter({
   const [backup, setBackup] = useState<UnitPaintDocument | null>(null);
   const [dimOthers, setDimOthers] = useState(true);
   const [brush, setBrush] = useState<Brush>("primary_uniform_or_hull");
-  const [tool, setTool] = useState<"brush" | "ground" | "muzzle">("brush");
+  const [tool, setTool] = useState<Tool>("brush");
+  const [emblemId, setEmblemId] = useState<EmblemId>(() => emblemForFaction(starterDocument(STARTERS[0]?.blueprintId ?? "")?.blueprint.factionId ?? "GER")?.id ?? "ger_balkenkreuz");
+  const [emblemSize, setEmblemSize] = useState(17);
+  const [emblemFlip, setEmblemFlip] = useState(false);
+  const [onlySprite, setOnlySprite] = useState(true);
   const [sheetNote, setSheetNote] = useState("");
   const gridRef = useRef<HTMLCanvasElement>(null);
   const pinRef = useRef<HTMLCanvasElement>(null);
+  const selectionRef = useRef<HTMLCanvasElement>(null);
+  const stampRef = useRef<HTMLCanvasElement>(null);
   const sheetRef = useRef<HTMLCanvasElement>(null);
   const [hoverHelp, setHoverHelp] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [zoom, setZoom] = useState<(typeof ZOOMS)[number]>(8);
+  const [zoom, setZoom] = useState<Zoom>(8);
+  const [selection, setSelection] = useState<CellMask | null>(null);
+  const [heal, setHeal] = useState(true);
+  const [problems, setProblems] = useState<string[]>([]);
+  const [savedPlates, setSavedPlates] = useState<SavedPlate[]>([]);
+  const [grainChoice, setGrainChoice] = useState<"auto" | "1" | "2" | "3">("auto");
+  const [grainDetected, setGrainDetected] = useState<number | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const dragStart = useRef<Vec2 | null>(null);
+  const lassoPoints = useRef<Vec2[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [painting, setPainting] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -228,7 +312,14 @@ export function UnitPixelPainter({
       const step = ARROW_STEP[event.key];
       if (step) {
         event.preventDefault();
-        commit(nudgeLayer(current, step[0], step[1]));
+        if (!isPlate(current)) {
+          commit(nudgeLayer(current, step[0], step[1]));
+        } else if (current.editingFrame !== "idle") {
+          setNotice(PLATE_IDLE_ONLY);
+        } else {
+          const nudged = nudgeLayer(current, step[0], step[1]);
+          commit(nudged === current ? current : buildAnimationDocument(nudged));
+        }
         return;
       }
       if (event.key === "[" || event.key === "]") {
@@ -248,22 +339,101 @@ export function UnitPixelPainter({
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, commit]);
 
+  // The stamp follows the country the sprite is filed under. A country with no emblem keeps the last pick.
+  const spriteFaction = doc.blueprint.factionId;
+  useEffect(() => {
+    const own = emblemForFaction(spriteFaction);
+    if (own) {
+      setEmblemId(own.id);
+    }
+  }, [spriteFaction]);
+
   useEffect(() => {
     drawGrid(gridRef.current, pinRef.current, doc, dimOthers);
     drawSheet(sheetRef.current, doc, setSheetNote);
   }, [doc, dimOthers]);
+
+  const { width: gridW, height: gridH } = doc.blueprint.canvasSize;
+  const plate = isPlate(doc);
+  const divisor = doc.blueprint.displayDivisor ?? 1;
+  const liveSelection = selection && selection.width === gridW && selection.height === gridH ? selection : null;
+
+  useEffect(() => {
+    drawSelection(selectionRef.current, liveSelection);
+  }, [liveSelection, gridW, gridH]);
+
+  const emblem = emblemById(emblemId) ?? EMBLEMS[0];
+  const activeSize = emblem?.sizes.some((item) => item.size === emblemSize) ? emblemSize : (emblem?.sizes[0]?.size ?? 0);
+  const stampBitmap = useMemo(() => (emblem ? emblemBitmap(emblem, activeSize, emblemFlip) : null), [emblem, activeSize, emblemFlip]);
+
+  // The hover preview: exactly the cells a click would write, so a clipped stamp shows clipped.
+  useEffect(() => {
+    drawStampPreview(stampRef.current, tool === "stamp" && cursor && stampBitmap ? stampPreviewCells(doc, stampBitmap, cursor.x, cursor.y, onlySprite) : [], FACTION_MILITARY_MAPPINGS[doc.blueprint.factionId]);
+  }, [tool, cursor, stampBitmap, onlySprite, doc, gridW, gridH]);
+
+  // A canvas of another size opens at a step that shows all of it, and drops a selection made on the old one.
+  useEffect(() => {
+    setZoom(openingZoom(gridW));
+    setSelection(null);
+  }, [gridW, gridH]);
+
+  // The check walks every beat of the plate, so it waits until the pencil has been still for a moment.
+  useEffect(() => {
+    if (!isPlate(doc)) {
+      setProblems([]);
+      return;
+    }
+    const timer = window.setTimeout(() => setProblems(plateProblems(doc)), 200);
+    return () => window.clearTimeout(timer);
+  }, [doc]);
+
+  const refreshSavedPlates = useCallback(async () => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    try {
+      const response = await fetch("/__dev/layered-units");
+      const json = await response.json();
+      setSavedPlates(Array.isArray(json.units) ? (json.units as SavedPlate[]) : []);
+    } catch {
+      setSavedPlates([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSavedPlates();
+  }, [refreshSavedPlates]);
 
   const mapping = FACTION_MILITARY_MAPPINGS[doc.blueprint.factionId];
   const editingLabel = FRAME_LABEL[doc.editingFrame];
   const skeleton = ARCHETYPES[doc.archetype];
   const openLayer = doc.layers && doc.editingLayer ? layerLabel(doc.archetype, doc.editingLayer) : null;
   const stackLine = `${skeleton.layers.map((layer) => layer.label).join(", then ")}, bottom to top`;
-  const modeLine = openLayer
-    ? `Painting ${openLayer} on ${editingLabel}. ${stackLine}. Arrow keys move this layer. [ and ] change layer.`
-    : `Painting ${editingLabel}. Duplicate it onto the next frame, then nudge the treads by a pixel or two.`;
+  const modeLine = plate
+    ? `${openLayer} is open. Select a part with Box or Lasso and send it to its layer. Move 1, Move 2, and Fire are built from Idle after every change.`
+    : openLayer
+      ? `Painting ${openLayer} on ${editingLabel}. ${stackLine}. Arrow keys move this layer. [ and ] change layer.`
+      : `Painting ${editingLabel}. Duplicate it onto the next frame, then nudge the treads by a pixel or two.`;
   const helpLine = hoverHelp ?? (notice || modeLine);
   const brushLabel = brush === "eraser" ? "Eraser" : `${SLOT_LABEL[brush]} ${slotHex(mapping, brush)}`;
-  const toolLabel = tool === "ground" ? "Feet" : tool === "muzzle" ? "Muzzle" : brush === "eraser" ? "Eraser" : "Pencil";
+  const toolLabel =
+    tool === "ground"
+      ? "Feet"
+      : tool === "muzzle"
+        ? "Muzzle"
+        : tool === "select"
+          ? "Box"
+          : tool === "lasso"
+            ? "Lasso"
+            : tool === "stamp"
+              ? "Stamp"
+              : tool === "steel"
+              ? "Steel links"
+              : brush === "eraser"
+                ? "Eraser"
+                : "Pencil";
+  const selectedCount = liveSelection ? maskCount(liveSelection) : 0;
+  const shifts = plateShifts(doc);
 
   const units = STARTERS.some((item) => item.blueprintId === doc.blueprint.blueprintId) ? STARTERS : [...STARTERS, doc.blueprint];
   const unitTypes = UNIT_TYPE_KEYS.includes(doc.blueprint.unitTypeId) ? UNIT_TYPE_KEYS : [...UNIT_TYPE_KEYS, doc.blueprint.unitTypeId];
@@ -285,7 +455,7 @@ export function UnitPixelPainter({
     }
     const name = (UNIT_TYPE_LABEL[unitTypeId] ?? unitTypeId).toLowerCase();
     if (next.archetype === current.archetype) {
-      commit(next);
+      commit(isPlate(next) ? buildAnimationDocument(next) : next);
       setNotice(`This sprite is now filed as ${name}. The drawing stays. Build Animation uses that unit's rules.`);
       return;
     }
@@ -293,13 +463,40 @@ export function UnitPixelPainter({
     setNotice(`Empty ${name}, on the ${ARCHETYPES[next.archetype].label.toLowerCase()} skeleton. ${blankLine(next)} Undo brings the last sprite back.`);
   };
 
-  const applyPointer = (event: PointerEvent<HTMLCanvasElement>) => {
+  const applyPointer = (event: PointerEvent<HTMLCanvasElement>, phase: "down" | "move") => {
     const point = pixelOf(event.currentTarget, event.clientX, event.clientY);
     if (!point) {
       return;
     }
     setCursor(point);
     const current = docRef.current;
+    if (tool === "brush" && event.altKey) {
+      // Alt-click picks up the colour under the pointer, as it does in the infantry editor.
+      const seen = current.blueprint.frames[current.editingFrame][point.y]?.[point.x] ?? null;
+      if (phase === "down" && seen) {
+        setBrush(seen);
+        setNotice(`Picked up ${SLOT_LABEL[seen]}.`);
+      }
+      return;
+    }
+    if (tool === "select" || tool === "lasso") {
+      if (phase === "down") {
+        dragStart.current = point;
+        lassoPoints.current = [point];
+      } else if (dragStart.current) {
+        const last = lassoPoints.current[lassoPoints.current.length - 1];
+        if (!last || last.x !== point.x || last.y !== point.y) {
+          lassoPoints.current.push(point);
+        }
+      }
+      if (!dragStart.current) {
+        return;
+      }
+      const { width, height } = current.blueprint.canvasSize;
+      setSelection(tool === "select" ? rectMask(width, height, dragStart.current, point) : polygonMask(width, height, lassoPoints.current));
+      setNotice("");
+      return;
+    }
     if (tool === "ground") {
       if (commit(placeGroundOrigin(current, point.x, point.y))) {
         setNotice(`Feet stand on pixel ${point.x}, ${point.y}. The drawing stays put. The game sprite shifts so the feet meet the ground.`);
@@ -307,15 +504,192 @@ export function UnitPixelPainter({
       return;
     }
     if (tool === "muzzle") {
-      if (commit(placeMuzzle(current, point.x, point.y))) {
-        setNotice(`Muzzle mark set at ${point.x}, ${point.y}. A gun flash can appear here later.`);
+      const marked = placeMuzzle(current, point.x, point.y);
+      if (commit(marked !== current && isPlate(marked) ? buildAnimationDocument(marked) : marked)) {
+        setNotice(`Muzzle mark set at ${point.x}, ${point.y}. Build Animation paints the flash there on Fire.`);
       }
+      return;
+    }
+    if (isPlate(current) && current.editingFrame !== "idle") {
+      setNotice(PLATE_IDLE_ONLY);
+      return;
+    }
+    if (tool === "stamp") {
+      if (phase !== "down" || !stampBitmap) {
+        return;
+      }
+      const stamped = stampEmblemAt(current, stampBitmap, point.x, point.y, onlySprite);
+      if (stamped === current) {
+        setNotice(onlySprite ? "Nothing to stamp there: no part of the sprite is under the emblem. Turn off Only on the sprite to stamp on empty canvas." : "The emblem is off the canvas.");
+        return;
+      }
+      commit(isPlate(stamped) && stamped.layers ? buildAnimationDocument(stamped) : stamped);
+      setNotice(`${emblem?.name ?? "Emblem"} stamped at ${point.x}, ${point.y}${current.editingLayer ? ` on ${layerLabel(current.archetype, current.editingLayer)}` : ""}.`);
+      return;
+    }
+    if (tool === "steel") {
+      if (!current.layers || !current.editingLayer) {
+        setNotice("Steel links are tagged on a layer. This unit is four flat frames.");
+        return;
+      }
+      commit(tagSteel(current, cardBlockMask(current, point.x, point.y)));
+      setNotice("");
       return;
     }
     if (!commit(paintAt(current, point.x, point.y, brush))) {
       setNotice(`That square is outside the ${FRAME_LABEL[current.editingFrame]} frame.`);
     } else {
       setNotice("");
+    }
+  };
+
+  /** A drag is over. A plate's other poses follow the idle pose, so they are built again once the pencil lifts. */
+  const endStroke = () => {
+    const current = docRef.current;
+    if (stroking.current && gestureSaved.current && tool === "brush" && isPlate(current) && current.layers && current.editingFrame === "idle") {
+      commit(buildAnimationDocument(current));
+    }
+    stroking.current = false;
+    gestureSaved.current = false;
+    dragStart.current = null;
+    setPainting(false);
+  };
+
+  const sendSelection = (layer: string) => {
+    const current = docRef.current;
+    if (!liveSelection || !current.layers) {
+      return;
+    }
+    const result = moveRegionToLayer(current, liveSelection, layer, heal);
+    const label = layerLabel(current.archetype, layer);
+    if (result.moved === 0) {
+      setNotice(`Nothing in the selection shows on another layer. ${label} already has it, or the selection is empty canvas.`);
+      return;
+    }
+    commit(withEditingLayer(result.doc, layer));
+    setSelection(null);
+    setNotice(
+      `${result.moved} pixels are now on ${label}. ${heal ? "The layers under it were filled in where the part sat inside them. " : ""}Idle looks the same. The other poses were built again.`,
+    );
+  };
+
+  const tagSelection = (stripes: boolean) => {
+    const current = docRef.current;
+    if (!liveSelection || !current.layers || !current.editingLayer) {
+      return;
+    }
+    const region = stripes ? linkStripes(liveSelection, current.blueprint.groundOrigin.x, current.blueprint.displayDivisor ?? 1) : liveSelection;
+    commit(tagSteel(current, region));
+    setNotice(
+      stripes
+        ? `Every other card pixel of ${layerLabel(current.archetype, current.editingLayer)} in the selection is steel. Move 1 steps those links along.`
+        : `The ${layerLabel(current.archetype, current.editingLayer)} ink in the selection is steel. Move 1 steps it along.`,
+    );
+  };
+
+  const changeDivisor = (value: number) => {
+    const current = docRef.current;
+    if (!Number.isInteger(value) || value < 1 || value === (current.blueprint.displayDivisor ?? 1)) {
+      return;
+    }
+    // Shifts that were one card pixel stay one card pixel. Shifts typed in by hand are left alone and checked.
+    const followed = sameShifts(plateShifts(current), shiftsForDivisor(current.blueprint.displayDivisor ?? 1));
+    const resized = withDisplayDivisor(current, value);
+    commit(followed ? withMotionShifts(resized, shiftsForDivisor(value)) : resized);
+    setNotice(`${value} by ${value} plate pixels make one card pixel.`);
+  };
+
+  const changeShift = (key: keyof MotionShifts, value: number) => {
+    if (!Number.isFinite(value) || value < 0) {
+      return;
+    }
+    const current = docRef.current;
+    commit(withMotionShifts(current, { ...plateShifts(current), [key]: value }));
+  };
+
+  const fitCard = () => {
+    const current = docRef.current;
+    const next = fitPlate(current);
+    commit(next);
+    setNotice(
+      `Divisor ${next.blueprint.displayDivisor}: the smallest at which every beat fits the card, with one card pixel of bob and tread and two of recoil.`,
+    );
+  };
+
+  const openPlate = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    const current = docRef.current;
+    const archetype = archetypeForUnitType(current.blueprint.unitTypeId);
+    if (!archetype || archetype === "infantry") {
+      setNotice("Set Type to the vehicle, aircraft, or ship in the picture first. A rifleman is drawn on the 48 canvas.");
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const image = await rgbaFromUrl(url);
+      const detected = detectPixelBlockSize(image.data, image.width, image.height);
+      const override: GrainOverride = grainChoice === "auto" ? "auto" : (Number(grainChoice) as 1 | 2 | 3);
+      const native = deupscaleToNativeArtPixels(image.data, image.width, image.height, resolveGrainBlock(detected, override));
+      setGrainDetected(detected);
+      const next = plateDocument({
+        factionId: current.blueprint.factionId,
+        unitTypeId: current.blueprint.unitTypeId,
+        rgba: native.rgba,
+        width: native.width,
+        height: native.height,
+        title: `${FACTION_NAME[current.blueprint.factionId]} ${(UNIT_TYPE_LABEL[current.blueprint.unitTypeId] ?? current.blueprint.unitTypeId).toLowerCase()}`,
+        sourcePath: file.name,
+      });
+      commit(next, null);
+      const grainNote =
+        native.blockSize <= 1
+          ? "It is already one art pixel per pixel."
+          : detected === native.blockSize
+            ? `Pixel grain ${native.blockSize}× collapsed to 1× before the colours were snapped.`
+            : `Detected ${detected}×, forced ${native.blockSize}×, and collapsed to 1× before the colours were snapped.`;
+      setNotice(
+        `${file.name} is ${native.width} by ${native.height} art pixels. ${grainNote} The plate is ${next.blueprint.canvasSize.width} by ${next.blueprint.canvasSize.height}, all on ${layerLabel(next.archetype, next.editingLayer ?? "")}.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const normalizeOpenPlate = () => {
+    const current = docRef.current;
+    if (!isPlate(current) || !current.layers || current.archetype === "infantry") {
+      setNotice("Pixel grain trim is for a plate. A 48 canvas is already one art pixel per pixel.");
+      return;
+    }
+    const grain = normalizePlateGrain(current, grainChoice === "auto" ? undefined : Number(grainChoice));
+    setGrainDetected(grain.detected);
+    if (grain.applied <= 1) {
+      setNotice(
+        `This plate is already 1×, ${current.blueprint.canvasSize.width} by ${current.blueprint.canvasSize.height}. Choose Force 2× or Force 3× to snap it anyway.`,
+      );
+      return;
+    }
+    commit(grain.doc, null);
+    const { width, height } = grain.doc.blueprint.canvasSize;
+    setNotice(`Collapsed ${grain.applied}× grain to 1×. ${width} by ${height}. The feet, the muzzle, and the shifts moved with the pixels.`);
+  };
+
+  const openSavedPlate = async (saved: SavedPlate) => {
+    try {
+      const response = await fetch(`/__dev/layered-units?faction=${saved.factionId}&unit=${saved.unitTypeId}`);
+      const json: unknown = await response.json();
+      if (!response.ok) {
+        throw new Error((json as { error?: string }).error ?? `Open failed with ${response.status}`);
+      }
+      const next = fromLayeredFile(json);
+      commit(next, null);
+      setNotice(`Opened ${saved.path}: ${next.blueprint.canvasSize.width} by ${next.blueprint.canvasSize.height}, divisor ${next.blueprint.displayDivisor}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -352,31 +726,40 @@ export function UnitPixelPainter({
   };
 
   const save = async () => {
+    const layered = savesAsLayeredUnit(doc);
     try {
-      const response = await fetch("/__dev/save-unit", {
+      const response = await fetch(layered ? "/__dev/save-layered" : "/__dev/save-unit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toPaintFile(doc)),
+        body: JSON.stringify(layered ? toLayeredFile(doc) : toPaintFile(doc)),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json.ok === false) {
         throw new Error(json.error || `Save failed with ${response.status}`);
       }
-      setNotice(`Saved this drawing in the project at ${json.path}.`);
+      if (layered) {
+        void refreshSavedPlates();
+        setNotice(`Saved the plate at ${json.path}. npm run animate:batch exports its card strip from that file.`);
+      } else {
+        setNotice(`Saved this drawing in the project at ${json.path}.`);
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(toPaintFile(doc), null, 2)], { type: "application/json" });
+    const layered = savesAsLayeredUnit(doc);
+    const text = layered ? JSON.stringify(toLayeredFile(doc), null, 1) : JSON.stringify(toPaintFile(doc), null, 2);
+    const name = layered ? `${doc.blueprint.factionId}_${doc.blueprint.unitTypeId}.layered.json` : `${doc.blueprint.blueprintId}.json`;
+    const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${doc.blueprint.blueprintId}.json`;
+    link.download = name;
     link.click();
     URL.revokeObjectURL(url);
-    setNotice(`Downloaded ${doc.blueprint.blueprintId}.json. Another player can open that file here.`);
+    setNotice(`Downloaded ${name}. Another player can open that file here.`);
   };
 
   const importJson = async (file: File | undefined) => {
@@ -385,7 +768,7 @@ export function UnitPixelPainter({
     }
     try {
       const parsed: unknown = JSON.parse(await file.text());
-      commit(fromPaintFile(parsed), null);
+      commit(readUnitFile(parsed), null);
       setNotice(`Opened ${file.name}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -428,6 +811,12 @@ export function UnitPixelPainter({
     }
   };
 
+  /** A change made by the parts or the generate panel. It is one step for Undo. */
+  const takeDocument = (next: UnitPaintDocument, note: string) => {
+    commit(next);
+    setNotice(note);
+  };
+
   const hint = (text: string) => ({
     title: text,
     onMouseEnter: () => setHoverHelp(text),
@@ -437,9 +826,37 @@ export function UnitPixelPainter({
   });
 
   const cell = zoom;
+  /** The checkerboard behind the canvas stays readable when a plate is shown small. */
+  const checker = Math.max(cell, 4);
 
   return (
-    <div className="sprite-editor" aria-label="Unit pixel painter">
+    <div
+      className={dropping ? "sprite-editor sprite-editor-drop" : "sprite-editor"}
+      aria-label="Unit pixel painter"
+      onDragOver={(event) => {
+        if (![...event.dataTransfer.types].includes("Files")) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDropping(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setDropping(false);
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDropping(false);
+        const file = [...event.dataTransfer.files].find((item) => item.type === "image/png" || item.name.toLowerCase().endsWith(".png"));
+        if (!file) {
+          setNotice("Drop a PNG to import it as a plate.");
+          return;
+        }
+        void openPlate(file);
+      }}
+    >
       <style>{PAINTER_CSS}</style>
       <header className="sprite-titlebar">
         <div>
@@ -555,47 +972,71 @@ export function UnitPixelPainter({
               "Open a short field where this sprite marches. Idle, two steps, then the shot. The rifle kicks back when it fires.",
             )}
             onClick={() => {
-              saveMotionSprite(docRef.current);
+              try {
+                saveMotionDocument(docRef.current);
+              } catch (error) {
+                setNotice(error instanceof Error ? error.message : String(error));
+                return;
+              }
               window.location.assign("/?anim=1");
             }}
           >
             Watch them move
           </HintButton>
         )}
+        {import.meta.env.DEV && (
+          <HintButton
+            hint={hint(
+              "Put this drawing on a battle map, at the size it was painted, on the same ground line as the vector unit. One pixel of the drawing is one pixel of the board.",
+            )}
+            onClick={() => {
+              try {
+                saveMotionDocument(docRef.current);
+              } catch (error) {
+                setNotice(error instanceof Error ? error.message : String(error));
+                return;
+              }
+              window.location.assign("/?field=1");
+            }}
+          >
+            On a battle map
+          </HintButton>
+        )}
         <HintButton
-          hint={hint(
-            "Clear the canvas and start an empty 48 by 48 sprite of the type and country selected above. The unit you had open stays in the list.",
-          )}
+          hint={hint("Clear the canvas and start an empty 48 by 48 sprite of the type and country selected above. The unit you had open stays in the list.")}
           onClick={() => {
             const current = docRef.current;
+            const name = (UNIT_TYPE_LABEL[current.blueprint.unitTypeId] ?? current.blueprint.unitTypeId).toLowerCase();
             const next = blankDocument(current.blueprint.factionId, current.archetype, current.blueprint.unitTypeId);
             commit(next, null);
-            setNotice(`Empty ${(UNIT_TYPE_LABEL[next.blueprint.unitTypeId] ?? next.blueprint.unitTypeId).toLowerCase()}. ${blankLine(next)}`);
+            setNotice(`Empty ${name}. ${blankLine(next)}`);
           }}
         >
           New sprite
         </HintButton>
-        <HintButton
-          hint={hint(
-            "Copy the frame you are painting onto the next pose, then select that pose. Nudge the boots, the treads, or the rifle by a pixel or two.",
-          )}
-          onClick={duplicateNext}
-        >
-          Duplicate Frame → Next
-        </HintButton>
+        {!plate && (
+          <HintButton
+            hint={hint(
+              "Copy the frame you are painting onto the next pose, then select that pose. Nudge the boots, the treads, or the rifle by a pixel or two.",
+            )}
+            onClick={duplicateNext}
+          >
+            Duplicate Frame → Next
+          </HintButton>
+        )}
         {doc.layers && (
           <HintButton
             hint={hint(
               doc.archetype === "infantry"
                 ? "Place the idle head, tunic, and rifle onto Move 1, Move 2, and Fire. A leg drawing already on Move 1 or Move 2 stays. Fire plants the idle boots a little wider, toes still pointing right."
-                : `Write Move 1, Move 2, and Fire from the Idle layers. Layers shift by whole pixels and nothing turns. ${skeleton.motion} What is on those three poses now is replaced.`,
+                : `Write Move 1, Move 2, and Fire from the Idle layers. Layers shift by whole pixels and nothing turns. ${skeleton.motion} What is on those three poses now is replaced.${plate ? " A plate does this by itself after every change." : ""}`,
             )}
             onClick={buildAnimation}
           >
             Build Animation
           </HintButton>
         )}
-        {doc.layers && doc.editingLayer && (
+        {!plate && doc.layers && doc.editingLayer && (
           <HintButton
             hint={hint(`Copy the ${openLayer} layer onto the next pose and select that pose. The other layers on that pose stay.`)}
             onClick={duplicateLayer}
@@ -603,20 +1044,24 @@ export function UnitPixelPainter({
             {"Copy Layer -> Next Pose"}
           </HintButton>
         )}
-        <HintButton
-          hint={hint(
-            doc.layers
-              ? "Load the picture you previously kept for this unit onto the layer you are painting. Erase the parts that belong on the other layers."
-              : "Load the picture you previously kept for this unit, if there is one, onto the frame you are painting.",
-          )}
-          onClick={() => void loadPromoted()}
-        >
-          Open kept picture
-        </HintButton>
+        {!plate && (
+          <HintButton
+            hint={hint(
+              doc.layers
+                ? "Load the picture you previously kept for this unit onto the layer you are painting. Erase the parts that belong on the other layers."
+                : "Load the picture you previously kept for this unit, if there is one, onto the frame you are painting.",
+            )}
+            onClick={() => void loadPromoted()}
+          >
+            Open kept picture
+          </HintButton>
+        )}
         {import.meta.env.DEV && (
           <HintButton
             hint={hint(
-              "Write this drawing into the project as JSON, under assets/units/authored. You can keep working on it from the dev server.",
+              plate
+                ? `Write this plate into the project at ${layeredUnitRelativePath(doc.blueprint.factionId, doc.blueprint.unitTypeId)}. The file holds the Idle layers, the feet, the muzzle, the divisor, and the shifts. The card strip is exported from it.`
+                : "Write this drawing into the project as JSON, under assets/units/authored. You can keep working on it from the dev server.",
             )}
             onClick={() => void save()}
           >
@@ -629,32 +1074,102 @@ export function UnitPixelPainter({
         >
           Download JSON
         </HintButton>
+        {!plate && (
+          <label
+            className="sprite-open"
+            {...hint("Copy another pose onto the frame you are painting. Idle can start from a step, then you change the pixels.")}
+          >
+            Load sprite
+            <select
+              aria-label="Load sprite"
+              defaultValue=""
+              onChange={(event) => {
+                const source = event.target.value as SpriteFrameKey;
+                event.target.value = "";
+                if (!SPRITE_FRAME_KEYS.includes(source) || source === doc.editingFrame) {
+                  return;
+                }
+                commit(loadFrameOntoCurrent(doc, source));
+                setNotice(`${FRAME_LABEL[source]} is now on ${FRAME_LABEL[doc.editingFrame]}. Edit it into this pose.`);
+              }}
+            >
+              <option value="">Choose a frame</option>
+              {SPRITE_FRAME_KEYS.filter((frame) => frame !== doc.editingFrame).map((frame) => (
+                <option key={frame} value={frame}>
+                  {FRAME_LABEL[frame]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {savedPlates.length > 0 && (
+          <label
+            className="sprite-open"
+            {...hint(
+              "Open a plate saved in the project under assets/layered. A plate is a vehicle, an aircraft, or a ship at the size it was baked, cut into layers.",
+            )}
+          >
+            Saved plates
+            <select
+              aria-label="Saved plates"
+              defaultValue=""
+              onChange={(event) => {
+                const saved = savedPlates.find((item) => item.path === event.target.value);
+                event.target.value = "";
+                if (saved) {
+                  void openSavedPlate(saved);
+                }
+              }}
+            >
+              <option value="">Choose a plate</option>
+              {savedPlates.map((item) => (
+                <option key={item.path} value={item.path}>
+                  {FACTION_NAME[item.factionId] ?? item.factionId} · {UNIT_TYPE_LABEL[item.unitTypeId] ?? item.unitTypeId}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label
           className="sprite-open"
-          {...hint("Copy another pose onto the frame you are painting. Idle can start from a step, then you change the pixels.")}
+          {...hint("Auto collapses a 2× or 3× Retro Diffusion block to one art pixel. Force a size when the picture is already 1×, or when the guess is wrong.")}
         >
-          Load sprite
-          <select
-            aria-label="Load sprite"
-            defaultValue=""
-            onChange={(event) => {
-              const source = event.target.value as SpriteFrameKey;
-              event.target.value = "";
-              if (!SPRITE_FRAME_KEYS.includes(source) || source === doc.editingFrame) {
-                return;
-              }
-              commit(loadFrameOntoCurrent(doc, source));
-              setNotice(`${FRAME_LABEL[source]} is now on ${FRAME_LABEL[doc.editingFrame]}. Edit it into this pose.`);
-            }}
-          >
-            <option value="">Choose a frame</option>
-            {SPRITE_FRAME_KEYS.filter((frame) => frame !== doc.editingFrame).map((frame) => (
-              <option key={frame} value={frame}>
-                {FRAME_LABEL[frame]}
-              </option>
-            ))}
+          Pixel grain
+          <select aria-label="Pixel grain" value={grainChoice} onChange={(event) => setGrainChoice(event.target.value as "auto" | "1" | "2" | "3")}>
+            <option value="auto">{autoGrainLabel(grainDetected)}</option>
+            <option value="1">Force 1×</option>
+            <option value="2">Force 2×</option>
+            <option value="3">Force 3×</option>
           </select>
         </label>
+        {grainDetected != null && (
+          <span className="sprite-grain-badge">{grainChoice === "auto" ? autoGrainLabel(grainDetected) : `Detected ${grainDetected}×`}</span>
+        )}
+        <label
+          className="sprite-open"
+          {...hint(
+            "Open a baked picture at its art-pixel size, as a new plate. A 2× or 3× block is collapsed before the colours are snapped and the feet are placed. Set Type and Colours of to the unit in the picture first. You can also drop a PNG on this editor.",
+          )}
+        >
+          Import Native Plate PNG
+          <input
+            type="file"
+            accept="image/png,.png"
+            aria-label="Import Native Plate PNG"
+            onChange={(event) => {
+              void openPlate(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        <HintButton
+          hint={hint(
+            "Snap the plate open now. Auto collapses a real 2× or 3× block grid. Force 2× or Force 3× divides a plate that is already one pixel per pixel, such as the 206 by 130 UK tank down to 103 by 65. The feet, the muzzle, and the shifts move with the pixels.",
+          )}
+          onClick={normalizeOpenPlate}
+        >
+          De-Upscale Existing Layered JSON (÷2 / ÷3)
+        </HintButton>
         {doc.layers && doc.archetype === "infantry" && (
           <HintButton
             hint={hint(
@@ -673,25 +1188,27 @@ export function UnitPixelPainter({
             Torso under rifle
           </HintButton>
         )}
-        <label
-          className="sprite-open"
-          {...hint(
-            doc.layers
-              ? "Open a picture you have already separated, onto the layer and pose you are painting. It needs to be 48 by 48."
-              : "Open a 48 by 48 picture onto the frame you are painting.",
-          )}
-        >
-          {doc.layers ? "Open a picture onto this layer" : "Open a picture onto this frame"}
-          <input
-            type="file"
-            accept="image/png,.png"
-            aria-label={doc.layers ? "Open a picture onto this layer" : "Open a picture onto this frame"}
-            onChange={(event) => {
-              void openPicture(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-        </label>
+        {!plate && (
+          <label
+            className="sprite-open"
+            {...hint(
+              doc.layers
+                ? "Open a picture you have already separated, onto the layer and pose you are painting. It needs to be 48 by 48."
+                : "Open a 48 by 48 picture onto the frame you are painting.",
+            )}
+          >
+            {doc.layers ? "Open a picture onto this layer" : "Open a picture onto this frame"}
+            <input
+              type="file"
+              accept="image/png,.png"
+              aria-label={doc.layers ? "Open a picture onto this layer" : "Open a picture onto this frame"}
+              onChange={(event) => {
+                void openPicture(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        )}
         <label
           className="sprite-open"
           {...hint("Open a unit file from another player. The canvas becomes the sprite in that file.")}
@@ -708,6 +1225,7 @@ export function UnitPixelPainter({
           />
         </label>
       </div>
+      {hasParts(doc) && <VehiclePartsPanel doc={doc} onChange={takeDocument} onNote={setNotice} hint={hint} />}
       <div className="sprite-scroll">
       <div className="sprite-workspace">
         <div className="sprite-tools" role="toolbar" aria-label="Tools">
@@ -757,11 +1275,57 @@ export function UnitPixelPainter({
             <span aria-hidden="true">◎</span>
             Muzzle
           </ToolButton>
+          <ToolButton
+            pressed={tool === "stamp"}
+            hint={hint(
+              "Stamp. Put the national emblem of the country on the sprite. Pick the emblem and size on the right. Click to stamp; the faint picture follows the pointer. Undo takes it off.",
+            )}
+            onClick={() => setTool("stamp")}
+          >
+            <span aria-hidden="true">★</span>
+            Stamp
+          </ToolButton>
+          {doc.layers && (
+            <>
+              <ToolButton
+                pressed={tool === "select"}
+                hint={hint(
+                  "Box. Drag a rectangle round a part, such as the tracks or the turret. Then send what it holds to a layer with the buttons under Selection.",
+                )}
+                onClick={() => setTool("select")}
+              >
+                <span aria-hidden="true">▭</span>
+                Box
+              </ToolButton>
+              <ToolButton
+                pressed={tool === "lasso"}
+                hint={hint(
+                  "Lasso. Draw round a part that a box does not fit, such as a turret with a sloped side. The shape closes when you let go. Then send it to a layer.",
+                )}
+                onClick={() => setTool("lasso")}
+              >
+                <span aria-hidden="true">◌</span>
+                Lasso
+              </ToolButton>
+              <ToolButton
+                pressed={tool === "steel"}
+                hint={hint(
+                  `Steel links. Drag along the tread or the propeller on the open layer. The ink under the brush turns to steel${plate ? `, ${divisor} by ${divisor} pixels at a time, which is one card pixel` : ""}. Build Animation steps steel along on Move 1. Empty canvas stays empty.`,
+                )}
+                onClick={() => setTool("steel")}
+              >
+                <span aria-hidden="true">▚</span>
+                Steel links
+              </ToolButton>
+            </>
+          )}
         </div>
 
         <div className="sprite-stage-column">
           <div className="sprite-canvas-bar">
-            <span>48 × 48 pixels</span>
+            <span>
+              {gridW} × {gridH} pixels{plate ? ` · ${divisor} × ${divisor} to a card pixel` : ""}
+            </span>
             <span>
               {toolLabel}
               {tool === "brush" && brush !== "eraser" ? ` · ${brushLabel}` : ""}
@@ -773,7 +1337,9 @@ export function UnitPixelPainter({
                   key={step}
                   type="button"
                   aria-pressed={zoom === step}
-                  {...hint(`Show each pixel as a ${step} pixel square. The sprite is still 48 by 48.`)}
+                  {...hint(
+                    `Show each pixel as a ${step} pixel square. The sprite is still ${gridW} by ${gridH}. A canvas wider than the window scrolls.`,
+                  )}
                   onClick={() => setZoom(step)}
                 >
                   {step}×
@@ -782,56 +1348,68 @@ export function UnitPixelPainter({
             </span>
           </div>
           <div className="sprite-draw">
+          <div className="sprite-viewport">
           <div
             className="sprite-stage"
             style={{
-              width: GRID * cell,
-              height: GRID * cell,
-              backgroundSize: `${cell * 2}px ${cell * 2}px`,
-              backgroundPosition: `0 0, 0 ${cell}px, ${cell}px ${-cell}px, ${-cell}px 0`,
+              width: gridW * cell,
+              height: gridH * cell,
+              backgroundSize: `${checker * 2}px ${checker * 2}px`,
+              backgroundPosition: `0 0, 0 ${checker}px, ${checker}px ${-checker}px, ${-checker}px 0`,
             }}
           >
             <canvas
               ref={gridRef}
               className="sprite-pixels"
-              width={GRID}
-              height={GRID}
-              aria-label="48 by 48 pixel grid"
+              width={gridW}
+              height={gridH}
+              aria-label={`${gridW} by ${gridH} pixel grid`}
               onPointerDown={(event) => {
                 stroking.current = true;
                 gestureSaved.current = false;
                 setPainting(true);
                 event.currentTarget.setPointerCapture(event.pointerId);
-                applyPointer(event);
+                applyPointer(event, "down");
               }}
               onPointerMove={(event) => {
                 const point = pixelOf(event.currentTarget, event.clientX, event.clientY);
                 setCursor(point);
                 if (painting || stroking.current) {
-                  applyPointer(event);
+                  applyPointer(event, "move");
                 }
               }}
-              onPointerUp={() => {
-                stroking.current = false;
-                gestureSaved.current = false;
-                setPainting(false);
-              }}
+              onPointerUp={endStroke}
               onPointerLeave={() => {
-                stroking.current = false;
-                gestureSaved.current = false;
-                setPainting(false);
+                endStroke();
                 setCursor(null);
               }}
             />
-            <div
-              className="sprite-gridlines"
-              style={{ backgroundSize: `${cell}px ${cell}px` }}
-            />
-            <canvas ref={pinRef} className="sprite-pins" width={GRID} height={GRID} />
+            {cell >= GRIDLINE_ZOOM && (
+              <div
+                className="sprite-gridlines"
+                style={{ backgroundSize: `${cell}px ${cell}px` }}
+              />
+            )}
+            {plate && divisor > 1 && divisor * cell >= 6 && (
+              <div
+                className="sprite-gridlines sprite-cardlines"
+                aria-hidden="true"
+                style={{
+                  backgroundSize: `${divisor * cell}px ${divisor * cell}px`,
+                  backgroundPosition: `${(doc.blueprint.groundOrigin.x % divisor) * cell}px ${((doc.blueprint.groundOrigin.y + 1) % divisor) * cell}px`,
+                }}
+              />
+            )}
+            <canvas ref={selectionRef} className="sprite-selection" width={gridW} height={gridH} />
+            <canvas ref={stampRef} className="sprite-stamp-preview" width={gridW} height={gridH} />
+            <canvas ref={pinRef} className="sprite-pins" width={gridW} height={gridH} />
+          </div>
           </div>
           <p className="sprite-canvas-note">
             Cream cross: where the feet stand ({doc.blueprint.groundOrigin.x}, {doc.blueprint.groundOrigin.y}). Crimson cross: muzzle
             {doc.blueprint.muzzlePoint ? ` (${doc.blueprint.muzzlePoint.x}, ${doc.blueprint.muzzlePoint.y})` : ""}.
+            {plate && divisor > 1 ? " The darker lines are card pixels." : ""}
+            {" Alt-click picks up a colour."}
           </p>
           </div>
           <section
@@ -854,38 +1432,207 @@ export function UnitPixelPainter({
             </p>
             {doc.layers && (
               <p className="sprite-side-lead">
-                {skeleton.label} skeleton: {stackLine}. Fits {skeleton.footprint.width} by {skeleton.footprint.height} pixels beside the 26-pixel rifleman.
+                {skeleton.label} skeleton: {stackLine}.{" "}
+                {plate
+                  ? "This is a plate, drawn at the size it was baked. The card is scaled down from it."
+                  : `Fits ${skeleton.footprint.width} by ${skeleton.footprint.height} pixels beside the 26-pixel rifleman.`}
               </p>
             )}
           </section>
+          {doc.layers && (
+            <section>
+              <h3>Selection</h3>
+              <p className="sprite-side-lead">
+                {selectedCount > 0
+                  ? `${selectedCount} pixels selected. Send what shows in them to a layer.`
+                  : "Drag with Box or Lasso to select a part. Each pixel is taken from whichever layer shows there."}
+              </p>
+              <div className="sprite-send">
+                {skeleton.layers.map((layer) => (
+                  <button
+                    key={layer.key}
+                    type="button"
+                    disabled={selectedCount === 0}
+                    {...hint(
+                      `Move what shows inside the selection onto ${layer.label}, at the same pixels. Idle looks the same afterwards. ${layer.hint}`,
+                    )}
+                    onClick={() => sendSelection(layer.key)}
+                  >
+                    To {layer.label}
+                  </button>
+                ))}
+              </div>
+              <label
+                className="sprite-check"
+                {...hint(
+                  "When a part is lifted to a higher layer, paint the layer under it where the part sat inside that layer's shape. The turret can then kick back without showing a gap in the hull. A barrel that sticks out past the hull leaves nothing behind.",
+                )}
+              >
+                <input type="checkbox" checked={heal} onChange={(event) => setHeal(event.target.checked)} />
+                Fill the hole underneath
+              </label>
+              <div className="sprite-send">
+                <button
+                  type="button"
+                  disabled={selectedCount === 0 || !doc.editingLayer}
+                  {...hint(
+                    `Turn every other ${plate ? "card pixel" : "pixel"} of ${openLayer ?? "the open layer"} inside the selection to steel: link, gap, link, gap. Select the top or bottom run of the tread first. Move 1 steps the links along.`,
+                  )}
+                  onClick={() => tagSelection(true)}
+                >
+                  Make steel links
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedCount === 0 || !doc.editingLayer}
+                  {...hint(`Turn all the ${openLayer ?? "open layer"} ink inside the selection to steel. Use it for a propeller blur or a wheel hub.`)}
+                  onClick={() => tagSelection(false)}
+                >
+                  All steel
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedCount === 0}
+                  {...hint("Drop the selection. Nothing on the canvas changes.")}
+                  onClick={() => setSelection(null)}
+                >
+                  Clear
+                </button>
+              </div>
+            </section>
+          )}
+          {plate && (
+            <section>
+              <h3>Card fit</h3>
+              <p className="sprite-side-lead">
+                The card is 80 by 56. The plate is scaled down by a whole number, with the feet on the card&apos;s ground line. Each shift is in plate
+                pixels and has to be a whole number of card pixels.
+              </p>
+              <div className="sprite-fields">
+                <NumberField
+                  label="Divisor"
+                  value={divisor}
+                  min={1}
+                  hint={hint(
+                    "How many plate pixels make one card pixel, each way. A bigger number makes the unit smaller on the card. Fit to card picks the smallest that fits.",
+                  )}
+                  onChange={changeDivisor}
+                />
+                <NumberField
+                  label="Bob"
+                  value={shifts.bobPx}
+                  min={0}
+                  step={divisor}
+                  hint={hint(`How far the body drops or rises on Move 2 and under a shot, in plate pixels. A multiple of ${divisor}.`)}
+                  onChange={(value) => changeShift("bobPx", value)}
+                />
+                <NumberField
+                  label="Recoil"
+                  value={shifts.recoilPx}
+                  min={0}
+                  step={divisor * 2}
+                  hint={hint(
+                    `How far the gun kicks back on Fire, in plate pixels. What carries the gun takes half. A multiple of ${divisor * 2}, because the windup and the recovery use half of it.`,
+                  )}
+                  onChange={(value) => changeShift("recoilPx", value)}
+                />
+                <NumberField
+                  label="Tread stride"
+                  value={shifts.treadStride}
+                  min={1}
+                  step={divisor}
+                  hint={hint(`How far the steel links and the propeller dashes step on Move 1, in plate pixels. A multiple of ${divisor}.`)}
+                  onChange={(value) => changeShift("treadStride", value)}
+                />
+              </div>
+              <button
+                type="button"
+                {...hint(
+                  "Set the smallest divisor at which every beat fits the card: the two steps, the windup, the shot with its flash, and the foam. The shifts become one card pixel of bob and tread and two of recoil.",
+                )}
+                onClick={fitCard}
+              >
+                Fit to card
+              </button>
+              {problems.length > 0 ? (
+                <ul className="sprite-problems">
+                  {problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="sprite-side-lead">Every beat fits the card and every shift is a whole card pixel.</p>
+              )}
+            </section>
+          )}
+          {tool === "stamp" && emblem && (
+            <section>
+              <h3>Stamp</h3>
+              <label className="sprite-field" {...hint("Which national emblem to stamp. It follows the country the sprite is filed under until you pick another.")}>
+                Emblem
+                <select value={emblem.id} onChange={(event) => setEmblemId(event.target.value as EmblemId)}>
+                  {EMBLEMS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {FACTION_NAME[item.faction]}: {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="sprite-send" role="group" aria-label="Emblem size">
+                {emblem.sizes.filter((item) => item.height * 3 <= gridH * 2).map((item) => (
+                  <button
+                    key={item.size}
+                    type="button"
+                    aria-pressed={activeSize === item.size}
+                    {...hint(`${item.label}: ${item.width} by ${item.height} pixels. Each size is drawn by hand, not scaled from another.`)}
+                    onClick={() => setEmblemSize(item.size)}
+                  >
+                    {item.label} {item.width}×{item.height}
+                  </button>
+                ))}
+              </div>
+              <label className="sprite-check" {...hint("Mirror the emblem left to right. Aircraft wear it the same way on both wings, so this only shows in the lit edges.")}>
+                <input type="checkbox" checked={emblemFlip} onChange={(event) => setEmblemFlip(event.target.checked)} />
+                Flip left to right
+              </label>
+              <label
+                className="sprite-check"
+                {...hint("Stamp only where the sprite already has a pixel on any layer of this pose, so the emblem cannot hang off the hull. Turn it off to stamp on empty canvas.")}
+              >
+                <input type="checkbox" checked={onlySprite} onChange={(event) => setOnlySprite(event.target.checked)} />
+                Only on the sprite
+              </label>
+              <p className="sprite-side-lead">{emblem.basis}</p>
+              <p className="sprite-side-lead">
+                The colours are fixed, so the emblem stays the same whichever country the sprite is filed under. It goes on {openLayer ?? editingLabel}
+                {plate ? ", Idle only. The other poses are built from it" : ""}.
+              </p>
+            </section>
+          )}
           <section>
             <h3>Colours</h3>
-            <ul className="sprite-swatches">
-              {PALETTE_SLOT_KEYS.map((slot) => {
-                const hex = slotHex(mapping, slot);
-                return (
-                  <li key={slot}>
-                    <button
-                      type="button"
-                      aria-pressed={tool === "brush" && brush === slot}
-                      {...hint(`${SLOT_LABEL[slot]}, ${hex}. ${SLOT_HELP[slot]}`)}
-                      onClick={() => {
-                        setTool("brush");
-                        setBrush(slot);
-                      }}
-                    >
-                      <i style={{ background: hex }} />
-                      <span>{SLOT_LABEL[slot]}</span>
-                      <code>{hex}</code>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <SwatchPalette
+              swatches={PALETTE_SLOT_KEYS.map((slot) => ({
+                key: slot,
+                label: SLOT_LABEL[slot],
+                hex: slotHex(mapping, slot),
+                help: `${SLOT_LABEL[slot]}, ${slotHex(mapping, slot)}. ${SLOT_HELP[slot]}`,
+              }))}
+              picked={tool === "brush" && brush !== "eraser" ? brush : null}
+              onPick={(slot) => {
+                setTool("brush");
+                setBrush(slot);
+              }}
+              hint={hint}
+            />
+            <p className="sprite-side-lead">Seven slots, in the colours of {FACTION_NAME[doc.blueprint.factionId]}. Emblem colours are fixed and come only from the Stamp tool.</p>
           </section>
         </aside>
       </div>
       </div>
+      {import.meta.env.DEV && hasParts(doc) && (
+        <VehicleGeneratePanel doc={doc} selection={liveSelection} onChange={takeDocument} hint={hint} />
+      )}
 
       <footer className="sprite-help" aria-live="polite">
         {helpLine}
@@ -930,6 +1677,55 @@ function ToolButton({
   );
 }
 
+/** A whole-number box. A value that is not a whole number of at least `min` stays in the box and is not applied. */
+function NumberField({
+  label,
+  value,
+  min,
+  step,
+  hint,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  step?: number;
+  hint: ReturnType<typeof hintProps>;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+  return (
+    <label className="sprite-field" {...hint}>
+      {label}
+      <input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        step={step ?? 1}
+        value={draft}
+        aria-label={label}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          const parsed = Number(event.target.value);
+          if (event.target.value.trim() !== "" && Number.isInteger(parsed) && parsed >= min && parsed !== value) {
+            onChange(parsed);
+          }
+        }}
+        onBlur={() => setDraft(String(value))}
+      />
+    </label>
+  );
+}
+
+const PLATE_IDLE_ONLY = "A plate's Move 1, Move 2, and Fire are built from Idle. Open Idle to paint, and they follow.";
+
+function sameShifts(left: MotionShifts, right: MotionShifts): boolean {
+  return left.bobPx === right.bobPx && left.recoilPx === right.recoilPx && left.treadStride === right.treadStride;
+}
+
 function hintProps(text: string) {
   return {
     title: text,
@@ -961,7 +1757,8 @@ function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null
   if (!ctx || !pinCtx) {
     return;
   }
-  const image = ctx.createImageData(GRID, GRID);
+  const { width, height } = doc.blueprint.canvasSize;
+  const image = ctx.createImageData(width, height);
   if (doc.layers && doc.editingLayer) {
     const stack = doc.layers[doc.editingFrame];
     const order = ARCHETYPE_LAYERS[doc.archetype];
@@ -992,7 +1789,7 @@ function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null
     } catch {
       keys = [];
     }
-    for (let i = 0; i < keys.length && i < GRID * GRID; i++) {
+    for (let i = 0; i < keys.length && i < width * height; i++) {
       const key = keys[i];
       if (key == null) {
         continue;
@@ -1001,11 +1798,56 @@ function drawGrid(grid: HTMLCanvasElement | null, pins: HTMLCanvasElement | null
     }
   }
   ctx.putImageData(image, 0, 0);
-  pinCtx.clearRect(0, 0, GRID, GRID);
-  stampPin(pinCtx, doc.blueprint.groundOrigin.x, doc.blueprint.groundOrigin.y, "#f5f0e6");
+  pinCtx.clearRect(0, 0, width, height);
+  // On a plate one canvas pixel is small on screen, so the cross is a card pixel thick.
+  const arm = doc.blueprint.displayDivisor ?? 1;
+  stampPin(pinCtx, doc.blueprint.groundOrigin.x, doc.blueprint.groundOrigin.y, "#f5f0e6", arm);
   if (doc.blueprint.muzzlePoint) {
-    stampPin(pinCtx, doc.blueprint.muzzlePoint.x, doc.blueprint.muzzlePoint.y, "#9c524e");
+    stampPin(pinCtx, doc.blueprint.muzzlePoint.x, doc.blueprint.muzzlePoint.y, "#9c524e", arm);
   }
+}
+
+/** The emblem about to be stamped, drawn faint over the sprite. The canvas is one pixel a cell. */
+function drawStampPreview(canvas: HTMLCanvasElement | null, cells: readonly StampCell[], mapping: (typeof FACTION_MILITARY_MAPPINGS)[RosterFactionId]): void {
+  const ctx = canvas?.getContext("2d");
+  if (!canvas || !ctx) {
+    return;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (cells.length === 0) {
+    return;
+  }
+  const image = ctx.createImageData(canvas.width, canvas.height);
+  for (const { x, y, slot } of cells) {
+    writePixel(image.data, (y * canvas.width + x) * 4, slotHex(mapping, slot), 190);
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+/** Tint the selected cells. The canvas is one pixel a cell and is scaled up by the stage. */
+function drawSelection(canvas: HTMLCanvasElement | null, selection: CellMask | null): void {
+  const ctx = canvas?.getContext("2d");
+  if (!canvas || !ctx) {
+    return;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!selection || selection.width !== canvas.width || selection.height !== canvas.height) {
+    return;
+  }
+  const image = ctx.createImageData(selection.width, selection.height);
+  for (let index = 0; index < selection.cells.length; index += 1) {
+    if (selection.cells[index] === 0) {
+      continue;
+    }
+    const x = index % selection.width;
+    const y = Math.floor(index / selection.width);
+    const has = (cx: number, cy: number) =>
+      cx >= 0 && cy >= 0 && cx < selection.width && cy < selection.height && selection.cells[cy * selection.width + cx] !== 0;
+    // The rim of the selection is drawn solid, the inside as a light wash.
+    const rim = !has(x - 1, y) || !has(x + 1, y) || !has(x, y - 1) || !has(x, y + 1);
+    writePixel(image.data, index * 4, "#ddcf99", rim ? 235 : 70);
+  }
+  ctx.putImageData(image, 0, 0);
 }
 
 function drawSheet(canvas: HTMLCanvasElement | null, doc: UnitPaintDocument, setSheetNote: (note: string) => void): void {
@@ -1037,13 +1879,27 @@ function paintLayer(
   mapping: (typeof FACTION_MILITARY_MAPPINGS)[RosterFactionId],
   alpha: number,
 ): void {
-  for (let y = 0; y < GRID; y += 1) {
-    for (let x = 0; x < GRID; x += 1) {
-      const slot = grid[y]?.[x];
+  // A plate has tens of thousands of cells, so each slot's colour is looked up once and not once a pixel.
+  const colours = new Map<PaletteSlotKey, number>(
+    [...PALETTE_SLOT_KEYS, ...EMBLEM_SLOT_KEYS].map((slot) => [slot, Number.parseInt(slotHex(mapping, slot).slice(1), 16)]),
+  );
+  const data = image.data;
+  for (let y = 0; y < image.height; y += 1) {
+    const row = grid[y];
+    if (!row) {
+      continue;
+    }
+    for (let x = 0; x < image.width; x += 1) {
+      const slot = row[x];
       if (slot == null) {
         continue;
       }
-      writePixel(image.data, (y * GRID + x) * 4, slotHex(mapping, slot), alpha);
+      const rgb = colours.get(slot) ?? 0;
+      const offset = (y * image.width + x) * 4;
+      data[offset] = (rgb >> 16) & 255;
+      data[offset + 1] = (rgb >> 8) & 255;
+      data[offset + 2] = rgb & 255;
+      data[offset + 3] = alpha;
     }
   }
 }
@@ -1063,13 +1919,11 @@ const ARROW_STEP: Record<string, [number, number]> = {
   ArrowDown: [0, 1],
 };
 
-function stampPin(ctx: CanvasRenderingContext2D, x: number, y: number, hex: string): void {
+/** A cross centred on one pixel. `arm` is how many pixels each arm reaches. */
+function stampPin(ctx: CanvasRenderingContext2D, x: number, y: number, hex: string, arm = 1): void {
   ctx.fillStyle = hex;
-  ctx.fillRect(x, y, 1, 1);
-  ctx.fillRect(x - 1, y, 1, 1);
-  ctx.fillRect(x + 1, y, 1, 1);
-  ctx.fillRect(x, y - 1, 1, 1);
-  ctx.fillRect(x, y + 1, 1, 1);
+  ctx.fillRect(x - arm, y, arm * 2 + 1, 1);
+  ctx.fillRect(x, y - arm, 1, arm * 2 + 1);
 }
 
 function pixelOf(canvas: HTMLCanvasElement, clientX: number, clientY: number): { x: number; y: number } | null {
@@ -1116,6 +1970,14 @@ const PAINTER_CSS = `
   font: 14px/1.4 "Segoe UI", sans-serif;
   letter-spacing: 0;
   text-transform: none;
+}
+.sprite-editor-drop { outline: 2px dashed #ddcf99; outline-offset: 4px; }
+.sprite-grain-badge {
+  align-self: center;
+  padding: 4px 8px;
+  color: #1c1917;
+  background: #ddcf99;
+  font: 12px/1.3 "Segoe UI", sans-serif;
 }
 .sprite-editor button,
 .sprite-editor select,
@@ -1284,13 +2146,73 @@ const PAINTER_CSS = `
   height: 100%;
   image-rendering: pixelated;
 }
-.sprite-gridlines, .sprite-pins {
+.sprite-gridlines, .sprite-pins, .sprite-selection, .sprite-stamp-preview {
   pointer-events: none;
 }
 .sprite-gridlines {
   background-image:
     linear-gradient(to right, rgba(28, 25, 23, 0.22) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(28, 25, 23, 0.22) 1px, transparent 1px);
+}
+.sprite-cardlines {
+  background-image:
+    linear-gradient(to right, rgba(28, 25, 23, 0.32) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(28, 25, 23, 0.32) 1px, transparent 1px);
+}
+.sprite-draw {
+  min-width: 0;
+  max-width: 100%;
+}
+.sprite-viewport {
+  max-width: 100%;
+  max-height: 72vh;
+  overflow: auto;
+}
+.sprite-stage {
+  flex: none;
+}
+.sprite-send {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sprite-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #a99c8d;
+  font-size: 12px;
+}
+.sprite-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 8px 0;
+}
+.sprite-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #a99c8d;
+  font-size: 12px;
+}
+.sprite-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  background: #2a2420;
+  color: #f5f0e6;
+  border: 1px solid #4b3d44;
+}
+.sprite-problems {
+  margin: 8px 0 0;
+  padding: 6px 8px 6px 24px;
+  border-left: 3px solid #9c524e;
+  background: #2a2420;
+  color: #f5f0e6;
+  font-size: 12px;
 }
 .sprite-canvas-note, .sprite-side-lead, .sprite-note {
   margin: 0;
@@ -1308,37 +2230,6 @@ const PAINTER_CSS = `
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #a99c8d;
-}
-.sprite-parts, .sprite-swatches {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sprite-parts button, .sprite-swatches button {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-}
-.sprite-parts small {
-  margin-left: auto;
-  color: #ddcf99;
-  font-size: 11px;
-}
-.sprite-swatches i {
-  width: 18px;
-  height: 18px;
-  border: 1px solid #1c1917;
-  flex: none;
-}
-.sprite-swatches code {
-  margin-left: auto;
-  color: #a99c8d;
-  font-size: 11px;
 }
 .sprite-sheet {
   width: 160px;
@@ -1369,4 +2260,11 @@ const PAINTER_CSS = `
     grid-column: 1 / -1;
   }
 }
-`;
+.sprite-side .editor-swatch-name {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.sprite-side .editor-swatches + .editor-swatch-name + .sprite-side-lead {
+  margin-top: 6px;
+}
+${EDITOR_SHARED_CSS}`;

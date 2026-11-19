@@ -17,6 +17,21 @@ import {
   type FrameClips,
   type SpriteFrame,
 } from "./frameClips";
+import {
+  EDITOR_SHARED_CSS,
+  SentPicture,
+  SwatchPalette,
+  imageRgba,
+  loadImage,
+  money,
+  pictureCount as pictures,
+  pngBase64,
+  pngBlob,
+  putRgba,
+} from "./editorShared";
+import { EMBLEMS, emblemBitmap, emblemById, emblemForFaction, type EmblemId } from "./emblems";
+import { frameStampCells, stampFramePart, stampPreviewRgba } from "./frameStamp";
+import { FRAME_ZOOMS, openingFrameZoom } from "./frameView";
 import { FACTION_LUTS, FACTION_PRESET_LABEL, SLOT_LABELS, type FactionPresetId, type PartCategory } from "./paperDoll";
 import { GEN_ROOM_MAX, harvestPart, planGeneration, type GenPicture, type GenPlan, type GenSheet, type GenSpread } from "./partGen";
 import {
@@ -69,7 +84,8 @@ const RIG_URL = `/assets/units/rigs/${UNIT_ID}`;
 const FACTIONS = Object.keys(FACTION_LUTS) as FactionPresetId[];
 
 type ColourSet = FactionPresetId | "SHEET";
-const ZOOMS = [4, 6, 8, 10] as const;
+/** The country whose emblem the Stamp picks first. jap_walk.png is a Japanese soldier. */
+const SHEET_FACTION: FactionPresetId = "JAP";
 const UNDO_LIMIT = 100;
 const GENERATE_URL = "/__dev/generate-part";
 const CANDIDATE_ID = "candidate";
@@ -106,15 +122,7 @@ const GEN_HELP: Record<PartCategory, (room: number, each: boolean) => string> = 
     `The weapon is sent on its own${each ? ", once for every pose" : ""}. The weapon and ${room} pixels around it are open to repainting.`,
 };
 
-function money(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
-
-function pictures(count: number): string {
-  return count === 1 ? "1 picture" : `${count} pictures`;
-}
-
-type Tool = "pencil" | "eraser" | "feet" | "muzzle";
+type Tool = "pencil" | "eraser" | "feet" | "muzzle" | "stamp";
 
 const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
   {
@@ -133,28 +141,12 @@ const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
     label: "Muzzle",
     help: "Click the end of the barrel on this frame. The flash draws from here. Without a click it sits on the tip of the weapon.",
   },
+  {
+    id: "stamp",
+    label: "Stamp",
+    help: "Put a national emblem on the picked layer's part, centred on the click. The faint picture follows the pointer. One click is one undo step.",
+  },
 ];
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Could not open ${src}.`));
-    image.src = src;
-  });
-}
-
-function imageRgba(image: HTMLImageElement): Uint8ClampedArray {
-  const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("The browser would not open a canvas.");
-  }
-  ctx.drawImage(image, 0, 0);
-  return ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-}
 
 /** The file's JSON, or null when it is missing. The dev server answers a missing file with the page itself. */
 async function fetchJson(url: string): Promise<unknown> {
@@ -199,16 +191,6 @@ async function savedRig(): Promise<PartRig | null> {
   return assembleRig(json, parts);
 }
 
-function putRgba(canvas: HTMLCanvasElement | null, rgba: Uint8ClampedArray, width: number, height: number): void {
-  const ctx = canvas?.getContext("2d");
-  if (!canvas || !ctx) {
-    return;
-  }
-  canvas.width = width;
-  canvas.height = height;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
-}
-
 function cellsRgba(cells: readonly number[], lut: readonly string[]): Uint8ClampedArray {
   const out = new Uint8ClampedArray(cells.length * 4);
   cells.forEach((slot, index) => {
@@ -220,25 +202,6 @@ function cellsRgba(cells: readonly number[], lut: readonly string[]): Uint8Clamp
     out.set([(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 255], index * 4);
   });
   return out;
-}
-
-async function pngBlob(rgba: Uint8ClampedArray, width: number, height: number): Promise<Blob> {
-  const canvas = document.createElement("canvas");
-  putRgba(canvas, rgba, width, height);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) {
-    throw new Error("The picture could not be turned into a PNG.");
-  }
-  return blob;
-}
-
-async function pngBase64(rgba: Uint8ClampedArray, width: number, height: number): Promise<string> {
-  const bytes = new Uint8Array(await (await pngBlob(rgba, width, height)).arrayBuffer());
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
 }
 
 /** A part's strip in the sheet's own colours, so the picture opens again as the same part. */
@@ -275,44 +238,6 @@ function tryOn(rig: PartRig, layer: PartCategory, drawings: number[][]): PartRig
   };
 }
 
-/** The picture with everything outside the mask dimmed, so the open pixels stand out. */
-function openPixelsRgba(sheet: GenSheet): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(sheet.input);
-  for (let offset = 0; offset < out.length; offset += 4) {
-    if ((sheet.mask[offset + 3] ?? 0) > 12) {
-      continue;
-    }
-    out[offset] = Math.round((out[offset] ?? 0) * 0.22 + 22);
-    out[offset + 1] = Math.round((out[offset + 1] ?? 0) * 0.22 + 20);
-    out[offset + 2] = Math.round((out[offset + 2] ?? 0) * 0.22 + 18);
-  }
-  return out;
-}
-
-function SentPicture({ sheet }: { sheet: GenSheet }) {
-  const sentRef = useRef<HTMLCanvasElement>(null);
-  const openRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    putRgba(sentRef.current, sheet.input, sheet.width, sheet.height);
-    putRgba(openRef.current, openPixelsRgba(sheet), sheet.width, sheet.height);
-  }, [sheet]);
-  const style = { width: sheet.width * 2, height: sheet.height * 2 };
-  return (
-    <div className="frame-editor-sent">
-      <figure>
-        <canvas ref={sentRef} style={style} aria-label="The picture that is sent" />
-        <figcaption>
-          Sent, {sheet.width}×{sheet.height}
-        </figcaption>
-      </figure>
-      <figure>
-        <canvas ref={openRef} style={style} aria-label="The pixels open to repainting" />
-        <figcaption>Open to repainting</figcaption>
-      </figure>
-    </div>
-  );
-}
-
 export function FrameEditor() {
   const [rig, setRigState] = useState<PartRig | null>(null);
   const [clip, setClip] = useState<ClipKey>("idle");
@@ -322,6 +247,11 @@ export function FrameEditor() {
   const [slot, setSlot] = useState(2);
   const [faction, setFaction] = useState<ColourSet>("SHEET");
   const [zoom, setZoom] = useState<number>(8);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [emblemId, setEmblemId] = useState<EmblemId>(() => emblemForFaction(SHEET_FACTION)?.id ?? "jap_hinomaru");
+  const [emblemSize, setEmblemSize] = useState(0);
+  const [emblemFlip, setEmblemFlip] = useState(false);
+  const [onlySprite, setOnlySprite] = useState(true);
   const [dimOthers, setDimOthers] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
   const [addFrom, setAddFrom] = useState("walk:0");
@@ -346,10 +276,15 @@ export function FrameEditor() {
   const strokeRef = useRef(false);
   const strokeSavedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stampRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLCanvasElement>(null);
   const layerFileRef = useRef<HTMLInputElement>(null);
   const partFileRef = useRef<HTMLInputElement>(null);
   const lut = faction === "SHEET" ? AS_DRAWN_LUT : FACTION_LUTS[faction];
+  const swatches = useMemo(
+    () => SLOT_LABELS.map((label, value) => ({ key: value, label, hex: lut[value] ?? "#000000" })).slice(1),
+    [lut],
+  );
   const frames = rig?.clips[clip] ?? [];
   const frameIndex = frames.length === 0 ? -1 : Math.min(index, frames.length - 1);
   const frame = frames[frameIndex] ?? null;
@@ -383,10 +318,41 @@ export function FrameEditor() {
     [candidates, rig, frame],
   );
 
+  const emblem = emblemById(emblemId) ?? EMBLEMS[0] ?? null;
+  const activeSize = emblem?.sizes.some((item) => item.size === emblemSize) ? emblemSize : (emblem?.sizes[0]?.size ?? 0);
+  const stampBitmap = useMemo(() => (emblem ? emblemBitmap(emblem, activeSize, emblemFlip) : null), [emblem, activeSize, emblemFlip]);
+
   const setRig = useCallback((next: PartRig) => {
     rigRef.current = next;
     setRigState(next);
   }, []);
+
+  // A frame of another size opens at a step that shows all of it.
+  const rigWidth = rig?.width ?? 0;
+  const rigHeight = rig?.height ?? 0;
+  useEffect(() => {
+    if (rigWidth > 0 && rigHeight > 0) {
+      setZoom(openingFrameZoom(rigWidth, rigHeight));
+    }
+  }, [rigWidth, rigHeight]);
+
+  // The stamp follows the colour set's country. A country with no emblem keeps the last pick.
+  useEffect(() => {
+    const own = emblemForFaction(faction === "SHEET" ? SHEET_FACTION : faction);
+    if (own) {
+      setEmblemId(own.id);
+    }
+  }, [faction]);
+
+  // The hover preview: exactly the cells a click would write, so a clipped stamp shows clipped.
+  useEffect(() => {
+    const canvas = stampRef.current;
+    if (!canvas || !rig) {
+      return;
+    }
+    const cells = tool === "stamp" && cursor && frame && stampBitmap ? frameStampCells(rig, frame, layer, stampBitmap, cursor.x, cursor.y, onlySprite) : [];
+    putRgba(canvas, stampPreviewRgba(cells, rig.width, rig.height, lut), rig.width, rig.height);
+  }, [tool, cursor, frame, stampBitmap, rig, layer, onlySprite, lut]);
 
   const remember = useCallback(() => {
     const current = rigRef.current;
@@ -666,6 +632,15 @@ export function FrameEditor() {
         ...target,
         muzzle: { x: x - target.move.weapon.x, y: y - target.move.weapon.y },
       });
+    } else if (tool === "stamp" && first && stampBitmap) {
+      next = stampFramePart(current, target, layer, stampBitmap, x, y, onlySprite);
+      setNote(
+        next === current
+          ? onlySprite
+            ? "Nothing to stamp there: the soldier has no pixel under the emblem. Turn off Only on the sprite to stamp on empty canvas."
+            : "The emblem is off the frame."
+          : `${emblem?.name ?? "Emblem"} stamped at ${x}, ${y} on “${wornPart(current, layer).name}”, pose ${target.pose}. Ctrl+Z takes it off.`,
+      );
     }
     if (next === current) {
       return;
@@ -693,15 +668,22 @@ export function FrameEditor() {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const { x, y } = cellAt(event);
+    const inside = rig !== null && x >= 0 && y >= 0 && x < rig.width && y < rig.height;
+    setCursor((seen) => (!inside ? null : seen && seen.x === x && seen.y === y ? seen : { x, y }));
     if (!strokeRef.current || (tool !== "pencil" && tool !== "eraser") || event.altKey) {
       return;
     }
-    const { x, y } = cellAt(event);
     applyTool(x, y, false, false);
   };
 
   const endStroke = () => {
     strokeRef.current = false;
+  };
+
+  const leaveCanvas = () => {
+    endStroke();
+    setCursor(null);
   };
 
   const allFrames = useMemo(
@@ -1125,7 +1107,7 @@ export function FrameEditor() {
         <label>
           Zoom
           <select value={zoom} onChange={(event) => setZoom(Number(event.target.value))}>
-            {ZOOMS.map((value) => (
+            {FRAME_ZOOMS.map((value) => (
               <option key={value} value={value}>
                 {value}×
               </option>
@@ -1335,6 +1317,53 @@ export function FrameEditor() {
               </button>
             ))}
           </div>
+          {tool === "stamp" && emblem && (
+            <>
+              <h3>Stamp</h3>
+              <label title="Which national emblem to stamp. It follows the colour set's country until you pick another.">
+                Emblem
+                <select aria-label="Emblem" value={emblem.id} onChange={(event) => setEmblemId(event.target.value as EmblemId)}>
+                  {EMBLEMS.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.faction}: {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div role="group" aria-label="Emblem size">
+                {emblem.sizes.map((item) => (
+                  <button
+                    key={item.size}
+                    type="button"
+                    aria-pressed={activeSize === item.size}
+                    title={`${item.label}: ${item.width} by ${item.height} pixels. Each size is drawn by hand, not scaled from another.`}
+                    onClick={() => setEmblemSize(item.size)}
+                  >
+                    {item.width}×{item.height}
+                  </button>
+                ))}
+              </div>
+              <label className="frame-editor-check">
+                <input type="checkbox" checked={emblemFlip} onChange={(event) => setEmblemFlip(event.target.checked)} />
+                Flip left to right
+              </label>
+              <label
+                className="frame-editor-check"
+                title="Stamp only where the soldier already has a pixel on any layer of this frame. Turn it off to stamp on empty canvas."
+              >
+                <input type="checkbox" checked={onlySprite} onChange={(event) => setOnlySprite(event.target.checked)} />
+                Only on the sprite
+              </label>
+              <p className="frame-editor-note">
+                The smallest emblem is {emblem.sizes[0]?.width}×{emblem.sizes[0]?.height}, already large on a {rig.width}×{rig.height} soldier.
+                It goes on the {LAYER_NAME[layer].toLowerCase()} part, so every frame on this pose shows it.
+              </p>
+              <p className="frame-editor-note">
+                A frame holds the 13 soldier colours, and none is the emblem&apos;s crimson or cream. The red is painted as gear plum and the
+                white as skin tan, the same in every colour set.
+              </p>
+            </>
+          )}
           <h3>Layer</h3>
           <div role="group" aria-label="Layers">
             {LAYER_ORDER.map((name) => (
@@ -1535,39 +1564,44 @@ export function FrameEditor() {
           )}
 
           <h3>Colour</h3>
-          <div className="frame-editor-swatches" role="group" aria-label="Colours">
-            {SLOT_LABELS.map((label, value) =>
-              value === 0 ? null : (
-                <button
-                  key={label}
-                  type="button"
-                  aria-pressed={slot === value}
-                  aria-label={label}
-                  title={label}
-                  style={{ background: lut[value] }}
-                  onClick={() => {
-                    setSlot(value);
-                    setTool("pencil");
-                  }}
-                />
-              ),
-            )}
-          </div>
-          <p className="frame-editor-note">{SLOT_LABELS[slot]}</p>
+          <SwatchPalette
+            swatches={swatches}
+            picked={slot}
+            onPick={(value) => {
+              setSlot(value);
+              setTool("pencil");
+            }}
+          />
         </aside>
 
         <div className="frame-editor-canvas">
+          <p className="frame-editor-bar">
+            <span>
+              {rig.width} × {rig.height} pixels, the frame&apos;s own size
+            </span>
+            <span>{cursor ? `${cursor.x}, ${cursor.y}` : "—, —"}</span>
+          </p>
           {frame ? (
-            <canvas
-              ref={canvasRef}
-              aria-label={`${CLIP_LABEL[clip]} ${frameIndex}, ${LAYER_NAME[layer]} layer`}
-              style={{ width: rig.width * zoom, height: rig.height * zoom }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={endStroke}
-              onPointerCancel={endStroke}
-              onPointerLeave={endStroke}
-            />
+            <div className="frame-editor-stage" style={{ width: rig.width * zoom, height: rig.height * zoom }}>
+              <canvas
+                ref={canvasRef}
+                aria-label={`${CLIP_LABEL[clip]} ${frameIndex}, ${LAYER_NAME[layer]} layer`}
+                style={{ width: rig.width * zoom, height: rig.height * zoom }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={endStroke}
+                onPointerCancel={endStroke}
+                onPointerLeave={leaveCanvas}
+              />
+              <canvas
+                ref={stampRef}
+                className="frame-editor-stamp-preview"
+                width={rig.width}
+                height={rig.height}
+                aria-hidden="true"
+                style={{ width: rig.width * zoom, height: rig.height * zoom }}
+              />
+            </div>
           ) : (
             <p className="frame-editor-note">Pick a frame, or add one to {CLIP_LABEL[clip]}.</p>
           )}
@@ -1790,23 +1824,6 @@ const FRAME_EDITOR_CSS = `
 .frame-editor-gen input, .frame-editor-gen select {
   background: #1c1917;
 }
-.frame-editor-sent {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.frame-editor-sent figure {
-  margin: 0;
-}
-.frame-editor-sent canvas {
-  display: block;
-  image-rendering: pixelated;
-  box-shadow: 0 0 0 1px #4b3d44;
-}
-.frame-editor-sent figcaption {
-  margin-top: 4px;
-  color: #a99c8d;
-}
 .frame-editor-candidate {
   flex: none;
   display: flex;
@@ -1816,7 +1833,7 @@ const FRAME_EDITOR_CSS = `
 }
 .frame-editor-strip .frame-editor-candidate canvas {
   width: 160px;
-  height: 160px;
+  height: auto;
 }
 .frame-editor-strip .frame-editor-candidate button {
   padding: 6px 10px;
@@ -1870,7 +1887,7 @@ const FRAME_EDITOR_CSS = `
 }
 .frame-editor-strip canvas {
   display: block;
-  width: 80px;
+  width: auto;
   height: 80px;
   image-rendering: pixelated;
   background: #2f2925;
@@ -1895,11 +1912,6 @@ const FRAME_EDITOR_CSS = `
   flex-wrap: wrap;
   gap: 4px;
 }
-.frame-editor-swatches button {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-}
 .frame-editor-canvas canvas {
   display: block;
   image-rendering: pixelated;
@@ -1909,6 +1921,22 @@ const FRAME_EDITOR_CSS = `
 }
 .frame-editor-canvas .frame-editor-note {
   margin-top: 6px;
+}
+.frame-editor-stage {
+  position: relative;
+}
+.frame-editor-canvas canvas.frame-editor-stamp-preview {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: none;
+  cursor: auto;
+}
+.frame-editor-bar {
+  display: flex;
+  gap: 16px;
+  margin: 0 0 6px;
+  color: #a99c8d;
 }
 .frame-editor-card {
   margin: 0;
@@ -1934,4 +1962,4 @@ const FRAME_EDITOR_CSS = `
 .frame-editor-check {
   color: #f5f0e6;
 }
-`;
+${EDITOR_SHARED_CSS}`;

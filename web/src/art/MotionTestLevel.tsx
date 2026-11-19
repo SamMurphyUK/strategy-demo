@@ -1,20 +1,76 @@
 import { useEffect, useRef, useState } from "react";
 import { compileBlueprintFrame } from "./blockoutCompiler";
-import { poseFiring, poseFrameAt, poseStep } from "./motionPreview";
-import { FRAME_LABEL, loadMotionSprite } from "./pixelPaint";
+import { beatGrid, loadMotionDocument } from "./layeredUnit";
+import { playbackBeatAt, poseStep, type PlaybackBeat } from "./motionPreview";
+import { nativeBeatPixels } from "./nativeBattleOverlay";
+import { isPlate, starterDocument, type UnitPaintDocument } from "./pixelPaint";
+import { PLATE_DRAW_SCALE } from "./pixelGrain";
 import type { ArchetypeKey } from "./archetypeLayers";
 import { ARCHETYPE_STARTERS } from "./archetypeStarters";
 import { FACTION_MILITARY_MAPPINGS, STARTER_BLUEPRINTS } from "./starterParts";
-import type { UnitSpriteSheetBlueprint } from "./skeletonSchema";
+import type { UnitSpriteSheetBlueprint, Vec2 } from "./skeletonSchema";
 import { MILITARY } from "../ui/theme/militaryPalette";
 
 interface Actor {
   id: string;
   blueprint: UnitSpriteSheetBlueprint;
+  /** The layers behind the blueprint, when the unit has them. They give the half-recoil beats. */
+  doc: UnitPaintDocument | null;
   name: string;
   detail: string;
   depth: number;
   phase: number;
+}
+
+/** One beat of one actor, ready to draw, and the pixel of it that stands on the ground line. */
+interface DrawnBeat {
+  canvas: OffscreenCanvas;
+  foot: Vec2;
+}
+
+const BEAT_LABEL: Record<string, string> = {
+  idle: "Idle",
+  move_1: "Move 1",
+  idle_2: "Idle",
+  move_2: "Move 2",
+  fire: "Fire",
+  fire_windup: "Windup",
+  fire_peak: "Fire",
+  fire_recover: "Recover",
+  idle_settle: "Idle",
+};
+
+/**
+ * Draw one beat. A plate is copied at one art pixel per lane pixel, standing on its ground point.
+ * A 48-pixel unit is shown at its own size, then the lane scale. A unit with layers gets the windup
+ * and the recovery built from them.
+ */
+function drawBeat(item: Actor, beat: PlaybackBeat): DrawnBeat | null {
+  const mapping = FACTION_MILITARY_MAPPINGS[item.blueprint.factionId];
+  try {
+    if (item.doc && isPlate(item.doc)) {
+      const pixels = nativeBeatPixels(item.doc, beat);
+      if (pixels.width < 1 || pixels.height < 1) {
+        return null;
+      }
+      const canvas = new OffscreenCanvas(pixels.width, pixels.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        return null;
+      }
+      const image = ctx.createImageData(pixels.width, pixels.height);
+      image.data.set(pixels.rgba);
+      ctx.putImageData(image, 0, 0);
+      return { canvas, foot: item.doc.blueprint.groundOrigin };
+    }
+    const blueprint = item.doc?.layers
+      ? { ...item.blueprint, frames: { ...item.blueprint.frames, idle: beatGrid(item.doc, beat) } }
+      : item.blueprint;
+    const compiled = compileBlueprintFrame(blueprint, item.doc?.layers ? "idle" : beat.flat, mapping);
+    return compiled.canvas ? { canvas: compiled.canvas, foot: item.blueprint.groundOrigin } : null;
+  } catch {
+    return null;
+  }
 }
 
 const SKELETON_DETAIL: Record<ArchetypeKey, string> = {
@@ -39,6 +95,7 @@ const FIELD: Omit<Actor, "depth">[] = [
     return {
       id: item.blueprint.blueprintId,
       blueprint: item.blueprint,
+      doc: starterDocument(item.blueprint.blueprintId),
       name: item.title,
       detail: SKELETON_DETAIL[item.archetype],
       phase: (index + 1) % 3,
@@ -51,7 +108,7 @@ function actor(id: string, blueprintId: string, name: string, detail: string, ph
   if (!blueprint) {
     throw new Error(`No starter blueprint ${blueprintId}`);
   }
-  return { id, blueprint, name, detail, phase };
+  return { id, blueprint, doc: null, name, detail, phase };
 }
 
 function withDepths(actors: Omit<Actor, "depth">[]): Actor[] {
@@ -62,10 +119,11 @@ function withDepths(actors: Omit<Actor, "depth">[]): Actor[] {
   }));
 }
 
-function editorActor(blueprint: UnitSpriteSheetBlueprint): Omit<Actor, "depth"> {
+function editorActor(doc: UnitPaintDocument): Omit<Actor, "depth"> {
   return {
     id: "editor",
-    blueprint,
+    blueprint: doc.blueprint,
+    doc,
     name: "From the editor",
     detail: "the sprite open in the editor",
     phase: 1,
@@ -96,10 +154,19 @@ export function MotionTestLevel() {
     let pausedTotal = 0;
     let pauseStarted: number | null = null;
     const origin = performance.now();
-    const editor = loadMotionSprite();
-    const actors = withDepths(editor ? [editorActor(editor.blueprint), ...FIELD] : FIELD);
+    const editor = loadMotionDocument();
+    const actors = withDepths(editor ? [editorActor(editor), ...FIELD] : FIELD);
     const dust = new Map<string, { x: number; y: number; life: number }[]>();
     const lastStep = new Map<string, number>();
+    // Each beat of each actor is drawn once and kept. A plate is far too big to compile every frame.
+    const drawn = new Map<string, DrawnBeat | null>();
+    const beatOf = (item: Actor, beat: PlaybackBeat): DrawnBeat | null => {
+      const key = `${item.id}:${beat.name}`;
+      if (!drawn.has(key)) {
+        drawn.set(key, drawBeat(item, beat));
+      }
+      return drawn.get(key) ?? null;
+    };
 
     const tick = (now: number) => {
       if (stopped) {
@@ -150,8 +217,11 @@ export function MotionTestLevel() {
 
       actors.forEach((item, index) => {
         const time = elapsed + item.phase * 0.4;
-        const firing = poseFiring(time);
-        const pose = poseFrameAt(time, firing);
+        const beat = playbackBeatAt(time);
+        // A unit with layers shows the windup and the recovery. A flat one has no half recoil.
+        const layered = Boolean(item.doc?.layers) && item.doc?.archetype !== "infantry";
+        const firing = layered ? beat.recoil > 0 : beat.flat === "fire";
+        const pose = layered ? beat.pose : beat.flat;
         const step = poseStep(time);
         const travel = step % (span * 2);
         const goingRight = travel < span;
@@ -160,25 +230,28 @@ export function MotionTestLevel() {
         const kick = firing ? item.blueprint.recoilOffsetPx : 0;
         const groundY = Math.round(grounds[index] ?? 0);
         const footX = left + along;
-        const compiled = compileBlueprintFrame(item.blueprint, pose, FACTION_MILITARY_MAPPINGS[item.blueprint.factionId]);
-        const sheet = compiled.canvas;
+        const shown = beatOf(item, beat);
+        const sheet = shown?.canvas ?? null;
         const ground = item.blueprint.groundOrigin;
+        const plate = item.doc !== null && isPlate(item.doc);
+        const drawScale = plate ? PLATE_DRAW_SCALE : scale;
 
         ctx.fillStyle = MILITARY.charcoal;
         ctx.fillRect(0, groundY, cssW, 2);
         ctx.fillStyle = "#1c1917";
         ctx.fillText(item.name, 16, groundY - 22);
-        ctx.fillText(`${item.detail} · ${FRAME_LABEL[pose]}`, 16, groundY - 6);
+        ctx.fillText(`${item.detail} · ${layered ? (BEAT_LABEL[beat.name] ?? beat.name) : (BEAT_LABEL[beat.flat] ?? beat.flat)}`, 16, groundY - 6);
 
-        if (sheet) {
+        if (shown) {
           ctx.save();
-          ctx.translate(footX - kick * facing * scale, groundY);
-          ctx.scale(scale * facing, scale);
+          ctx.imageSmoothingEnabled = false;
+          ctx.translate(footX - kick * facing * drawScale, groundY);
+          ctx.scale(drawScale * facing, drawScale);
           ctx.globalAlpha = 0.35;
           ctx.fillStyle = "#1A1614";
           ctx.fillRect(-6, 0, 12, 1);
           ctx.globalAlpha = 1;
-          ctx.drawImage(sheet, -ground.x, -ground.y);
+          ctx.drawImage(shown.canvas, -shown.foot.x, -shown.foot.y);
           ctx.restore();
         }
 
@@ -198,7 +271,8 @@ export function MotionTestLevel() {
           ctx.fillRect(Math.round(speck.x), Math.round(speck.y), size, size);
         }
 
-        if (firing && item.blueprint.muzzlePoint && sheet) {
+        // A plate's flash is painted into its Fire pose, in card pixels, so it needs none drawn here.
+        if (!plate && beat.flat === "fire" && beat.recoil === 1 && item.blueprint.muzzlePoint && sheet) {
           const muzzle = item.blueprint.muzzlePoint;
           const tipX = footX + facing * (muzzle.x - ground.x - kick) * scale;
           const tipY = groundY + (muzzle.y - ground.y) * scale;
@@ -250,6 +324,7 @@ export function MotionTestLevel() {
         </div>
         <div className="motion-test-actions">
           <a href="/?bake=1">Back to the editor</a>
+          <a href="/?field=1">On a battle map</a>
           <button
             type="button"
             onClick={() => {
@@ -264,7 +339,9 @@ export function MotionTestLevel() {
       <canvas ref={canvasRef} />
       <p className="motion-test-note">
         One lane for each skeleton: infantry, tank, mechanised infantry, artillery, aircraft, ship. Idle, move 1, idle, move 2,
-        eleven poses a second. The figure steps one pixel at a time. Fire kicks back and flashes. Space pauses.
+        eleven poses a second. The figure steps one pixel at a time. Every sixteenth pose a layered unit winds up, fires, and
+        recovers. A plate is drawn at one art pixel per pixel of this lane, on its ground point. The lanes stay the same size.
+        On a battle map it is the same 1× size. Space pauses.
       </p>
       <style>{STYLE}</style>
     </section>

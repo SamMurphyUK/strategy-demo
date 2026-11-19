@@ -20,11 +20,38 @@ export const BAKE_ROUTE = "/__dev/bake-unit";
 export const PROMOTE_ROUTE = "/__dev/promote-candidate";
 export const SAVE_UNIT_ROUTE = "/__dev/save-unit";
 export const SAVE_RIG_ROUTE = "/__dev/save-rig";
+export const SAVE_LAYERED_ROUTE = "/__dev/save-layered";
+export const LAYERED_UNITS_ROUTE = "/__dev/layered-units";
 export const GENERATE_PART_ROUTE = "/__dev/generate-part";
 
 const FRAME_NAME = /^(idle|walk|fire)_\d+$/;
 const PART_ID = /^[a-z0-9_]+$/;
-const PART_LAYERS = new Set(["legs", "torso", "head", "weapon"]);
+/**
+ * The four layers of the infantry rig, then the layers of the vehicle, aircraft, and ship skeletons.
+ * The second list is a copy of ARCHETYPE_LAYERS in src/art/archetypeLayers.ts. A test keeps them the same.
+ */
+export const PART_LAYERS = new Set([
+  "legs",
+  "torso",
+  "head",
+  "weapon",
+  "tracks",
+  "hull",
+  "turret",
+  "barrel",
+  "wheels_tracks",
+  "chassis",
+  "crew_gun",
+  "carriage_wheels",
+  "gun_shield",
+  "barrel_breech",
+  "fuselage_wings",
+  "engines_props",
+  "tail_markings",
+  "hull_waterline",
+  "superstructure",
+  "turrets_masts",
+]);
 /** The inpainting tool takes pictures up to this size, and prices each one the same. */
 const INPAINT_MAX_SIDE = 256;
 const INPAINT_POLL_MS = 3000;
@@ -100,6 +127,13 @@ export function authoredUnitRelativePath(factionId, blueprintId) {
   const faction = rosterFaction(factionId);
   const blueprint = plainId("blueprintId", blueprintId);
   return path.join("assets", "units", "authored", faction, `${blueprint}.json`);
+}
+
+/** assets/layered/<factionId>/<unitTypeId>.json, relative to the Vite root. One file a unit: the plate-size source. */
+export function layeredUnitRelativePath(factionId, unitTypeId) {
+  const faction = rosterFaction(factionId);
+  const unit = plainId("unitTypeId", unitTypeId);
+  return path.join("assets", "layered", faction, `${unit}.json`);
 }
 
 /** public/assets/units/rigs/<unitId>/, relative to the Vite root. */
@@ -671,6 +705,70 @@ export function bakeUnitPlugin() {
         }
       });
 
+      server.middlewares.use(SAVE_LAYERED_ROUTE, async (req, res) => {
+        if (req.method !== "POST") {
+          return reply(res, 405, { ok: false, error: "Use POST." });
+        }
+        if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+          return reply(res, 415, { ok: false, error: "Send application/json." });
+        }
+        try {
+          const text = await readBody(req);
+          let body;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            return reply(res, 400, { ok: false, error: "The body is not valid JSON." });
+          }
+          if (body?.kind !== "layered-unit" || typeof body.layers !== "object" || body.layers === null) {
+            return reply(res, 422, { ok: false, error: "The body is not a layered unit file." });
+          }
+          const relative = layeredUnitRelativePath(body.factionId, body.unitTypeId);
+          const target = resolveInsideRoot(root, relative);
+          await mkdir(path.dirname(target), { recursive: true });
+          await writeFile(target, `${JSON.stringify(body, null, 1)}\n`, "utf8");
+          return reply(res, 200, { ok: true, path: portable(relative) });
+        } catch (error) {
+          const http = httpError(error);
+          return reply(res, http.status, { ok: false, error: http.error });
+        }
+      });
+
+      // With ?faction=&unit= this returns one file. Without them it lists the files on disk.
+      server.middlewares.use(LAYERED_UNITS_ROUTE, async (req, res) => {
+        if (req.method !== "GET") {
+          return reply(res, 405, { ok: false, error: "Use GET." });
+        }
+        const query = new URLSearchParams(req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "");
+        try {
+          if (query.has("faction") || query.has("unit")) {
+            const relative = layeredUnitRelativePath(query.get("faction"), query.get("unit"));
+            const text = await readFile(resolveInsideRoot(root, relative), "utf8");
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            return res.end(text);
+          }
+          const units = [];
+          for (const faction of ROSTER_IDS) {
+            const folder = resolveInsideRoot(root, path.join("assets", "layered", faction));
+            const names = await readdir(folder).catch(() => []);
+            for (const name of names.sort()) {
+              if (name.endsWith(".json")) {
+                const unitTypeId = name.slice(0, -".json".length);
+                units.push({ factionId: faction, unitTypeId, path: portable(path.join("assets", "layered", faction, name)) });
+              }
+            }
+          }
+          return reply(res, 200, { ok: true, units });
+        } catch (error) {
+          if (error?.code === "ENOENT") {
+            return reply(res, 404, { ok: false, error: "That layered unit is not on disk." });
+          }
+          const http = httpError(error);
+          return reply(res, http.status === 500 ? 422 : http.status, { ok: false, error: http.error });
+        }
+      });
+
       server.middlewares.use(SAVE_RIG_ROUTE, async (req, res) => {
         if (req.method !== "POST") {
           return reply(res, 405, { ok: false, error: "Use POST." });
@@ -736,8 +834,8 @@ export function bakeUnitPlugin() {
         }
       });
 
-      // Repaint one part of the rig. The editor sends a picture of the soldier and a mask of the
-      // pixels the new part may cover. dryRunOnly asks the price and spends nothing. A paid run
+      // Repaint one part of a rifleman's rig or of a vehicle. The editor sends a picture of the unit
+      // and a mask of the pixels the new part may cover. dryRunOnly asks the price and spends nothing. A paid run
       // needs agreedCost, the price the editor showed, and stops when the price has gone up.
       server.middlewares.use(GENERATE_PART_ROUTE, async (req, res) => {
         if (req.method !== "POST") {

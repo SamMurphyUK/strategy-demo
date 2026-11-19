@@ -1,5 +1,5 @@
 import { INFANTRY_LAYER_KEYS, LAYER_LABEL, buildMarch, type InfantryLayerFrames } from "./infantryMarch";
-import type { PaletteSlotKey, SpriteFrameGrid, SpriteFrameKey, UnitCategory, Vec2 } from "./skeletonSchema";
+import type { MotionShifts, PaletteSlotKey, SpriteFrameGrid, SpriteFrameKey, UnitCategory, Vec2 } from "./skeletonSchema";
 
 /**
  * Every unit is drawn on one of six skeletons. A skeleton is an ordered stack of layers.
@@ -200,6 +200,16 @@ const UNIT_TYPE_ALIAS: Record<string, ArchetypeKey> = {
   bomber: "aircraft",
 };
 
+const UNIT_TYPE_FULL_NAME: Record<string, string> = {
+  tac_bomber: "tactical_bomber",
+  bomber: "strategic_bomber",
+};
+
+/** The UNIT_DEFINITIONS key for a name from the art notes. A name that is already a key comes back as it is. */
+export function rosterUnitType(unitTypeId: string): string {
+  return UNIT_TYPE_FULL_NAME[unitTypeId] ?? unitTypeId;
+}
+
 export function archetypeForUnitType(unitTypeId: string): ArchetypeKey | null {
   for (const key of ARCHETYPE_KEYS) {
     if (ARCHETYPES[key].unitTypes.includes(unitTypeId)) {
@@ -366,46 +376,78 @@ export function mostUsedSlot(grid: SpriteFrameGrid, except?: PaletteSlotKey): Pa
 }
 
 /**
- * The alternate phase of a tread or a wheel. Each run of steel steps one pixel to the right and the
- * colour it covers drops in behind it. A run against the layer's edge loses a pixel instead of
- * leaving the layer, so the outline never changes.
+ * The alternate phase of a tread or a wheel. Each run of steel steps `stride` pixels to the right and
+ * the colours it covers drop in behind it, in their order. Steel that would leave the layer, or cross
+ * a gap in it, is lost instead, so the outline never changes.
  */
-export function stepHighlights(grid: SpriteFrameGrid): SpriteFrameGrid {
+export function stepHighlights(grid: SpriteFrameGrid, stride = 1): SpriteFrameGrid {
+  const step = Math.max(1, Math.floor(stride));
   const body = mostUsedSlot(grid, MOVING_DETAIL_SLOT);
   return grid.map((row) => {
     const next = row.slice();
-    let x = 0;
-    while (x < row.length) {
-      if (row[x] !== MOVING_DETAIL_SLOT) {
-        x += 1;
+    let start = 0;
+    while (start < row.length) {
+      if (row[start] == null) {
+        start += 1;
         continue;
       }
-      let end = x;
-      while (row[end + 1] === MOVING_DETAIL_SLOT) {
+      let end = start;
+      while (row[end + 1] != null) {
         end += 1;
       }
-      const ahead = row[end + 1] ?? null;
-      if (ahead != null) {
-        next[x] = ahead;
-        next[end + 1] = MOVING_DETAIL_SLOT;
-      } else {
-        next[x] = (x > 0 ? row[x - 1] : null) ?? body ?? MOVING_DETAIL_SLOT;
-      }
-      x = end + 2;
+      stepSegment(row, next, start, end, step, body);
+      start = end + 1;
     }
     return next;
   });
 }
 
+/** One unbroken stretch of ink on a row: the steel moves along it and the other colours close up behind. */
+function stepSegment(
+  row: readonly (PaletteSlotKey | null)[],
+  next: (PaletteSlotKey | null)[],
+  start: number,
+  end: number,
+  step: number,
+  body: PaletteSlotKey | null,
+): void {
+  const colours: PaletteSlotKey[] = [];
+  let steel = false;
+  for (let x = start; x <= end; x += 1) {
+    const slot = row[x];
+    if (slot === MOVING_DETAIL_SLOT) {
+      steel = true;
+    } else if (slot != null) {
+      colours.push(slot);
+    }
+  }
+  if (!steel) {
+    return;
+  }
+  let used = 0;
+  let last: PaletteSlotKey | null = null;
+  for (let x = start; x <= end; x += 1) {
+    if (x - step >= start && row[x - step] === MOVING_DETAIL_SLOT) {
+      next[x] = MOVING_DETAIL_SLOT;
+      continue;
+    }
+    const colour: PaletteSlotKey = colours[used] ?? last ?? body ?? MOVING_DETAIL_SLOT;
+    used += 1;
+    last = colour;
+    next[x] = colour;
+  }
+}
+
 /**
- * The alternate phase of a propeller. Each steel dash steps one pixel toward the lower wingtip.
+ * The alternate phase of a propeller. Each steel dash steps `stride` pixels toward the lower wingtip.
  * Dashes cross empty canvas, so the cell a dash leaves goes empty.
  */
-export function stepBlur(grid: SpriteFrameGrid): SpriteFrameGrid {
+export function stepBlur(grid: SpriteFrameGrid, stride = 1): SpriteFrameGrid {
+  const step = Math.max(1, Math.floor(stride));
   const next = grid.map((row) => row.map((slot) => (slot === MOVING_DETAIL_SLOT ? null : slot)));
   for (let y = 0; y < grid.length; y += 1) {
     const row = grid[y];
-    const below = next[y + 1];
+    const below = next[y + step];
     if (!row || !below) {
       continue;
     }
@@ -421,10 +463,13 @@ export function stepBlur(grid: SpriteFrameGrid): SpriteFrameGrid {
 const FOAM: PaletteSlotKey = "skin_stand_in";
 
 /**
- * Foam on the waterline, which is the hull's bottom row. Phase 0 throws a pixel ahead of the bow and
+ * Foam on the waterline, which is the hull's bottom edge. Phase 0 throws a dash ahead of the bow and
  * behind the stern. Phase 1 pulls the dashes onto the hull's ends.
+ * `unit` is the side of one dash. A plate drawn larger than the card passes its display divisor, so
+ * each dash is one card pixel.
  */
-export function waterlineFoam(hull: SpriteFrameGrid, phase: 0 | 1): SpriteFrameGrid {
+export function waterlineFoam(hull: SpriteFrameGrid, phase: 0 | 1, unit = 1): SpriteFrameGrid {
+  const side = Math.max(1, Math.floor(unit));
   const next = cloneGrid(hull);
   let waterline = -1;
   for (let y = hull.length - 1; y >= 0; y -= 1) {
@@ -433,25 +478,66 @@ export function waterlineFoam(hull: SpriteFrameGrid, phase: 0 | 1): SpriteFrameG
       break;
     }
   }
-  const row = next[waterline];
-  if (!row) {
+  if (waterline < 0) {
     return next;
   }
-  const stern = row.findIndex((slot) => slot != null);
-  let bow = stern;
-  for (let x = row.length - 1; x > stern; x -= 1) {
-    if (row[x] != null) {
-      bow = x;
-      break;
+  const top = Math.max(0, waterline - side + 1);
+  let stern = Number.POSITIVE_INFINITY;
+  let bow = -1;
+  for (let y = top; y <= waterline; y += 1) {
+    const row = hull[y] ?? [];
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] != null) {
+        stern = Math.min(stern, x);
+        bow = Math.max(bow, x);
+      }
     }
   }
-  const cells = phase === 0 ? [bow + 1, bow - 1, stern - 1, stern + 1] : [bow, bow - 2, stern, stern + 2];
-  for (const x of cells) {
-    if (x >= 0 && x < row.length) {
-      row[x] = FOAM;
-    }
+  const offsets = phase === 0 ? { bow: [1, -1], stern: [-1, 1] } : { bow: [0, -2], stern: [0, 2] };
+  for (const offset of offsets.bow) {
+    fillBlock(next, bow + (offset - 1) * side + 1, top, side, waterline - top + 1, FOAM);
+  }
+  for (const offset of offsets.stern) {
+    fillBlock(next, stern + offset * side, top, side, waterline - top + 1, FOAM);
   }
   return next;
+}
+
+function fillBlock(grid: SpriteFrameGrid, left: number, top: number, width: number, height: number, slot: PaletteSlotKey): void {
+  for (let y = top; y < top + height; y += 1) {
+    for (let x = left; x < left + width; x += 1) {
+      paintCell(grid, x, y, slot);
+    }
+  }
+}
+
+/** What a blueprint without `motion` moves by. These are the amounts the 48-pixel starters were drawn for. */
+export const LEGACY_SHIFTS: MotionShifts = { bobPx: 1, recoilPx: 2, treadStride: 1 };
+
+/** One card pixel of bob and tread, two of recoil, for a plate scaled down by this divisor. */
+export function shiftsForDivisor(divisor: number): MotionShifts {
+  const unit = Math.max(1, Math.floor(divisor));
+  return { bobPx: unit, recoilPx: unit * 2, treadStride: unit };
+}
+
+/**
+ * Why these shifts would smear on the card. A shift has to be a whole number of card pixels.
+ * The recoil has to be an even number of them, because the windup and the recovery use half of it.
+ */
+export function shiftProblems(shifts: MotionShifts, divisor: number): string[] {
+  const unit = Math.max(1, Math.floor(divisor));
+  const problems: string[] = [];
+  const whole = (value: number) => Number.isInteger(value) && value >= 0;
+  if (!whole(shifts.bobPx) || shifts.bobPx % unit !== 0) {
+    problems.push(`Bob ${shifts.bobPx} is not a multiple of ${unit}.`);
+  }
+  if (!whole(shifts.recoilPx) || shifts.recoilPx % (unit * 2) !== 0) {
+    problems.push(`Recoil ${shifts.recoilPx} is not a multiple of ${unit * 2}.`);
+  }
+  if (!whole(shifts.treadStride) || shifts.treadStride % unit !== 0) {
+    problems.push(`Tread stride ${shifts.treadStride} is not a multiple of ${unit}.`);
+  }
+  return problems;
 }
 
 type Shift = readonly [number, number];
@@ -467,56 +553,64 @@ export interface PoseRule {
   flash?: string;
 }
 
-const ALTERNATE: Record<string, (grid: SpriteFrameGrid) => SpriteFrameGrid> = {
+const ALTERNATE: Record<string, (grid: SpriteFrameGrid, stride: number) => SpriteFrameGrid> = {
   tracks: stepHighlights,
   wheels_tracks: stepHighlights,
   engines_props: stepBlur,
 };
 
-/** A flak gun's barrel points up the diagonal, so its recoil slides one back and one down. */
+/** A flak gun's barrel points up the diagonal, so its recoil slides back and down by the same amount. */
 const FLAK_UNIT_TYPES: readonly string[] = ["aaa", "aa"];
 
 /**
  * The offsets Build Animation applies, by pose. Nothing rotates.
  * Infantry is not here: it keeps the march in infantryMarch.ts.
+ * The gun takes the whole recoil. Whatever carries the gun takes half.
  */
-export function motionRules(archetype: Exclude<ArchetypeKey, "infantry">, unitTypeId: string): Record<MovePose, PoseRule> {
+export function motionRules(
+  archetype: Exclude<ArchetypeKey, "infantry">,
+  unitTypeId: string,
+  shifts: MotionShifts = LEGACY_SHIFTS,
+): Record<MovePose, PoseRule> {
+  const bob = shifts.bobPx;
+  const kick = shifts.recoilPx;
+  const half = Math.round(kick / 2);
   switch (archetype) {
     case "tank":
       return {
         move_1: { shift: {}, alternate: "tracks" },
-        move_2: { shift: { hull: [0, 1], turret: [0, 1], barrel: [0, 1] } },
-        fire: { shift: { hull: [0, 1], turret: [-1, 1], barrel: [-2, 1] }, flash: "barrel" },
+        move_2: { shift: { hull: [0, bob], turret: [0, bob], barrel: [0, bob] } },
+        fire: { shift: { hull: [0, bob], turret: [0 - half, bob], barrel: [0 - kick, bob] }, flash: "barrel" },
       };
     case "mech_infantry":
       return {
         move_1: { shift: {}, alternate: "wheels_tracks" },
-        move_2: { shift: { chassis: [0, -1], crew_gun: [0, -1] } },
-        fire: { shift: { crew_gun: [-1, 0] } },
+        move_2: { shift: { chassis: [0, 0 - bob], crew_gun: [0, 0 - bob] } },
+        fire: { shift: { crew_gun: [0 - half, 0] } },
       };
     case "artillery":
       return {
         move_1: { shift: {} },
-        move_2: { shift: { gun_shield: [0, 1], barrel_breech: [0, 1] } },
+        move_2: { shift: { gun_shield: [0, bob], barrel_breech: [0, bob] } },
         fire: {
           shift: {
-            carriage_wheels: [-1, 0],
-            gun_shield: [-1, 0],
-            barrel_breech: FLAK_UNIT_TYPES.includes(unitTypeId) ? [-1, 1] : [-2, 0],
+            carriage_wheels: [0 - half, 0],
+            gun_shield: [0 - half, 0],
+            barrel_breech: FLAK_UNIT_TYPES.includes(unitTypeId) ? [0 - half, half] : [0 - kick, 0],
           },
         },
       };
     case "aircraft":
       return {
         move_1: { shift: {}, alternate: "engines_props" },
-        move_2: { shift: { engines_props: [0, 1] } },
-        fire: { shift: { fuselage_wings: [-1, 0], engines_props: [-1, 0], tail_markings: [-1, 0] }, flash: "engines_props" },
+        move_2: { shift: { engines_props: [0, bob] } },
+        fire: { shift: { fuselage_wings: [0 - half, 0], engines_props: [0 - half, 0], tail_markings: [0 - half, 0] }, flash: "engines_props" },
       };
     case "ship":
       return {
         move_1: { shift: {}, foam: 0 },
-        move_2: { shift: { hull_waterline: [0, -1], superstructure: [0, -1], turrets_masts: [0, -1] }, foam: 1 },
-        fire: { shift: { hull_waterline: [0, 1], superstructure: [0, 1], turrets_masts: [0, 1] }, flash: "turrets_masts" },
+        move_2: { shift: { hull_waterline: [0, 0 - bob], superstructure: [0, 0 - bob], turrets_masts: [0, 0 - bob] }, foam: 1 },
+        fire: { shift: { hull_waterline: [0, bob], superstructure: [0, bob], turrets_masts: [0, bob] }, flash: "turrets_masts" },
       };
   }
 }
@@ -528,6 +622,13 @@ export interface BuildAnimationOptions {
   groundX: number;
   /** The gun's tip on the idle pose. No mark, no painted flash. */
   muzzlePoint?: Vec2 | null;
+  /** How far the layers move. Left out, they move by the 48-pixel amounts. */
+  shifts?: MotionShifts;
+  /**
+   * The side of one flash or foam block, in plate pixels. A plate passes its display divisor so each
+   * block is one card pixel. Left out, a block is one pixel.
+   */
+  unit?: number;
 }
 
 /**
@@ -540,7 +641,7 @@ export function buildAnimation(archetype: ArchetypeKey, source: LayerFrames, opt
     return buildMarch(source as unknown as InfantryLayerFrames, options.groundX);
   }
   const idle = cloneStack(archetype, source.idle);
-  const rules = motionRules(archetype, options.unitTypeId);
+  const rules = motionRules(archetype, options.unitTypeId, options.shifts);
   return {
     idle,
     move_1: poseFromIdle(archetype, idle, rules.move_1, options),
@@ -549,17 +650,63 @@ export function buildAnimation(archetype: ArchetypeKey, source: LayerFrames, opt
   };
 }
 
+/**
+ * The shot at part of its recoil, built from the idle layers. Half is the windup and the recovery.
+ * Each offset is cut back to a whole number of blocks, so a part that only moves one block waits for
+ * the peak. The flash is on the peak alone.
+ */
+export function buildFirePose(
+  archetype: Exclude<ArchetypeKey, "infantry">,
+  idle: LayerStack,
+  options: BuildAnimationOptions,
+  fraction: number,
+): LayerStack {
+  const rule = motionRules(archetype, options.unitTypeId, options.shifts).fire;
+  if (fraction >= 1) {
+    return poseFromIdle(archetype, idle, rule, options);
+  }
+  const unit = Math.max(1, Math.floor(options.unit ?? 1));
+  const part = (value: number) => Math.trunc((value * Math.max(0, fraction)) / unit) * unit;
+  const shift: Record<string, Shift> = {};
+  for (const [layer, [dx, dy]] of Object.entries(rule.shift)) {
+    shift[layer] = [part(dx), part(dy)];
+  }
+  return poseFromIdle(archetype, idle, { shift }, options);
+}
+
+/**
+ * The layers one playback beat shows. The stored poses cover the whole beats. A half-recoil beat is
+ * built here from the idle layers, so no fifth pose is kept. A rifleman has no half recoil and shows
+ * the beat's flat pose.
+ */
+export function beatStack(
+  archetype: ArchetypeKey,
+  frames: LayerFrames,
+  beat: { pose: SpriteFrameKey; recoil: number; flat: SpriteFrameKey },
+  options: BuildAnimationOptions,
+): LayerStack {
+  if (archetype === "infantry") {
+    return frames[beat.flat];
+  }
+  if (beat.recoil > 0 && beat.recoil < 1) {
+    return buildFirePose(archetype, frames.idle, options, beat.recoil);
+  }
+  return frames[beat.pose];
+}
+
 function poseFromIdle(archetype: ArchetypeKey, idle: LayerStack, rule: PoseRule, options: BuildAnimationOptions): LayerStack {
   const { width, height } = stackSize(archetype, idle);
+  const unit = Math.max(1, Math.floor(options.unit ?? 1));
+  const stride = options.shifts?.treadStride ?? LEGACY_SHIFTS.treadStride;
   const stack: LayerStack = {};
   for (const layer of ARCHETYPE_LAYERS[archetype]) {
     let grid = idle[layer] ?? emptyGrid(width, height);
     const phase = ALTERNATE[layer];
     if (rule.alternate === layer && phase) {
-      grid = phase(grid);
+      grid = phase(grid, stride);
     }
     if (rule.foam !== undefined && layer === "hull_waterline") {
-      grid = waterlineFoam(grid, rule.foam);
+      grid = waterlineFoam(grid, rule.foam, unit);
     }
     const [dx, dy] = rule.shift[layer] ?? [0, 0];
     stack[layer] = dx !== 0 || dy !== 0 ? shiftGrid(grid, dx, dy) : cloneGrid(grid);
@@ -567,24 +714,31 @@ function poseFromIdle(archetype: ArchetypeKey, idle: LayerStack, rule: PoseRule,
   const target = rule.flash ? stack[rule.flash] : undefined;
   if (rule.flash && target && options.muzzlePoint) {
     const [dx, dy] = rule.shift[rule.flash] ?? [0, 0];
-    paintFlash(target, { x: options.muzzlePoint.x + dx, y: options.muzzlePoint.y + dy });
+    paintFlash(target, { x: options.muzzlePoint.x + dx, y: options.muzzlePoint.y + dy }, unit);
     if (archetype === "aircraft") {
       for (const gun of wingGuns(idle.fuselage_wings, options.muzzlePoint)) {
         const [wx, wy] = rule.shift.fuselage_wings ?? [0, 0];
-        paintCell(target, gun.x + wx + 1, gun.y + wy, "skin_stand_in");
-        paintCell(target, gun.x + wx + 2, gun.y + wy, "insignia_accent");
+        flashBlock(target, { x: gun.x + wx, y: gun.y + wy }, 1, 0, unit, "skin_stand_in");
+        flashBlock(target, { x: gun.x + wx, y: gun.y + wy }, 2, 0, unit, "insignia_accent");
       }
     }
   }
   return stack;
 }
 
-/** Two light pixels ahead of the gun's tip, with the faction's accent above and below the first. */
-function paintFlash(grid: SpriteFrameGrid, tip: Vec2): void {
-  paintCell(grid, tip.x + 1, tip.y, "skin_stand_in");
-  paintCell(grid, tip.x + 2, tip.y, "skin_stand_in");
-  paintCell(grid, tip.x + 1, tip.y - 1, "insignia_accent");
-  paintCell(grid, tip.x + 1, tip.y + 1, "insignia_accent");
+/** Two light blocks ahead of the gun's tip, with the faction's accent above and below the first. */
+function paintFlash(grid: SpriteFrameGrid, tip: Vec2, unit: number): void {
+  flashBlock(grid, tip, 1, 0, unit, "skin_stand_in");
+  flashBlock(grid, tip, 2, 0, unit, "skin_stand_in");
+  flashBlock(grid, tip, 1, -1, unit, "insignia_accent");
+  flashBlock(grid, tip, 1, 1, unit, "insignia_accent");
+}
+
+/** One block of the flash, `across` blocks ahead of the tip and `down` blocks below it. The middle row is centred on the tip. */
+function flashBlock(grid: SpriteFrameGrid, tip: Vec2, across: number, down: number, unit: number, slot: PaletteSlotKey): void {
+  const left = tip.x + 1 + (across - 1) * unit;
+  const top = tip.y - Math.floor((unit - 1) / 2) + down * unit;
+  fillBlock(grid, left, top, unit, unit, slot);
 }
 
 /** A gun on each wing, halfway from the fuselage to the tip, on the leading edge. */

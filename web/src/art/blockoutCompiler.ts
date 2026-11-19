@@ -8,7 +8,7 @@ import type {
   UnitSpriteSheetBlueprint,
   Vec2,
 } from "./skeletonSchema";
-import { MILITARY_STRIP_KEYS, SPRITE_FRAME_KEYS } from "./skeletonSchema";
+import { MILITARY_STRIP_KEYS, SPRITE_FRAME_KEYS, stripKeyOfSlot } from "./skeletonSchema";
 
 const SHEET_MARGIN = 1;
 
@@ -54,8 +54,117 @@ export function assertBlockoutFitsSheet(blueprint: UnitSpriteSheetBlueprint): Ve
   return offset;
 }
 
+/** What the card needs to know about a plate: where its ground point is and how far it is scaled down. */
+export interface CardPlacement {
+  groundOrigin: Vec2;
+  sheetFootAnchor: Vec2;
+  displayDivisor?: number;
+}
+
+/** Whole plate pixels to one card pixel. A blueprint without a divisor is drawn at its own size. */
+export function divisorOf(placement: { displayDivisor?: number }): number {
+  const divisor = placement.displayDivisor ?? 1;
+  if (!Number.isInteger(divisor) || divisor < 1) {
+    throw new Error(`displayDivisor ${divisor} must be a whole number of 1 or more`);
+  }
+  return divisor;
+}
+
+/**
+ * The card pixel a plate pixel lands on. The grid of blocks hangs from the ground point: the ground
+ * row is the bottom row of its block, and the ground column is the left column of its block. The feet
+ * therefore stay on the foot anchor at every divisor.
+ */
+export function cardCell(placement: CardPlacement, x: number, y: number): Vec2 {
+  const divisor = divisorOf(placement);
+  return {
+    x: placement.sheetFootAnchor.x + Math.floor((x - placement.groundOrigin.x) / divisor),
+    y: placement.sheetFootAnchor.y + Math.ceil((y - placement.groundOrigin.y) / divisor),
+  };
+}
+
+/** The plate pixel a card pixel shows: the middle of its block. This is the nearest-neighbour sample. */
+export function plateSample(placement: CardPlacement, cardX: number, cardY: number): Vec2 {
+  const divisor = divisorOf(placement);
+  const middle = Math.floor(divisor / 2);
+  return {
+    x: placement.groundOrigin.x + (cardX - placement.sheetFootAnchor.x) * divisor + middle,
+    y: placement.groundOrigin.y + (cardY - placement.sheetFootAnchor.y) * divisor - (divisor - 1) + middle,
+  };
+}
+
+function insideInkMargin(cell: Vec2): boolean {
+  return (
+    cell.x >= SHEET_MARGIN &&
+    cell.y >= SHEET_MARGIN &&
+    cell.x <= SPRITE_BAKE.width - 1 - SHEET_MARGIN &&
+    cell.y <= SPRITE_BAKE.height - 1 - SHEET_MARGIN
+  );
+}
+
+/** The first painted pixel that would land on the card's outer pixel or off the card, or null when the pose fits. */
+export function firstPixelOffCard(grid: readonly (readonly (unknown | null)[])[], placement: CardPlacement): Vec2 | null {
+  for (let y = 0; y < grid.length; y++) {
+    const row = grid[y] ?? [];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] != null && !insideInkMargin(cardCell(placement, x, y))) {
+        return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * One pose scaled onto the 80×56 card, as slots. Each card pixel takes the middle of its block.
+ * The outline is not here. figureGround.ts paints it when the card is drawn.
+ */
+export function rasterCardSlots(
+  grid: readonly (readonly (PaletteSlotKey | null)[])[],
+  placement: CardPlacement,
+): (PaletteSlotKey | null)[] {
+  const slots: (PaletteSlotKey | null)[] = new Array(SPRITE_BAKE.width * SPRITE_BAKE.height).fill(null);
+  for (let cardY = 0; cardY < SPRITE_BAKE.height; cardY++) {
+    for (let cardX = 0; cardX < SPRITE_BAKE.width; cardX++) {
+      const sample = plateSample(placement, cardX, cardY);
+      slots[cardY * SPRITE_BAKE.width + cardX] = grid[sample.y]?.[sample.x] ?? null;
+    }
+  }
+  return slots;
+}
+
+/** One frame scaled onto the 80×56 card, as strip keys. Throws when the frame leaves the ink margin. */
+export function rasterCardAlbedo(
+  blueprint: UnitSpriteSheetBlueprint,
+  frameKey: SpriteFrameKey,
+  factionMapping: FactionMilitaryMapping,
+  militaryStrip: Record<MilitaryStripKey, string> = MILITARY,
+): (MilitaryStripKey | null)[] {
+  const frame = blueprint.frames[frameKey];
+  const off = firstPixelOffCard(frame, blueprint);
+  if (off) {
+    throw new Error(`Frame "${frameKey}" pixel (${off.x}, ${off.y}) leaves the ink margin`);
+  }
+  return rasterCardSlots(frame, blueprint).map((slot) => (slot == null ? null : stripKeyFor(factionMapping, slot, militaryStrip)));
+}
+
+function assertGroundOnPlate(blueprint: UnitSpriteSheetBlueprint): void {
+  const { width, height } = blueprint.canvasSize;
+  const { x: footX, y: footY } = blueprint.groundOrigin;
+  if (!Number.isInteger(footX) || !Number.isInteger(footY)) {
+    throw new Error("groundOrigin must land on a whole pixel");
+  }
+  if (footX < 0 || footY < 0 || footX >= width || footY >= height) {
+    throw new Error(`groundOrigin (${footX}, ${footY}) is outside the ${width}×${height} blockout`);
+  }
+  const anchor = blueprint.sheetFootAnchor;
+  if (!Number.isInteger(anchor.x) || !Number.isInteger(anchor.y)) {
+    throw new Error("sheetFootAnchor must land on a whole pixel");
+  }
+}
+
 function stripKeyFor(mapping: FactionMilitaryMapping, slot: PaletteSlotKey, militaryStrip: Record<string, string>): MilitaryStripKey {
-  const key = mapping[slot];
+  const key = stripKeyOfSlot(mapping, slot);
   if (key === undefined || !Object.prototype.hasOwnProperty.call(militaryStrip, key)) {
     throw new Error(`Slot "${slot}" has no MilitaryStripKey`);
   }
@@ -65,6 +174,8 @@ function stripKeyFor(mapping: FactionMilitaryMapping, slot: PaletteSlotKey, mili
 /**
  * Map one frame's slots onto faction colours. The grid is already flat, so there is no parent walk.
  * Opaque pixels must land inside [1..78, 1..54] once groundOrigin sits on (40, 52).
+ * A blueprint with a displayDivisor is a plate: its canvas may be larger than the card, and each pixel
+ * is checked where the divisor puts it. The keys that come back are at the plate's own size.
  */
 export function compileBlueprintFrame(
   blueprint: UnitSpriteSheetBlueprint,
@@ -80,7 +191,11 @@ export function compileBlueprintFrame(
   if (!frame || frame.length !== height || frame.some((row) => row.length !== width)) {
     throw new Error(`Frame "${frameKey}" is not a ${width}×${height} grid`);
   }
-  const sheetBlitOffset = assertBlockoutFitsSheet(blueprint);
+  const plate = blueprint.displayDivisor !== undefined;
+  if (plate) {
+    assertGroundOnPlate(blueprint);
+  }
+  const sheetBlitOffset = plate ? cardCell(blueprint, 0, 0) : assertBlockoutFitsSheet(blueprint);
   const albedoKeys: (MilitaryStripKey | null)[] = new Array(width * height).fill(null);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -88,9 +203,8 @@ export function compileBlueprintFrame(
       if (slot == null) {
         continue;
       }
-      const sheetX = x + sheetBlitOffset.x;
-      const sheetY = y + sheetBlitOffset.y;
-      if (sheetX < SHEET_MARGIN || sheetY < SHEET_MARGIN || sheetX > SPRITE_BAKE.width - 1 - SHEET_MARGIN || sheetY > SPRITE_BAKE.height - 1 - SHEET_MARGIN) {
+      const cell = plate ? cardCell(blueprint, x, y) : { x: x + sheetBlitOffset.x, y: y + sheetBlitOffset.y };
+      if (!insideInkMargin(cell)) {
         throw new Error(`Frame "${frameKey}" pixel (${x}, ${y}) leaves the ink margin`);
       }
       albedoKeys[y * width + x] = stripKeyFor(factionMapping, slot, militaryStrip);
@@ -149,6 +263,14 @@ export function blitBlueprintToSheet80x56(
   factionMapping: FactionMilitaryMapping,
   frameKey: SpriteFrameKey = "idle",
 ): OffscreenCanvas {
+  if (blueprint.displayDivisor !== undefined) {
+    if (typeof OffscreenCanvas === "undefined") {
+      throw new Error("OffscreenCanvas is not available");
+    }
+    const card = new OffscreenCanvas(SPRITE_BAKE.width, SPRITE_BAKE.height);
+    paintAlbedo(card, rasterCardAlbedo(blueprint, frameKey, factionMapping), SPRITE_BAKE.width, SPRITE_BAKE.height, MILITARY);
+    return card;
+  }
   const compiled = compileBlueprintFrame(blueprint, frameKey, factionMapping);
   if (!compiled.canvas || typeof OffscreenCanvas === "undefined") {
     throw new Error("OffscreenCanvas is not available");

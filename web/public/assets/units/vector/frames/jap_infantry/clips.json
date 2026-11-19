@@ -1,0 +1,30 @@
+{
+  "kind": "sprite-clips",
+  "version": 1,
+  "unitId": "jap_infantry",
+  "width": 80,
+  "height": 80,
+  "feet": {
+    "x": 43,
+    "y": 71
+  },
+  "scale": 4,
+  "clips": {
+    "idle": [
+      "idle_0"
+    ],
+    "walk": [
+      "walk_0",
+      "walk_1",
+      "walk_2",
+      "walk_3",
+      "walk_4",
+      "walk_5",
+      "walk_6",
+      "walk_7"
+    ],
+    "fire": [
+      "fire_0"
+    ]
+  }
+}

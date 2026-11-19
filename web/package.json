@@ -14,10 +14,16 @@
     "rebuild-map-geometry": "node scripts/rebuild-map-geometry.mjs",
     "normalize-land-svg": "node scripts/normalize-land-svg.mjs",
     "bake:candidates": "tsx scripts/bakeCandidates.mjs",
+    "bake:landed": "node scripts/bakeLandedAir.mjs",
     "bake:overnight": "node scripts/overnightBake.mjs",
+    "plate:import": "tsx scripts/importPlates.mjs",
+    "animate:batch": "tsx scripts/animateBatch.mjs",
     "slice:sheets": "node scripts/sliceReferenceSheets.mjs",
     "fetch:plates": "node scripts/fetchReferencePlates.mjs",
-    "gen:plates": "node scripts/generateLocalReferencePlates.mjs"
+    "gen:plates": "node scripts/generateLocalReferencePlates.mjs",
+    "vectorize:units": "python scripts/vectorize_units.py",
+    "polish:units": "python scripts/unify_shading.py",
+    "stamp:units": "tsx scripts/stampUnits.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
