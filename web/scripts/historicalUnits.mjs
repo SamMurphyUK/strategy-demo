@@ -20,6 +20,82 @@ export const UNIT_TYPES = [
 ];
 
 export const AIR_UNITS = new Set(["fighter", "tac_bomber", "bomber"]);
+export const LAND_UNITS = new Set(["infantry", "mech_infantry", "artillery", "tank", "aaa"]);
+
+/** The soldier in jap_walk.png stands on a 36×56 grid. Land art follows him at 32 px per metre. */
+export const LAND_PX_PER_M = 32;
+/** Aircraft are drawn at half the land ruler, so the largest bomber still fits one 512 image. */
+export const AIR_PX_PER_M = 16;
+
+/**
+ * The largest box a land or naval drawing may fill, in sprite pixels. The drawing keeps its own
+ * shape inside it. Land is true to the soldier. Ships are shortened the way tabletop models are:
+ * each class has one length, the same for every faction.
+ */
+export const CLASS_BOX = {
+  infantry: { width: 36, height: 56 },
+  mech_infantry: { width: 186, height: 72 },
+  artillery: { width: 186, height: 72 },
+  tank: { width: 192, height: 86 },
+  aaa: { width: 186, height: 96 },
+  submarine: { width: 256, height: 160 },
+  destroyer: { width: 320, height: 160 },
+  transport: { width: 352, height: 160 },
+  cruiser: { width: 416, height: 160 },
+  carrier: { width: 512, height: 160 },
+  battleship: { width: 512, height: 160 },
+};
+
+/** Fuselage length and wingspan in metres. Sprites point nose-right, so length is the width. */
+export const AIRFRAME_M = {
+  GER: {
+    fighter: { length: 8.95, span: 9.92 },
+    tac_bomber: { length: 11.1, span: 13.8 },
+    bomber: { length: 16.4, span: 22.6 },
+  },
+  USSR: {
+    fighter: { length: 8.5, span: 9.2 },
+    tac_bomber: { length: 11.6, span: 14.6 },
+    bomber: { length: 14.8, span: 21.4 },
+  },
+  UK: {
+    fighter: { length: 9.12, span: 11.23 },
+    tac_bomber: { length: 13.57, span: 16.52 },
+    bomber: { length: 21.11, span: 31.09 },
+  },
+  US: {
+    fighter: { length: 9.83, span: 11.28 },
+    tac_bomber: { length: 10.09, span: 12.66 },
+    bomber: { length: 22.66, span: 31.62 },
+  },
+  JAP: {
+    fighter: { length: 9.06, span: 12.0 },
+    tac_bomber: { length: 10.2, span: 14.37 },
+    bomber: { length: 20.0, span: 25.0 },
+  },
+};
+
+/** The box this unit's drawing is fitted into. */
+export function unitBox(factionId, unitTypeId) {
+  if (AIR_UNITS.has(unitTypeId)) {
+    const frame = AIRFRAME_M[factionId]?.[unitTypeId];
+    if (!frame) {
+      throw new Error(`No airframe size for ${factionId} ${unitTypeId}`);
+    }
+    return { width: Math.round(frame.length * AIR_PX_PER_M), height: Math.round(frame.span * AIR_PX_PER_M) };
+  }
+  const box = CLASS_BOX[unitTypeId];
+  if (!box) {
+    throw new Error(`No size for ${unitTypeId}`);
+  }
+  return { ...box };
+}
+
+/** The size a drawing takes when it fills the box without changing shape. */
+export function fitInside(width, height, box) {
+  const scale = Math.min(box.width / width, box.height / height);
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
 
 export const HISTORICAL_UNITS = {
   GER: {

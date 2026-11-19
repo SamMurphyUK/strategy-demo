@@ -217,6 +217,51 @@
       "taskId": "abdf9d7e-69e3-451f-8548-6d6fee0da645",
       "cost": 0.03,
       "silhouetteIoU": 0.6494565217391305
+    },
+    "GER/ger_tank_pz4/seed1/rd_fast__default/192x96": {
+      "idempotencyKey": "425198c8-4f2d-497e-916a-6e4b0bf57e0d",
+      "factionId": "GER",
+      "unitTypeId": "tank",
+      "blueprintId": "ger_tank_pz4",
+      "seed": 1,
+      "promptStyle": "rd_fast__default",
+      "width": 192,
+      "height": 96,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "46999d52-57d8-4f2e-a542-dd1d2dc1490c",
+      "cost": 0.03,
+      "silhouetteIoU": 0.981058495821727
+    },
+    "GER/ger_battleship/seed1/rd_core__simple/512x128": {
+      "idempotencyKey": "ccf61ea9-f628-453f-88b6-fa3e4d7689b6",
+      "factionId": "GER",
+      "unitTypeId": "battleship",
+      "blueprintId": "ger_battleship",
+      "seed": 1,
+      "promptStyle": "rd_core__simple",
+      "width": 512,
+      "height": 128,
+      "status": "succeeded",
+      "quotedCost": 0.1,
+      "taskId": "c84857ac-2362-4603-8d8e-7ad9799dcc3f",
+      "cost": 0.1,
+      "silhouetteIoU": 0.49134022636093805
+    },
+    "GER/ger_battleship/seed1/rd_lite__simple/512x128": {
+      "idempotencyKey": "bd6f60d3-7bba-46d0-954d-d592e1db4da9",
+      "factionId": "GER",
+      "unitTypeId": "battleship",
+      "blueprintId": "ger_battleship",
+      "seed": 1,
+      "promptStyle": "rd_lite__simple",
+      "width": 512,
+      "height": 128,
+      "status": "succeeded",
+      "quotedCost": 0.05,
+      "taskId": "3c05bb86-6664-4075-b923-fa90b97bd541",
+      "cost": 0.05,
+      "silhouetteIoU": 0.43698514127338517
     }
   }
 }

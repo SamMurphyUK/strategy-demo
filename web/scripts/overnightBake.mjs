@@ -1,15 +1,18 @@
 /**
- * Unattended Retro Diffusion v2 batch on RD Fast.
+ * Unattended Retro Diffusion v2 batch.
  *
  *   npm run bake:overnight
  *   npm run bake:overnight -- --run --seeds 3 --max-usd 9.50
+ *   npm run bake:overnight -- --run --faction GER --unit battleship --seeds 1 --style rd_lite__simple
  *
  * Without --run every job is sent with check_cost and nothing is spent.
  * With --run each seed is generated in order. Idempotency keys are written to
  * web/assets/candidates/overnight_ledger.json before the paid request, so a
  * restart resumes the same task instead of buying it twice.
  *
- * Input is the sliced 48×48 plate (or its blockout) at strength 0.45.
+ * Input is the sliced plate at its own size (see historicalUnits.mjs) at strength 0.45,
+ * standing on the bottom row of a canvas the model accepts. Land units go to RD Fast.
+ * Aircraft and ships are larger than Fast allows, so they go to Core.
  * reference_images is not sent. Results land in web/assets/candidates.
  */
 import { randomUUID } from "node:crypto";
@@ -18,14 +21,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { activePalette } from "../dev/militaryStrip.mjs";
-import {
-  candidateRelativePath,
-  quantizeToActiveKeys,
-  quantizedRelativePath,
-  upsertCandidate,
-} from "../dev/bakeUnitPlugin.mjs";
-import { decodeRgbaPng, encodeRgbaPng } from "../dev/pngRgba.mjs";
-import { FACTIONS, UNIT_TYPES, bakePromptFor, blueprintIdFor } from "./historicalUnits.mjs";
+import { candidateRelativePath, quantizeToActiveKeys } from "../dev/bakeUnitPlugin.mjs";
+import { encodeRgbaPng } from "../dev/pngRgba.mjs";
+import { FACTIONS, LAND_UNITS, UNIT_TYPES, bakePromptFor, blueprintIdFor } from "./historicalUnits.mjs";
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLATE_DIR = path.join(WEB_ROOT, "reference_plates");
@@ -35,18 +33,44 @@ const MANIFEST_PATH = path.join(CANDIDATE_DIR, "manifest.json");
 const RD_INFERENCES = "https://api.retrodiffusion.ai/v2/inferences";
 const ENV_PATH = path.join(WEB_ROOT, ".env.local");
 
-export const PROMPT_STYLE = "rd_fast__default";
+/** Land units fit RD Fast. */
+export const LAND_STYLE = "rd_fast__default";
+/** Aircraft and ships need the 512 side that Core allows. */
+export const LARGE_STYLE = "rd_core__simple";
+/** The smallest and largest side each model accepts. */
+export const STYLE_LIMITS = {
+  rd_fast__default: { min: 64, max: 384 },
+  rd_core__simple: { min: 16, max: 512 },
+  rd_lite__simple: { min: 16, max: 512 },
+};
 /** 45% of the way from the reference plate toward a new drawing. */
 export const INPUT_STRENGTH = 0.45;
-const PLATE = 48;
-/** rd_fast__default rejects anything under 64. 96 is 2× the plate, so the result scales back cleanly. */
-const GENERATE = 96;
+/** Canvas sides are rounded up to this. The plate is padded, never scaled. */
+const CANVAS_STEP = 16;
 const POLL_MS = 2000;
 const BACKOFF_MS = 30_000;
 const TASK_TIMEOUT_MS = 180_000;
 
+export function styleFor(unitTypeId) {
+  return LAND_UNITS.has(unitTypeId) ? LAND_STYLE : LARGE_STYLE;
+}
+
+/** The image size to ask for: the plate's size, padded up to what the model accepts. */
+export function canvasFor(width, height, style) {
+  const limits = STYLE_LIMITS[style];
+  if (!limits) {
+    throw new Error(`No size limits for ${style}`);
+  }
+  const side = (value) => Math.max(limits.min, Math.ceil(value / CANVAS_STEP) * CANVAS_STEP);
+  const canvas = { width: side(width), height: side(height) };
+  if (canvas.width > limits.max || canvas.height > limits.max) {
+    throw new Error(`A ${width}×${height} plate does not fit ${style}, which stops at ${limits.max}`);
+  }
+  return canvas;
+}
+
 export function parseOvernightArgs(argv) {
-  const args = { run: false, seeds: 3, maxUsd: 9.5, limit: null, unit: null };
+  const args = { run: false, seeds: 3, maxUsd: 9.5, limit: null, unit: null, faction: null, style: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--run") {
@@ -71,6 +95,10 @@ export function parseOvernightArgs(argv) {
       args.limit = count;
     } else if (arg === "--unit") {
       args.unit = required(argv, ++i, "--unit");
+    } else if (arg === "--faction") {
+      args.faction = required(argv, ++i, "--faction");
+    } else if (arg === "--style") {
+      args.style = required(argv, ++i, "--style");
     } else {
       throw new Error(`Unknown argument ${arg}`);
     }
@@ -86,17 +114,25 @@ function required(argv, index, flag) {
   return value;
 }
 
-export function jobKey(factionId, blueprintId, seed) {
-  return `${factionId}/${blueprintId}/seed${seed}`;
+/** The model and size are part of the key, so a picture bought at another size is a different job. */
+export function jobKey(job, canvas) {
+  return `${job.factionId}/${job.blueprintId}/seed${job.seed}/${job.style}/${canvas.width}x${canvas.height}`;
 }
 
-export function buildQueue(seeds, unit) {
+export function buildQueue(seeds, unit = null, faction = null, style = null) {
   const jobs = [];
   const units = unit ? UNIT_TYPES.filter((unitTypeId) => unitTypeId === unit) : UNIT_TYPES;
   if (unit && units.length === 0) {
     throw new Error(`Unknown unit ${unit}`);
   }
-  for (const factionId of FACTIONS) {
+  const factions = faction ? FACTIONS.filter((factionId) => factionId === faction) : FACTIONS;
+  if (faction && factions.length === 0) {
+    throw new Error(`Unknown faction ${faction}`);
+  }
+  if (style && !STYLE_LIMITS[style]) {
+    throw new Error(`Unknown style ${style}`);
+  }
+  for (const factionId of factions) {
     for (const unitTypeId of units) {
       const blueprintId = blueprintIdFor(factionId, unitTypeId);
       for (let seed = 1; seed <= seeds; seed++) {
@@ -105,6 +141,7 @@ export function buildQueue(seeds, unit) {
           unitTypeId,
           blueprintId,
           seed,
+          style: style ?? styleFor(unitTypeId),
           prompt: bakePromptFor(factionId, unitTypeId),
           platePath: path.join(PLATE_DIR, factionId, `${unitTypeId}.png`),
         });
@@ -114,12 +151,12 @@ export function buildQueue(seeds, unit) {
   return jobs;
 }
 
-export function inferenceBody(prompt, inputImage, seed, checkCost) {
+export function inferenceBody({ style, prompt, width, height, inputImage, seed, checkCost }) {
   return {
-    prompt_style: PROMPT_STYLE,
+    prompt_style: style,
     prompt,
-    width: GENERATE,
-    height: GENERATE,
+    width,
+    height,
     num_images: 1,
     input_image: inputImage,
     strength: INPUT_STRENGTH,
@@ -129,6 +166,34 @@ export function inferenceBody(prompt, inputImage, seed, checkCost) {
     seed,
     check_cost: checkCost,
   };
+}
+
+/**
+ * Where a job's pictures are saved. A style other than the unit's usual one is named in the
+ * file, so a trial on another model sits beside the usual picture.
+ */
+export function candidatePaths(job) {
+  const raw = candidateRelativePath(job.factionId, job.blueprintId, job.seed);
+  const tag = job.style === styleFor(job.unitTypeId) ? "" : `.${job.style}`;
+  return {
+    raw: raw.replace(/\.raw\.png$/, `${tag}.raw.png`),
+    quantized: raw.replace(/\.raw\.png$/, `${tag}.quantized.png`),
+  };
+}
+
+/** One manifest row per faction, blueprint, seed and model. */
+export function upsertStyled(manifest, entry) {
+  const candidates = Array.isArray(manifest?.candidates) ? manifest.candidates : [];
+  const rest = candidates.filter(
+    (item) =>
+      !(
+        item?.factionId === entry.factionId &&
+        item?.blueprintId === entry.blueprintId &&
+        String(item?.seed) === String(entry.seed) &&
+        (item?.promptStyle ?? LAND_STYLE) === entry.promptStyle
+      ),
+  );
+  return { candidates: [...rest, entry] };
 }
 
 export function quotedUsd(payload) {
@@ -145,7 +210,7 @@ export function spentUsd(ledger) {
 }
 
 export function emptyLedger() {
-  return { promptStyle: PROMPT_STYLE, strength: INPUT_STRENGTH, jobs: {} };
+  return { strength: INPUT_STRENGTH, jobs: {} };
 }
 
 function portable(relative) {
@@ -262,33 +327,47 @@ async function pollTask(token, taskId) {
   throw new Error(`Retro Diffusion timed out after ${TASK_TIMEOUT_MS / 1000}s`);
 }
 
-async function plateBase64(platePath) {
-  const bytes = await readFile(platePath);
-  const fitted = await sharp(bytes)
-    .resize(PLATE, PLATE, {
-      fit: "contain",
-      kernel: "nearest",
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png()
-    .toBuffer();
-  const decoded = decodeRgbaPng(fitted);
-  const albedoKeys = new Array(PLATE * PLATE);
-  for (let i = 0; i < albedoKeys.length; i++) {
-    albedoKeys[i] = decoded.data[i * 4 + 3] >= 128 ? "steel" : null;
+/**
+ * Stand the plate on the bottom row of the canvas, centred, at one plate pixel per canvas pixel.
+ * Pure so the placement can be tested without a file.
+ */
+export function placeOnCanvas(plateRgba, plateWidth, plateHeight, canvas) {
+  const left = Math.floor((canvas.width - plateWidth) / 2);
+  const top = canvas.height - plateHeight;
+  const rgba = new Uint8ClampedArray(canvas.width * canvas.height * 4);
+  const albedoKeys = new Array(canvas.width * canvas.height).fill(null);
+  for (let y = 0; y < plateHeight; y++) {
+    for (let x = 0; x < plateWidth; x++) {
+      const from = (y * plateWidth + x) * 4;
+      if (plateRgba[from + 3] < 128) continue;
+      const pixel = (top + y) * canvas.width + left + x;
+      rgba[pixel * 4] = plateRgba[from];
+      rgba[pixel * 4 + 1] = plateRgba[from + 1];
+      rgba[pixel * 4 + 2] = plateRgba[from + 2];
+      rgba[pixel * 4 + 3] = 255;
+      albedoKeys[pixel] = "steel";
+    }
   }
-  const input = await sharp(fitted).resize(GENERATE, GENERATE, { kernel: "nearest" }).png().toBuffer();
-  return { base64: input.toString("base64"), albedoKeys };
+  return { rgba, albedoKeys };
 }
 
-async function toPlatePng(bytes) {
-  const decoded = decodeRgbaPng(bytes);
-  if (decoded.width === PLATE && decoded.height === PLATE) return { bytes, decoded };
-  const fitted = await sharp(bytes)
-    .resize(PLATE, PLATE, { fit: "fill", kernel: "nearest" })
-    .png()
-    .toBuffer();
-  return { bytes: fitted, decoded: decodeRgbaPng(fitted) };
+async function plateInput(platePath, style) {
+  const { data, info } = await sharp(await readFile(platePath)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const canvas = canvasFor(info.width, info.height, style);
+  const placed = placeOnCanvas(data, info.width, info.height, canvas);
+  const png = encodeRgbaPng(canvas.width, canvas.height, placed.rgba);
+  return { base64: Buffer.from(png).toString("base64"), albedoKeys: placed.albedoKeys, canvas };
+}
+
+/** The result at the canvas size. It is only resized when the model returns another size. */
+async function resultOnCanvas(bytes, canvas) {
+  const meta = await sharp(bytes).metadata();
+  const same = meta.width === canvas.width && meta.height === canvas.height;
+  const png = same
+    ? bytes
+    : await sharp(bytes).resize(canvas.width, canvas.height, { fit: "fill", kernel: "nearest" }).png().toBuffer();
+  const data = await sharp(png).ensureAlpha().raw().toBuffer();
+  return { png, data, returned: { width: meta.width, height: meta.height } };
 }
 
 function money(value) {
@@ -302,23 +381,30 @@ export async function main(argv = process.argv.slice(2)) {
   if (!token) {
     throw new Error("RD_API_TOKEN is not set in web/.env.local");
   }
-  const jobs = buildQueue(args.seeds, args.unit).slice(0, args.limit ?? Infinity);
+  const jobs = buildQueue(args.seeds, args.unit, args.faction, args.style).slice(0, args.limit ?? Infinity);
   const ledger = await readJson(LEDGER_PATH, emptyLedger);
   if (!ledger.jobs) ledger.jobs = {};
   let manifest = await readJson(MANIFEST_PATH, () => ({ candidates: [] }));
   if (!Array.isArray(manifest.candidates)) manifest = { candidates: [] };
 
-  console.log(
-    `${jobs.length} images · ${PROMPT_STYLE} · strength ${INPUT_STRENGTH} · ${args.run ? "run" : "dry run"} · cap ${money(args.maxUsd)}`,
-  );
+  console.log(`${jobs.length} images · strength ${INPUT_STRENGTH} · ${args.run ? "run" : "dry run"} · cap ${money(args.maxUsd)}`);
   let quotedTotal = 0;
   let unknownQuotes = 0;
 
   for (const job of jobs) {
-    const key = jobKey(job.factionId, job.blueprintId, job.seed);
+    const plate = await plateInput(job.platePath, job.style);
+    const canvas = plate.canvas;
+    const key = jobKey(job, canvas);
     const prior = ledger.jobs[key];
-    const plate = await plateBase64(job.platePath);
-    const body = inferenceBody(job.prompt, plate.base64, job.seed, true);
+    const body = inferenceBody({
+      style: job.style,
+      prompt: job.prompt,
+      width: canvas.width,
+      height: canvas.height,
+      inputImage: plate.base64,
+      seed: job.seed,
+      checkCost: true,
+    });
 
     if (args.run && prior?.status === "succeeded") {
       console.log(`${key} already saved ${money(prior.cost)}`);
@@ -356,6 +442,9 @@ export async function main(argv = process.argv.slice(2)) {
           unitTypeId: job.unitTypeId,
           blueprintId: job.blueprintId,
           seed: job.seed,
+          promptStyle: job.style,
+          width: canvas.width,
+          height: canvas.height,
           status: "pending",
         };
     record.quotedCost = quote;
@@ -403,43 +492,44 @@ export async function main(argv = process.argv.slice(2)) {
       }
     }
 
-    const rawBytes = Buffer.from(result.image, "base64");
-    const fitted = await toPlatePng(rawBytes);
-    const scored = quantizeToActiveKeys(
-      fitted.decoded.data,
-      fitted.decoded.width,
-      fitted.decoded.height,
-      plate.albedoKeys,
-      activePalette(job.factionId),
-    );
-    const rawRelative = candidateRelativePath(job.factionId, job.blueprintId, job.seed);
-    const quantizedRelative = quantizedRelativePath(job.factionId, job.blueprintId, job.seed);
-    const rawPath = path.join(WEB_ROOT, rawRelative);
-    const quantizedPath = path.join(WEB_ROOT, quantizedRelative);
+    const fitted = await resultOnCanvas(Buffer.from(result.image, "base64"), canvas);
+    if (fitted.returned.width !== canvas.width || fitted.returned.height !== canvas.height) {
+      console.log(`${key} came back ${fitted.returned.width}×${fitted.returned.height} and was resized to ${canvas.width}×${canvas.height}`);
+    }
+    const scored = quantizeToActiveKeys(fitted.data, canvas.width, canvas.height, plate.albedoKeys, activePalette(job.factionId));
+    const files = candidatePaths(job);
+    const rawPath = path.join(WEB_ROOT, files.raw);
+    const quantizedPath = path.join(WEB_ROOT, files.quantized);
     await mkdir(path.dirname(rawPath), { recursive: true });
-    await writeFile(rawPath, fitted.bytes);
-    await writeFile(quantizedPath, encodeRgbaPng(PLATE, PLATE, scored.rgba));
+    await writeFile(rawPath, fitted.png);
+    await writeFile(quantizedPath, encodeRgbaPng(canvas.width, canvas.height, scored.rgba));
 
     const previous = (manifest.candidates ?? []).find(
-      (item) => item?.factionId === job.factionId && item?.blueprintId === job.blueprintId && String(item?.seed) === String(job.seed),
+      (item) =>
+        item?.factionId === job.factionId &&
+        item?.blueprintId === job.blueprintId &&
+        String(item?.seed) === String(job.seed) &&
+        (item?.promptStyle ?? LAND_STYLE) === job.style,
     );
     const entry = {
       factionId: job.factionId,
       unitTypeId: job.unitTypeId,
       blueprintId: job.blueprintId,
       seed: job.seed,
-      raw: portable(rawRelative),
-      quantized: portable(quantizedRelative),
+      raw: portable(files.raw),
+      quantized: portable(files.quantized),
+      width: canvas.width,
+      height: canvas.height,
       silhouetteIoU: scored.silhouetteIoU,
       promoted: previous?.promoted === true,
       promotedPath: previous?.promoted ? previous.promotedPath : null,
       taskId,
       cost: result.cost ?? quote,
-      promptStyle: PROMPT_STYLE,
+      promptStyle: job.style,
       strength: INPUT_STRENGTH,
       updatedAt: new Date().toISOString(),
     };
-    manifest = upsertCandidate(manifest, entry);
+    manifest = upsertStyled(manifest, entry);
     await mkdir(path.dirname(MANIFEST_PATH), { recursive: true });
     await writeFile(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 

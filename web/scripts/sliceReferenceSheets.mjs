@@ -8,24 +8,45 @@
  * Each isolated non-white island is a connected component. Islands are matched
  * to the 14 unit types with a checked label table for these sheets.
  * Germany's sheet has no destroyer (it drew a second submarine and a second
- * battleship instead); that unit gets a 48×48 blockout.
+ * battleship instead); that unit gets a flat blockout.
+ *
+ * Every plate is cut to the size in historicalUnits.mjs, so the units keep their
+ * proportions beside the soldier. Infantry is the idle pose of jap_walk.png in
+ * the faction's colours; the sheet's own infantry drawing is not used.
+ * reference_plates/lineup/<FACTION>.png stands the plates on one ground line.
  */
 import { access, copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
-import { FACTION_MILITARY_MAPPINGS, MILITARY } from "../dev/militaryStrip.mjs";
-import { encodeRgbaPng } from "../dev/pngRgba.mjs";
-import { AIR_UNITS, FACTIONS, UNIT_TYPES, bakePromptFor, historicalName } from "./historicalUnits.mjs";
+import { quantizeToActiveKeys } from "../dev/bakeUnitPlugin.mjs";
+import { FACTION_MILITARY_MAPPINGS, MILITARY, activePalette } from "../dev/militaryStrip.mjs";
+import { AIR_UNITS, FACTIONS, UNIT_TYPES, bakePromptFor, fitInside, historicalName, unitBox } from "./historicalUnits.mjs";
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHEET_DIR = path.join(WEB_ROOT, "reference_sheets");
 const OUT_DIR = path.join(WEB_ROOT, "reference_plates");
 const SOURCE_JPG_DIR = "C:/Users/sammu/Downloads/references";
-const PLATE = 48;
+const SOLDIER_SHEET = path.join(WEB_ROOT, "public", "assets", "units", "jap_walk.png");
+/** The fourth cell of the 4×2 walk sheet leads the walk and is the idle pose. */
+const SOLDIER_CELL = 3;
 const PREVIEW = 256;
 const MIN_AREA = 2000;
 const WHITE = 242;
+/** White shut inside a drawing counts as paper from this many sheet pixels up. */
+const PAPER_POCKET = 1500;
+/** Aircraft these sheets already draw nose-right. Every other aircraft is drawn nose-up. */
+const NOSE_RIGHT = {
+  US: new Set(["bomber"]),
+  JAP: new Set(["fighter", "tac_bomber", "bomber"]),
+};
+/** Each lineup row starts with the soldier, so every class is read against him. */
+const LINEUP_ROWS = [
+  ["infantry", "mech_infantry", "artillery", "aaa", "tank"],
+  ["infantry", "fighter", "tac_bomber", "bomber"],
+  ["infantry", "submarine", "destroyer", "transport"],
+  ["infantry", "cruiser", "carrier", "battleship"],
+];
 
 /**
  * Unit id for each island after sorting top-to-bottom, then left-to-right.
@@ -187,36 +208,235 @@ function hexRgb(hex) {
   return { r: (rgb >> 16) & 255, g: (rgb >> 8) & 255, b: rgb & 255 };
 }
 
-/** Flat 48×48 stand-in used when a sheet has no drawing for that unit. */
-export function blockoutPng(factionId, unitTypeId) {
+function rawPng(rgba, width, height) {
+  return sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/** Flat stand-in at the unit's own size, used when a sheet has no drawing for it. */
+export async function blockoutPlate(factionId, unitTypeId) {
+  const box = unitBox(factionId, unitTypeId);
+  const width = box.width;
+  const height = AIR_UNITS.has(unitTypeId) || unitTypeId === "infantry" ? box.height : Math.min(box.height, Math.round(width / 4));
   const color = hexRgb(MILITARY[FACTION_MILITARY_MAPPINGS[factionId].primary_uniform_or_hull]);
-  const rgba = new Uint8ClampedArray(PLATE * PLATE * 4);
-  const dot = (x, y) => {
-    if (x < 0 || y < 0 || x >= PLATE || y >= PLATE) return;
-    const offset = (y * PLATE + x) * 4;
-    rgba[offset] = color.r;
-    rgba[offset + 1] = color.g;
-    rgba[offset + 2] = color.b;
-    rgba[offset + 3] = 255;
-  };
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  /** Fill a rectangle given as fractions of the plate. */
   const fill = (x0, y0, x1, y1) => {
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) dot(x, y);
+    for (let y = Math.floor(y0 * height); y < Math.ceil(y1 * height); y++) {
+      for (let x = Math.floor(x0 * width); x < Math.ceil(x1 * width); x++) {
+        const offset = (y * width + x) * 4;
+        rgba[offset] = color.r;
+        rgba[offset + 1] = color.g;
+        rgba[offset + 2] = color.b;
+        rgba[offset + 3] = 255;
+      }
     }
   };
   if (AIR_UNITS.has(unitTypeId)) {
-    fill(8, 20, 40, 27);
-    fill(20, 8, 27, 40);
+    fill(0, 0.42, 1, 0.58);
+    fill(0.45, 0, 0.65, 1);
   } else if (unitTypeId === "infantry") {
-    fill(20, 8, 27, 16);
-    fill(16, 16, 31, 32);
-    fill(18, 32, 22, 42);
-    fill(26, 32, 30, 42);
+    fill(0.3, 0, 0.7, 0.2);
+    fill(0.15, 0.2, 0.85, 0.6);
+    fill(0.2, 0.6, 0.45, 1);
+    fill(0.55, 0.6, 0.8, 1);
   } else {
-    fill(6, 22, 42, 36);
-    fill(24, 14, 36, 22);
+    fill(0, 0.55, 1, 1);
+    fill(0.35, 0.15, 0.65, 0.55);
   }
-  return encodeRgbaPng(PLATE, PLATE, rgba);
+  return { png: await rawPng(rgba, width, height), width, height };
+}
+
+/**
+ * Clear the paper around a drawing. The fill starts at the edges of the crop, so white
+ * inside the drawing stays.
+ */
+export function clearPaper(rgba, width, height) {
+  const seen = new Uint8Array(width * height);
+  const stack = [];
+  const visit = (x, y) => {
+    const pixel = y * width + x;
+    const offset = pixel * 4;
+    if (seen[pixel] || !isBackground(rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3])) return;
+    seen[pixel] = 1;
+    stack.push(pixel);
+  };
+  for (let x = 0; x < width; x++) {
+    visit(x, 0);
+    visit(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    visit(0, y);
+    visit(width - 1, y);
+  }
+  while (stack.length > 0) {
+    const pixel = stack.pop();
+    rgba[pixel * 4 + 3] = 0;
+    const x = pixel % width;
+    const y = (pixel / width) | 0;
+    if (x > 0) visit(x - 1, y);
+    if (x < width - 1) visit(x + 1, y);
+    if (y > 0) visit(x, y - 1);
+    if (y < height - 1) visit(x, y + 1);
+  }
+  return rgba;
+}
+
+/** Connected groups of the pixels that pass the test, as lists of pixel indexes. */
+function regions(width, height, member) {
+  const seen = new Uint8Array(width * height);
+  const found = [];
+  for (let start = 0; start < width * height; start++) {
+    if (seen[start] || !member(start)) continue;
+    const pixels = [start];
+    seen[start] = 1;
+    for (let at = 0; at < pixels.length; at++) {
+      const pixel = pixels[at];
+      const x = pixel % width;
+      const y = (pixel / width) | 0;
+      const around = [x > 0 ? pixel - 1 : -1, x < width - 1 ? pixel + 1 : -1, y > 0 ? pixel - width : -1, y < height - 1 ? pixel + width : -1];
+      for (const next of around) {
+        if (next < 0 || seen[next] || !member(next)) continue;
+        seen[next] = 1;
+        pixels.push(next);
+      }
+    }
+    found.push(pixels);
+  }
+  return found;
+}
+
+/**
+ * Leave one drawing in the crop. Pieces of a neighbouring drawing go, and so does paper shut
+ * in by rigging or masts. Small white details inside the drawing stay.
+ */
+export function clearStrays(rgba, width, height, pocket = PAPER_POCKET) {
+  const paper = (pixel) => isBackground(rgba[pixel * 4], rgba[pixel * 4 + 1], rgba[pixel * 4 + 2], rgba[pixel * 4 + 3]);
+  const clear = (pixels) => {
+    for (const pixel of pixels) rgba[pixel * 4 + 3] = 0;
+  };
+  const drawings = regions(width, height, (pixel) => !paper(pixel)).sort((a, b) => b.length - a.length);
+  for (const stray of drawings.slice(1)) clear(stray);
+  for (const shut of regions(width, height, (pixel) => rgba[pixel * 4 + 3] >= 16 && paper(pixel))) {
+    if (shut.length >= pocket) clear(shut);
+  }
+  return rgba;
+}
+
+/** One sheet drawing, paper cleared, scaled into the unit's box with hard edges. */
+async function sheetPlate(cropPng, box) {
+  const { data, info } = await sharp(cropPng).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  clearPaper(data, info.width, info.height);
+  clearStrays(data, info.width, info.height);
+  let left = info.width;
+  let top = info.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < info.height; y++) {
+    for (let x = 0; x < info.width; x++) {
+      if (data[(y * info.width + x) * 4 + 3] < 16) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (right < 0) {
+    throw new Error("The crop holds no drawing");
+  }
+  const inkWidth = right - left + 1;
+  const inkHeight = bottom - top + 1;
+  const size = fitInside(inkWidth, inkHeight, box);
+  const scaled = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+    .extract({ left, top, width: inkWidth, height: inkHeight })
+    .resize(size.width, size.height, { fit: "fill" })
+    .raw()
+    .toBuffer();
+  for (let offset = 0; offset < scaled.length; offset += 4) {
+    scaled[offset + 3] = scaled[offset + 3] >= 128 ? 255 : 0;
+  }
+  return { png: await rawPng(scaled, size.width, size.height), ...size };
+}
+
+/** The idle soldier from jap_walk.png, pixel for pixel, in the faction's colours. */
+export async function soldierPlate(factionId) {
+  const { data, info } = await sharp(SOLDIER_SHEET).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const cell = info.width / 4;
+  const originX = (SOLDIER_CELL % 4) * cell;
+  const originY = Math.floor(SOLDIER_CELL / 4) * cell;
+  const alphaAt = (x, y) => data[((originY + y) * info.width + originX + x) * 4 + 3];
+  let minX = cell;
+  let minY = cell;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < cell; y++) {
+    for (let x = 0; x < cell; x++) {
+      if (alphaAt(x, y) < 128) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) {
+    throw new Error("The idle cell of jap_walk.png is empty");
+  }
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const keys = new Array(width * height).fill(null);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const from = ((originY + minY + y) * info.width + originX + minX + x) * 4;
+      if (data[from + 3] < 128) continue;
+      const to = (y * width + x) * 4;
+      rgba.set(data.subarray(from, from + 4), to);
+      keys[y * width + x] = "steel";
+    }
+  }
+  const tinted = quantizeToActiveKeys(rgba, width, height, keys, activePalette(factionId));
+  return { png: await rawPng(tinted.rgba, width, height), width, height };
+}
+
+/** Stand a faction's plates on one ground line per row, at one sprite pixel per pixel. */
+async function writeLineup(factionId, plates) {
+  const margin = 16;
+  const gap = 16;
+  const rowGap = 28;
+  const rows = LINEUP_ROWS.map((row) => {
+    const items = row.map((unitTypeId) => plates.get(unitTypeId));
+    return {
+      items,
+      width: items.reduce((sum, item) => sum + item.width, 0) + gap * (items.length - 1),
+      height: Math.max(...items.map((item) => item.height)),
+    };
+  });
+  const width = margin * 2 + Math.max(...rows.map((row) => row.width));
+  const height = margin * 2 + rows.reduce((sum, row) => sum + row.height, 0) + rowGap * (rows.length - 1);
+  const layers = [];
+  let top = margin;
+  for (const row of rows) {
+    const ground = top + row.height;
+    layers.push({
+      input: { create: { width: width - margin * 2, height: 2, channels: 4, background: "#4b3d44" } },
+      left: margin,
+      top: ground,
+    });
+    let left = margin;
+    for (const item of row.items) {
+      layers.push({ input: item.png, left, top: ground - item.height });
+      left += item.width + gap;
+    }
+    top = ground + rowGap;
+  }
+  const file = path.join(OUT_DIR, "lineup", `${factionId}.png`);
+  await mkdir(path.dirname(file), { recursive: true });
+  await sharp({ create: { width, height, channels: 4, background: "#c8c2b6" } })
+    .composite(layers)
+    .png()
+    .toFile(file);
+  return file;
 }
 
 async function ensureSheet(factionId) {
@@ -253,11 +473,12 @@ function contactHtml(entries) {
   const rows = UNIT_TYPES.map((unitTypeId) => {
     const cells = FACTIONS.map((factionId) => {
       const entry = byKey.get(`${factionId}:${unitTypeId}`);
-      const src = `${factionId}/${unitTypeId}.preview.png`;
-      const flag = entry.source === "blockout" ? `<p class="warn">No island on the sheet. 48×48 blockout.</p>` : "";
+      const src = `${factionId}/${unitTypeId}.png`;
+      const flag = entry.source === "blockout" ? `<p class="warn">No island on the sheet. Flat blockout.</p>` : "";
       return `<td>
-        <img src="${escapeHtml(src)}" width="128" height="128" alt="${escapeHtml(historicalName(factionId, unitTypeId))}"/>
+        <img class="plate" src="${escapeHtml(src)}" alt="${escapeHtml(historicalName(factionId, unitTypeId))}"/>
         <div class="name">${escapeHtml(historicalName(factionId, unitTypeId))}</div>
+        <div class="size">${entry.width}×${entry.height}</div>
         ${flag}
         <textarea readonly rows="4">${escapeHtml(bakePromptFor(factionId, unitTypeId))}</textarea>
       </td>`;
@@ -280,15 +501,20 @@ function contactHtml(entries) {
     body { margin: 24px; background: #1c1917; color: #f5f0e6; font: 14px/1.4 "Segoe UI", sans-serif; }
     table { border-collapse: collapse; }
     th, td { border: 1px solid #4b3d44; padding: 8px; vertical-align: top; }
-    img { image-rendering: pixelated; background: #f4f1ea; }
+    img { image-rendering: pixelated; background: #c8c2b6; }
+    img.plate { max-width: 256px; height: auto; }
+    img.lineup { display: block; max-width: 100%; margin: 0 0 16px; }
     textarea { width: 220px; margin-top: 6px; }
     .warn { color: #ddcf99; }
     .name { max-width: 220px; margin-top: 6px; }
+    .size { color: #ddcf99; }
   </style>
 </head>
 <body>
   <h1>Reference plates</h1>
-  <p>Fourteen unit types for GER, USSR, UK, US, and JAP. Check these before the overnight batch.</p>
+  <p>Fourteen unit types for GER, USSR, UK, US, and JAP, each at its own size beside the soldier.</p>
+  ${FACTIONS.map((factionId) => `<h2>${factionId}</h2><img class="lineup" src="lineup/${factionId}.png" alt="${factionId} lineup"/>`).join("\n  ")}
+  <h2>Plates</h2>
   <table>
     <thead><tr><th>Unit</th>${head}</tr></thead>
     <tbody>${rows}</tbody>
@@ -310,16 +536,23 @@ export async function sliceSheets() {
     const labels = labelIslands(factionId, islands.length);
     const factionDir = path.join(OUT_DIR, factionId);
     await mkdir(factionDir, { recursive: true });
-    const found = new Set();
+    const plates = new Map();
+    const keep = async (unitTypeId, plate, source) => {
+      plates.set(unitTypeId, plate);
+      await writeFile(path.join(factionDir, `${unitTypeId}.png`), plate.png);
+      entries.push({ factionId, unitTypeId, source, width: plate.width, height: plate.height });
+    };
+    await keep("infantry", await soldierPlate(factionId), "soldier");
     for (let index = 0; index < islands.length; index++) {
       const unitTypeId = labels[index];
       const box = islands[index];
+      if (unitTypeId === "infantry") continue;
       let crop = await sharp(sheetPath)
         .extract({ left: box.x, top: box.y, width: box.w, height: box.h })
         .png()
         .toBuffer();
-      if (unitTypeId != null && AIR_UNITS.has(unitTypeId)) {
-        // These sheets draw aircraft nose-up. The bake prompt wants the nose to the right.
+      if (unitTypeId != null && AIR_UNITS.has(unitTypeId) && !NOSE_RIGHT[factionId]?.has(unitTypeId)) {
+        // Most aircraft are drawn nose-up. The bake prompt wants the nose to the right.
         crop = await sharp(crop).rotate(90).png().toBuffer();
       }
       if (unitTypeId == null) {
@@ -328,24 +561,17 @@ export async function sliceSheets() {
         entries.push({ factionId, extra: true, preview });
         continue;
       }
-      found.add(unitTypeId);
-      const plate = await fitPng(crop, PLATE);
-      const preview = await fitPng(crop, PREVIEW);
-      await sharp(plate).toFile(path.join(factionDir, `${unitTypeId}.png`));
-      await sharp(preview).toFile(path.join(factionDir, `${unitTypeId}.preview.png`));
-      entries.push({ factionId, unitTypeId, source: "sheet" });
+      await keep(unitTypeId, await sheetPlate(crop, unitBox(factionId, unitTypeId)), "sheet");
     }
     for (const unitTypeId of UNIT_TYPES) {
-      if (found.has(unitTypeId)) continue;
-      const plate = blockoutPng(factionId, unitTypeId);
-      await writeFile(path.join(factionDir, `${unitTypeId}.png`), plate);
-      await sharp(plate)
-        .resize(PREVIEW, PREVIEW, { kernel: "nearest" })
-        .png()
-        .toFile(path.join(factionDir, `${unitTypeId}.preview.png`));
-      entries.push({ factionId, unitTypeId, source: "blockout" });
+      if (plates.has(unitTypeId)) continue;
+      await keep(unitTypeId, await blockoutPlate(factionId, unitTypeId), "blockout");
       console.log(`${factionId} ${unitTypeId}: blockout (no island on the sheet)`);
     }
+    await writeLineup(factionId, plates);
+    console.log(
+      `${factionId} ${UNIT_TYPES.map((unitTypeId) => `${unitTypeId} ${plates.get(unitTypeId).width}×${plates.get(unitTypeId).height}`).join(", ")}`,
+    );
   }
   const html = contactHtml(entries);
   await writeFile(path.join(OUT_DIR, "index.html"), html, "utf8");
@@ -368,7 +594,7 @@ export async function copyPlatesTo(destDir) {
   const html = await readFile(path.join(OUT_DIR, "index.html"));
   await mkdir(destDir, { recursive: true });
   await writeFile(path.join(destDir, "index.html"), html);
-  for (const factionId of FACTIONS) {
+  for (const factionId of [...FACTIONS, "lineup"]) {
     const from = path.join(OUT_DIR, factionId);
     const to = path.join(destDir, factionId);
     await mkdir(to, { recursive: true });

@@ -60,6 +60,9 @@ interface SavedCandidate {
   blueprintId: string;
   seed: number;
   quantized: string;
+  width?: number;
+  height?: number;
+  promptStyle?: string;
   silhouetteIoU: number | null;
   promoted?: boolean;
 }
@@ -236,10 +239,12 @@ export function UnitBakeReviewPanel() {
                   aria-pressed={galleryId(item) === galleryKey}
                   onClick={() => setGalleryKey(galleryId(item))}
                 >
-                  <img src={`/__dev/bake-file?path=${encodeURIComponent(item.quantized)}`} alt="" width={48} height={48} />
+                  <img src={`/__dev/bake-file?path=${encodeURIComponent(item.quantized)}`} alt="" />
                   <small>
                     {item.unitTypeId ?? item.blueprintId} {item.seed}
                     {item.silhouetteIoU == null ? "" : ` · ${item.silhouetteIoU.toFixed(2)}`}
+                    {item.width ? ` · ${item.width}×${item.height}` : ""}
+                    {item.promptStyle && item.promptStyle !== "rd_fast__default" ? ` · ${item.promptStyle}` : ""}
                   </small>
                 </button>
               ))}
@@ -251,7 +256,7 @@ export function UnitBakeReviewPanel() {
             <figcaption>
               {galleryPick.factionId} {galleryPick.unitTypeId ?? galleryPick.blueprintId} seed {galleryPick.seed}
             </figcaption>
-            <img src={`/__dev/bake-file?path=${encodeURIComponent(galleryPick.quantized)}`} alt="" width={192} height={192} />
+            <img src={`/__dev/bake-file?path=${encodeURIComponent(galleryPick.quantized)}`} alt="" {...galleryZoom(galleryPick)} />
           </figure>
         )}
       </details>
@@ -380,6 +385,8 @@ const PANEL_CSS = `
 .overnight-row button { width: 96px; padding: 4px; background: #2a2420; color: #f5f0e6; border: 1px solid #4b3d44; }
 .overnight-row button[aria-pressed="true"] { border-color: #ddcf99; }
 .overnight-row img, .overnight-gallery figure img { image-rendering: pixelated; background: #c8c2b6; }
+.overnight-row img { display: block; width: 86px; height: 48px; object-fit: contain; }
+.overnight-gallery figure img { max-width: 100%; height: auto; }
 .overnight-row small { display: block; color: #ddcf99; font-size: 10px; }
 .sprite-blockout-toggle {
   flex: none;
@@ -453,8 +460,17 @@ const PANEL_CSS = `
 }
 `;
 
+/** The picture's own path. A trial on another model shares the faction, blueprint and seed. */
 function galleryId(item: SavedCandidate): string {
-  return `${item.factionId}:${item.blueprintId}:${item.seed}`;
+  return item.quantized;
+}
+
+/** Older pictures are 48 square and carry no size. */
+function galleryZoom(item: SavedCandidate): { width: number; height: number } {
+  const width = item.width ?? 48;
+  const height = item.height ?? 48;
+  const zoom = Math.max(1, Math.min(4, Math.floor(1024 / width)));
+  return { width: width * zoom, height: height * zoom };
 }
 
 function bakeBody(
