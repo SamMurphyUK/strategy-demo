@@ -63,6 +63,7 @@ interface SavedCandidate {
   width?: number;
   height?: number;
   promptStyle?: string;
+  grade?: string;
   silhouetteIoU: number | null;
   promoted?: boolean;
 }
@@ -245,6 +246,7 @@ export function UnitBakeReviewPanel() {
                     {item.silhouetteIoU == null ? "" : ` · ${item.silhouetteIoU.toFixed(2)}`}
                     {item.width ? ` · ${item.width}×${item.height}` : ""}
                     {item.promptStyle && item.promptStyle !== "rd_fast__default" ? ` · ${item.promptStyle}` : ""}
+                    {item.grade === "outlined" ? " · outlines" : ""}
                   </small>
                 </button>
               ))}
@@ -255,6 +257,7 @@ export function UnitBakeReviewPanel() {
           <figure>
             <figcaption>
               {galleryPick.factionId} {galleryPick.unitTypeId ?? galleryPick.blueprintId} seed {galleryPick.seed}
+              {galleryPick.grade === "outlined" ? " · outlines" : ""}
             </figcaption>
             <img src={`/__dev/bake-file?path=${encodeURIComponent(galleryPick.quantized)}`} alt="" {...galleryZoom(galleryPick)} />
           </figure>

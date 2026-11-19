@@ -25,6 +25,8 @@ import { AIR_UNITS, FACTIONS, UNIT_TYPES, bakePromptFor, fitInside, historicalNa
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHEET_DIR = path.join(WEB_ROOT, "reference_sheets");
+/** A drawing supplied for a unit the faction sheet does not have, such as the German destroyer. */
+const MANUAL_DIR = path.join(SHEET_DIR, "manual");
 const OUT_DIR = path.join(WEB_ROOT, "reference_plates");
 const SOURCE_JPG_DIR = "C:/Users/sammu/Downloads/references";
 const SOLDIER_SHEET = path.join(WEB_ROOT, "public", "assets", "units", "jap_walk.png");
@@ -33,8 +35,11 @@ const SOLDIER_CELL = 3;
 const PREVIEW = 256;
 const MIN_AREA = 2000;
 const WHITE = 242;
-/** White shut inside a drawing counts as paper from this many sheet pixels up. */
-const PAPER_POCKET = 1500;
+/**
+ * Enclosed paper is a hole: a wheel gap, one cell of a net. Any of it is cleared.
+ * A painted colour that is not paper stays, including a light grey hub.
+ */
+const PAPER_POCKET = 1;
 /** Aircraft these sheets already draw nose-right. Every other aircraft is drawn nose-up. */
 const NOSE_RIGHT = {
   US: new Set(["bomber"]),
@@ -308,8 +313,8 @@ function regions(width, height, member) {
 }
 
 /**
- * Leave one drawing in the crop. Pieces of a neighbouring drawing go, and so does paper shut
- * in by rigging or masts. Small white details inside the drawing stay.
+ * Leave one drawing in the crop. Pieces of a neighbouring drawing go, and so does every
+ * pocket of paper the lines have closed off.
  */
 export function clearStrays(rgba, width, height, pocket = PAPER_POCKET) {
   const paper = (pixel) => isBackground(rgba[pixel * 4], rgba[pixel * 4 + 1], rgba[pixel * 4 + 2], rgba[pixel * 4 + 3]);
@@ -565,6 +570,15 @@ export async function sliceSheets() {
     }
     for (const unitTypeId of UNIT_TYPES) {
       if (plates.has(unitTypeId)) continue;
+      const manual = path.join(MANUAL_DIR, factionId, `${unitTypeId}.png`);
+      try {
+        await access(manual);
+        await keep(unitTypeId, await sheetPlate(await readFile(manual), unitBox(factionId, unitTypeId)), "manual");
+        console.log(`${factionId} ${unitTypeId}: manual drawing`);
+        continue;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
       await keep(unitTypeId, await blockoutPlate(factionId, unitTypeId), "blockout");
       console.log(`${factionId} ${unitTypeId}: blockout (no island on the sheet)`);
     }

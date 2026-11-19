@@ -87,7 +87,7 @@ const GLYPH_TO_SLOT: Record<string, PaletteSlotKey | null> = {
   I: "insignia_accent",
 };
 
-export function parseGrid(rows: string[]): (PaletteSlotKey | null)[][] {
+function parseGrid(rows: string[]): (PaletteSlotKey | null)[][] {
   return rows.map((row) =>
     row.split("").map((ch) => {
       if (!(ch in GLYPH_TO_SLOT)) {

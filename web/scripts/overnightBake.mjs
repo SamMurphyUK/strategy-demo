@@ -20,7 +20,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
-import { activePalette } from "../dev/militaryStrip.mjs";
+import { FACTION_MILITARY_MAPPINGS, activePalette } from "../dev/militaryStrip.mjs";
 import { candidateRelativePath, quantizeToActiveKeys } from "../dev/bakeUnitPlugin.mjs";
 import { encodeRgbaPng } from "../dev/pngRgba.mjs";
 import { FACTIONS, LAND_UNITS, UNIT_TYPES, bakePromptFor, blueprintIdFor } from "./historicalUnits.mjs";
@@ -70,7 +70,7 @@ export function canvasFor(width, height, style) {
 }
 
 export function parseOvernightArgs(argv) {
-  const args = { run: false, seeds: 3, maxUsd: 9.5, limit: null, unit: null, faction: null, style: null };
+  const args = { run: false, seeds: 3, maxUsd: 9.5, limit: null, unit: null, faction: null, style: null, except: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--run") {
@@ -99,6 +99,8 @@ export function parseOvernightArgs(argv) {
       args.faction = required(argv, ++i, "--faction");
     } else if (arg === "--style") {
       args.style = required(argv, ++i, "--style");
+    } else if (arg === "--except") {
+      args.except = required(argv, ++i, "--except");
     } else {
       throw new Error(`Unknown argument ${arg}`);
     }
@@ -119,9 +121,14 @@ export function jobKey(job, canvas) {
   return `${job.factionId}/${job.blueprintId}/seed${job.seed}/${job.style}/${canvas.width}x${canvas.height}`;
 }
 
-export function buildQueue(seeds, unit = null, faction = null, style = null) {
+export function buildQueue(seeds, unit = null, faction = null, style = null, except = null) {
   const jobs = [];
-  const units = unit ? UNIT_TYPES.filter((unitTypeId) => unitTypeId === unit) : UNIT_TYPES;
+  if (except && !UNIT_TYPES.includes(except)) {
+    throw new Error(`Unknown unit ${except}`);
+  }
+  const units = (unit ? UNIT_TYPES.filter((unitTypeId) => unitTypeId === unit) : UNIT_TYPES).filter(
+    (unitTypeId) => unitTypeId !== except,
+  );
   if (unit && units.length === 0) {
     throw new Error(`Unknown unit ${unit}`);
   }
@@ -190,7 +197,8 @@ export function upsertStyled(manifest, entry) {
         item?.factionId === entry.factionId &&
         item?.blueprintId === entry.blueprintId &&
         String(item?.seed) === String(entry.seed) &&
-        (item?.promptStyle ?? LAND_STYLE) === entry.promptStyle
+        (item?.promptStyle ?? LAND_STYLE) === entry.promptStyle &&
+        (item?.grade ?? "peeled") === (entry.grade ?? "peeled")
       ),
   );
   return { candidates: [...rest, entry] };
@@ -359,6 +367,95 @@ async function plateInput(platePath, style) {
   return { base64: Buffer.from(png).toString("base64"), albedoKeys: placed.albedoKeys, canvas };
 }
 
+/**
+ * Peel near-black pixels that touch transparency. A black ink contour is not on the military
+ * strip, and snapping it would turn it into charcoal. Interior pixels are left for the palette.
+ */
+export function dropInkOutlines(rgba, width, height) {
+  const out = new Uint8ClampedArray(rgba);
+  const ink = (offset) => {
+    if (out[offset + 3] < 128) return false;
+    const max = Math.max(out[offset], out[offset + 1], out[offset + 2]);
+    const min = Math.min(out[offset], out[offset + 1], out[offset + 2]);
+    return max <= 24 && max - min <= 18;
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    const clear = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 4;
+        if (!ink(offset)) continue;
+        const touchesClear = [
+          [x - 1, y],
+          [x + 1, y],
+          [x, y - 1],
+          [x, y + 1],
+        ].some(([nx, ny]) => nx < 0 || ny < 0 || nx >= width || ny >= height || out[(ny * width + nx) * 4 + 3] < 128);
+        if (touchesClear) clear.push(offset);
+      }
+    }
+    if (clear.length === 0) break;
+    for (const offset of clear) out[offset + 3] = 0;
+  }
+  return out;
+}
+
+/**
+ * Grey paint has no faction hue, so it is moved onto that faction's hull colour before the
+ * snap. Near-black stays on charcoal. A saturated pixel is left for the nearest strip colour.
+ */
+export function biasGreysToHull(rgba, palette, hullKey) {
+  const hull = palette.find((entry) => entry.key === hullKey);
+  const shadow = palette.find((entry) => entry.key === "charcoal") ?? hull;
+  if (!hull) {
+    throw new Error(`The faction palette has no ${hullKey}`);
+  }
+  const out = new Uint8ClampedArray(rgba);
+  for (let offset = 0; offset < out.length; offset += 4) {
+    if (out[offset + 3] < 128) continue;
+    const max = Math.max(out[offset], out[offset + 1], out[offset + 2]);
+    const min = Math.min(out[offset], out[offset + 1], out[offset + 2]);
+    if (max - min > 36) continue;
+    const target = max < 40 ? shadow : hull;
+    out[offset] = target.r;
+    out[offset + 1] = target.g;
+    out[offset + 2] = target.b;
+  }
+  return out;
+}
+
+/** The outer charcoal pixels are the ink contour. Two passes turn that ring into the hull colour. */
+export function liftEdgeShadow(rgba, width, height, palette, hullKey) {
+  const hull = palette.find((entry) => entry.key === hullKey);
+  const shadow = palette.find((entry) => entry.key === "charcoal");
+  if (!hull || !shadow) return new Uint8ClampedArray(rgba);
+  const out = new Uint8ClampedArray(rgba);
+  const isShadow = (offset) =>
+    out[offset + 3] >= 128 && out[offset] === shadow.r && out[offset + 1] === shadow.g && out[offset + 2] === shadow.b;
+  for (let pass = 0; pass < 2; pass++) {
+    const hits = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 4;
+        if (!isShadow(offset)) continue;
+        const open = [
+          [x - 1, y],
+          [x + 1, y],
+          [x, y - 1],
+          [x, y + 1],
+        ].some(([nx, ny]) => nx < 0 || ny < 0 || nx >= width || ny >= height || out[(ny * width + nx) * 4 + 3] < 128);
+        if (open) hits.push(offset);
+      }
+    }
+    for (const offset of hits) {
+      out[offset] = hull.r;
+      out[offset + 1] = hull.g;
+      out[offset + 2] = hull.b;
+    }
+  }
+  return out;
+}
+
 /** The result at the canvas size. It is only resized when the model returns another size. */
 async function resultOnCanvas(bytes, canvas) {
   const meta = await sharp(bytes).metadata();
@@ -381,7 +478,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!token) {
     throw new Error("RD_API_TOKEN is not set in web/.env.local");
   }
-  const jobs = buildQueue(args.seeds, args.unit, args.faction, args.style).slice(0, args.limit ?? Infinity);
+  const jobs = buildQueue(args.seeds, args.unit, args.faction, args.style, args.except).slice(0, args.limit ?? Infinity);
   const ledger = await readJson(LEDGER_PATH, emptyLedger);
   if (!ledger.jobs) ledger.jobs = {};
   let manifest = await readJson(MANIFEST_PATH, () => ({ candidates: [] }));
@@ -496,7 +593,15 @@ export async function main(argv = process.argv.slice(2)) {
     if (fitted.returned.width !== canvas.width || fitted.returned.height !== canvas.height) {
       console.log(`${key} came back ${fitted.returned.width}×${fitted.returned.height} and was resized to ${canvas.width}×${canvas.height}`);
     }
-    const scored = quantizeToActiveKeys(fitted.data, canvas.width, canvas.height, plate.albedoKeys, activePalette(job.factionId));
+    const palette = activePalette(job.factionId);
+    const painted = biasGreysToHull(
+      dropInkOutlines(fitted.data, canvas.width, canvas.height),
+      palette,
+      FACTION_MILITARY_MAPPINGS[job.factionId].primary_uniform_or_hull,
+    );
+    const scored = quantizeToActiveKeys(painted, canvas.width, canvas.height, plate.albedoKeys, palette);
+    const hullKey = FACTION_MILITARY_MAPPINGS[job.factionId].primary_uniform_or_hull;
+    scored.rgba = liftEdgeShadow(scored.rgba, canvas.width, canvas.height, palette, hullKey);
     const files = candidatePaths(job);
     const rawPath = path.join(WEB_ROOT, files.raw);
     const quantizedPath = path.join(WEB_ROOT, files.quantized);

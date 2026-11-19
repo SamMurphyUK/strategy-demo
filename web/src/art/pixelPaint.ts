@@ -125,7 +125,7 @@ export function documentFromLayers(blueprint: UnitSpriteSheetBlueprint, archetyp
   };
 }
 
-/** The six riflemen, then one layered starter for each other skeleton, then the flat tanks of the other countries. */
+/** The six riflemen, then the candidate sprites, then any flat tank that has no candidate picture. */
 export function starterBlueprints(): UnitSpriteSheetBlueprint[] {
   const layered = layeredStarterBlueprints();
   return [

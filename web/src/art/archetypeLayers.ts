@@ -92,7 +92,7 @@ export const ARCHETYPES: Record<ArchetypeKey, ArchetypeDefinition> = {
       { key: "crew_gun", label: "Crew and gun", hint: "Crew and the mounted gun, above the body. The gun kicks back a pixel on Fire." },
     ],
     unitTypes: ["mech_infantry"],
-    footprint: { width: 42, height: 24 },
+    footprint: { width: 44, height: 24 },
     motion: "Move 1 steps the wheels and tread. Move 2 lifts the body and crew a pixel. Fire kicks the gun back one.",
   },
   artillery: {
@@ -113,7 +113,7 @@ export const ARCHETYPES: Record<ArchetypeKey, ArchetypeDefinition> = {
       },
     ],
     unitTypes: ["artillery", "aaa", "aa"],
-    footprint: { width: 42, height: 26 },
+    footprint: { width: 44, height: 36 },
     motion:
       "Move 1 is the idle. Move 2 settles the shield and barrel a pixel. Fire rolls the carriage back one and the barrel two, or one back and one down for a flak gun.",
   },
@@ -135,7 +135,7 @@ export const ARCHETYPES: Record<ArchetypeKey, ArchetypeDefinition> = {
       { key: "tail_markings", label: "Tail and markings", hint: "Fin, crosses, roundels, and bands, above everything." },
     ],
     unitTypes: ["fighter", "tactical_bomber", "strategic_bomber"],
-    footprint: { width: 40, height: 40 },
+    footprint: { width: 44, height: 44 },
     motion:
       "Move 1 steps the propeller blur. Move 2 slides the engines a pixel toward one wingtip. Fire pulls the whole airframe back one and flashes the nose and wing guns.",
   },

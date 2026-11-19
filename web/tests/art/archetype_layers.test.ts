@@ -273,7 +273,7 @@ describe("alternate phases", () => {
   it("gives the tank and the half-track a second tread phase on Move 1 only", () => {
     for (const [id, layer] of [
       ["ger_tank_pz4", "tracks"],
-      ["ger_mech_sdkfz251", "wheels_tracks"],
+      ["ger_mech_infantry", "wheels_tracks"],
     ] as const) {
       const { layers } = starter(id);
       expect(layers.move_1[layer], id).not.toEqual(layers.idle[layer]);
@@ -284,43 +284,31 @@ describe("alternate phases", () => {
     }
   });
 
-  it("steps the propeller dashes on Move 1 and leaves the cowling alone", () => {
-    const { layers } = starter("ger_fighter_bf109");
+  it("keeps the fighter's propeller on its own layer", () => {
+    const { layers } = starter("ger_fighter");
     const idle = layers.idle.engines_props;
-    const dashes = cells(idle, "metallic_steel");
-    expect(dashes.length).toBeGreaterThan(0);
+    expect(cells(idle).length).toBeGreaterThan(0);
+    // This propeller is not drawn in steel, so the steel-step leaves it as it is. The banking shift still moves it.
     expect(layers.move_1.engines_props).toEqual(stepBlur(idle));
-    expect(cells(layers.move_1.engines_props, "metallic_steel")).toEqual(
-      dashes.map((cell) => {
-        const [x, y] = cell.split(",").map(Number);
-        return `${x},${y + 1}`;
-      }),
-    );
-    expect(cells(layers.move_1.engines_props, "secondary_trim_or_webbing")).toEqual(cells(idle, "secondary_trim_or_webbing"));
+    expect(layers.move_1.engines_props).toEqual(idle);
     expect(layers.move_1.fuselage_wings).toEqual(layers.idle.fuselage_wings);
     expect(layers.move_2.engines_props).toEqual(shiftGrid(idle, 0, 1));
     expect(layers.move_2.fuselage_wings).toEqual(layers.idle.fuselage_wings);
   });
 
   it("puts foam on the waterline at bow and stern, in a different pattern on each step", () => {
-    const { layers } = starter("ger_destroyer_z23");
+    const { layers } = starter("ger_destroyer");
     const hull = layers.idle.hull_waterline;
     const waterline = bounds(hull).maxY;
     const row = hull[waterline];
     const stern = row.findIndex((slot) => slot != null);
     const bow = row.length - 1 - [...row].reverse().findIndex((slot) => slot != null);
-    expect(cells(hull, "skin_stand_in")).toEqual([]);
-    const first = cells(layers.move_1.hull_waterline, "skin_stand_in");
-    expect(first.sort()).toEqual(
-      [`${stern - 1},${waterline}`, `${stern + 1},${waterline}`, `${bow - 1},${waterline}`, `${bow + 1},${waterline}`].sort(),
-    );
-    const second = cells(layers.move_2.hull_waterline, "skin_stand_in");
-    expect(second.sort()).toEqual(
-      [`${stern},${waterline - 1}`, `${stern + 2},${waterline - 1}`, `${bow - 2},${waterline - 1}`, `${bow},${waterline - 1}`].sort(),
-    );
+    const foamAt = (grid: SpriteFrameGrid, y: number, xs: number[]) => xs.every((x) => grid[y]?.[x] === "skin_stand_in");
     expect(layers.move_1.hull_waterline).toEqual(waterlineFoam(hull, 0));
+    expect(foamAt(layers.move_1.hull_waterline, waterline, [stern - 1, stern + 1, bow - 1, bow + 1])).toBe(true);
     expect(layers.move_2.hull_waterline).toEqual(shiftGrid(waterlineFoam(hull, 1), 0, -1));
-    expect(cells(layers.fire.hull_waterline, "skin_stand_in")).toEqual([]);
+    expect(foamAt(layers.move_2.hull_waterline, waterline - 1, [stern, stern + 2, bow - 2, bow])).toBe(true);
+    expect(layers.fire.hull_waterline).toEqual(shiftGrid(hull, 0, 1));
   });
 });
 
@@ -328,8 +316,8 @@ describe("muzzle flash", () => {
   it("paints the flash on the recoiled gun tip, only when the muzzle is marked", () => {
     for (const [id, layer] of [
       ["ger_tank_pz4", "barrel"],
-      ["ger_fighter_bf109", "engines_props"],
-      ["ger_destroyer_z23", "turrets_masts"],
+      ["ger_fighter", "engines_props"],
+      ["ger_destroyer", "turrets_masts"],
     ] as const) {
       const found = starter(id);
       const muzzle = found.blueprint.muzzlePoint;
@@ -349,7 +337,7 @@ describe("muzzle flash", () => {
   });
 
   it("fires a gun from each wing of the fighter", () => {
-    const { layers, blueprint } = starter("ger_fighter_bf109");
+    const { layers, blueprint } = starter("ger_fighter");
     const nose = blueprint.muzzlePoint ?? { x: 0, y: 0 };
     const flashes = cells(layers.fire.engines_props, "skin_stand_in").map((cell) => Number(cell.split(",")[1]));
     expect(flashes.some((y) => y < nose.y - 3)).toBe(true);
@@ -357,7 +345,7 @@ describe("muzzle flash", () => {
   });
 
   it("leaves the half-track and the howitzer to the runtime flash", () => {
-    for (const id of ["ger_mech_sdkfz251", "ger_artillery_lefh18"]) {
+    for (const id of ["ger_mech_infantry", "ger_artillery"]) {
       const found = starter(id);
       const top = ARCHETYPE_LAYERS[found.archetype][2];
       const [dx, dy] = OFFSETS[found.archetype as Exclude<ArchetypeKey, "infantry">].fire[top];
@@ -368,15 +356,40 @@ describe("muzzle flash", () => {
 });
 
 describe("layered starters", () => {
-  it("seeds one starter for each skeleton that is not infantry", () => {
-    expect(ARCHETYPE_STARTERS.map((item) => item.blueprint.blueprintId)).toEqual([
+  it("seeds a German candidate sprite for every unit type except infantry", () => {
+    expect(ARCHETYPE_STARTERS.map((item) => item.blueprint.blueprintId).slice(0, 13)).toEqual([
       "ger_tank_pz4",
-      "ger_mech_sdkfz251",
-      "ger_artillery_lefh18",
-      "ger_fighter_bf109",
-      "ger_destroyer_z23",
+      "ger_mech_infantry",
+      "ger_artillery",
+      "ger_aaa",
+      "ger_fighter",
+      "ger_tac_bomber",
+      "ger_bomber",
+      "ger_submarine",
+      "ger_transport",
+      "ger_destroyer",
+      "ger_cruiser",
+      "ger_carrier",
+      "ger_battleship",
     ]);
-    expect(ARCHETYPE_STARTERS.map((item) => item.archetype)).toEqual(["tank", "mech_infantry", "artillery", "aircraft", "ship"]);
+    const outlined = ARCHETYPE_STARTERS.slice(13).map((item) => item.blueprint.blueprintId);
+    expect(outlined).toEqual(expect.arrayContaining(["uk_tank_cromwell", "us_tank_sherman", "ussr_tank_t34"]));
+    expect(outlined.some((id) => id.includes("infantry_43"))).toBe(false);
+    expect(ARCHETYPE_STARTERS.slice(0, 13).map((item) => item.archetype)).toEqual([
+      "tank",
+      "mech_infantry",
+      "artillery",
+      "artillery",
+      "aircraft",
+      "aircraft",
+      "aircraft",
+      "ship",
+      "ship",
+      "ship",
+      "ship",
+      "ship",
+      "ship",
+    ]);
     for (const item of ARCHETYPE_STARTERS) {
       expect(archetypeForUnitType(item.blueprint.unitTypeId), item.title).toBe(item.archetype);
       expect(item.blueprint.category, item.title).toBe(ARCHETYPES[item.archetype].category);
@@ -395,7 +408,17 @@ describe("layered starters", () => {
       expect("layers" in item.blueprint, item.title).toBe(false);
       for (const pose of MOVES) {
         // A gun on its carriage does not march: the brief keeps every artillery layer still on Move 1.
-        if (item.archetype === "artillery" && pose === "move_1") {
+        // A propeller that is not painted in steel has nothing to step, so that Move 1 matches Idle too.
+        const gear = item.archetype === "tank" ? item.layers.idle.tracks : item.archetype === "mech_infantry" ? item.layers.idle.wheels_tracks : null;
+        const still =
+          (item.archetype === "artillery" && pose === "move_1") ||
+          (item.archetype === "aircraft" &&
+            pose === "move_1" &&
+            stepBlur(item.layers.idle.engines_props).every((row, y) => row.every((slot, x) => slot === item.layers.idle.engines_props[y][x]))) ||
+          (gear != null &&
+            pose === "move_1" &&
+            stepHighlights(gear).every((row, y) => row.every((slot, x) => slot === gear[y][x])));
+        if (still) {
           expect(item.blueprint.frames[pose], item.title).toEqual(item.blueprint.frames.idle);
           continue;
         }
@@ -438,7 +461,7 @@ describe("layered starters", () => {
   });
 
   it("keeps the destroyer's hull to 46 pixels so the foam and the outline stay on the sheet", () => {
-    const { layers } = starter("ger_destroyer_z23");
+    const { layers } = starter("ger_destroyer");
     expect(ARCHETYPES.ship.footprint.width).toBe(46);
     expect(bounds(layers.idle.hull_waterline).width).toBeLessThanOrEqual(46);
     for (const pose of SPRITE_FRAME_KEYS) {
@@ -456,12 +479,14 @@ describe("layered starters", () => {
 });
 
 describe("painting any skeleton", () => {
-  it("lists the riflemen, the five layered starters, and the other countries' flat tanks", () => {
+  it("lists the riflemen, the candidate sprites, and the tanks that have no outlined picture", () => {
     const ids = starterBlueprints().map((item) => item.blueprintId);
+    const flatTanks = STARTER_BLUEPRINTS.filter((item) => item.unitTypeId !== "infantry" && !ids.includes(item.blueprintId));
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(16);
+    expect(ids).toHaveLength(6 + ARCHETYPE_STARTERS.length + flatTanks.length);
     expect(ids.slice(0, 6).every((id) => id.includes("_infantry_"))).toBe(true);
-    expect(ids.slice(6, 11)).toEqual(ARCHETYPE_STARTERS.map((item) => item.blueprint.blueprintId));
+    expect(ids.slice(6, 6 + ARCHETYPE_STARTERS.length)).toEqual(ARCHETYPE_STARTERS.map((item) => item.blueprint.blueprintId));
+    expect(flatTanks.map((item) => item.blueprintId)).toEqual(["jap_tank_chi_ha", "minor_tank_lt38"]);
     expect(STARTER_BLUEPRINTS).toHaveLength(12);
   });
 
@@ -474,13 +499,16 @@ describe("painting any skeleton", () => {
     expect(flat.layers).toBeNull();
     expect(flat.editingLayer).toBeNull();
     expect(flat.archetype).toBe("tank");
-    expect(starterDocument("ussr_tank_t34")?.layers).toBeNull();
+    expect(starterDocument("ussr_tank_t34")?.archetype).toBe("tank");
+    expect(starterDocument("ussr_tank_t34")?.editingLayer).toBe("tracks");
+    const flatT34 = documentFromBlueprint(STARTER_BLUEPRINTS.find((item) => item.blueprintId === "ussr_tank_t34")!);
+    expect(flatT34.layers).toBeNull();
     expect(starterDocument("ger_infantry_43")?.archetype).toBe("infantry");
     expect(starterDocument("nobody")).toBeNull();
   });
 
   it("paints one layer, erases through all of them, and refuses another skeleton's layer", () => {
-    const ship = starterDocument("ger_destroyer_z23")!;
+    const ship = starterDocument("ger_destroyer")!;
     expect(withEditingLayer(ship, "turret")).toBe(ship);
     const masts = withEditingLayer(ship, "turrets_masts");
     expect(masts.editingLayer).toBe("turrets_masts");
@@ -540,7 +568,7 @@ describe("painting any skeleton", () => {
   });
 
   it("changes the unit type inside a skeleton without losing the drawing", () => {
-    const howitzer = starterDocument("ger_artillery_lefh18")!;
+    const howitzer = starterDocument("ger_artillery")!;
     const flak = withUnitType(howitzer, "aaa");
     expect(flak.archetype).toBe("artillery");
     expect(flak.blueprint.unitTypeId).toBe("aaa");

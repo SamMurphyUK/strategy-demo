@@ -180,11 +180,20 @@ export const HISTORICAL_UNITS = {
   },
 };
 
+/** Hull words are names of colours on the military strip, so factions stay apart without leaving it. */
+export const HULL_COLOUR = {
+  GER: "feldgrau",
+  USSR: "crimson",
+  UK: "khaki",
+  US: "olive",
+  JAP: "terracotta",
+};
+
 const SIDE_PROMPT =
-  "side-profile pixel art game sprite, PLATFORMER STYLE, facing right, flat orthographic side view, full body centered, single isolated unit on transparent background, PLATFORMER STYLE POSE, {NAME}, crisp 1px pixel clusters, flat cel shading, limited color palette, no anti-aliasing, no drop shadow, no ground floor, no text";
+  "side-profile pixel art game sprite, facing right, flat orthographic side view, full body centered, single isolated unit on transparent background, {NAME}, {HULL} hull, steel and brown details, colours from a fixed military palette only, no black outline, no ink contour, retro blocky sprite, simple shapes, flat block colours, chunky pixels, hard edges, no anti-aliasing, no dithering, no fine detail, no drop shadow, no ground, no text";
 
 const AIR_PROMPT =
-  "top-down pixel art game sprite, nose pointing right, flat orthographic top view forming a T shape, full aircraft centered, single isolated unit on transparent background, {NAME}, crisp 1px pixel clusters, flat cel shading, limited color palette, no anti-aliasing, no drop shadow, no ground floor, no text";
+  "top-down pixel art game sprite, nose pointing right, flat orthographic top view forming a T shape, full aircraft centered, single isolated unit on transparent background, {NAME}, {HULL} upper surfaces, steel and brown details, colours from a fixed military palette only, no black outline, no ink contour, retro blocky sprite, simple shapes, flat block colours, chunky pixels, hard edges, no anti-aliasing, no dithering, no fine detail, no drop shadow, no ground, no text";
 
 /** Starter blueprint ids where the editor already has one. Other units use faction_unit. */
 const KNOWN_BLUEPRINT = {
@@ -205,8 +214,12 @@ export function historicalName(factionId, unitTypeId) {
 
 export function bakePromptFor(factionId, unitTypeId) {
   const name = historicalName(factionId, unitTypeId);
+  const hull = HULL_COLOUR[factionId];
+  if (!hull) {
+    throw new Error(`No hull colour for ${factionId}`);
+  }
   const template = AIR_UNITS.has(unitTypeId) ? AIR_PROMPT : SIDE_PROMPT;
-  return template.replace("{NAME}", name);
+  return template.replace("{NAME}", name).replace("{HULL}", hull);
 }
 
 export function blueprintIdFor(factionId, unitTypeId) {

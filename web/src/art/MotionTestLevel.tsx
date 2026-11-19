@@ -26,16 +26,24 @@ const SKELETON_DETAIL: Record<ArchetypeKey, string> = {
   ship: "foam, swell, and broadside",
 };
 
-/** One lane for each skeleton. Every lane plays the four flat frames and nothing else. */
+/** One lane for each skeleton, using the German candidate sprite for every class but infantry. */
+const LANE_TYPES = ["tank", "mech_infantry", "artillery", "fighter", "destroyer"];
+
 const FIELD: Omit<Actor, "depth">[] = [
   actor("ger-idle", "ger_infantry_43", "German rifleman", SKELETON_DETAIL.infantry, 0),
-  ...ARCHETYPE_STARTERS.map((item, index) => ({
-    id: item.blueprint.blueprintId,
-    blueprint: item.blueprint,
-    name: item.title,
-    detail: SKELETON_DETAIL[item.archetype],
-    phase: (index + 1) % 3,
-  })),
+  ...LANE_TYPES.map((unitTypeId, index) => {
+    const item = ARCHETYPE_STARTERS.find((starter) => starter.blueprint.unitTypeId === unitTypeId);
+    if (!item) {
+      throw new Error(`No starter for ${unitTypeId}`);
+    }
+    return {
+      id: item.blueprint.blueprintId,
+      blueprint: item.blueprint,
+      name: item.title,
+      detail: SKELETON_DETAIL[item.archetype],
+      phase: (index + 1) % 3,
+    };
+  }),
 ];
 
 function actor(id: string, blueprintId: string, name: string, detail: string, phase: number): Omit<Actor, "depth"> {

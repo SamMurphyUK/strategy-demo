@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clearPaper, clearStrays, spriteIslands, SHEET_LABELS } from "../../scripts/sliceReferenceSheets.mjs";
+import { activePalette } from "../../dev/militaryStrip.mjs";
 import {
   AIR_PX_PER_M,
   AIR_UNITS,
@@ -17,6 +18,9 @@ import {
   STYLE_LIMITS,
   buildQueue,
   candidatePaths,
+  biasGreysToHull,
+  dropInkOutlines,
+  liftEdgeShadow,
   canvasFor,
   inferenceBody,
   jobKey,
@@ -37,6 +41,7 @@ describe("overnight bake", () => {
       unit: null,
       faction: null,
       style: null,
+      except: null,
     });
     expect(parseOvernightArgs(["--run", "--seeds", "3", "--max-usd", "9.50"])).toEqual({
       run: true,
@@ -46,6 +51,7 @@ describe("overnight bake", () => {
       unit: null,
       faction: null,
       style: null,
+      except: null,
     });
     expect(parseOvernightArgs(["--faction", "GER", "--unit", "battleship", "--style", "rd_lite__simple"])).toMatchObject({
       faction: "GER",
@@ -56,11 +62,19 @@ describe("overnight bake", () => {
 
   it("uses the side-profile prompt for ships and the T-shape prompt for aircraft", () => {
     const tank = bakePromptFor("GER", "tank");
-    expect(tank).toContain("PLATFORMER STYLE");
+    expect(tank).toContain("retro blocky sprite");
+    expect(tank).toContain("facing right");
+    expect(tank).toContain("no fine detail");
     expect(tank).toContain("Panzer IV Ausf. H tank");
+    expect(tank).toContain("feldgrau hull");
+    expect(tank).toContain("no black outline");
+    expect(bakePromptFor("UK", "tank")).toContain("khaki hull");
+    expect(bakePromptFor("US", "tank")).toContain("olive hull");
+    expect(bakePromptFor("USSR", "tank")).toContain("crimson hull");
     expect(tank).not.toContain("reference");
     const fighter = bakePromptFor("GER", "fighter");
     expect(fighter.startsWith("top-down pixel art game sprite, nose pointing right")).toBe(true);
+    expect(fighter).toContain("retro blocky sprite");
     expect(fighter).toContain("Messerschmitt Bf 109G fighter");
     expect(historicalName("JAP", "battleship")).toBe("Yamato battleship");
   });
@@ -98,6 +112,10 @@ describe("overnight bake", () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ factionId: "GER", unitTypeId: "battleship", style: "rd_lite__simple", seed: 1 });
     expect(() => buildQueue(1, null, "ITA")).toThrow("Unknown faction ITA");
+    const withoutInfantry = buildQueue(1, null, "UK", null, "infantry");
+    expect(withoutInfantry).toHaveLength(13);
+    expect(withoutInfantry.some((job) => job.unitTypeId === "infantry")).toBe(false);
+    expect(() => buildQueue(1, null, "UK", null, "horse")).toThrow("Unknown unit horse");
     expect(() => buildQueue(1, null, null, "rd_pro__default")).toThrow("Unknown style rd_pro__default");
   });
 
@@ -140,6 +158,40 @@ describe("overnight bake", () => {
     expect(() => canvasFor(400, 86, "rd_fast__default")).toThrow("does not fit rd_fast__default");
   });
 
+  it("peels a near-black outline and leaves the hull pixel", () => {
+    const width = 3;
+    const height = 3;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) rgba.set([0, 0, 0, 255], i * 4);
+    rgba.set([168, 138, 94, 255], (1 * width + 1) * 4);
+    const peeled = dropInkOutlines(rgba, width, height);
+    expect(peeled[3]).toBe(0);
+    expect(Array.from(peeled.slice(4 * 4, 4 * 4 + 4))).toEqual([168, 138, 94, 255]);
+    expect(Array.from(rgba.slice(0, 4))).toEqual([0, 0, 0, 255]);
+  });
+
+  it("moves a grey hull onto the faction colour and leaves a saturated pixel", () => {
+    const palette = activePalette("UK");
+    const rgba = new Uint8ClampedArray(8);
+    rgba.set([70, 72, 74, 255], 0);
+    rgba.set([180, 40, 40, 255], 4);
+    const biased = biasGreysToHull(rgba, palette, "khaki");
+    expect(Array.from(biased.slice(0, 4))).toEqual([168, 138, 94, 255]);
+    expect(Array.from(biased.slice(4, 8))).toEqual([180, 40, 40, 255]);
+    const shadow = new Uint8ClampedArray([20, 20, 22, 255]);
+    expect(Array.from(biasGreysToHull(shadow, palette, "khaki").slice(0, 3))).toEqual([75, 61, 68]);
+  });
+
+  it("turns a charcoal edge into the hull colour", () => {
+    const palette = activePalette("US");
+    const rgba = new Uint8ClampedArray(8);
+    rgba.set([75, 61, 68, 255], 0);
+    rgba.set([125, 123, 98, 255], 4);
+    const lifted = liftEdgeShadow(rgba, 2, 1, palette, "olive");
+    expect(Array.from(lifted.slice(0, 3))).toEqual([125, 123, 98, 255].slice(0, 3));
+    expect(Array.from(lifted.slice(4, 7))).toEqual([125, 123, 98]);
+  });
+
   it("stands the plate on the bottom row of the canvas without scaling it", () => {
     const plate = new Uint8ClampedArray(2 * 1 * 4);
     plate.set([10, 20, 30, 255], 0);
@@ -168,6 +220,15 @@ describe("overnight bake", () => {
     expect(manifest.candidates.map((item: { promptStyle: string; cost: number }) => `${item.promptStyle} ${item.cost}`)).toEqual([
       "rd_lite__simple 0.05",
       "rd_core__simple 0.2",
+    ]);
+    const outlined = { ...row("rd_core__simple", 0.2), grade: "outlined" };
+    manifest = upsertStyled(manifest, outlined);
+    expect(manifest.candidates).toHaveLength(3);
+    manifest = upsertStyled(manifest, { ...outlined, cost: 0.3 });
+    expect(manifest.candidates.map((item: { grade?: string; cost: number }) => `${item.grade ?? "peeled"} ${item.cost}`)).toEqual([
+      "peeled 0.05",
+      "peeled 0.2",
+      "outlined 0.3",
     ]);
   });
 
@@ -257,6 +318,11 @@ describe("overnight bake", () => {
     expect(kept[(3 * width + 7) * 4 + 3]).toBe(0);
     expect(kept[(3 * width + 3) * 4 + 3]).toBe(255);
     expect(kept[(1 * width + 1) * 4 + 3]).toBe(255);
+
+    const holes = rgba.slice();
+    clearStrays(holes, width, height);
+    expect(holes[(3 * width + 3) * 4 + 3]).toBe(0);
+    expect(holes[(1 * width + 1) * 4 + 3]).toBe(255);
 
     clearStrays(rgba, width, height, 9);
     expect(alpha(3, 3)).toBe(0);
