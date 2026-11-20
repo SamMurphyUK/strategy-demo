@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { decodeRgbaPng } from "../../dev/pngRgba.mjs";
 import { AS_DRAWN_LUT, clipsFromWalkSheet, fromFrameFile, toFrameFile } from "../../src/art/frameClips";
-import { EMBLEM_FRAME_SLOT, frameStampCells, stampFramePart, stampPreviewRgba } from "../../src/art/frameStamp";
+import { EMBLEM_FRAME_SLOT, frameSlotsFor, frameStampCells, stampFramePart, stampPreviewRgba } from "../../src/art/frameStamp";
 import { FRAME_ZOOMS, openingFrameZoom } from "../../src/art/frameView";
-import { emblemBitmap, emblemForFaction, type EmblemBitmap } from "../../src/art/emblems";
+import { emblemBitmap, emblemById, emblemForFaction, type EmblemBitmap } from "../../src/art/emblems";
 import { FACTION_LUTS } from "../../src/art/paperDoll";
 import { assembleRig, moveLayer, resolveFrame, rigFromClips, toPartFile, toRigFile, withRigFrame, wornPart, type PartRig, type RigFrame } from "../../src/art/partRig";
 import { EMBLEM_SLOT_KEYS, EMBLEM_STRIP } from "../../src/art/skeletonSchema";
@@ -50,9 +50,9 @@ function torsoMiddle(target: PartRig, frame: RigFrame): { x: number; y: number }
 }
 
 describe("emblem colours in the frame editor's slots", () => {
-  it("gives the six emblem colours six different slots, all inside 1–13", () => {
+  it("gives every emblem colour its own slot, all inside 1–13", () => {
     const slots = EMBLEM_SLOT_KEYS.map((key) => EMBLEM_FRAME_SLOT[key]);
-    expect(new Set(slots).size).toBe(6);
+    expect(new Set(slots).size).toBe(EMBLEM_SLOT_KEYS.length);
     for (const slot of slots) {
       expect(Number.isInteger(slot) && slot >= 1 && slot <= 13).toBe(true);
     }
@@ -158,6 +158,27 @@ describe("stamping a frame at its native size", () => {
     expect(back.parts.map((part) => part.drawings)).toEqual(stamped.parts.map((part) => part.drawings));
     const pixels = resolveFrame(stamped, frame);
     expect(fromFrameFile(JSON.parse(JSON.stringify(toFrameFile(pixels)))).layers).toEqual(pixels.layers);
+  });
+});
+
+describe("Hinomaru, darker", () => {
+  it("paints the disc terracotta and the rim tan, and leaves the original Hinomaru on plum", () => {
+    const darker = emblemById("jap_hinomaru_darker");
+    const slots = frameSlotsFor("jap_hinomaru_darker");
+    expect(darker?.name).toBe("Hinomaru, darker");
+    expect(darker?.sizes).toBe(hinomaru.sizes);
+    expect(FACTION_LUTS.JAP[slots.emblem_red]).toBe(MILITARY.terracotta);
+    expect(FACTION_LUTS.JAP[slots.emblem_red_light]).toBe(MILITARY.terracotta);
+    expect(FACTION_LUTS.JAP[slots.emblem_white]).toBe(MILITARY.tan);
+    expect(FACTION_LUTS.JAP[slots.emblem_white_shade]).toBe(MILITARY.tan);
+    expect(frameSlotsFor("jap_hinomaru").emblem_red).toBe(EMBLEM_FRAME_SLOT.emblem_red);
+    const drawn = emblemBitmap(darker!, 17);
+    const cells = frameStampCells(rig, walkFrame(0), "torso", drawn, 40, 40, false, slots);
+    const top = 40 - Math.floor(drawn.length / 2);
+    const left = 40 - Math.floor((drawn[0]?.length ?? 0) / 2);
+    const painted = (kind: "emblem_red" | "emblem_white") => cells.find((cell) => drawn[cell.y - top]?.[cell.x - left] === kind);
+    expect(painted("emblem_red")?.slot).toBe(slots.emblem_red);
+    expect(painted("emblem_white")?.slot).toBe(slots.emblem_white);
   });
 });
 

@@ -74,6 +74,8 @@ export const SLOT_LABEL: Record<PaletteSlotKey, string> = {
   emblem_white: "Emblem white",
   emblem_white_shade: "Emblem white, shaded",
   emblem_blue: "Emblem blue",
+  emblem_grey: "Emblem grey",
+  emblem_moss: "Emblem moss",
 };
 
 export const FRAME_LABEL: Record<SpriteFrameKey, string> = {

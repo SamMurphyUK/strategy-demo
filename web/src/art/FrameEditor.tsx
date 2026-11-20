@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import { SPRITE_BAKE } from "../ui/map/figureGround";
 import {
   AS_DRAWN_LUT,
   CLIP_KEYS,
-  CLIP_LABEL,
   LAYER_NAME,
   LAYER_ORDER,
   cardRgba,
@@ -30,23 +29,41 @@ import {
   putRgba,
 } from "./editorShared";
 import { EMBLEMS, emblemBitmap, emblemById, emblemForFaction, type EmblemId } from "./emblems";
-import { frameStampCells, stampFramePart, stampPreviewRgba } from "./frameStamp";
-import { FRAME_ZOOMS, openingFrameZoom } from "./frameView";
+import { frameSlotsFor, frameStampCells, stampFramePart, stampPreviewRgba } from "./frameStamp";
+import { maskCount, polygonMask, rectMask, type CellMask } from "./pixelPaint";
+import { autoGrainLabel, deupscaleToNativeArtPixels, detectPixelBlockSize, resolveGrainBlock, type GrainOverride } from "./pixelGrain";
+import { editorSchemeForRig, editorSchemeForUnitType } from "./editorScheme";
+import { FRAME_ZOOMS, viewFrameZoom, zoomLabel } from "./frameView";
+import { isVehicleUnitType, steelToolFor, type SteelTool } from "./archetypeLayers";
+import type { ShelfUnit } from "./unitShelf";
 import { FACTION_LUTS, FACTION_PRESET_LABEL, SLOT_LABELS, type FactionPresetId, type PartCategory } from "./paperDoll";
 import { GEN_ROOM_MAX, harvestPart, planGeneration, type GenPicture, type GenPlan, type GenSheet, type GenSpread } from "./partGen";
+import { purpleSheet } from "./purpleSheet";
 import {
   assembleRig,
   breathFrame,
   buildGaps,
+  buildMotion,
+  claimUnselected,
+  paintSteel,
   clearMoves,
   copyPart,
+  clipTitle,
   describeFrames,
+  isVehicleClipSet,
   erasePart,
+  feedIdleCopies,
+  fillLayerInk,
+  fillPart,
   fillTorsoUnderWeapon,
   framesOnPose,
+  idleSource,
   moveLayer,
+  muzzlePoints,
   outlineFit,
   ownPose,
+  paintBrush,
+  paintedSelection,
   paintPart,
   partFromDrawings,
   partFromPicture,
@@ -58,10 +75,18 @@ import {
   renamePart,
   resolveFrame,
   retakeOutline,
+  rigBundle,
+  rigFromBundle,
   rigFromClips,
+  frameMuzzles,
+  renameEmptyParts,
+  rigFromPicture,
+  seatPicture,
+  toggleMuzzle,
+  withVehicleClips,
   saveBuild,
+  sendShownToLayer,
   shiftCells,
-  shotFrame,
   slideDrawing,
   spreadDrawing,
   toPartFile,
@@ -122,13 +147,20 @@ const GEN_HELP: Record<PartCategory, (room: number, each: boolean) => string> = 
     `The weapon is sent on its own${each ? ", once for every pose" : ""}. The weapon and ${room} pixels around it are open to repainting.`,
 };
 
-type Tool = "pencil" | "eraser" | "feet" | "muzzle" | "stamp";
+type Tool = "pencil" | "fill" | "eraser" | "feet" | "muzzle" | "stamp" | "box" | "lasso" | "drag";
+
+const PENCIL_SIZES = [1, 2, 3, 4, 5] as const;
 
 const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
   {
     id: "pencil",
     label: "Pencil",
-    help: "Paint the picked colour onto the part the picked layer is wearing. Alt-click picks up a colour.",
+    help: "Paint the picked colour onto the part the picked layer is wearing. The size under the tools sets how many pixels it covers. Alt-click picks up a colour.",
+  },
+  {
+    id: "fill",
+    label: "Fill",
+    help: "Replace every connected square of the same colour on the picked layer's part. Squares join by their edges. One click is one undo step.",
   },
   { id: "eraser", label: "Eraser", help: "Clear the square on every layer's part." },
   {
@@ -139,12 +171,27 @@ const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
   {
     id: "muzzle",
     label: "Muzzle",
-    help: "Click the end of the barrel on this frame. The flash draws from here. Without a click it sits on the tip of the weapon.",
+    help: "Click the end of a barrel on this frame. Click that pixel again to take the muzzle off. Each gun can have its own. On a soldier, a frame with none uses the tip of the weapon.",
   },
   {
     id: "stamp",
     label: "Stamp",
-    help: "Put a national emblem on the picked layer's part, centred on the click. The faint picture follows the pointer. One click is one undo step.",
+    help: "Put an emblem or a marking on the picked layer's part, centred on the click. The faint picture follows the pointer. One click is one undo step.",
+  },
+  {
+    id: "box",
+    label: "Box",
+    help: "Drag a rectangle around pixels. Empty ground is left out. Then send what shows inside it onto a layer.",
+  },
+  {
+    id: "lasso",
+    label: "Lasso",
+    help: "Draw around a part a box does not fit. Empty ground is left out. The shape closes when you let go. Then send what shows inside it onto a layer.",
+  },
+  {
+    id: "drag",
+    label: "Drag layer",
+    help: "Drag the picked layer on this frame. The drawing stays put, so the other frames keep it where it was. Arrow keys do the same one pixel at a time.",
   },
 ];
 
@@ -169,7 +216,7 @@ async function savedFrames(): Promise<FrameClips | null> {
     return null;
   }
   const file = readClipsFile(json);
-  const clips = { idle: [], walk: [], fire: [] } as Record<ClipKey, SpriteFrame[]>;
+  const clips = { idle: [], walk: [], fire: [], damaged: [] } as Record<ClipKey, SpriteFrame[]>;
   for (const key of CLIP_KEYS) {
     for (const name of file.clips[key]) {
       clips[key].push(fromFrameFile(await fetchJson(`${FRAMES_URL}/${name}.json`)));
@@ -178,17 +225,33 @@ async function savedFrames(): Promise<FrameClips | null> {
   return { unitId: file.unitId, width: file.width, height: file.height, feet: file.feet, clips };
 }
 
-async function savedRig(): Promise<PartRig | null> {
-  const json = await fetchJson(`${RIG_URL}/rig.json`);
-  if (json === null) {
+async function savedRigAt(id: string): Promise<PartRig | null> {
+  const base = `/assets/units/rigs/${id}`;
+  const json = await fetchJson(`${base}/rig.json`);
+  if (!json || typeof json !== "object") {
     return null;
   }
-  const listed = (json as { parts?: { id?: unknown }[] }).parts ?? [];
+  const listed = (json as { parts?: { id?: unknown }[] }).parts;
+  if (!Array.isArray(listed)) {
+    return null;
+  }
   const parts: unknown[] = [];
   for (const part of listed) {
-    parts.push(await fetchJson(`${RIG_URL}/part_${String(part.id)}.json`));
+    const file = await fetchJson(`${base}/part_${String(part.id)}.json`);
+    if (file === null) {
+      return null;
+    }
+    parts.push(file);
   }
-  return assembleRig(json, parts);
+  try {
+    return assembleRig(json, parts);
+  } catch {
+    return null;
+  }
+}
+
+async function savedRig(): Promise<PartRig | null> {
+  return savedRigAt(UNIT_ID);
 }
 
 function cellsRgba(cells: readonly number[], lut: readonly string[]): Uint8ClampedArray {
@@ -214,13 +277,25 @@ function withClip(rig: PartRig, clip: ClipKey, frames: RigFrame[]): PartRig {
   return { ...rig, clips: { ...rig.clips, [clip]: frames } };
 }
 
-function movementText(frame: RigFrame): string {
+function editorLayerLabel(unitId: string, layer: PartCategory): string {
+  return editorSchemeForRig(unitId).layers.find((item) => item.id === layer)?.label ?? LAYER_NAME[layer];
+}
+
+function movementText(frame: RigFrame, labelFor: (layer: PartCategory) => string): string {
   const moved = LAYER_ORDER.filter((layer) => frame.move[layer].x !== 0 || frame.move[layer].y !== 0);
   if (moved.length === 0) {
     return "No movement on this frame.";
   }
   const signed = (value: number) => (value < 0 ? `−${-value}` : String(value));
-  return `Movement on this frame: ${moved.map((layer) => `${LAYER_NAME[layer]} ${signed(frame.move[layer].x)}, ${signed(frame.move[layer].y)}`).join(" · ")}.`;
+  return `Movement on this frame: ${moved.map((layer) => `${labelFor(layer)} ${signed(frame.move[layer].x)}, ${signed(frame.move[layer].y)}`).join(" · ")}.`;
+}
+
+function editorZoomBox(host: HTMLElement | null): { width: number; height: number } {
+  const measured = host?.clientWidth ?? 0;
+  return {
+    width: measured > 80 ? measured - 8 : 720,
+    height: Math.max(200, Math.min(520, window.innerHeight - 280)),
+  };
 }
 
 function FrameThumb({ frame, lut }: { frame: SpriteFrame; lut: readonly string[] }) {
@@ -238,12 +313,20 @@ function tryOn(rig: PartRig, layer: PartCategory, drawings: number[][]): PartRig
   };
 }
 
-export function FrameEditor() {
+function rigIdFor(pick: ShelfUnit): string {
+  const raw = `${pick.factionId}_${pick.unitTypeId}_seed${pick.seed ?? 1}`.toLowerCase();
+  const id = raw.replace(/[^a-z0-9_-]/g, "");
+  return id || "loaded_sprite";
+}
+
+export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null }) {
   const [rig, setRigState] = useState<PartRig | null>(null);
   const [clip, setClip] = useState<ClipKey>("idle");
   const [index, setIndex] = useState(0);
   const [layer, setLayer] = useState<PartCategory>("torso");
+  const [sheetOn, setSheetOn] = useState<PartCategory[]>([...LAYER_ORDER]);
   const [tool, setTool] = useState<Tool>("pencil");
+  const [pencilSize, setPencilSize] = useState(1);
   const [slot, setSlot] = useState(2);
   const [faction, setFaction] = useState<ColourSet>("SHEET");
   const [zoom, setZoom] = useState<number>(8);
@@ -251,7 +334,17 @@ export function FrameEditor() {
   const [emblemId, setEmblemId] = useState<EmblemId>(() => emblemForFaction(SHEET_FACTION)?.id ?? "jap_hinomaru");
   const [emblemSize, setEmblemSize] = useState(0);
   const [emblemFlip, setEmblemFlip] = useState(false);
+  const [emblemTurn, setEmblemTurn] = useState(false);
   const [onlySprite, setOnlySprite] = useState(true);
+  const [selection, setSelection] = useState<CellMask | null>(null);
+  const [heal, setHeal] = useState(true);
+  const [bob, setBob] = useState(1);
+  const [recoil, setRecoil] = useState(2);
+  const [stride, setStride] = useState(1);
+  const [along, setAlong] = useState<"x" | "y">("x");
+  const [steelTool, setSteelTool] = useState<SteelTool | null>("soldier");
+  const [grain, setGrain] = useState<GrainOverride>("auto");
+  const [dropping, setDropping] = useState(false);
   const [dimOthers, setDimOthers] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
   const [addFrom, setAddFrom] = useState("walk:0");
@@ -271,12 +364,18 @@ export function FrameEditor() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const candidateKeyRef = useRef(0);
+  const canvasHostRef = useRef<HTMLDivElement>(null);
   const rigRef = useRef<PartRig | null>(null);
   const undoRef = useRef<PartRig[]>([]);
   const strokeRef = useRef(false);
   const strokeSavedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stampRef = useRef<HTMLCanvasElement>(null);
+  const selectRef = useRef<HTMLCanvasElement>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const dragLayerRef = useRef<{ x: number; y: number; mx: number; my: number } | null>(null);
+  const lassoPoints = useRef<{ x: number; y: number }[]>([]);
+  const rigFileRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLCanvasElement>(null);
   const layerFileRef = useRef<HTMLInputElement>(null);
   const partFileRef = useRef<HTMLInputElement>(null);
@@ -285,6 +384,9 @@ export function FrameEditor() {
     () => SLOT_LABELS.map((label, value) => ({ key: value, label, hex: lut[value] ?? "#000000" })).slice(1),
     [lut],
   );
+  const vehicleClips = rig ? isVehicleClipSet(rig.clips) : false;
+  const titleFor = (key: ClipKey) => clipTitle(key, vehicleClips);
+  const clipTabs = CLIP_KEYS.filter((key) => key !== "damaged" || vehicleClips || key === clip);
   const frames = rig?.clips[clip] ?? [];
   const frameIndex = frames.length === 0 ? -1 : Math.min(index, frames.length - 1);
   const frame = frames[frameIndex] ?? null;
@@ -320,19 +422,28 @@ export function FrameEditor() {
 
   const emblem = emblemById(emblemId) ?? EMBLEMS[0] ?? null;
   const activeSize = emblem?.sizes.some((item) => item.size === emblemSize) ? emblemSize : (emblem?.sizes[0]?.size ?? 0);
-  const stampBitmap = useMemo(() => (emblem ? emblemBitmap(emblem, activeSize, emblemFlip) : null), [emblem, activeSize, emblemFlip]);
+  const stampBitmap = useMemo(
+    () => (emblem ? emblemBitmap(emblem, activeSize, emblemFlip, emblemTurn) : null),
+    [emblem, activeSize, emblemFlip, emblemTurn],
+  );
 
   const setRig = useCallback((next: PartRig) => {
     rigRef.current = next;
     setRigState(next);
   }, []);
 
+  // A new unit starts with every visible layer ticked for the purple sheet.
+  const sheetUnitId = rig?.unitId ?? "";
+  useEffect(() => {
+    setSheetOn(editorSchemeForRig(sheetUnitId).layers.map((item) => item.id));
+  }, [sheetUnitId]);
+
   // A frame of another size opens at a step that shows all of it.
   const rigWidth = rig?.width ?? 0;
   const rigHeight = rig?.height ?? 0;
   useEffect(() => {
     if (rigWidth > 0 && rigHeight > 0) {
-      setZoom(openingFrameZoom(rigWidth, rigHeight));
+      setZoom(viewFrameZoom(rigWidth, rigHeight, editorZoomBox(canvasHostRef.current)));
     }
   }, [rigWidth, rigHeight]);
 
@@ -350,9 +461,30 @@ export function FrameEditor() {
     if (!canvas || !rig) {
       return;
     }
-    const cells = tool === "stamp" && cursor && frame && stampBitmap ? frameStampCells(rig, frame, layer, stampBitmap, cursor.x, cursor.y, onlySprite) : [];
+    const cells = tool === "stamp" && cursor && frame && stampBitmap ? frameStampCells(rig, frame, layer, stampBitmap, cursor.x, cursor.y, onlySprite, frameSlotsFor(emblemId)) : [];
     putRgba(canvas, stampPreviewRgba(cells, rig.width, rig.height, lut), rig.width, rig.height);
-  }, [tool, cursor, frame, stampBitmap, rig, layer, onlySprite, lut]);
+  }, [tool, cursor, frame, stampBitmap, rig, layer, onlySprite, lut, emblemId]);
+
+  useEffect(() => {
+    const canvas = selectRef.current;
+    if (!canvas || !rig) {
+      return;
+    }
+    const rgba = new Uint8ClampedArray(rig.width * rig.height * 4);
+    if (selection && selection.width === rig.width && selection.height === rig.height) {
+      for (let index = 0; index < selection.cells.length; index += 1) {
+        if (selection.cells[index] === 0) {
+          continue;
+        }
+        const offset = index * 4;
+        rgba[offset] = 221;
+        rgba[offset + 1] = 207;
+        rgba[offset + 2] = 153;
+        rgba[offset + 3] = 56;
+      }
+    }
+    putRgba(canvas, rgba, rig.width, rig.height);
+  }, [selection, rig]);
 
   const remember = useCallback(() => {
     const current = rigRef.current;
@@ -401,14 +533,119 @@ export function FrameEditor() {
     [clip, edit, frameIndex],
   );
 
+  const openRig = useCallback(
+    (next: PartRig, tool: SteelTool | null, message: string) => {
+      undoRef.current = [];
+      setRig(next);
+      setClip("idle");
+      setIndex(0);
+      setPlaying(false);
+      setSelection(null);
+      setLayer(editorSchemeForRig(next.unitId).picture);
+      setFaction("SHEET");
+      setSteelTool(tool);
+      setAlong(tool === "propeller" ? "y" : "x");
+      setZoom(viewFrameZoom(next.width, next.height, editorZoomBox(canvasHostRef.current)));
+      setNote(message);
+    },
+    [setRig],
+  );
+
   const startFresh = useCallback(async () => {
     const fresh = rigFromClips(await walkSheetClips());
-    undoRef.current = [];
-    setRig(fresh);
-    setClip("idle");
-    setIndex(0);
-    setNote("Split jap_walk.png into eight poses. The fourth sheet frame leads the walk, and Idle is that pose.");
-  }, [setRig]);
+    openRig(fresh, "soldier", "Split jap_walk.png into eight poses. The fourth sheet frame leads the walk, and Idle is that pose.");
+  }, [openRig]);
+
+  const loadShelf = useCallback(async () => {
+    if (!shelfPick) {
+      setNote("Pick a unit on the shelf first.");
+      return;
+    }
+    if (shelfPick.kind === "clips") {
+      if (!window.confirm("Load the Japanese walk? It replaces what is open. Ctrl+Z does not bring the open sprite back.")) {
+        return;
+      }
+      await startFresh();
+      return;
+    }
+    if (!shelfPick.picture) {
+      setNote(`${shelfPick.label} has no pixel picture to open.`);
+      return;
+    }
+    const id = rigIdFor(shelfPick);
+    const vehicle = isVehicleUnitType(shelfPick.unitTypeId);
+    const scheme = editorSchemeForUnitType(shelfPick.unitTypeId);
+    const body = scheme.layers.find((item) => item.id === scheme.picture)?.label.toLowerCase() ?? "torso";
+    const saved = await savedRigAt(id);
+    if (saved) {
+      if (!window.confirm(`Load ${shelfPick.label}? It opens the layers saved on this sprite. Ctrl+Z does not bring the open sprite back.`)) {
+        return;
+      }
+      openRig(saved, steelToolFor(shelfPick.unitTypeId), `Opened ${shelfPick.label} with the layers saved on it.`);
+      return;
+    }
+    const agreed = window.confirm(
+      `Load ${shelfPick.label}? The whole picture goes on the ${body}, at its own size. Save layers writes public/assets/units/rigs/${id} and leaves the Japanese walk where it is. The editor has 13 colours, so a few of the picture's colours share a slot. Ctrl+Z does not bring the open sprite back.${vehicle ? " Idle, Moving, Firing, and Damaged start as copies of this picture: 4, 8, 2, and 2." : ""}`,
+    );
+    if (!agreed) {
+      return;
+    }
+    try {
+      const response = await fetch(`/__dev/bake-file?path=${encodeURIComponent(shelfPick.picture)}`);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Could not open ${shelfPick.picture}.`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      try {
+        const image = await loadImage(url);
+        let rgba = imageRgba(image);
+        let width = image.naturalWidth;
+        let height = image.naturalHeight;
+        const block = resolveGrainBlock(detectPixelBlockSize(rgba, width, height), grain);
+        if (block > 1) {
+          const native = deupscaleToNativeArtPixels(rgba, width, height, block);
+          rgba = native.rgba;
+          width = native.width;
+          height = native.height;
+        }
+        const seated = renameEmptyParts(seatPicture(rigFromPicture(id, rgba, width, height), scheme.picture), (layer) =>
+          scheme.layers.find((item) => item.id === layer)?.label ?? null,
+        );
+        const prepared = scheme.muzzle === "weapon" ? seated : { ...seated, muzzleLayer: scheme.muzzle };
+        const next = vehicle ? withVehicleClips(prepared) : prepared;
+        const tool = steelToolFor(shelfPick.unitTypeId);
+        const steel =
+          tool === "tread"
+            ? " Steel links are on, and they step along the tread."
+            : tool === "propeller"
+              ? " Steel is on, and it steps toward the wingtip."
+              : tool === "soldier"
+                ? " Steel links are on."
+                : " This kind of unit has no steel links.";
+        const copies = vehicle
+          ? " Idle has 4 frames, Moving has 8, Firing has 2, and Damaged has 2. Each frame is this picture."
+          : "";
+        const resting = scheme.layers.filter((item) => item.id !== scheme.picture).map((item) => item.label.toLowerCase());
+        const listed =
+          scheme.layers.length === 4
+            ? "Legs, head, and weapon are empty."
+            : resting.length === 1
+              ? `${resting[0]} is empty.`
+              : `${resting.slice(0, -1).join(", ")} and ${resting[resting.length - 1]} are empty.`;
+        const empty = listed.charAt(0).toUpperCase() + listed.slice(1);
+        openRig(
+          next,
+          tool,
+          `Opened ${shelfPick.label} at ${width}×${height}. The whole picture is on the ${body}. ${empty}${steel}${copies} Save layers writes public/assets/units/rigs/${id}.`,
+        );
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  }, [grain, openRig, shelfPick, startFresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -476,12 +713,14 @@ export function FrameEditor() {
     }
     const width = rig.width;
     const height = rig.height;
-    canvas.width = width * zoom;
-    canvas.height = height * zoom;
+    const scale = zoom < 1 ? 1 : zoom;
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    ctx.imageSmoothingEnabled = false;
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         ctx.fillStyle = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? "#3a332e" : "#2f2925";
-        ctx.fillRect(x * zoom, y * zoom, zoom, zoom);
+        ctx.fillRect(x * scale, y * scale, scale, scale);
       }
     }
     if (!frame || !shownFrame) {
@@ -501,21 +740,21 @@ export function FrameEditor() {
         }
         ctx.globalAlpha = source === rgba ? 1 : 0.3;
         ctx.fillStyle = `rgb(${source[offset]},${source[offset + 1]},${source[offset + 2]})`;
-        ctx.fillRect(x * zoom, y * zoom, zoom, zoom);
+        ctx.fillRect(x * scale, y * scale, scale, scale);
       }
     }
     ctx.globalAlpha = 1;
-    if (zoom >= 6) {
+    if (scale >= 6) {
       ctx.strokeStyle = "rgba(28, 25, 23, 0.35)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = 0; x <= width; x += 1) {
-        ctx.moveTo(x * zoom + 0.5, 0);
-        ctx.lineTo(x * zoom + 0.5, height * zoom);
+        ctx.moveTo(x * scale + 0.5, 0);
+        ctx.lineTo(x * scale + 0.5, height * scale);
       }
       for (let y = 0; y <= height; y += 1) {
-        ctx.moveTo(0, y * zoom + 0.5);
-        ctx.lineTo(width * zoom, y * zoom + 0.5);
+        ctx.moveTo(0, y * scale + 0.5);
+        ctx.lineTo(width * scale, y * scale + 0.5);
       }
       ctx.stroke();
     }
@@ -529,11 +768,11 @@ export function FrameEditor() {
           const filled = (painted[y * width + x] ?? 0) !== 0;
           if (inside && !filled) {
             ctx.fillStyle = "rgba(221, 207, 153, 0.45)";
-            ctx.fillRect(x * zoom, y * zoom, zoom, zoom);
+            ctx.fillRect(x * scale, y * scale, scale, scale);
           } else if (!inside && filled) {
             ctx.strokeStyle = MILITARY.crimson;
             ctx.lineWidth = 2;
-            ctx.strokeRect(x * zoom + 1, y * zoom + 1, zoom - 2, zoom - 2);
+            ctx.strokeRect(x * scale + 1, y * scale + 1, Math.max(1, scale - 2), Math.max(1, scale - 2));
           }
         }
       }
@@ -541,17 +780,20 @@ export function FrameEditor() {
     const cross = (x: number, y: number, colour: string) => {
       ctx.strokeStyle = colour;
       ctx.lineWidth = 2;
-      ctx.strokeRect(x * zoom + 1, y * zoom + 1, zoom - 2, zoom - 2);
+      const mark = Math.max(1, scale - 2);
+      ctx.strokeRect(x * scale + 1, y * scale + 1, mark, mark);
       ctx.beginPath();
-      ctx.moveTo((x - 1) * zoom, (y + 0.5) * zoom);
-      ctx.lineTo((x + 2) * zoom, (y + 0.5) * zoom);
-      ctx.moveTo((x + 0.5) * zoom, (y - 1) * zoom);
-      ctx.lineTo((x + 0.5) * zoom, (y + 2) * zoom);
+      ctx.moveTo((x - 1) * scale, (y + 0.5) * scale);
+      ctx.lineTo((x + 2) * scale, (y + 0.5) * scale);
+      ctx.moveTo((x + 0.5) * scale, (y - 1) * scale);
+      ctx.lineTo((x + 0.5) * scale, (y + 2) * scale);
       ctx.stroke();
     };
     cross(rig.feet.x, rig.feet.y, MILITARY.cream);
-    if (shownFrame.muzzle) {
-      cross(shownFrame.muzzle.x, shownFrame.muzzle.y, MILITARY.crimson);
+    if (frame) {
+      for (const muzzle of frameMuzzles(rig, frame)) {
+        cross(muzzle.x, muzzle.y, MILITARY.crimson);
+      }
     }
   }, [rig, dimOthers, frame, shownFrame, layer, lut, showOutline, zoom]);
 
@@ -567,8 +809,12 @@ export function FrameEditor() {
         return;
       }
       if (event.key === "[" || event.key === "]") {
-        const step = event.key === "]" ? 1 : LAYER_ORDER.length - 1;
-        setLayer((current) => LAYER_ORDER[(LAYER_ORDER.indexOf(current) + step) % LAYER_ORDER.length] ?? current);
+        const order = editorSchemeForRig(rig?.unitId ?? "jap_infantry").layers.map((item) => item.id);
+        const step = event.key === "]" ? 1 : order.length - 1;
+        setLayer((current) => {
+          const at = order.indexOf(current);
+          return order[(at < 0 ? 0 : at + step) % order.length] ?? current;
+        });
         return;
       }
       const moves: Record<string, [number, number]> = {
@@ -590,14 +836,18 @@ export function FrameEditor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edit, editFrame, layer, undo]);
+  }, [edit, editFrame, layer, rig?.unitId, undo]);
 
   const cellAt = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const scale = rect.width / event.currentTarget.width;
+    const width = rigRef.current?.width ?? 1;
+    const height = rigRef.current?.height ?? 1;
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { x: -1, y: -1 };
+    }
     return {
-      x: Math.floor((event.clientX - rect.left) / scale / zoom),
-      y: Math.floor((event.clientY - rect.top) / scale / zoom),
+      x: Math.floor(((event.clientX - rect.left) / rect.width) * width),
+      y: Math.floor(((event.clientY - rect.top) / rect.height) * height),
     };
   };
 
@@ -614,7 +864,7 @@ export function FrameEditor() {
         if (found !== 0) {
           setSlot(found);
           setLayer(name);
-          setNote(`Picked ${SLOT_LABELS[found]} on the ${LAYER_NAME[name]} layer.`);
+          setNote(`Picked ${SLOT_LABELS[found]} on the ${editorLayerLabel(rigRef.current?.unitId ?? "", name)} layer.`);
           return;
         }
       }
@@ -622,18 +872,36 @@ export function FrameEditor() {
     }
     let next = current;
     if (tool === "pencil") {
-      next = paintPart(current, target, layer, x, y, slot);
+      next = paintBrush(current, target, layer, x, y, slot, pencilSize);
+    } else if (tool === "fill" && first) {
+      const partX = x - target.move[layer].x;
+      const partY = y - target.move[layer].y;
+      const onPart = partX >= 0 && partY >= 0 && partX < current.width && partY < current.height;
+      next = onPart ? fillPart(current, target, layer, x, y, slot) : current;
+      if (onPart) {
+        setNote(
+          next === current
+            ? `That square is already ${SLOT_LABELS[slot]}.`
+            : `Filled the connected squares on “${wornPart(current, layer).name}”, pose ${target.pose}. Ctrl+Z takes it back.`,
+        );
+      }
     } else if (tool === "eraser") {
       next = erasePart(current, target, x, y);
     } else if (tool === "feet" && first) {
       next = current.feet.x === x && current.feet.y === y ? current : { ...current, feet: { x, y } };
     } else if (tool === "muzzle" && first) {
-      next = withRigFrame(current, clip, frameIndex, {
-        ...target,
-        muzzle: { x: x - target.move.weapon.x, y: y - target.move.weapon.y },
-      });
+      const muzzleLayer = current.muzzleLayer ?? editorSchemeForRig(current.unitId).muzzle;
+      const before = muzzlePoints(target).length;
+      next = withRigFrame(current, clip, frameIndex, toggleMuzzle(target, muzzleLayer, x, y));
+      const after = next.clips[clip][frameIndex];
+      const count = after ? muzzlePoints(after).length : 0;
+      setNote(
+        count < before
+          ? `Took the muzzle off ${x}, ${y}. ${count} left on this frame.`
+          : `Muzzle at ${x}, ${y}. ${count} on this frame. Click a muzzle again to take it off.`,
+      );
     } else if (tool === "stamp" && first && stampBitmap) {
-      next = stampFramePart(current, target, layer, stampBitmap, x, y, onlySprite);
+      next = stampFramePart(current, target, layer, stampBitmap, x, y, onlySprite, frameSlotsFor(emblemId));
       setNote(
         next === current
           ? onlySprite
@@ -663,22 +931,83 @@ export function FrameEditor() {
     }
     strokeRef.current = true;
     strokeSavedRef.current = false;
-    const { x, y } = cellAt(event);
-    applyTool(x, y, true, event.altKey);
+    const point = cellAt(event);
+    if (tool === "box" && rig) {
+      dragStart.current = point;
+      const target = rig.clips[clip][frameIndex];
+      const mask = rectMask(rig.width, rig.height, point, point);
+      setSelection(target ? paintedSelection(resolveFrame(rig, target), mask) : mask);
+      return;
+    }
+    if (tool === "lasso" && rig) {
+      lassoPoints.current = [point];
+      const target = rig.clips[clip][frameIndex];
+      const mask = polygonMask(rig.width, rig.height, lassoPoints.current);
+      setSelection(target ? paintedSelection(resolveFrame(rig, target), mask) : mask);
+      return;
+    }
+    if (tool === "drag") {
+      const target = rig?.clips[clip][frameIndex];
+      if (target) {
+        dragLayerRef.current = { x: point.x, y: point.y, mx: target.move[layer].x, my: target.move[layer].y };
+      }
+      return;
+    }
+    applyTool(point.x, point.y, true, event.altKey);
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const { x, y } = cellAt(event);
-    const inside = rig !== null && x >= 0 && y >= 0 && x < rig.width && y < rig.height;
-    setCursor((seen) => (!inside ? null : seen && seen.x === x && seen.y === y ? seen : { x, y }));
-    if (!strokeRef.current || (tool !== "pencil" && tool !== "eraser") || event.altKey) {
+    const point = cellAt(event);
+    const inside = rig !== null && point.x >= 0 && point.y >= 0 && point.x < rig.width && point.y < rig.height;
+    setCursor((seen) => (!inside ? null : seen && seen.x === point.x && seen.y === point.y ? seen : point));
+    if (!strokeRef.current || !rig) {
       return;
     }
-    applyTool(x, y, false, false);
+    if (tool === "box" && dragStart.current) {
+      const target = rig.clips[clip][frameIndex];
+      const mask = rectMask(rig.width, rig.height, dragStart.current, point);
+      setSelection(target ? paintedSelection(resolveFrame(rig, target), mask) : mask);
+      return;
+    }
+    if (tool === "lasso") {
+      const last = lassoPoints.current[lassoPoints.current.length - 1];
+      if (!last || last.x !== point.x || last.y !== point.y) {
+        lassoPoints.current = [...lassoPoints.current, point];
+        const target = rig.clips[clip][frameIndex];
+        const mask = polygonMask(rig.width, rig.height, lassoPoints.current);
+        setSelection(target ? paintedSelection(resolveFrame(rig, target), mask) : mask);
+      }
+      return;
+    }
+    if (tool === "drag" && dragLayerRef.current) {
+      const origin = dragLayerRef.current;
+      const dx = point.x - origin.x;
+      const dy = point.y - origin.y;
+      const current = rigRef.current;
+      const target = current?.clips[clip][frameIndex];
+      if (!current || !target) {
+        return;
+      }
+      const moved = { ...target.move[layer], x: origin.mx + dx, y: origin.my + dy };
+      if (target.move[layer].x === moved.x && target.move[layer].y === moved.y) {
+        return;
+      }
+      if (!strokeSavedRef.current) {
+        remember();
+        strokeSavedRef.current = true;
+      }
+      setRig(withRigFrame(current, clip, frameIndex, { ...target, move: { ...target.move, [layer]: moved } }));
+      return;
+    }
+    if ((tool !== "pencil" && tool !== "eraser") || event.altKey) {
+      return;
+    }
+    applyTool(point.x, point.y, false, false);
   };
 
   const endStroke = () => {
     strokeRef.current = false;
+    dragLayerRef.current = null;
   };
 
   const leaveCanvas = () => {
@@ -692,7 +1021,7 @@ export function FrameEditor() {
         ? CLIP_KEYS.flatMap((key) =>
             rig.clips[key].map((_, at) => ({
               value: `${key}:${at}`,
-              label: `${CLIP_LABEL[key]} ${at}`,
+              label: `${clipTitle(key, isVehicleClipSet(rig.clips))} ${at}`,
             })),
           )
         : [],
@@ -710,7 +1039,7 @@ export function FrameEditor() {
     commit(withClip(current, clip, list));
     setIndex(at);
     setPlaying(false);
-    setNote(`${label} is ${CLIP_LABEL[clip]} ${at}.`);
+    setNote(`${label} is ${clipTitle(clip, isVehicleClipSet(current.clips))} ${at}.`);
   };
 
   const addCopy = () => {
@@ -721,7 +1050,7 @@ export function FrameEditor() {
     const [key, at] = addFrom.split(":") as [ClipKey, string];
     const source = current.clips[key]?.[Number(at)];
     if (source) {
-      insertFrame({ ...source, move: { ...source.move } }, `A copy of ${CLIP_LABEL[key]} ${at}`);
+      insertFrame({ ...source, move: { ...source.move } }, `A copy of ${clipTitle(key, isVehicleClipSet(current.clips))} ${at}`);
     }
   };
 
@@ -733,7 +1062,7 @@ export function FrameEditor() {
     const list = current.clips[clip].filter((_, at) => at !== frameIndex);
     commit(withClip(current, clip, list));
     setIndex(Math.max(0, frameIndex - 1));
-    setNote(`Deleted ${CLIP_LABEL[clip]} ${frameIndex}. Ctrl+Z brings it back.`);
+    setNote(`Deleted ${clipTitle(clip, isVehicleClipSet(current.clips))} ${frameIndex}. Ctrl+Z brings it back.`);
   };
 
   const moveFrame = (step: number) => {
@@ -753,7 +1082,17 @@ export function FrameEditor() {
     const url = URL.createObjectURL(file);
     try {
       const image = await loadImage(url);
-      use(imageRgba(image), image.naturalWidth, image.naturalHeight);
+      let rgba = imageRgba(image);
+      let width = image.naturalWidth;
+      let height = image.naturalHeight;
+      const block = resolveGrainBlock(detectPixelBlockSize(rgba, width, height), grain);
+      if (block > 1) {
+        const native = deupscaleToNativeArtPixels(rgba, width, height, block);
+        rgba = native.rgba;
+        width = native.width;
+        height = native.height;
+      }
+      use(rgba, width, height);
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
@@ -764,7 +1103,7 @@ export function FrameEditor() {
   const openOntoLayer = (file: File) =>
     readPicture(file, (rgba, width, height) => {
       edit((current, target) => placePicture(current, target, layer, rgba, width, height));
-      setNote(`Put ${file.name} on this pose of the ${LAYER_NAME[layer].toLowerCase()} part. Ctrl+Z takes it off.`);
+      setNote(`Put ${file.name} on this pose of the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part. Ctrl+Z takes it off.`);
     });
 
   const newPartFromPicture = (file: File) =>
@@ -787,6 +1126,184 @@ export function FrameEditor() {
         setNote(error instanceof Error ? error.message : String(error));
       }
     });
+
+  const paintSteelSelection = (stripes: boolean) => {
+    const current = rigRef.current;
+    const target = current?.clips[clip][frameIndex];
+    if (!current || !target || !selection || maskCount(selection) === 0) {
+      setNote("Draw a box or a lasso first.");
+      return;
+    }
+    try {
+      const next = paintSteel(current, target, layer, selection, stripes);
+      if (next === current) {
+        setNote(`No ink on the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} in the selection.`);
+        return;
+      }
+      commit(next);
+      setNote(
+        stripes
+          ? `Every other column of the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} in the selection is gun metal. Build animation steps it.`
+          : `The ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} ink in the selection is gun metal. Build animation steps it.`,
+      );
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const buildFromPose = () => {
+    const current = rigRef.current;
+    const target = current?.clips[clip][frameIndex];
+    if (!current || !target) {
+      return;
+    }
+    const name = editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase();
+    const moving = clipTitle("walk", isVehicleClipSet(current.clips));
+    if (
+      !window.confirm(
+        `Replace ${moving} and Firing from this pose? Idle stays. The first walk frame steps the gun metal on the ${name}. Ctrl+Z brings the old clips back.`,
+      )
+    ) {
+      return;
+    }
+    commit(buildMotion(current, target, { bob, recoil, stride, along, links: layer }));
+    setClip("walk");
+    setIndex(0);
+    setPlaying(false);
+    setNote(
+      `${moving} is two frames and Firing is the shot. Gun metal on the ${name} steps ${Math.max(1, Math.floor(stride))} pixel${stride === 1 ? "" : "s"} ${along === "x" ? "along the tread" : "toward the wingtip"}.`,
+    );
+  };
+
+  const sendSelection = () => {
+    const current = rigRef.current;
+    if (!current || !selection || maskCount(selection) === 0) {
+      setNote("Draw a box or a lasso first.");
+      return;
+    }
+    try {
+      const source = idleSource(current);
+      const sent = sendShownToLayer(current, source, selection, layer, heal);
+      if (sent.moved === 0) {
+        setNote("What shows in the selection is already on this layer.");
+        return;
+      }
+      commit(feedIdleCopies(current, sent.rig));
+      setNote(
+        `Moved ${sent.moved} pixel${sent.moved === 1 ? "" : "s"} from Idle 0 onto the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()}. Every frame that still shows that picture follows. Ctrl+Z puts them back.`,
+      );
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const claimLayer = () => {
+    const current = rigRef.current;
+    if (!current) {
+      return;
+    }
+    const name = editorLayerLabel(current.unitId, layer).toLowerCase();
+    try {
+      const source = idleSource(current);
+      const sent = claimUnselected(current, source, layer, selection, editorSchemeForRig(current.unitId).picture);
+      if (sent.moved === 0) {
+        setNote(`Nothing left on the sprite to put on the ${name}.`);
+        return;
+      }
+      commit(feedIdleCopies(current, sent.rig));
+      setNote(
+        `The ${name} took ${sent.moved} pixel${sent.moved === 1 ? "" : "s"} from Idle 0. Every frame that still shows that picture follows. Ctrl+Z puts them back.`,
+      );
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const fillWithinLayer = () => {
+    const current = rigRef.current;
+    const target = current?.clips[clip][frameIndex];
+    if (!current || !target) {
+      return;
+    }
+    const name = editorLayerLabel(current.unitId, layer).toLowerCase();
+    const next = fillLayerInk(current, target, layer, slot);
+    if (next === current) {
+      setNote(`The ${name} has no pixels to fill.`);
+      return;
+    }
+    commit(next);
+    setNote(
+      layer === "legs" || layer === "torso"
+        ? `Filled the ${name} inside its outline with ${SLOT_LABELS[slot]}.`
+        : `Filled every pixel of the ${name} with ${SLOT_LABELS[slot]}.`,
+    );
+  };
+
+  const downloadRig = () => {
+    const current = rigRef.current;
+    if (!current) {
+      return;
+    }
+    const blob = new Blob([JSON.stringify(rigBundle(current))], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${current.unitId}.rig.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setNote(`Downloaded ${current.unitId}.rig.json. Open rig file reads it back.`);
+  };
+
+  const openRigFile = async (file: File) => {
+    try {
+      const opened = rigFromBundle(JSON.parse(await file.text()));
+      undoRef.current = [];
+      setRig(opened);
+      setIndex(0);
+      setSelection(null);
+      setNote(`Opened ${file.name}. ${opened.width}×${opened.height}, ${opened.parts.length} parts.`);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const dropPicture = (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    if (file.name.toLowerCase().endsWith(".json")) {
+      void openRigFile(file);
+      return;
+    }
+    readPicture(file, (rgba, width, height) => {
+      const current = rigRef.current;
+      if (!current) {
+        return;
+      }
+      if (width === current.width && height === current.height) {
+        edit((next, target) => placePicture(next, target, layer, rgba, width, height));
+        setNote(`Put ${file.name} on this pose of the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part. Ctrl+Z takes it off.`);
+        return;
+      }
+      try {
+        const name = partName.trim() || file.name.replace(/\.png$/i, "");
+        const next = partFromPicture(current, layer, name, rgba, width, height);
+        commit(next);
+        setPartName("");
+        setNote(
+          width === current.width
+            ? `“${wornPart(next, layer).name}” is one drawing, placed on all ${current.poses} poses by the skeleton.`
+            : `“${wornPart(next, layer).name}” has its own drawing for each of the ${current.poses} poses.`,
+        );
+      } catch (error) {
+        setNote(
+          error instanceof Error
+            ? error.message
+            : `${file.name} is ${width}×${height}. This frame is ${current.width}×${current.height}.`,
+        );
+      }
+    });
+  };
 
   const copyWornPart = () => {
     const current = rigRef.current;
@@ -821,7 +1338,7 @@ export function FrameEditor() {
       const next = removePart(current, gone.id);
       commit(next);
       setNote(
-        `Took “${gone.name}” out of the parts. The ${LAYER_NAME[layer].toLowerCase()} now wears “${wornPart(next, layer).name}”. Ctrl+Z brings it back.`,
+        `Took “${gone.name}” out of the parts. The ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} now wears “${wornPart(next, layer).name}”. Ctrl+Z brings it back.`,
       );
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
@@ -856,7 +1373,7 @@ export function FrameEditor() {
     if (isColourSet(build.colours)) {
       setFaction(build.colours);
     }
-    const gaps = buildGaps(current, build).map((name) => LAYER_NAME[name].toLowerCase());
+    const gaps = buildGaps(current, build).map((name) => editorLayerLabel(rigRef.current?.unitId ?? "", name).toLowerCase());
     setNote(
       gaps.length === 0
         ? `Wearing “${build.name}” in every frame of every clip.`
@@ -864,18 +1381,28 @@ export function FrameEditor() {
     );
   };
 
-  const saveCurrentBuild = () => {
+  const saveLayerCopy = () => {
     const current = rigRef.current;
     if (!current) {
       return;
     }
+    const name = buildName.trim();
+    if (name.length === 0) {
+      setNote("Type a name for the copy first.");
+      return;
+    }
     try {
-      const existed = current.builds.some((build) => build.name.toLowerCase() === buildName.trim().toLowerCase());
-      commit(saveBuild(current, buildName, faction));
-      setNote(
-        `${existed ? "Saved over" : "Saved"} the build “${buildName.trim()}”: these four parts in the ${faction === "SHEET" ? "sheet's own" : FACTION_PRESET_LABEL[faction]} colours. Save writes it to disk.`,
-      );
+      const existed = current.builds.some((build) => build.name.toLowerCase() === name.toLowerCase());
+      const next = saveBuild(current, name, faction);
+      const stored = next.builds.find((build) => build.name.toLowerCase() === name.toLowerCase());
+      commit(next);
       setBuildName("");
+      const label = stored?.name ?? name;
+      void save(
+        existed
+          ? `Saved over the copy “${label}”. This sprite still has these layers, and loading it again keeps the copy.`
+          : `Saved a copy called “${label}”. This sprite still has these layers, and loading it again keeps the copy.`,
+      );
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     }
@@ -888,7 +1415,7 @@ export function FrameEditor() {
       return;
     }
     commit(removeBuild(current, id));
-    setNote(`Deleted the build “${build.name}”. Its parts stay in the library. Ctrl+Z brings it back.`);
+    setNote(`Deleted the copy “${build.name}”. This sprite keeps the layers it has now. Ctrl+Z brings the copy back.`);
   };
 
   /** Post one picture and its mask to the dev server. A dry run asks the price and spends nothing. */
@@ -1031,14 +1558,14 @@ export function FrameEditor() {
       setLayer(candidate.layer);
       setCandidates((list) => list.filter((item) => item.key !== candidate.key));
       setNote(
-        `“${wornPart(next, candidate.layer).name}” is in the parts and the ${LAYER_NAME[candidate.layer].toLowerCase()} is wearing it. Save writes it to disk.`,
+        `“${wornPart(next, candidate.layer).name}” is in the parts and the ${editorLayerLabel(rigRef.current?.unitId ?? "", candidate.layer).toLowerCase()} is wearing it. Save writes it to disk.`,
       );
     } catch (error) {
       setGenNote(error instanceof Error ? error.message : String(error));
     }
   };
 
-  const save = async () => {
+  const save = async (done?: string) => {
     const current = rigRef.current;
     if (!current) {
       return;
@@ -1066,7 +1593,7 @@ export function FrameEditor() {
       if (!response.ok || json.ok === false) {
         throw new Error(json.error || `Saving failed (${response.status}).`);
       }
-      setNote(`Saved ${json.parts} parts and ${json.frames} frame pictures to ${json.path}.`);
+      setNote(done ?? `Saved the layers on ${current.unitId}. Loading this sprite again opens them.`);
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1076,7 +1603,7 @@ export function FrameEditor() {
 
   if (!rig) {
     return (
-      <section className="frame-editor" aria-label="Frame editor">
+      <section className="frame-editor" aria-label="Sprite editor">
         <style>{FRAME_EDITOR_CSS}</style>
         <p className="frame-editor-note">{note}</p>
       </section>
@@ -1087,16 +1614,63 @@ export function FrameEditor() {
   const fitAll = worn ? outlineFit(rig, worn) : null;
   const sharing = frame ? framesOnPose(rig, frame.pose) : [];
   const savedBuild = wornBuild(rig, faction);
+  const scheme = editorSchemeForRig(rig.unitId);
+  const shownLayers = scheme.layers.map((item) => item.id);
+  const infantryScheme = scheme.layers.length === 4;
+  const sheetLayers = shownLayers.filter((id) => sheetOn.includes(id));
+
+  const downloadPurple = async (which: "all" | "picked") => {
+    const current = rigRef.current;
+    if (!current) {
+      return;
+    }
+    const picked = which === "all" ? shownLayers : sheetLayers;
+    const clipFrames = current.clips[clip];
+    if (picked.length === 0 || clipFrames.length === 0) {
+      return;
+    }
+    const sheet = purpleSheet(
+      clipFrames.map((item) => resolveFrame(current, item)),
+      picked,
+      lut,
+      { flash: which === "all" },
+    );
+    const url = URL.createObjectURL(await pngBlob(sheet.rgba, sheet.width, sheet.height));
+    const link = document.createElement("a");
+    link.href = url;
+    const names = picked.map((id) => editorLayerLabel(current.unitId, id).toLowerCase().replace(/\s+/g, "_"));
+    link.download = which === "all" ? `${current.unitId}_${clip}_purple.png` : `${current.unitId}_${clip}_purple_${names.join("-")}.png`;
+    link.click();
+    URL.revokeObjectURL(url);
+    const frameWord = clipFrames.length === 1 ? "frame" : "frames";
+    setNote(
+      which === "all"
+        ? `Downloaded ${titleFor(clip)} as a ${sheet.width}×${sheet.height} magenta sheet, ${clipFrames.length} ${frameWord}. The 16 colours sit under the grid.`
+        : `Downloaded ${titleFor(clip)} with ${names.join(", ").replace(/_/g, " ")} as a ${sheet.width}×${sheet.height} magenta sheet. Everything else is magenta.`,
+    );
+  };
 
   return (
-    <section className="frame-editor" aria-label="Frame editor">
+    <section className="frame-editor" aria-label="Sprite editor">
       <style>{FRAME_EDITOR_CSS}</style>
       <header className="frame-editor-head">
-        <h2>Frame editor</h2>
+        <h2>Sprite editor</h2>
+        <button
+          type="button"
+          disabled={!shelfPick}
+          onClick={() => void loadShelf()}
+          title={
+            shelfPick
+              ? `Open ${shelfPick.label} at its own pixel size. The picture sits on the torso. Save writes a new rig folder.`
+              : "Pick a unit on the shelf first."
+          }
+        >
+          {shelfPick ? `Load ${shelfPick.label.split(",")[0]}` : "Load a sprite"}
+        </button>
         <label>
           Colours
           <select value={faction} onChange={(event) => setFaction(event.target.value as ColourSet)}>
-            <option value="SHEET">As drawn (jap_walk.png)</option>
+            <option value="SHEET">{rig.unitId === UNIT_ID ? "As drawn (jap_walk.png)" : "As drawn"}</option>
             {FACTIONS.map((id) => (
               <option key={id} value={id}>
                 {FACTION_PRESET_LABEL[id]}
@@ -1104,22 +1678,32 @@ export function FrameEditor() {
             ))}
           </select>
         </label>
-        <label>
-          Zoom
-          <select value={zoom} onChange={(event) => setZoom(Number(event.target.value))}>
-            {FRAME_ZOOMS.map((value) => (
-              <option key={value} value={value}>
-                {value}×
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="frame-editor-zoom" role="group" aria-label="Zoom">
+          {FRAME_ZOOMS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={zoom === value}
+              title={`${zoomLabel(value)} on the frame's own pixels.`}
+              onClick={() => setZoom(value)}
+            >
+              {zoomLabel(value)}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setZoom(viewFrameZoom(rig.width, rig.height, editorZoomBox(canvasHostRef.current)))}
+            title="Fit the whole sprite in the editor."
+          >
+            Fit
+          </button>
+        </div>
         {import.meta.env.DEV && (
           <button
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            title={`Write the rig, every part and a picture of every frame to public${RIG_URL}. Part pictures use the sheet's colours. jap_walk.png is never written.`}
+            title={`Write the rig, every part and a picture of every frame to public/assets/units/rigs/${rig.unitId}. Part pictures use the sheet's colours. jap_walk.png is never written.`}
           >
             {busy ? "Saving…" : "Save"}
           </button>
@@ -1139,10 +1723,33 @@ export function FrameEditor() {
         >
           Start again from the walk sheet
         </button>
+        <button
+          type="button"
+          onClick={downloadRig}
+          title="Download this rig and every part as one JSON file. Open rig file reads it back. Save still writes the project files."
+        >
+          Download rig
+        </button>
+        <button type="button" onClick={() => rigFileRef.current?.click()} title="Open a rig JSON from Download rig.">
+          Open rig file
+        </button>
+        <input
+          ref={rigFileRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) {
+              void openRigFile(file);
+            }
+          }}
+        />
       </header>
 
       <div className="frame-editor-clips" role="tablist" aria-label="Clips">
-        {CLIP_KEYS.map((key) => (
+        {clipTabs.map((key) => (
           <button
             key={key}
             type="button"
@@ -1154,18 +1761,18 @@ export function FrameEditor() {
               setTick(0);
             }}
           >
-            {CLIP_LABEL[key]} <small>{rig.clips[key].length}</small>
+            {titleFor(key)} <small>{rig.clips[key].length}</small>
           </button>
         ))}
       </div>
 
-      <div className="frame-editor-strip" role="group" aria-label={`${CLIP_LABEL[clip]} frames`}>
+      <div className="frame-editor-strip" role="group" aria-label={`${titleFor(clip)} frames`}>
         {shown.map((item, at) => (
           <button
             key={at}
             type="button"
             aria-pressed={at === frameIndex}
-            aria-label={`${CLIP_LABEL[clip]} ${at}`}
+            aria-label={`${titleFor(clip)} ${at}`}
             onClick={() => {
               setIndex(at);
               setPlaying(false);
@@ -1179,6 +1786,43 @@ export function FrameEditor() {
         ))}
         {frames.length === 0 && <p className="frame-editor-note">No frames yet. Add one below.</p>}
       </div>
+
+      <div className="frame-editor-row frame-editor-parts" role="group" aria-label="Purple sheet">
+        <strong>Purple sheet</strong>
+        {scheme.layers.map((item) => (
+          <label key={item.id} className="frame-editor-check">
+            <input
+              type="checkbox"
+              checked={sheetOn.includes(item.id)}
+              onChange={() =>
+                setSheetOn((current) =>
+                  current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
+                )
+              }
+            />
+            {item.label}
+          </label>
+        ))}
+        <button
+          type="button"
+          disabled={frames.length === 0}
+          title="Download this clip, every layer, on magenta. The 16-colour palette is the row under the frames. Send that picture to Gemini."
+          onClick={() => void downloadPurple("all")}
+        >
+          Full sheet
+        </button>
+        <button
+          type="button"
+          disabled={frames.length === 0 || sheetLayers.length === 0}
+          title="Download this clip with only the ticked layers painted. The rest of each frame is magenta."
+          onClick={() => void downloadPurple("picked")}
+        >
+          Selected layers
+        </button>
+      </div>
+      <p className="frame-editor-note">
+        This clip, on magenta, with the 16 colours in a row underneath. Full sheet paints every layer. Selected layers paints only the ticked ones.
+      </p>
 
       <div className="frame-editor-row" role="group" aria-label="Frame actions">
         <label>
@@ -1194,19 +1838,27 @@ export function FrameEditor() {
         <button type="button" onClick={addCopy} title="Put that frame's pose and movement after the current frame in this clip.">
           Add frame
         </button>
+        {infantryScheme && (
+          <button
+            type="button"
+            disabled={!frame}
+            onClick={() => frame && insertFrame(breathFrame(frame), "A breath frame")}
+            title="Copy this frame with the head and torso moved one pixel up. The movement stays when a part is swapped."
+          >
+            Add breath frame
+          </button>
+        )}
         <button
           type="button"
           disabled={!frame}
-          onClick={() => frame && insertFrame(breathFrame(frame), "A breath frame")}
-          title="Copy this frame with the head and torso moved one pixel up. The movement stays when a part is swapped."
-        >
-          Add breath frame
-        </button>
-        <button
-          type="button"
-          disabled={!frame}
-          onClick={() => frame && insertFrame(shotFrame(frame), "A shot frame")}
-          title="Copy this frame with the weapon moved two pixels back and the muzzle flash on. The movement stays when a part is swapped."
+          onClick={() =>
+            frame &&
+            insertFrame(
+              { ...moveLayer(frame, scheme.muzzle, -2, 0), flash: true },
+              "A shot frame",
+            )
+          }
+          title={`Copy this frame with the ${editorLayerLabel(rig.unitId, scheme.muzzle).toLowerCase()} moved two pixels back and the muzzle flash on. The movement stays when a part is swapped.`}
         >
           Add shot frame
         </button>
@@ -1223,18 +1875,18 @@ export function FrameEditor() {
 
       <div className="frame-editor-row frame-editor-parts" role="group" aria-label="Parts">
         <strong>Parts</strong>
-        {LAYER_ORDER.map((name) => (
+        {shownLayers.map((name) => (
           <label key={name}>
-            {LAYER_NAME[name]}
+            {editorLayerLabel(rigRef.current?.unitId ?? "", name)}
             <select
-              aria-label={`${LAYER_NAME[name]} part`}
+              aria-label={`${editorLayerLabel(rigRef.current?.unitId ?? "", name)} part`}
               value={rig.wearing[name]}
-              title={`Swap the ${LAYER_NAME[name].toLowerCase()} in every frame of every clip.`}
+              title={`Swap the ${editorLayerLabel(rigRef.current?.unitId ?? "", name).toLowerCase()} in every frame of every clip.`}
               onChange={(event) => {
                 const next = wearPart(rig, name, event.target.value);
                 commit(next);
                 setLayer(name);
-                setNote(`The ${LAYER_NAME[name].toLowerCase()} now wears “${wornPart(next, name).name}” in every frame of every clip.`);
+                setNote(`The ${editorLayerLabel(rigRef.current?.unitId ?? "", name).toLowerCase()} now wears “${wornPart(next, name).name}” in every frame of every clip.`);
               }}
             >
               {partsOf(rig, name).map((part) => (
@@ -1247,17 +1899,40 @@ export function FrameEditor() {
         ))}
       </div>
 
-      <div className="frame-editor-row frame-editor-parts" role="group" aria-label="Builds">
-        <strong>Builds</strong>
+      <div className="frame-editor-row frame-editor-parts" role="group" aria-label="This sprite">
+        <strong>This sprite</strong>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+          title="Write these layers onto this sprite. Loading it again opens them."
+        >
+          Save layers
+        </button>
+        <input
+          type="text"
+          aria-label="Copy name"
+          placeholder="Name for a copy"
+          value={buildName}
+          onChange={(event) => setBuildName(event.target.value)}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={saveLayerCopy}
+          title="Keep these layers as a named copy, written with this sprite. The sprite stays as it is."
+        >
+          Save a copy
+        </button>
         <label>
-          Saved
+          Copies
           <select
-            aria-label="Saved build"
+            aria-label="Saved copy"
             value={savedBuild?.id ?? ""}
-            title="Put a saved build's four parts and colours on."
+            title="Put a copy's layers and colours on this sprite."
             onChange={(event) => putOnBuild(event.target.value)}
           >
-            <option value="">{rig.builds.length === 0 ? "None saved yet" : "Not a saved build"}</option>
+            <option value="">{rig.builds.length === 0 ? "No copies yet" : "This sprite"}</option>
             {rig.builds.map((build) => (
               <option key={build.id} value={build.id}>
                 {build.name}
@@ -1265,31 +1940,17 @@ export function FrameEditor() {
             ))}
           </select>
         </label>
-        <input
-          type="text"
-          aria-label="Build name"
-          placeholder="Name for this build"
-          value={buildName}
-          onChange={(event) => setBuildName(event.target.value)}
-        />
-        <button
-          type="button"
-          onClick={saveCurrentBuild}
-          title="Save the four parts being worn, and the colour set, under the name. A name already in use is saved over."
-        >
-          Save build
-        </button>
         <button
           type="button"
           disabled={!savedBuild}
           onClick={() => savedBuild && deleteBuild(savedBuild.id)}
-          title="Delete the saved build that is on now. Its parts stay in the library."
+          title="Delete the selected copy. The sprite keeps the layers it has now."
         >
-          Delete build
+          Delete copy
         </button>
       </div>
 
-      <div className="frame-editor-strip frame-editor-shelf" role="group" aria-label={`${LAYER_NAME[layer]} parts`}>
+      <div className="frame-editor-strip frame-editor-shelf" role="group" aria-label={`${editorLayerLabel(rigRef.current?.unitId ?? "", layer)} parts`}>
         {shelf.map(({ part, pixels }) => (
           <button
             key={part.id}
@@ -1298,7 +1959,7 @@ export function FrameEditor() {
             title={`Wear “${part.name}” in every frame of every clip.`}
             onClick={() => {
               commit(wearPart(rig, layer, part.id));
-              setNote(`The ${LAYER_NAME[layer].toLowerCase()} now wears “${part.name}” in every frame of every clip.`);
+              setNote(`The ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} now wears “${part.name}” in every frame of every clip.`);
             }}
           >
             <FrameThumb frame={pixels} lut={lut} />
@@ -1312,20 +1973,46 @@ export function FrameEditor() {
           <h3>Tool</h3>
           <div role="group" aria-label="Tools">
             {TOOLS.map((item) => (
-              <button key={item.id} type="button" aria-pressed={tool === item.id} title={item.help} onClick={() => setTool(item.id)}>
-                {item.label}
-              </button>
+              <Fragment key={item.id}>
+                <button type="button" aria-pressed={tool === item.id} title={item.help} onClick={() => setTool(item.id)}>
+                  {item.label}
+                </button>
+                {item.id === "fill" && (
+                  <button
+                    type="button"
+                    onClick={fillWithinLayer}
+                    title="Fill every painted pixel of this layer that sits inside its outline. A layer with no outline fills all of its pixels. Empty ground stays empty."
+                  >
+                    Fill within layer
+                  </button>
+                )}
+              </Fragment>
             ))}
           </div>
+          {tool === "pencil" && (
+            <div className="frame-editor-zoom" role="group" aria-label="Pencil size">
+              {PENCIL_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  aria-pressed={pencilSize === size}
+                  title={`The pencil covers a ${size}×${size} square.`}
+                  onClick={() => setPencilSize(size)}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          )}
           {tool === "stamp" && emblem && (
             <>
               <h3>Stamp</h3>
-              <label title="Which national emblem to stamp. It follows the colour set's country until you pick another.">
+              <label title="Which emblem or marking to stamp. A country's emblem is picked with the colour set until you choose another.">
                 Emblem
                 <select aria-label="Emblem" value={emblem.id} onChange={(event) => setEmblemId(event.target.value as EmblemId)}>
                   {EMBLEMS.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.faction}: {item.name}
+                      {item.kind === "marking" ? item.name : `${item.faction}: ${item.name}`}
                     </option>
                   ))}
                 </select>
@@ -1347,6 +2034,10 @@ export function FrameEditor() {
                 <input type="checkbox" checked={emblemFlip} onChange={(event) => setEmblemFlip(event.target.checked)} />
                 Flip left to right
               </label>
+              <label className="frame-editor-check" title="Turn the emblem a quarter turn, so a wide mark stands on its side.">
+                <input type="checkbox" checked={emblemTurn} onChange={(event) => setEmblemTurn(event.target.checked)} />
+                On its side
+              </label>
               <label
                 className="frame-editor-check"
                 title="Stamp only where the soldier already has a pixel on any layer of this frame. Turn it off to stamp on empty canvas."
@@ -1356,28 +2047,81 @@ export function FrameEditor() {
               </label>
               <p className="frame-editor-note">
                 The smallest emblem is {emblem.sizes[0]?.width}×{emblem.sizes[0]?.height}, already large on a {rig.width}×{rig.height} soldier.
-                It goes on the {LAYER_NAME[layer].toLowerCase()} part, so every frame on this pose shows it.
+                It goes on the {editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part, so every frame on this pose shows it.
               </p>
               <p className="frame-editor-note">
-                A frame holds the 13 soldier colours, and none is the emblem&apos;s crimson or cream. The red is painted as gear plum and the
-                white as skin tan, the same in every colour set.
+                {emblem.id === "jap_hinomaru_darker"
+                  ? "The disc is terracotta and the rim is tan, the Japan uniform colours. They are exact when the colour set is JAP Tan."
+                  : "A frame holds the 13 soldier colours, and none is the emblem's crimson or cream. The red is painted as gear plum and the white as skin tan, the same in every colour set."}
               </p>
+            </>
+          )}
+          {(tool === "box" || tool === "lasso" || (selection !== null && maskCount(selection) > 0)) && (
+            <>
+              <h3>Selection</h3>
+              <p className="frame-editor-note">{selection ? `${maskCount(selection)} pixels` : "Draw on the frame."}</p>
+              <label
+                className="frame-editor-check"
+                title="When a pixel is lifted onto a layer above, paint the layer it left with that part's usual colour so the body stays."
+              >
+                <input type="checkbox" checked={heal} onChange={(event) => setHeal(event.target.checked)} />
+                Fill the hole underneath
+              </label>
+              <button
+                type="button"
+                onClick={sendSelection}
+                title="Move the pixels that show inside the selection onto the picked layer."
+              >
+                Send to {editorLayerLabel(rigRef.current?.unitId ?? "", layer)}
+              </button>
+              {(steelTool === "soldier" || steelTool === "tread") && (
+                <button
+                  type="button"
+                  onClick={() => paintSteelSelection(true)}
+                  title="Turn every other column of this layer's ink in the selection into gun metal: link, gap, link, gap. Build animation steps those links."
+                >
+                  Make steel links
+                </button>
+              )}
+              {steelTool !== null && (
+                <button
+                  type="button"
+                  onClick={() => paintSteelSelection(false)}
+                  title={
+                    steelTool === "propeller"
+                      ? "Turn this layer's ink in the selection into gun metal. Build animation steps it toward the wingtip."
+                      : "Turn this layer's ink in the selection into gun metal. Use it for a wheel hub or a solid link."
+                  }
+                >
+                  All steel
+                </button>
+              )}
+              <button type="button" onClick={() => setSelection(null)} title="Drop the box or lasso. The drawing stays.">
+                Clear selection
+              </button>
             </>
           )}
           <h3>Layer</h3>
           <div role="group" aria-label="Layers">
-            {LAYER_ORDER.map((name) => (
+            {scheme.layers.map((item) => (
               <button
-                key={name}
+                key={item.id}
                 type="button"
-                aria-pressed={layer === name}
-                title="The pencil paints this layer's part. Arrow keys move the layer on this frame. Shift and an arrow key slide the drawing itself. [ and ] switch layers. The order never changes: legs, torso, head, weapon on top."
-                onClick={() => setLayer(name)}
+                aria-pressed={layer === item.id}
+                title={`The pencil paints the ${item.label.toLowerCase()}. Arrow keys move it on this frame. Shift and an arrow key slide the drawing. [ and ] switch layers. Underneath to on top: ${scheme.layers.map((layerItem) => layerItem.label).join(", ")}.`}
+                onClick={() => setLayer(item.id)}
               >
-                {LAYER_NAME[name]}
+                {item.label}
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={claimLayer}
+            title="Painted pixels still on the layer the picture was loaded onto move onto this layer. Pixels already on another layer stay. A selection keeps its pixels where they are. Empty ground is left alone."
+          >
+            Fill all unselected areas with this layer
+          </button>
           <label className="frame-editor-check">
             <input type="checkbox" checked={dimOthers} onChange={(event) => setDimOthers(event.target.checked)} />
             Fade other layers
@@ -1391,7 +2135,7 @@ export function FrameEditor() {
             />
             Muzzle flash
           </label>
-          <p className="frame-editor-note">{frame ? movementText(frame) : ""}</p>
+          <p className="frame-editor-note">{frame ? movementText(frame, (id) => editorLayerLabel(rig.unitId, id)) : ""}</p>
           <button
             type="button"
             disabled={!frame || clearMoves(frame) === frame}
@@ -1406,7 +2150,7 @@ export function FrameEditor() {
             onClick={() => {
               edit((current) => ownPose(current, clip, frameIndex));
               setNote(
-                `${CLIP_LABEL[clip]} ${frameIndex} has its own pose now. Painting it changes no other frame. Every part got a drawing for the new pose.`,
+                `${titleFor(clip)} ${frameIndex} has its own pose now. Painting it changes no other frame. Every part got a drawing for the new pose.`,
               );
             }}
             title="Give this frame a pose of its own, with its movement drawn in, so it can be repainted without changing the frames it was copied from."
@@ -1414,7 +2158,7 @@ export function FrameEditor() {
             Give this frame its own pose
           </button>
 
-          <h3>{LAYER_NAME[layer]} part</h3>
+          <h3>{editorLayerLabel(rigRef.current?.unitId ?? "", layer)} part</h3>
           <p className="frame-editor-note">{worn ? `“${worn.name}”` : ""}</p>
           <input
             type="text"
@@ -1433,7 +2177,7 @@ export function FrameEditor() {
           <button
             type="button"
             onClick={() => partFileRef.current?.click()}
-            title={`Make a ${LAYER_NAME[layer].toLowerCase()} part from a PNG. ${rig.width}×${rig.height} is one drawing, placed on every pose by the skeleton. ${rig.width * rig.poses}×${rig.height} is a strip with one drawing per pose.`}
+            title={`Make a ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part from a PNG. ${rig.width}×${rig.height} is one drawing, placed on every pose by the skeleton. ${rig.width * rig.poses}×${rig.height} is a strip with one drawing per pose.`}
           >
             New part from a picture
           </button>
@@ -1472,10 +2216,19 @@ export function FrameEditor() {
             type="button"
             disabled={!frame}
             onClick={() => layerFileRef.current?.click()}
-            title={`Open an ${rig.width}×${rig.height} PNG onto this pose of the worn ${LAYER_NAME[layer].toLowerCase()} part.`}
+            title={`Open an ${rig.width}×${rig.height} PNG onto this pose of the worn ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part.`}
           >
             Open a picture onto this pose
           </button>
+          <label title="A picture made of 2× or 3× blocks is collapsed to one pixel a block before it is placed. Auto reads the picture.">
+            Pixel grain
+            <select aria-label="Pixel grain" value={String(grain)} onChange={(event) => setGrain(event.target.value === "auto" ? "auto" : (Number(event.target.value) as GrainOverride))}>
+              <option value="auto">{autoGrainLabel(null)}</option>
+              <option value="1">1×, leave it</option>
+              <option value="2">2× blocks</option>
+              <option value="3">3× blocks</option>
+            </select>
+          </label>
           <input
             ref={layerFileRef}
             type="file"
@@ -1500,25 +2253,27 @@ export function FrameEditor() {
           >
             Use this drawing on every pose
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              const current = rigRef.current;
-              if (!current) {
-                return;
-              }
-              const next = fillTorsoUnderWeapon(current);
-              commit(next);
-              setNote(
-                next === current
-                  ? "The torso already runs under the weapon on every pose."
-                  : "Painted the torso under the weapon on every pose. Any weapon can sit over it now.",
-              );
-            }}
-            title="Paint the worn torso under the worn weapon on every pose, so a moved or swapped weapon leaves no hole."
-          >
-            Fill torso under weapon
-          </button>
+          {infantryScheme && (
+            <button
+              type="button"
+              onClick={() => {
+                const current = rigRef.current;
+                if (!current) {
+                  return;
+                }
+                const next = fillTorsoUnderWeapon(current);
+                commit(next);
+                setNote(
+                  next === current
+                    ? "The torso already runs under the weapon on every pose."
+                    : "Painted the torso under the weapon on every pose. Any weapon can sit over it now.",
+                );
+              }}
+              title="Paint the worn torso under the worn weapon on every pose, so a moved or swapped weapon leaves no hole."
+            >
+              Fill torso under weapon
+            </button>
+          )}
           {fit && fitAll && (
             <>
               <p className="frame-editor-note">
@@ -1553,7 +2308,7 @@ export function FrameEditor() {
                   setNote(
                     next === current
                       ? `The outline already follows “${wornPart(current, layer).name}” on every pose.`
-                      : `The ${LAYER_NAME[layer].toLowerCase()} outline now follows “${wornPart(current, layer).name}” on every pose. New ${LAYER_NAME[layer].toLowerCase()} parts are held to it.`,
+                      : `The ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} outline now follows “${wornPart(current, layer).name}” on every pose. New ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} parts are held to it.`,
                   );
                 }}
                 title="Take the skeleton's outline again from the worn part, on all poses. Use it after the walk itself has been cleaned up. A torso's outline also covers what the worn weapon hides."
@@ -1563,21 +2318,99 @@ export function FrameEditor() {
             </>
           )}
 
+          <h3>Motion</h3>
+          <label title="How far the other layers shift on the second walk frame and on the shot. Positive is down.">
+            Bob
+            <input
+              aria-label="Bob"
+              type="number"
+              value={bob}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                setBob(Number.isFinite(parsed) ? Math.trunc(parsed) : 0);
+              }}
+            />
+          </label>
+          <label title="How far the weapon kicks back on the shot. The torso takes half.">
+            Recoil
+            <input
+              aria-label="Recoil"
+              type="number"
+              min={0}
+              value={recoil}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                setRecoil(Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0);
+              }}
+            />
+          </label>
+          {steelTool !== null && (
+            <>
+              <label title="How far the gun metal steps on the first walk frame.">
+                Tread stride
+                <input
+                  aria-label="Tread stride"
+                  type="number"
+                  min={1}
+                  value={stride}
+                  onChange={(event) => setStride(Math.max(1, Math.trunc(Number(event.target.value)) || 1))}
+                />
+              </label>
+              <label title="Across a tread the links step sideways. Toward the wingtip, propeller dashes step down.">
+                Step
+                <select aria-label="Step" value={along} onChange={(event) => setAlong(event.target.value === "y" ? "y" : "x")}>
+                  <option value="x">Along the tread</option>
+                  <option value="y">Toward the wingtip</option>
+                </select>
+              </label>
+            </>
+          )}
+          <button
+            type="button"
+            disabled={!frame}
+            onClick={buildFromPose}
+            title={`Write ${titleFor("walk")} and Firing from this pose. The picked layer's gun metal steps on the first walk frame. Idle stays.`}
+          >
+            Build animation
+          </button>
+          <p className="frame-editor-note">
+            {steelTool === "propeller"
+              ? "Gun metal on the picked layer steps toward the wingtip. "
+              : steelTool === "tread"
+                ? "Gun metal on the picked layer steps along the tread. "
+                : steelTool === "soldier"
+                  ? `Gun metal on the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} steps. `
+                  : ""}
+            The other layers bob, then the weapon kicks back.
+          </p>
           <h3>Colour</h3>
           <SwatchPalette
             swatches={swatches}
             picked={slot}
             onPick={(value) => {
               setSlot(value);
-              setTool("pencil");
+              setTool((current) => (current === "fill" ? current : "pencil"));
             }}
           />
         </aside>
 
-        <div className="frame-editor-canvas">
+        <div
+          ref={canvasHostRef}
+          className={dropping ? "frame-editor-canvas frame-editor-drop" : "frame-editor-canvas"}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDropping(true);
+          }}
+          onDragLeave={() => setDropping(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDropping(false);
+            dropPicture(event.dataTransfer.files[0]);
+          }}
+        >
           <p className="frame-editor-bar">
             <span>
-              {rig.width} × {rig.height} pixels, the frame&apos;s own size
+              {rig.width} × {rig.height} pixels, the frame&apos;s own size. Drop a PNG or a rig file here.
             </span>
             <span>{cursor ? `${cursor.x}, ${cursor.y}` : "—, —"}</span>
           </p>
@@ -1585,7 +2418,7 @@ export function FrameEditor() {
             <div className="frame-editor-stage" style={{ width: rig.width * zoom, height: rig.height * zoom }}>
               <canvas
                 ref={canvasRef}
-                aria-label={`${CLIP_LABEL[clip]} ${frameIndex}, ${LAYER_NAME[layer]} layer`}
+                aria-label={`${titleFor(clip)} ${frameIndex}, ${editorLayerLabel(rigRef.current?.unitId ?? "", layer)} layer`}
                 style={{ width: rig.width * zoom, height: rig.height * zoom }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
@@ -1601,13 +2434,21 @@ export function FrameEditor() {
                 aria-hidden="true"
                 style={{ width: rig.width * zoom, height: rig.height * zoom }}
               />
+              <canvas
+                ref={selectRef}
+                className="frame-editor-select"
+                width={rig.width}
+                height={rig.height}
+                aria-hidden="true"
+                style={{ width: rig.width * zoom, height: rig.height * zoom }}
+              />
             </div>
           ) : (
-            <p className="frame-editor-note">Pick a frame, or add one to {CLIP_LABEL[clip]}.</p>
+            <p className="frame-editor-note">Pick a frame, or add one to {titleFor(clip)}.</p>
           )}
           {frame && worn && (
             <p className="frame-editor-note">
-              Painting changes “{worn.name}” on pose {frame.pose}. That pose shows on {describeFrames(sharing)}.
+              Painting changes “{worn.name}” on pose {frame.pose}. That pose shows on {describeFrames(sharing, titleFor)}.
             </p>
           )}
           <p className="frame-editor-note">{note}</p>
@@ -1632,14 +2473,14 @@ export function FrameEditor() {
             </label>
           </div>
           <p className="frame-editor-note">
-            The cream cross is the feet. The game stands them on the card's ground point. The red cross is the muzzle.
+            The cream cross is the feet. The game stands them on the card's ground point. The red crosses are the muzzles.
           </p>
         </figure>
       </div>
 
       {import.meta.env.DEV && (
         <section className="frame-editor-gen" aria-label="Generate a part">
-          <h3>Generate a {LAYER_NAME[layer].toLowerCase()} part</h3>
+          <h3>Generate a {editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()} part</h3>
           <p className="frame-editor-note">
             {GEN_HELP[layer](genRoom, genEach)} What comes back is matched to the 13 colours, so the words change the shape and the shading.
             The colour set changes the hue.
@@ -1651,7 +2492,7 @@ export function FrameEditor() {
                 type="text"
                 className="frame-editor-wide"
                 aria-label="What to draw"
-                placeholder={`Describe the ${LAYER_NAME[layer].toLowerCase()}`}
+                placeholder={`Describe the ${editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase()}`}
                 value={genPrompt}
                 onChange={(event) => setGenPrompt(event.target.value)}
               />
@@ -1737,7 +2578,7 @@ export function FrameEditor() {
                 <div key={candidate.key} className="frame-editor-candidate">
                   {pixels && <FrameThumb frame={pixels} lut={lut} />}
                   <small>
-                    {LAYER_NAME[candidate.layer]}: {candidate.name} · seed {candidate.seed}
+                    {editorLayerLabel(rigRef.current?.unitId ?? "", candidate.layer)}: {candidate.name} · seed {candidate.seed}
                   </small>
                   <button
                     type="button"
@@ -1769,6 +2610,8 @@ const FRAME_EDITOR_CSS = `
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   font: 13px/1.4 "Segoe UI", sans-serif;
   letter-spacing: 0;
 }
@@ -1856,6 +2699,20 @@ const FRAME_EDITOR_CSS = `
   gap: 6px;
   align-items: center;
 }
+.frame-editor-zoom {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.frame-editor-zoom button {
+  min-width: 36px;
+  padding: 4px 6px;
+}
+.frame-editor-zoom button[aria-pressed="true"] {
+  background: #ddcf99;
+  color: #1c1917;
+}
 .frame-editor-head, .frame-editor-row, .frame-editor-clips {
   display: flex;
   flex-wrap: wrap;
@@ -1901,6 +2758,13 @@ const FRAME_EDITOR_CSS = `
   align-items: flex-start;
   flex-wrap: wrap;
 }
+.frame-editor-canvas {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(560px, calc(100vh - 280px));
+  overflow: auto;
+}
 .frame-editor-tools {
   display: flex;
   flex-direction: column;
@@ -1925,12 +2789,16 @@ const FRAME_EDITOR_CSS = `
 .frame-editor-stage {
   position: relative;
 }
-.frame-editor-canvas canvas.frame-editor-stamp-preview {
+.frame-editor-canvas canvas.frame-editor-stamp-preview,
+.frame-editor-canvas canvas.frame-editor-select {
   position: absolute;
   inset: 0;
   pointer-events: none;
   box-shadow: none;
   cursor: auto;
+}
+.frame-editor-drop {
+  outline: 2px solid #ddcf99;
 }
 .frame-editor-bar {
   display: flex;

@@ -1,4 +1,5 @@
 import {
+  AS_DRAWN_LUT,
   CLIP_KEYS,
   CLIP_LABEL,
   LAYER_NAME,
@@ -31,8 +32,13 @@ export interface RigFrame {
   pose: number;
   move: LayerMoves;
   flash: boolean;
-  /** A hand-placed muzzle, before the weapon's movement. Null uses the tip of the barrel. */
+  /**
+   * Hand-placed muzzle, in the muzzle layer's own space, before that layer moves.
+   * Null on a soldier uses the tip of the weapon. The first of `muzzles` when there are several.
+   */
   muzzle: PixelPoint | null;
+  /** Every barrel tip, in the same space as `muzzle`. Absent on older frames, which have `muzzle` alone. */
+  muzzles?: PixelPoint[];
 }
 
 /** One soldier out of the library: a part for each layer and a colour set, under a name. */
@@ -60,6 +66,8 @@ export interface PartRig {
   clips: Record<ClipKey, RigFrame[]>;
   /** Saved choices of parts and colours, by name. */
   builds: RigBuild[];
+  /** The layer a muzzle mark follows. Absent means the weapon, as on the soldier. */
+  muzzleLayer?: PartCategory;
 }
 
 export interface RigFile {
@@ -77,6 +85,8 @@ export interface RigFile {
   clips: Record<ClipKey, RigFrame[]>;
   /** Files saved before builds existed have none. */
   builds?: RigBuild[];
+  /** Files saved before vehicle layers have none, and the muzzles follow the weapon. */
+  muzzleLayer?: PartCategory;
 }
 
 export interface PartFile {
@@ -251,18 +261,57 @@ function drawingOf(rig: PartRig, layer: PartCategory, pose: number): number[] {
   return wornPart(rig, layer).drawings[pose] ?? blank(rig);
 }
 
+/** The barrel tips stored on a frame. An older frame has only `muzzle`. */
+export function muzzlePoints(frame: RigFrame): PixelPoint[] {
+  if (frame.muzzles && frame.muzzles.length > 0) {
+    return frame.muzzles;
+  }
+  return frame.muzzle ? [frame.muzzle] : [];
+}
+
+/** Add a muzzle at this pixel, or take it off if one is already there. Points sit on `layer` and move with it. */
+export function toggleMuzzle(frame: RigFrame, layer: PartCategory, x: number, y: number): RigFrame {
+  const local = { x: x - frame.move[layer].x, y: y - frame.move[layer].y };
+  const current = muzzlePoints(frame);
+  const next = current.some((point) => point.x === local.x && point.y === local.y)
+    ? current.filter((point) => point.x !== local.x || point.y !== local.y)
+    : [...current, local];
+  const cleared: RigFrame = { ...frame, muzzle: next[0] ? { x: next[0].x, y: next[0].y } : null };
+  if (next.length === 0) {
+    delete cleared.muzzles;
+    return cleared;
+  }
+  cleared.muzzles = next.map((point) => ({ x: point.x, y: point.y }));
+  return cleared;
+}
+
+/** Where the muzzles show on this frame, after the muzzle layer has moved. */
+export function frameMuzzles(rig: PartRig, frame: RigFrame): PixelPoint[] {
+  const layer = rig.muzzleLayer ?? "weapon";
+  const stored = muzzlePoints(frame);
+  if (stored.length > 0) {
+    return stored.map((point) => ({ x: point.x + frame.move[layer].x, y: point.y + frame.move[layer].y }));
+  }
+  if (layer !== "weapon") {
+    return [];
+  }
+  const tip = tipOf(drawingOf(rig, "weapon", frame.pose), rig.width, rig.height);
+  return tip ? [{ x: tip.x + frame.move.weapon.x, y: tip.y + frame.move.weapon.y }] : [];
+}
+
 /** Turn a frame into pixels: each worn part's drawing for the pose, moved by the frame's movement. */
 export function resolveFrame(rig: PartRig, frame: RigFrame): SpriteFrame {
   const layers = {} as Record<PartCategory, number[]>;
   for (const layer of LAYER_ORDER) {
     layers[layer] = shiftCells(drawingOf(rig, layer, frame.pose), rig.width, rig.height, frame.move[layer].x, frame.move[layer].y);
   }
-  const tip = frame.muzzle ?? tipOf(drawingOf(rig, "weapon", frame.pose), rig.width, rig.height);
+  const tips = frameMuzzles(rig, frame);
   return {
     width: rig.width,
     height: rig.height,
     layers,
-    muzzle: tip ? { x: tip.x + frame.move.weapon.x, y: tip.y + frame.move.weapon.y } : null,
+    muzzle: tips[0] ?? null,
+    ...(tips.length > 1 ? { muzzles: tips } : {}),
     flash: frame.flash,
   };
 }
@@ -295,7 +344,7 @@ export function rigFromClips(clips: FrameClips): PartRig {
   }
   const { width, height } = clips;
   const drawings = { legs: [], torso: [], head: [], weapon: [] } as Record<PartCategory, number[][]>;
-  const frames = { idle: [], walk: [], fire: [] } as Record<ClipKey, RigFrame[]>;
+  const frames = { idle: [], walk: [], fire: [], damaged: [] } as Record<ClipKey, RigFrame[]>;
 
   const addPose = (frame: SpriteFrame): number => {
     for (const layer of LAYER_ORDER) {
@@ -352,6 +401,9 @@ export function rigFromClips(clips: FrameClips): PartRig {
   for (const frame of clips.clips.fire) {
     frames.fire.push(asPose(frame));
   }
+  for (const frame of clips.clips.damaged) {
+    frames.damaged.push(asPose(frame));
+  }
 
   const poses = drawings.legs.length;
   const anchors = {} as Record<PartCategory, PixelPoint[]>;
@@ -404,8 +456,53 @@ export function framesOnPose(rig: PartRig, pose: number): { clip: ClipKey; index
   return CLIP_KEYS.flatMap((clip) => rig.clips[clip].flatMap((frame, index) => (frame.pose === pose ? [{ clip, index }] : [])));
 }
 
-export function describeFrames(frames: readonly { clip: ClipKey; index: number }[]): string {
-  return frames.map((item) => `${CLIP_LABEL[item.clip]} ${item.index}`).join(", ");
+/** A vehicle's Walking tab reads as Moving once Damaged has frames. */
+export function isVehicleClipSet(clips: Record<ClipKey, readonly unknown[]>): boolean {
+  return clips.damaged.length > 0;
+}
+
+export function clipTitle(key: ClipKey, vehicle: boolean): string {
+  return vehicle && key === "walk" ? "Moving" : CLIP_LABEL[key];
+}
+
+export function describeFrames(
+  frames: readonly { clip: ClipKey; index: number }[],
+  title: (key: ClipKey) => string = (key) => CLIP_LABEL[key],
+): string {
+  const groups: { clip: ClipKey; indexes: number[] }[] = [];
+  for (const item of frames) {
+    const last = groups[groups.length - 1];
+    if (last && last.clip === item.clip) {
+      last.indexes.push(item.index);
+    } else {
+      groups.push({ clip: item.clip, indexes: [item.index] });
+    }
+  }
+  return groups.map((group) => `${title(group.clip)} ${indexSpan(group.indexes)}`).join(", ");
+}
+
+function indexSpan(indexes: readonly number[]): string {
+  const sorted = [...indexes].sort((left, right) => left - right);
+  const runs: string[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  if (start === undefined || previous === undefined) {
+    return "";
+  }
+  const flush = (end: number) => {
+    runs.push(start === end ? `${start}` : `${start}-${end}`);
+  };
+  for (const index of sorted.slice(1)) {
+    if (index === previous + 1) {
+      previous = index;
+      continue;
+    }
+    flush(previous);
+    start = index;
+    previous = index;
+  }
+  flush(previous);
+  return runs.join(", ");
 }
 
 /** Paint one pixel of the worn part, as seen on a frame. The frame's movement is taken off first. */
@@ -435,6 +532,521 @@ export function paintPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x:
 /** Clear the pixel on every layer's worn part. */
 export function erasePart(rig: PartRig, frame: RigFrame, x: number, y: number): PartRig {
   return LAYER_ORDER.reduce((next, layer) => paintPart(next, frame, layer, x, y, 0), rig);
+}
+
+/**
+ * Replace the connected squares of one colour on the worn part, as seen on a frame.
+ * Squares join by their edges. A corner does not join them. The frame's movement is taken off first.
+ */
+export function fillPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: number, y: number, slot: number): PartRig {
+  const inFrame = (cx: number, cy: number) =>
+    Number.isInteger(cx) && Number.isInteger(cy) && cx >= 0 && cy >= 0 && cx < rig.width && cy < rig.height;
+  const px = x - frame.move[layer].x;
+  const py = y - frame.move[layer].y;
+  if (!inFrame(x, y) || !inFrame(px, py)) {
+    return rig;
+  }
+  const part = wornPart(rig, layer);
+  const drawing = part.drawings[frame.pose];
+  if (!drawing) {
+    return rig;
+  }
+  const next = Math.max(0, Math.min(13, Math.round(slot)));
+  const width = rig.width;
+  const start = py * width + px;
+  const from = drawing[start] ?? 0;
+  if (from === next) {
+    return rig;
+  }
+  const cells = drawing.slice();
+  const seen = new Uint8Array(width * rig.height);
+  const stack = [start];
+  seen[start] = 1;
+  while (stack.length > 0) {
+    const index = stack.pop();
+    if (index === undefined || (drawing[index] ?? 0) !== from) {
+      continue;
+    }
+    cells[index] = next;
+    const cx = index % width;
+    const cy = (index - cx) / width;
+    const neighbours = [
+      cx > 0 ? index - 1 : -1,
+      cx < width - 1 ? index + 1 : -1,
+      cy > 0 ? index - width : -1,
+      cy < rig.height - 1 ? index + width : -1,
+    ];
+    for (const neighbour of neighbours) {
+      if (neighbour >= 0 && seen[neighbour] === 0 && (drawing[neighbour] ?? 0) === from) {
+        seen[neighbour] = 1;
+        stack.push(neighbour);
+      }
+    }
+  }
+  return withDrawing(rig, part, frame.pose, cells);
+}
+
+/** Idle's first frame. Layer splits are taken from this picture. */
+export function idleSource(rig: PartRig): RigFrame {
+  const idle = rig.clips.idle[0];
+  if (idle) {
+    return idle;
+  }
+  for (const key of CLIP_KEYS) {
+    const frame = rig.clips[key][0];
+    if (frame) {
+      return frame;
+    }
+  }
+  throw new Error("This sprite has no frames.");
+}
+
+function sameCells(a: readonly number[] | undefined, b: readonly number[] | undefined): boolean {
+  if (!a || !b || a.length !== b.length) {
+    return false;
+  }
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * After a change to Idle 0's picture, write that picture onto every other pose that was
+ * still a copy of it. A pose that has already been drawn differently stays as it is.
+ */
+export function feedIdleCopies(before: PartRig, after: PartRig): PartRig {
+  const pose = idleSource(before).pose;
+  let next = after;
+  for (let other = 0; other < before.poses; other += 1) {
+    if (other === pose) {
+      continue;
+    }
+    const copy = LAYER_ORDER.every((layer) => {
+      const worn = wornPart(before, layer);
+      return sameCells(worn.drawings[other], worn.drawings[pose]);
+    });
+    if (!copy) {
+      continue;
+    }
+    for (const layer of LAYER_ORDER) {
+      const part = wornPart(next, layer);
+      const cells = part.drawings[pose];
+      if (cells) {
+        next = withDrawing(next, part, other, cells.slice());
+      }
+    }
+  }
+  return next;
+}
+
+/**
+ * Move the ink that shows inside a region onto one layer, on the pose this frame shows.
+ * A pixel already on that layer stays. Lifting a pixel can paint the layer it left, so the
+ * body under a raised part does not go empty. The rig is unchanged when nothing moves.
+ */
+export function sendShownToLayer(
+  rig: PartRig,
+  frame: RigFrame,
+  region: { width: number; height: number; cells: ArrayLike<number> },
+  to: PartCategory,
+  heal: boolean,
+): { rig: PartRig; moved: number } {
+  if (region.width !== rig.width || region.height !== rig.height || region.cells.length !== rig.width * rig.height) {
+    throw new Error(`The selection is ${region.width}×${region.height}. The frame is ${rig.width}×${rig.height}.`);
+  }
+  const shown = resolveFrame(rig, frame);
+  const toIndex = LAYER_ORDER.indexOf(to);
+  const fill = {} as Record<PartCategory, number>;
+  for (const layer of LAYER_ORDER) {
+    fill[layer] = commonSlot(wornPart(rig, layer).drawings[frame.pose] ?? []);
+  }
+  let next = rig;
+  let moved = 0;
+  for (let y = 0; y < rig.height; y += 1) {
+    for (let x = 0; x < rig.width; x += 1) {
+      if ((region.cells[y * rig.width + x] ?? 0) === 0) {
+        continue;
+      }
+      let owner: PartCategory | null = null;
+      let slot = 0;
+      for (let index = LAYER_ORDER.length - 1; index >= 0; index -= 1) {
+        const layer = LAYER_ORDER[index] ?? "legs";
+        const value = shown.layers[layer][y * rig.width + x] ?? 0;
+        if (value !== 0) {
+          owner = layer;
+          slot = value;
+          break;
+        }
+      }
+      if (!owner || owner === to) {
+        continue;
+      }
+      const px = x - frame.move[to].x;
+      const py = y - frame.move[to].y;
+      const onPart = px >= 0 && py >= 0 && px < rig.width && py < rig.height;
+      if (!onPart) {
+        continue;
+      }
+      let step = paintPart(next, frame, to, x, y, slot);
+      step = paintPart(step, frame, owner, x, y, 0);
+      if (heal && LAYER_ORDER.indexOf(owner) < toIndex && fill[owner] !== 0) {
+        step = paintPart(step, frame, owner, x, y, fill[owner]);
+      }
+      if (step === next) {
+        continue;
+      }
+      next = step;
+      moved += 1;
+    }
+  }
+  return { rig: next, moved };
+}
+
+/**
+ * The part of a box or lasso that sits on painted pixels. Empty ground cannot be selected.
+ */
+export function paintedSelection(
+  shown: { width: number; height: number; layers: Record<PartCategory, ArrayLike<number>> },
+  region: { width: number; height: number; cells: ArrayLike<number> },
+): { width: number; height: number; cells: Uint8Array } {
+  if (region.width !== shown.width || region.height !== shown.height || region.cells.length !== shown.width * shown.height) {
+    throw new Error(`The selection is ${region.width}×${region.height}. The frame is ${shown.width}×${shown.height}.`);
+  }
+  const cells = new Uint8Array(shown.width * shown.height);
+  for (let index = 0; index < cells.length; index += 1) {
+    if ((region.cells[index] ?? 0) === 0) {
+      continue;
+    }
+    const painted = LAYER_ORDER.some((name) => (shown.layers[name][index] ?? 0) !== 0);
+    if (painted) {
+      cells[index] = 1;
+    }
+  }
+  return { width: shown.width, height: shown.height, cells };
+}
+
+/** Paint a square of the worn part, centred on the pixel under the pencil. */
+export function paintBrush(
+  rig: PartRig,
+  frame: RigFrame,
+  layer: PartCategory,
+  x: number,
+  y: number,
+  slot: number,
+  size = 1,
+): PartRig {
+  const span = Math.max(1, Math.min(8, Math.round(size) || 1));
+  const origin = -Math.floor((span - 1) / 2);
+  let next = rig;
+  for (let dy = 0; dy < span; dy += 1) {
+    for (let dx = 0; dx < span; dx += 1) {
+      next = paintPart(next, frame, layer, x + origin + dx, y + origin + dy, slot);
+    }
+  }
+  return next;
+}
+
+/**
+ * Recolour the worn part's painted pixels on this pose. An outlined layer only changes
+ * pixels inside the outline. Empty ground stays empty.
+ */
+export function fillLayerInk(rig: PartRig, frame: RigFrame, layer: PartCategory, slot: number): PartRig {
+  const part = wornPart(rig, layer);
+  const drawing = part.drawings[frame.pose];
+  if (!drawing) {
+    return rig;
+  }
+  const outline = isOutlined(layer) ? rig.outlines[layer][frame.pose] : null;
+  const next = Math.max(0, Math.min(13, Math.round(slot)));
+  let changed = false;
+  const cells = drawing.slice();
+  for (let index = 0; index < cells.length; index += 1) {
+    if ((cells[index] ?? 0) === 0) {
+      continue;
+    }
+    if (outline && outline[index] !== 1) {
+      continue;
+    }
+    if (cells[index] !== next) {
+      cells[index] = next;
+      changed = true;
+    }
+  }
+  return changed ? withDrawing(rig, part, frame.pose, cells) : rig;
+}
+
+/**
+ * Move leftover sprite pixels onto `layer`. A pixel already on a layer other than `seat`
+ * stays there. Pixels inside `region` stay where they are. Empty ground is left alone.
+ */
+export function claimUnselected(
+  rig: PartRig,
+  frame: RigFrame,
+  layer: PartCategory,
+  region: { width: number; height: number; cells: ArrayLike<number> } | null,
+  seat: PartCategory,
+): { rig: PartRig; moved: number } {
+  if (region && (region.width !== rig.width || region.height !== rig.height || region.cells.length !== rig.width * rig.height)) {
+    throw new Error(`The selection is ${region.width}×${region.height}. The frame is ${rig.width}×${rig.height}.`);
+  }
+  const shown = resolveFrame(rig, frame);
+  let next = rig;
+  let moved = 0;
+  for (let y = 0; y < rig.height; y += 1) {
+    for (let x = 0; x < rig.width; x += 1) {
+      const index = y * rig.width + x;
+      if (region && (region.cells[index] ?? 0) !== 0) {
+        continue;
+      }
+      let owner: PartCategory | null = null;
+      let slot = 0;
+      for (let at = LAYER_ORDER.length - 1; at >= 0; at -= 1) {
+        const name = LAYER_ORDER[at] ?? "legs";
+        const value = shown.layers[name][index] ?? 0;
+        if (value !== 0) {
+          owner = name;
+          slot = value;
+          break;
+        }
+      }
+      if (!owner || owner === layer || owner !== seat) {
+        continue;
+      }
+      let step = paintPart(next, frame, layer, x, y, slot);
+      step = paintPart(step, frame, owner, x, y, 0);
+      if (step === next) {
+        continue;
+      }
+      next = step;
+      moved += 1;
+    }
+  }
+  return { rig: next, moved };
+}
+
+/** Gun metal. Build Animation steps pixels of this slot along a tread or a propeller. */
+export const STEEL_SLOT = 12;
+
+export interface MotionBuild {
+  /** Body shift on the second walk frame and on the shot. Positive is down. */
+  bob: number;
+  /** How far the weapon kicks back on the shot. The torso takes half. */
+  recoil: number;
+  /** How far gun metal steps on the first walk frame. */
+  stride: number;
+  /** Across a tread, or down toward the lower wingtip. */
+  along: "x" | "y";
+  /** The layer whose gun metal steps. The other layers bob. */
+  links: PartCategory;
+}
+
+/**
+ * Turn ink on the worn part into gun metal, inside a region of the frame.
+ * Stripes keep every other column, counted from the feet. Empty cells stay empty.
+ */
+export function paintSteel(
+  rig: PartRig,
+  frame: RigFrame,
+  layer: PartCategory,
+  region: { width: number; height: number; cells: ArrayLike<number> },
+  stripes: boolean,
+  block = 1,
+): PartRig {
+  if (region.width !== rig.width || region.height !== rig.height || region.cells.length !== rig.width * rig.height) {
+    throw new Error(`The selection is ${region.width}×${region.height}. The frame is ${rig.width}×${rig.height}.`);
+  }
+  const part = wornPart(rig, layer);
+  const drawing = part.drawings[frame.pose];
+  if (!drawing) {
+    return rig;
+  }
+  const cells = drawing.slice();
+  const move = frame.move[layer];
+  const side = Math.max(1, Math.floor(block));
+  let changed = false;
+  for (let y = 0; y < rig.height; y += 1) {
+    for (let x = 0; x < rig.width; x += 1) {
+      if ((region.cells[y * rig.width + x] ?? 0) === 0) {
+        continue;
+      }
+      const px = x - move.x;
+      const py = y - move.y;
+      if (px < 0 || py < 0 || px >= rig.width || py >= rig.height) {
+        continue;
+      }
+      const index = py * rig.width + px;
+      if ((cells[index] ?? 0) === 0 || cells[index] === STEEL_SLOT) {
+        continue;
+      }
+      if (stripes) {
+        const column = Math.floor((x - rig.feet.x) / side);
+        if ((((column % 2) + 2) % 2) !== 0) {
+          continue;
+        }
+      }
+      cells[index] = STEEL_SLOT;
+      changed = true;
+    }
+  }
+  return changed ? withDrawing(rig, part, frame.pose, cells) : rig;
+}
+
+/**
+ * The next phase of gun metal. Along a tread, each run of ink steps its gun metal to the right and
+ * the colours it covered close up behind it. Toward the wingtip, each dash steps down and leaves a gap.
+ * Gun metal that would leave the run, or the frame, is dropped.
+ */
+export function stepSteel(cells: readonly number[], width: number, height: number, stride: number, along: "x" | "y"): number[] {
+  const step = Math.max(1, Math.floor(stride));
+  if (along === "y") {
+    const next = cells.map((slot) => (slot === STEEL_SLOT ? 0 : slot));
+    for (let y = 0; y < height; y += 1) {
+      const below = y + step;
+      if (below >= height) {
+        continue;
+      }
+      for (let x = 0; x < width; x += 1) {
+        if ((cells[y * width + x] ?? 0) === STEEL_SLOT) {
+          next[below * width + x] = STEEL_SLOT;
+        }
+      }
+    }
+    return next;
+  }
+  const body = fillBehind(cells);
+  const next = cells.slice();
+  for (let y = 0; y < height; y += 1) {
+    let start = 0;
+    while (start < width) {
+      if ((cells[y * width + start] ?? 0) === 0) {
+        start += 1;
+        continue;
+      }
+      let end = start;
+      while (end + 1 < width && (cells[y * width + end + 1] ?? 0) !== 0) {
+        end += 1;
+      }
+      const colours: number[] = [];
+      let steel = false;
+      for (let x = start; x <= end; x += 1) {
+        const slot = cells[y * width + x] ?? 0;
+        if (slot === STEEL_SLOT) {
+          steel = true;
+        } else if (slot !== 0) {
+          colours.push(slot);
+        }
+      }
+      if (steel) {
+        let used = 0;
+        let last = 0;
+        for (let x = start; x <= end; x += 1) {
+          const index = y * width + x;
+          if (x - step >= start && (cells[y * width + (x - step)] ?? 0) === STEEL_SLOT) {
+            next[index] = STEEL_SLOT;
+            continue;
+          }
+          const colour = colours[used] ?? (last || body || STEEL_SLOT);
+          used += 1;
+          last = colour;
+          next[index] = colour;
+        }
+      }
+      start = end + 1;
+    }
+  }
+  return next;
+}
+
+/**
+ * Replace Walking and Firing from one pose. The first walk frame steps gun metal on `links`.
+ * The second shifts every other layer by the bob. Firing kicks the weapon back, the torso half as far,
+ * and bobs the same layers. Idle is left as it is.
+ */
+export function buildMotion(rig: PartRig, frame: RigFrame, motion: MotionBuild): PartRig {
+  const bob = Math.trunc(motion.bob);
+  const recoil = Math.max(0, Math.trunc(motion.recoil));
+  const half = Math.round(recoil / 2);
+  const sourceDrawing = wornPart(rig, motion.links).drawings[frame.pose] ?? blank(rig);
+  const stepped = stepSteel(sourceDrawing, rig.width, rig.height, motion.stride, motion.along);
+  const steppedChanged = stepped.some((slot, index) => slot !== (sourceDrawing[index] ?? 0));
+  let next = rig;
+  let stepPose = frame.pose;
+  if (steppedChanged) {
+    next = withExtraPose(rig, frame.pose);
+    stepPose = next.poses - 1;
+    next = withDrawing(next, wornPart(next, motion.links), stepPose, stepped);
+  }
+  const bobMove = noMove();
+  for (const name of LAYER_ORDER) {
+    if (name !== motion.links) {
+      bobMove[name] = { x: 0, y: bob };
+    }
+  }
+  const fireMove = noMove();
+  for (const name of LAYER_ORDER) {
+    if (name !== motion.links) {
+      fireMove[name] = { x: 0, y: bob };
+    }
+  }
+  fireMove.torso = motion.links === "torso" ? { x: -half, y: 0 } : { x: -half, y: bob };
+  fireMove.weapon = motion.links === "weapon" ? { x: -recoil, y: 0 } : { x: -recoil, y: bob };
+  const muzzle = frame.muzzle ? { x: frame.muzzle.x, y: frame.muzzle.y } : null;
+  const muzzles = frame.muzzles?.map((point) => ({ x: point.x, y: point.y }));
+  const marks = muzzles && muzzles.length > 0 ? { muzzle: muzzles[0] ?? null, muzzles } : { muzzle };
+  return {
+    ...next,
+    clips: {
+      ...next.clips,
+      walk: [
+        { pose: stepPose, move: noMove(), flash: false, ...marks },
+        { pose: frame.pose, move: bobMove, flash: false, ...marks },
+      ],
+      fire: [{ pose: frame.pose, move: fireMove, flash: true, ...marks }],
+    },
+  };
+}
+
+function fillBehind(cells: readonly number[]): number {
+  const counts = new Map<number, number>();
+  let best = 0;
+  let most = 0;
+  for (const slot of cells) {
+    if (slot === 0 || slot === STEEL_SLOT) {
+      continue;
+    }
+    const count = (counts.get(slot) ?? 0) + 1;
+    counts.set(slot, count);
+    if (count > most) {
+      most = count;
+      best = slot;
+    }
+  }
+  return best;
+}
+
+function withExtraPose(rig: PartRig, pose: number): PartRig {
+  const parts = rig.parts.map((part) => ({
+    ...part,
+    drawings: [...part.drawings, (part.drawings[pose] ?? blank(rig)).slice()],
+  }));
+  const anchors = {} as Record<PartCategory, PixelPoint[]>;
+  for (const layer of LAYER_ORDER) {
+    const from = rig.anchors[layer][pose] ?? { x: 0, y: 0 };
+    anchors[layer] = [...rig.anchors[layer], { x: from.x, y: from.y }];
+  }
+  return {
+    ...rig,
+    poses: rig.poses + 1,
+    parts,
+    anchors,
+    outlines: {
+      legs: [...rig.outlines.legs, (rig.outlines.legs[pose] ?? blank(rig)).slice()],
+      torso: [...rig.outlines.torso, (rig.outlines.torso[pose] ?? blank(rig)).slice()],
+    },
+  };
 }
 
 /** Move one layer on one frame. This is a number on the frame, so it stays when the part is swapped. */
@@ -506,6 +1118,144 @@ function pictureCells(
     }
   }
   return cells;
+}
+
+function drawnChannels(hex: string): [number, number, number] {
+  const body = hex.replace("#", "");
+  return [Number.parseInt(body.slice(0, 2), 16), Number.parseInt(body.slice(2, 4), 16), Number.parseInt(body.slice(4, 6), 16)];
+}
+
+/** Nearest of the 13 editor colours. Slot 0 stays empty, so ink never lands on it. */
+function nearestDrawnSlot(r: number, g: number, b: number): number {
+  let best = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let slot = 1; slot <= 13; slot += 1) {
+    const [tr, tg, tb] = drawnChannels(AS_DRAWN_LUT[slot] ?? "#000000");
+    const distance = (r - tr) ** 2 + (g - tg) ** 2 + (b - tb) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = slot;
+    }
+  }
+  return best;
+}
+
+/** One still picture as a rig. Every pixel sits on the torso. The other layers start empty. */
+export function rigFromPicture(unitId: string, rgba: Uint8ClampedArray, width: number, height: number): PartRig {
+  if (width < 1 || height < 1 || rgba.length < width * height * 4) {
+    throw new Error(`The picture is ${width}×${height}, which does not match its pixels.`);
+  }
+  const torso = new Array<number>(width * height).fill(0);
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    const alpha = rgba[offset + 3] ?? 0;
+    if (alpha < 128) {
+      continue;
+    }
+    torso[index] = nearestDrawnSlot(rgba[offset] ?? 0, rgba[offset + 1] ?? 0, rgba[offset + 2] ?? 0);
+  }
+  const empty = new Array<number>(width * height).fill(0);
+  let footX = Math.floor(width / 2);
+  let footY = height - 1;
+  for (let y = height - 1; y >= 0; y -= 1) {
+    let left = -1;
+    let right = -1;
+    for (let x = 0; x < width; x += 1) {
+      if (torso[y * width + x] !== 0) {
+        if (left < 0) {
+          left = x;
+        }
+        right = x;
+      }
+    }
+    if (left >= 0) {
+      footX = Math.floor((left + right) / 2);
+      footY = y;
+      break;
+    }
+  }
+  const drawings: Record<PartCategory, number[][]> = {
+    legs: [empty.slice()],
+    torso: [torso],
+    head: [empty.slice()],
+    weapon: [empty.slice()],
+  };
+  const parts: RigPart[] = LAYER_ORDER.map((layer) => ({
+    id: layer === "torso" ? "torso_picture" : `${layer}_empty`,
+    name: layer === "torso" ? "Picture" : `Empty ${LAYER_NAME[layer].toLowerCase()}`,
+    layer,
+    drawings: drawings[layer],
+  }));
+  return {
+    unitId,
+    width,
+    height,
+    feet: { x: footX, y: footY },
+    poses: 1,
+    anchors: { legs: [{ x: 0, y: 0 }], torso: [{ x: 0, y: 0 }], head: [{ x: 0, y: 0 }], weapon: [{ x: 0, y: 0 }] },
+    outlines: { legs: [empty.slice()], torso: [empty.slice()] },
+    parts,
+    wearing: { legs: "legs_empty", torso: "torso_picture", head: "head_empty", weapon: "weapon_empty" },
+    clips: { idle: [{ pose: 0, move: noMove(), flash: false, muzzle: null }], walk: [], fire: [], damaged: [] },
+    builds: [],
+  };
+}
+
+/** Move the loaded picture off the torso and onto `layer`. The torso is left empty. */
+export function seatPicture(rig: PartRig, layer: PartCategory): PartRig {
+  if (layer === "torso") {
+    return rig;
+  }
+  const source = wornPart(rig, "torso");
+  const target = wornPart(rig, layer);
+  const blank = (drawing: number[]) => drawing.map(() => 0);
+  return {
+    ...rig,
+    parts: rig.parts.map((part) => {
+      if (part.id === target.id) {
+        return { ...part, name: "Picture", drawings: source.drawings.map((drawing) => drawing.slice()) };
+      }
+      if (part.id === source.id) {
+        return { ...part, name: "Empty torso", drawings: source.drawings.map(blank) };
+      }
+      return part;
+    }),
+  };
+}
+
+/** Rename the empty parts to the layers the editor is showing. The picture keeps its name. */
+export function renameEmptyParts(rig: PartRig, labelFor: (layer: PartCategory) => string | null): PartRig {
+  return {
+    ...rig,
+    parts: rig.parts.map((part) => {
+      const label = labelFor(part.layer);
+      if (!label || part.name === "Picture" || !part.name.startsWith("Empty ")) {
+        return part;
+      }
+      const name = `Empty ${label.toLowerCase()}`;
+      return name === part.name ? part : { ...part, name };
+    }),
+  };
+}
+
+function stillFrames(count: number): RigFrame[] {
+  return Array.from({ length: count }, () => ({ pose: 0, move: noMove(), flash: false, muzzle: null }));
+}
+
+/**
+ * Idle 4, Moving 8, Firing 2, Damaged 2.
+ * Every frame shows the still picture (pose 0) and keeps its own movement, so a later edit does not alias.
+ */
+export function withVehicleClips(rig: PartRig): PartRig {
+  return {
+    ...rig,
+    clips: {
+      idle: stillFrames(4),
+      walk: stillFrames(8),
+      fire: stillFrames(2),
+      damaged: stillFrames(2),
+    },
+  };
 }
 
 /** Put a frame-sized picture onto the worn part, on the pose a frame shows. */
@@ -809,7 +1559,21 @@ export function toRigFile(rig: PartRig): RigFile {
     wearing: rig.wearing,
     clips: rig.clips,
     builds: rig.builds,
+    ...(rig.muzzleLayer ? { muzzleLayer: rig.muzzleLayer } : {}),
   };
+}
+
+/** One file that holds the rig and every part, so Download and Open can round-trip without the dev server. */
+export function rigBundle(rig: PartRig): { rig: RigFile; parts: PartFile[] } {
+  return { rig: toRigFile(rig), parts: rig.parts.map((part) => toPartFile(rig, part)) };
+}
+
+/** Open a file written by `rigBundle`. */
+export function rigFromBundle(value: unknown): PartRig {
+  if (!isRecord(value) || !("rig" in value) || !Array.isArray(value.parts)) {
+    throw new Error("That file is not a rig with its parts.");
+  }
+  return assembleRig(value.rig, value.parts);
 }
 
 export function toPartFile(rig: PartRig, part: RigPart): PartFile {
@@ -939,7 +1703,7 @@ export function assembleRig(value: unknown, partFiles: readonly unknown[]): Part
     outlines: { legs: [], torso: [] },
     parts,
     wearing: {} as Record<PartCategory, string>,
-    clips: { idle: [], walk: [], fire: [] },
+    clips: { idle: [], walk: [], fire: [], damaged: [] },
     builds: readBuilds(value.builds),
   };
   for (const layer of LAYER_ORDER) {
@@ -963,10 +1727,11 @@ export function assembleRig(value: unknown, partFiles: readonly unknown[]): Part
     rig.outlines[layer] = list.map((outline, pose) => readCells(outline, width * height, 1, `The ${layer} outline on pose ${pose}`));
   }
   for (const key of CLIP_KEYS) {
-    const list = clips[key];
-    if (!Array.isArray(list)) {
+    const listed = clips[key] ?? (key === "damaged" ? [] : undefined);
+    if (!Array.isArray(listed)) {
       throw new Error(`The ${CLIP_LABEL[key]} clip is not a list of frames.`);
     }
+    const list = listed;
     rig.clips[key] = list.map((frame, index) => {
       if (
         !isRecord(frame) ||
@@ -984,13 +1749,19 @@ export function assembleRig(value: unknown, partFiles: readonly unknown[]): Part
           move[layer] = { x: point.x, y: point.y };
         }
       }
+      const stored = Array.isArray(frame.muzzles) ? frame.muzzles.filter(isPoint).map((point) => ({ x: point.x, y: point.y })) : [];
+      const muzzle = isPoint(frame.muzzle) ? { x: frame.muzzle.x, y: frame.muzzle.y } : (stored[0] ?? null);
       return {
         pose: frame.pose as number,
         move,
         flash: frame.flash === true,
-        muzzle: isPoint(frame.muzzle) ? { x: frame.muzzle.x, y: frame.muzzle.y } : null,
+        muzzle,
+        ...(stored.length > 0 ? { muzzles: stored } : {}),
       };
     });
+  }
+  if (LAYER_ORDER.includes(value.muzzleLayer as PartCategory)) {
+    rig.muzzleLayer = value.muzzleLayer as PartCategory;
   }
   return rig;
 }

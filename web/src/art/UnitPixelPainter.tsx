@@ -152,8 +152,10 @@ const SLOT_HELP: Record<PaletteSlotKey, string> = {
   emblem_red: "Fixed. The red of a national emblem. It is the same in every country.",
   emblem_red_light: "Fixed. The lit edge of a red emblem.",
   emblem_white: "Fixed. The white of a national emblem.",
-  emblem_white_shade: "Fixed. The shaded edge of a white emblem.",
+  emblem_white_shade: "Fixed. The shaded edge of a white emblem. On a German cross this is the light grey.",
   emblem_blue: "Fixed. The blue of a national emblem.",
+  emblem_grey: "Fixed. The grey of a German cross edge, chipped paint, and barnacles.",
+  emblem_moss: "Fixed. The green of moss on a hull.",
 };
 
 export interface PaintCommand {
@@ -163,6 +165,7 @@ export interface PaintCommand {
   candidateBase64?: string | null;
 }
 
+/** The 48×48 plate painter. The sprite page opens FrameEditor. This stays so the plate tests still run. */
 export function UnitPixelPainter({
   command,
   onDocument,
@@ -1573,7 +1576,7 @@ export function UnitPixelPainter({
                 <select value={emblem.id} onChange={(event) => setEmblemId(event.target.value as EmblemId)}>
                   {EMBLEMS.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {FACTION_NAME[item.faction]}: {item.name}
+                      {item.kind === "marking" ? item.name : `${FACTION_NAME[item.faction]}: ${item.name}`}
                     </option>
                   ))}
                 </select>

@@ -39,7 +39,7 @@ describe("emblem data", () => {
       const unsupported = UNSUPPORTED_FACTIONS.includes(faction);
       expect(emblemForFaction(faction) === null, faction).toBe(unsupported);
     }
-    expect(EMBLEMS.map((emblem) => emblem.faction)).toEqual(["GER", "USSR", "US", "UK", "JAP"]);
+    expect(EMBLEMS.filter((emblem) => emblem.kind !== "marking").map((emblem) => emblem.faction)).toEqual(["GER", "USSR", "US", "UK", "JAP"]);
   });
 
   it("covers every faction in data/factions.json", () => {
@@ -170,7 +170,7 @@ describe("emblem colours and the country", () => {
   });
 
   it("are the sixteen-colour strip's own colours", () => {
-    expect(Object.values(EMBLEM_STRIP)).toEqual(["charcoal", "crimson", "terracotta", "cream", "bone", "steel"]);
+    expect(Object.values(EMBLEM_STRIP)).toEqual(["charcoal", "crimson", "terracotta", "cream", "bone", "steel", "feldgrau", "spruce"]);
   });
 
   it("save in a plate's layered file, in the legend only when a stamp is in it, and open again as the same pixels", () => {
@@ -181,7 +181,9 @@ describe("emblem colours and the country", () => {
     expect(stamped).not.toBe(plate);
     const file = toLayeredFile(stamped);
     expect(file.legend.D).toBe("emblem_dark");
-    expect(file.legend.C).toBe("emblem_white");
+    expect(file.legend.O).toBe("emblem_white_shade");
+    expect(file.legend.G).toBe("emblem_grey");
+    expect(file.legend.C).toBeUndefined();
     expect(file.legend.R).toBeUndefined();
     const reopened = fromLayeredFile(JSON.parse(JSON.stringify(file)));
     expect(reopened.layers!.idle).toEqual(stamped.layers!.idle);
@@ -341,6 +343,64 @@ describe("stamping", () => {
       const both = emblemBitmap(emblem, size, true, true);
       expect(both.map((row) => row.slice().reverse())).toEqual(turned.map((row) => row.slice()));
     }
+  });
+});
+
+describe("German crosses and the extra markings", () => {
+  it("keeps charcoal to the rim of the closed German cross", () => {
+    for (const item of emblemById("ger_balkenkreuz")!.sizes) {
+      const bitmap = emblemBitmap(emblemById("ger_balkenkreuz")!, item.size);
+      bitmap.forEach((row, y) => {
+        row.forEach((slot, x) => {
+          if (slot !== "emblem_dark") {
+            return;
+          }
+          const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => (bitmap[y + dy]?.[x + dx] ?? null) === null);
+          expect(edge, `${item.size} at ${x}, ${y}`).toBe(true);
+        });
+      });
+    }
+  });
+
+  it("paints the German crosses in the highlight grey, not cream", () => {
+    for (const id of ["ger_balkenkreuz", "ger_balkenkreuz_open"] as const) {
+      for (const item of emblemById(id)!.sizes) {
+        const slots = new Set(emblemBitmap(emblemById(id)!, item.size).flat());
+        expect(slots.has("emblem_white"), `${id} ${item.size}`).toBe(false);
+        expect(slots.has("emblem_white_shade"), `${id} ${item.size}`).toBe(true);
+        expect(slots.has("emblem_grey"), `${id} ${item.size}`).toBe(true);
+      }
+    }
+  });
+
+  it("leaves two pixels of the open cross's arm ends bare", () => {
+    for (const item of emblemById("ger_balkenkreuz_open")!.sizes) {
+      const bitmap = emblemBitmap(emblemById("ger_balkenkreuz_open")!, item.size);
+      const bare = (slot: string | null) => slot == null || slot === "emblem_dark";
+      const n = bitmap.length;
+      for (const y of [0, 1, n - 2, n - 1]) {
+        expect(bitmap[y]!.every(bare), `${item.size} row ${y}`).toBe(true);
+      }
+      for (const row of bitmap) {
+        for (const x of [0, 1, n - 2, n - 1]) {
+          expect(bare(row[x] ?? null), `${item.size} column ${x}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("offers the extra markings by name", () => {
+    expect(EMBLEMS.filter((emblem) => emblem.kind === "marking").map((emblem) => emblem.name)).toEqual([
+      "Hinomaru, darker",
+      "Open Balkenkreuz",
+      "Bullet holes",
+      "Barnacles",
+      "Moss",
+      "Tactical number",
+      "Cargo",
+      "Anchor",
+      "Victory marks",
+    ]);
   });
 });
 

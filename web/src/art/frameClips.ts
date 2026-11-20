@@ -20,12 +20,13 @@ export const LAYER_NAME: Record<PartCategory, string> = {
   weapon: "Weapon",
 };
 
-export type ClipKey = "idle" | "walk" | "fire";
-export const CLIP_KEYS: readonly ClipKey[] = ["idle", "walk", "fire"];
+export type ClipKey = "idle" | "walk" | "fire" | "damaged";
+export const CLIP_KEYS: readonly ClipKey[] = ["idle", "walk", "fire", "damaged"];
 export const CLIP_LABEL: Record<ClipKey, string> = {
   idle: "Idle",
   walk: "Walking",
   fire: "Firing",
+  damaged: "Damaged",
 };
 
 /** One frame at the sheet's own size. Each layer holds the semantic slots 0–13. */
@@ -34,6 +35,8 @@ export interface SpriteFrame {
   height: number;
   layers: Record<PartCategory, number[]>;
   muzzle: PixelPoint | null;
+  /** Further barrel tips, in the same space as `muzzle`. Absent when the frame has one muzzle or none. */
+  muzzles?: PixelPoint[];
   flash: boolean;
 }
 
@@ -53,6 +56,7 @@ export interface SpriteFrameFile {
   height: number;
   layers: Record<PartCategory, number[]>;
   muzzle: PixelPoint | null;
+  muzzles?: PixelPoint[];
   flash: boolean;
 }
 
@@ -137,6 +141,7 @@ export function cloneFrame(frame: SpriteFrame): SpriteFrame {
       weapon: frame.layers.weapon.slice(),
     },
     muzzle: frame.muzzle ? { ...frame.muzzle } : null,
+    ...(frame.muzzles && frame.muzzles.length > 1 ? { muzzles: frame.muzzles.map((point) => ({ ...point })) } : {}),
     flash: frame.flash,
   };
 }
@@ -183,7 +188,7 @@ export function clipsFromWalkSheet(rgba: Uint8ClampedArray, width: number, heigh
     width: cell,
     height: cell,
     feet: feetOf(first),
-    clips: { idle: [cloneFrame(first)], walk: ordered, fire: [] },
+    clips: { idle: [cloneFrame(first)], walk: ordered, fire: [], damaged: [] },
   };
 }
 
@@ -442,12 +447,15 @@ export function frameRgba(frame: SpriteFrame, lut: readonly string[]): Uint8Clam
       writeHex(out, index * 4, hex);
     }
   }
-  if (frame.flash && frame.muzzle) {
-    for (const [dx, dy, hex] of FLASH) {
-      const x = frame.muzzle.x + dx;
-      const y = frame.muzzle.y + dy;
-      if (inside(frame, x, y)) {
-        writeHex(out, (y * frame.width + x) * 4, hex);
+  const tips = frame.muzzles && frame.muzzles.length > 0 ? frame.muzzles : frame.muzzle ? [frame.muzzle] : [];
+  if (frame.flash) {
+    for (const tip of tips) {
+      for (const [dx, dy, hex] of FLASH) {
+        const x = tip.x + dx;
+        const y = tip.y + dy;
+        if (inside(frame, x, y)) {
+          writeHex(out, (y * frame.width + x) * 4, hex);
+        }
       }
     }
   }
@@ -490,6 +498,7 @@ export function toFrameFile(frame: SpriteFrame): SpriteFrameFile {
     height: frame.height,
     layers: frame.layers,
     muzzle: frame.muzzle,
+    ...(frame.muzzles && frame.muzzles.length > 1 ? { muzzles: frame.muzzles.map((point) => ({ ...point })) } : {}),
     flash: frame.flash,
   };
 }
@@ -506,6 +515,7 @@ export function toClipsFile(clips: FrameClips): FrameClipsFile {
       idle: clips.clips.idle.map((_, index) => frameFileName("idle", index)),
       walk: clips.clips.walk.map((_, index) => frameFileName("walk", index)),
       fire: clips.clips.fire.map((_, index) => frameFileName("fire", index)),
+      damaged: clips.clips.damaged.map((_, index) => frameFileName("damaged", index)),
     },
   };
 }
@@ -540,6 +550,12 @@ export function fromFrameFile(value: unknown): SpriteFrame {
     frame.layers[layer] = cells.slice() as number[];
   }
   frame.muzzle = isPoint(value.muzzle) ? { x: value.muzzle.x, y: value.muzzle.y } : null;
+  if (Array.isArray(value.muzzles)) {
+    const points = value.muzzles.filter(isPoint).map((point) => ({ x: point.x, y: point.y }));
+    if (points.length > 1) {
+      frame.muzzles = points;
+    }
+  }
   frame.flash = value.flash === true;
   return frame;
 }
@@ -551,7 +567,11 @@ export function readClipsFile(value: unknown): FrameClipsFile {
   const clips = {} as Record<ClipKey, string[]>;
   for (const key of CLIP_KEYS) {
     const names = value.clips[key];
-    if (!Array.isArray(names) || !names.every((name) => typeof name === "string" && /^(idle|walk|fire)_\d+$/.test(name))) {
+    if (key === "damaged" && names === undefined) {
+      clips[key] = [];
+      continue;
+    }
+    if (!Array.isArray(names) || !names.every((name) => typeof name === "string" && /^(idle|walk|fire|damaged)_\d+$/.test(name))) {
       throw new Error(`The ${CLIP_LABEL[key]} list is not frame names.`);
     }
     clips[key] = names as string[];

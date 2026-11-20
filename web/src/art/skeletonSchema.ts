@@ -47,7 +47,9 @@ export type EmblemSlotKey =
   | "emblem_red_light"
   | "emblem_white"
   | "emblem_white_shade"
-  | "emblem_blue";
+  | "emblem_blue"
+  | "emblem_grey"
+  | "emblem_moss";
 
 export const EMBLEM_SLOT_KEYS: readonly EmblemSlotKey[] = [
   "emblem_dark",
@@ -56,6 +58,8 @@ export const EMBLEM_SLOT_KEYS: readonly EmblemSlotKey[] = [
   "emblem_white",
   "emblem_white_shade",
   "emblem_blue",
+  "emblem_grey",
+  "emblem_moss",
 ];
 
 /** The strip key each emblem slot always resolves to. */
@@ -66,6 +70,9 @@ export const EMBLEM_STRIP: Record<EmblemSlotKey, MilitaryStripKey> = {
   emblem_white: "cream",
   emblem_white_shade: "bone",
   emblem_blue: "steel",
+  /** The grey of a German cross edge and of chipped paint. Bone, above, is the light grey. */
+  emblem_grey: "feldgrau",
+  emblem_moss: "spruce",
 };
 
 export type FactionMilitaryMapping = Record<BrushSlotKey, MilitaryStripKey>;

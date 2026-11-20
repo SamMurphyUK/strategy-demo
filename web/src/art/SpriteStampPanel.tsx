@@ -47,7 +47,7 @@ function stampLine(stamp: StampPlacement): string {
 }
 
 /**
- * Places national emblems on a large polished sprite. The PNG is not changed: the placements are saved beside it
+ * Places emblems and markings on a large polished sprite. The PNG is not changed: the placements are saved beside it
  * and baked into a separate stamped PNG and SVG.
  */
 export function SpriteStampPanel({ source, factionId, onBaked }: { source: string; factionId: string; onBaked?: (svg: string | null) => void }) {
@@ -239,7 +239,7 @@ export function SpriteStampPanel({ source, factionId, onBaked }: { source: strin
             {(minor || emblemId === null) && <option value="">No emblem: minor powers have none</option>}
             {EMBLEMS.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.faction}: {item.name}
+                {item.kind === "marking" ? item.name : `${item.faction}: ${item.name}`}
               </option>
             ))}
           </select>

@@ -24,7 +24,7 @@ export const SAVE_LAYERED_ROUTE = "/__dev/save-layered";
 export const LAYERED_UNITS_ROUTE = "/__dev/layered-units";
 export const GENERATE_PART_ROUTE = "/__dev/generate-part";
 
-const FRAME_NAME = /^(idle|walk|fire)_\d+$/;
+const FRAME_NAME = /^(idle|walk|fire|damaged)_\d+$/;
 const PART_ID = /^[a-z0-9_]+$/;
 /**
  * The four layers of the infantry rig, then the layers of the vehicle, aircraft, and ship skeletons.

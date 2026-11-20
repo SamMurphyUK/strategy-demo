@@ -18,6 +18,8 @@ import type { EmblemSlotKey } from "./skeletonSchema";
  *   white    cream      →  9 skin mid (tan, the lightest fixed colour)
  *   white shaded bone   →  8 skin highlight (bone, exact)
  *   blue     steel      → 12 gun metal (steel, exact)
+ *   grey     feldgrau   →  4 webbing (taupe, the nearest grey every country shares)
+ *   moss     spruce     →  7 wood (khaki, the nearest green-brown every country shares)
  *
  * The emblem keeps its shape and its lighting in every colour set, but the red reads as plum and the
  * white as tan. The sheet's own colours (As drawn) put cream in slot 8, so there the white and its
@@ -30,7 +32,24 @@ export const EMBLEM_FRAME_SLOT: Readonly<Record<EmblemSlotKey, number>> = {
   emblem_white: 9,
   emblem_white_shade: 8,
   emblem_blue: 12,
+  emblem_grey: 4,
+  emblem_moss: 7,
 };
+
+/**
+ * Hinomaru, darker. The disc is terracotta, slot 10, the exact shadow of the Japan uniform.
+ * The rim, including its shaded edge, is tan, slot 9, one step darker than cream.
+ */
+export const JAP_DARKER_FRAME_SLOT: Readonly<Record<EmblemSlotKey, number>> = {
+  ...EMBLEM_FRAME_SLOT,
+  emblem_red: EMBLEM_FRAME_SLOT.emblem_red_light,
+  emblem_white_shade: EMBLEM_FRAME_SLOT.emblem_white,
+};
+
+/** The frame slots a stamp writes. Only the darker Hinomaru leaves the shared table. */
+export function frameSlotsFor(emblemId: string): Readonly<Record<EmblemSlotKey, number>> {
+  return emblemId === "jap_hinomaru_darker" ? JAP_DARKER_FRAME_SLOT : EMBLEM_FRAME_SLOT;
+}
 
 export interface FrameStampCell {
   x: number;
@@ -51,6 +70,7 @@ export function frameStampCells(
   x: number,
   y: number,
   onlySprite: boolean,
+  slots: Readonly<Record<EmblemSlotKey, number>> = EMBLEM_FRAME_SLOT,
 ): FrameStampCell[] {
   const move = frame.move[layer];
   const reach = (cx: number, cy: number) => {
@@ -63,7 +83,7 @@ export function frameStampCells(
   return emblemCells(bitmap, { x, y }, { width: rig.width, height: rig.height }, { onlyOn }).map((cell) => ({
     x: cell.x,
     y: cell.y,
-    slot: EMBLEM_FRAME_SLOT[cell.slot],
+    slot: slots[cell.slot],
   }));
 }
 
@@ -80,6 +100,7 @@ export function stampFramePart(
   x: number,
   y: number,
   onlySprite: boolean,
+  slots: Readonly<Record<EmblemSlotKey, number>> = EMBLEM_FRAME_SLOT,
 ): PartRig {
   const part = wornPart(rig, layer);
   const drawing = part.drawings[frame.pose];
@@ -88,7 +109,7 @@ export function stampFramePart(
   }
   const move = frame.move[layer];
   let cells: number[] | null = null;
-  for (const cell of frameStampCells(rig, frame, layer, bitmap, x, y, onlySprite)) {
+  for (const cell of frameStampCells(rig, frame, layer, bitmap, x, y, onlySprite, slots)) {
     const index = (cell.y - move.y) * rig.width + (cell.x - move.x);
     if ((drawing[index] ?? 0) === cell.slot) {
       continue;

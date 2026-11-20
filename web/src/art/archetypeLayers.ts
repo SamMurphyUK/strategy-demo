@@ -219,6 +219,29 @@ export function archetypeForUnitType(unitTypeId: string): ArchetypeKey | null {
   return UNIT_TYPE_ALIAS[unitTypeId] ?? null;
 }
 
+/** Which steel control a loaded sprite should show. Ships and guns have none. */
+export type SteelTool = "tread" | "propeller" | "soldier";
+
+/** Tanks, guns, planes, and ships. Infantry keeps the walk sheet. */
+export function isVehicleUnitType(unitTypeId: string): boolean {
+  const archetype = archetypeForUnitType(unitTypeId);
+  return archetype !== null && archetype !== "infantry";
+}
+
+export function steelToolFor(unitTypeId: string): SteelTool | null {
+  const archetype = archetypeForUnitType(unitTypeId);
+  if (archetype === "tank" || archetype === "mech_infantry") {
+    return "tread";
+  }
+  if (archetype === "aircraft") {
+    return "propeller";
+  }
+  if (archetype === "infantry") {
+    return "soldier";
+  }
+  return null;
+}
+
 export function isArchetype(value: unknown): value is ArchetypeKey {
   return typeof value === "string" && (ARCHETYPE_KEYS as readonly string[]).includes(value);
 }
