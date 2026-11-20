@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/GER/ger_bomber_seed1.outlined.polished.png",
+  "width": 272,
+  "height": 336,
+  "stamps": [
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 41,
+      "x": 171,
+      "y": 33,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 41,
+      "x": 175,
+      "y": 303,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

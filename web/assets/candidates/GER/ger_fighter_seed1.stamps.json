@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/GER/ger_fighter_seed1.outlined.polished.png",
+  "width": 144,
+  "height": 160,
+  "stamps": [
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 23,
+      "x": 93,
+      "y": 115,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 23,
+      "x": 93,
+      "y": 47,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_bomber_seed1.outlined.polished.png",
+  "width": 240,
+  "height": 304,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 55,
+      "x": 151,
+      "y": 236,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ussr_red_star",
+      "size": 55,
+      "x": 151,
+      "y": 74,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

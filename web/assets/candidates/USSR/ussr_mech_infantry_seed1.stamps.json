@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_mech_infantry_seed1.outlined.polished.png",
+  "width": 192,
+  "height": 80,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 17,
+      "x": 108,
+      "y": 37,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ussr_red_star",
+      "size": 31,
+      "x": 29,
+      "y": 31,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

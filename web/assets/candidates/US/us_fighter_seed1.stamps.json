@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/US/us_fighter_seed1.outlined.polished.png",
+  "width": 160,
+  "height": 176,
+  "stamps": [
+    {
+      "emblem": "us_star_and_bars",
+      "size": 17,
+      "x": 60,
+      "y": 93,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

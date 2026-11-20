@@ -178,6 +178,20 @@ def quantized_twin(relative: str) -> str:
     return relative
 
 
+def candidate_row(index: dict[str, dict], relative: str) -> dict:
+    """The manifest row for this picture. A peeled file has no ".outlined" in its name."""
+    twin = quantized_twin(relative)
+    found = index.get(twin)
+    if found:
+        return found
+    peeled = twin.replace(".outlined.quantized.png", ".quantized.png")
+    if peeled != twin:
+        found = index.get(peeled)
+        if found:
+            return found
+    return {}
+
+
 def svg_name(path: Path) -> str:
     if is_polished(path):
         return path.name[: -len(POLISHED_SUFFIX)] + ".polished.svg"
@@ -374,7 +388,7 @@ def check_svg(svg: str, allowed: dict[tuple[int, int, int], str]) -> None:
 
 def unit_record(path: Path, index: dict[str, dict], width: int, height: int, svg_file: Path) -> dict:
     relative = path.resolve().relative_to(WEB_ROOT).as_posix()
-    row = index.get(quantized_twin(relative), {})
+    row = candidate_row(index, relative)
     faction = row.get("factionId") if isinstance(row.get("factionId"), str) else path.parent.name
     unit_type = row.get("unitTypeId") if isinstance(row.get("unitTypeId"), str) else "unit"
     seed = row.get("seed") if isinstance(row.get("seed"), int) else None

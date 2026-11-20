@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_cruiser_seed1.outlined.polished.png",
+  "width": 416,
+  "height": 128,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 23,
+      "x": 328,
+      "y": 89,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

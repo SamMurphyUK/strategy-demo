@@ -65,6 +65,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/GER/ger_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/GER/ger_bomber_seed1.outlined.stamped.png",
+      "factionId": "GER",
+      "unitTypeId": "bomber",
+      "width": 272,
+      "height": 336,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/GER/ger_carrier_seed1.polished.svg",
       "source": "assets/candidates/GER/ger_carrier_seed1.outlined.polished.png",
       "factionId": "GER",
@@ -109,6 +121,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/GER/ger_fighter_seed1.stamped.svg",
+      "source": "assets/candidates/GER/ger_fighter_seed1.outlined.stamped.png",
+      "factionId": "GER",
+      "unitTypeId": "fighter",
+      "width": 144,
+      "height": 160,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/GER/ger_mech_infantry_seed1.polished.svg",
       "source": "assets/candidates/GER/ger_mech_infantry_seed1.outlined.polished.png",
       "factionId": "GER",
@@ -142,6 +166,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/GER/ger_tac_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/GER/ger_tac_bomber_seed1.outlined.stamped.png",
+      "factionId": "GER",
+      "unitTypeId": "tac_bomber",
+      "width": 192,
+      "height": 224,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/GER/ger_tank_pz4_seed1.polished.svg",
       "source": "assets/candidates/GER/ger_tank_pz4_seed1.outlined.polished.png",
       "factionId": "GER",
@@ -151,6 +187,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/GER/ger_tank_pz4_seed1.stamped.svg",
+      "source": "assets/candidates/GER/ger_tank_pz4_seed1.outlined.stamped.png",
+      "factionId": "GER",
+      "unitTypeId": "tank",
+      "width": 192,
+      "height": 96,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/GER/ger_transport_seed1.polished.svg",
@@ -208,6 +256,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/JAP/jap_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/JAP/jap_bomber_seed1.outlined.stamped.png",
+      "factionId": "JAP",
+      "unitTypeId": "bomber",
+      "width": 320,
+      "height": 400,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/JAP/jap_carrier_seed1.polished.svg",
       "source": "assets/candidates/JAP/jap_carrier_seed1.outlined.polished.png",
       "factionId": "JAP",
@@ -263,6 +323,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/JAP/jap_mech_infantry_seed1.stamped.svg",
+      "source": "assets/candidates/JAP/jap_mech_infantry_seed1.outlined.stamped.png",
+      "factionId": "JAP",
+      "unitTypeId": "mech_infantry",
+      "width": 160,
+      "height": 80,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/JAP/jap_submarine_seed1.polished.svg",
       "source": "assets/candidates/JAP/jap_submarine_seed1.outlined.polished.png",
       "factionId": "JAP",
@@ -294,6 +366,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/JAP/jap_tank_chi_ha_seed1.stamped.svg",
+      "source": "assets/candidates/JAP/jap_tank_chi_ha_seed1.outlined.stamped.png",
+      "factionId": "JAP",
+      "unitTypeId": "tank",
+      "width": 176,
+      "height": 96,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/JAP/jap_transport_seed1.polished.svg",
@@ -359,6 +443,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/UK/uk_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/UK/uk_bomber_seed1.outlined.stamped.png",
+      "factionId": "UK",
+      "unitTypeId": "bomber",
+      "width": 352,
+      "height": 464,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/UK/uk_carrier_seed1.polished.svg",
@@ -428,6 +524,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/UK/uk_mech_infantry_seed1.stamped.svg",
+      "source": "assets/candidates/UK/uk_mech_infantry_seed1.outlined.stamped.png",
+      "factionId": "UK",
+      "unitTypeId": "mech_infantry",
+      "width": 144,
+      "height": 80,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/UK/uk_submarine_seed1.polished.svg",
       "source": "assets/candidates/UK/uk_submarine_seed1.outlined.polished.png",
       "factionId": "UK",
@@ -450,6 +558,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/UK/uk_tac_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/UK/uk_tac_bomber_seed1.outlined.stamped.png",
+      "factionId": "UK",
+      "unitTypeId": "tac_bomber",
+      "width": 208,
+      "height": 272,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/UK/uk_tank_cromwell_seed1.polished.svg",
       "source": "assets/candidates/UK/uk_tank_cromwell_seed1.outlined.polished.png",
       "factionId": "UK",
@@ -459,6 +579,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/UK/uk_tank_cromwell_seed1.stamped.svg",
+      "source": "assets/candidates/UK/uk_tank_cromwell_seed1.outlined.stamped.png",
+      "factionId": "UK",
+      "unitTypeId": "tank",
+      "width": 176,
+      "height": 96,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/UK/uk_transport_seed1.polished.svg",
@@ -592,6 +724,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/US/us_fighter_seed1.stamped.svg",
+      "source": "assets/candidates/US/us_fighter_seed1.outlined.stamped.png",
+      "factionId": "US",
+      "unitTypeId": "fighter",
+      "width": 160,
+      "height": 176,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/US/us_mech_infantry_seed1.polished.svg",
       "source": "assets/candidates/US/us_mech_infantry_seed1.outlined.polished.png",
       "factionId": "US",
@@ -601,6 +745,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/US/us_mech_infantry_seed1.stamped.svg",
+      "source": "assets/candidates/US/us_mech_infantry_seed1.outlined.stamped.png",
+      "factionId": "US",
+      "unitTypeId": "mech_infantry",
+      "width": 192,
+      "height": 80,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/US/us_submarine_seed1.polished.svg",
@@ -625,6 +781,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/US/us_tac_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/US/us_tac_bomber_seed1.outlined.stamped.png",
+      "factionId": "US",
+      "unitTypeId": "tac_bomber",
+      "width": 176,
+      "height": 192,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/US/us_tank_sherman_seed1.polished.svg",
       "source": "assets/candidates/US/us_tank_sherman_seed1.outlined.polished.png",
       "factionId": "US",
@@ -634,6 +802,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/US/us_tank_sherman_seed1.stamped.svg",
+      "source": "assets/candidates/US/us_tank_sherman_seed1.outlined.stamped.png",
+      "factionId": "US",
+      "unitTypeId": "tank",
+      "width": 144,
+      "height": 96,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/US/us_transport_seed1.polished.svg",
@@ -691,6 +871,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/USSR/ussr_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_bomber_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "bomber",
+      "width": 240,
+      "height": 304,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/USSR/ussr_carrier_seed1.polished.svg",
       "source": "assets/candidates/USSR/ussr_carrier_seed1.outlined.polished.png",
       "factionId": "USSR",
@@ -702,6 +894,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/USSR/ussr_carrier_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_carrier_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "carrier",
+      "width": 512,
+      "height": 144,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/USSR/ussr_cruiser_seed1.polished.svg",
       "source": "assets/candidates/USSR/ussr_cruiser_seed1.outlined.polished.png",
       "factionId": "USSR",
@@ -711,6 +915,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/USSR/ussr_cruiser_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_cruiser_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "cruiser",
+      "width": 416,
+      "height": 128,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/USSR/ussr_destroyer_seed1.polished.svg",
@@ -735,6 +951,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/USSR/ussr_fighter_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_fighter_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "fighter",
+      "width": 144,
+      "height": 160,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/USSR/ussr_mech_infantry_seed1.polished.svg",
       "source": "assets/candidates/USSR/ussr_mech_infantry_seed1.outlined.polished.png",
       "factionId": "USSR",
@@ -744,6 +972,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/USSR/ussr_mech_infantry_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_mech_infantry_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "mech_infantry",
+      "width": 192,
+      "height": 80,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/USSR/ussr_mech_infantry_seed1.svg",
@@ -767,6 +1007,18 @@
       "grade": "polished"
     },
     {
+      "file": "assets/units/vector/USSR/ussr_submarine_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_submarine_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "submarine",
+      "width": 256,
+      "height": 80,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
+    },
+    {
       "file": "assets/units/vector/USSR/ussr_tac_bomber_seed1.polished.svg",
       "source": "assets/candidates/USSR/ussr_tac_bomber_seed1.outlined.polished.png",
       "factionId": "USSR",
@@ -776,6 +1028,18 @@
       "seed": 1,
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "file": "assets/units/vector/USSR/ussr_tac_bomber_seed1.stamped.svg",
+      "source": "assets/candidates/USSR/ussr_tac_bomber_seed1.outlined.stamped.png",
+      "factionId": "USSR",
+      "unitTypeId": "tac_bomber",
+      "width": 192,
+      "height": 224,
+      "seed": 1,
+      "polished": true,
+      "stamped": true,
+      "grade": "stamped"
     },
     {
       "file": "assets/units/vector/USSR/ussr_tank_t34_seed1.polished.svg",

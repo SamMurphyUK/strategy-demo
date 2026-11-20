@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/JAP/jap_tank_chi_ha_seed1.outlined.polished.png",
+  "width": 176,
+  "height": 96,
+  "stamps": [
+    {
+      "emblem": "jap_hinomaru_darker",
+      "size": 17,
+      "x": 90,
+      "y": 29,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

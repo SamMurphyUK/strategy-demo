@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_fighter_seed1.outlined.polished.png",
+  "width": 144,
+  "height": 160,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 13,
+      "x": 88,
+      "y": 114,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ussr_red_star",
+      "size": 13,
+      "x": 88,
+      "y": 115,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}
