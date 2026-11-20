@@ -38,10 +38,41 @@ import {
 import { horizonShiftX } from "./horizonParallax";
 import type { UnitPaintDocument } from "./pixelPaint";
 import { preferStamped } from "./unitShelf";
+import { GraphicsSettingsPanel } from "./GraphicsSettingsPanel";
+import { graphicsSettings } from "../ui/battle/graphicsSettings";
 import { drawSceneryEdge, drawWWIIBattlefield } from "../ui/battle/unitRenderer";
 import { bakeScenery, sceneryBakeStats, sceneryForView, sceneryScaleFor } from "../ui/battle/scenery/sceneryBake";
 import { sceneForRegion, sceneRegionList } from "../ui/battle/scenery/sceneRegions";
 import { FACTION_PALETTE } from "../ui/theme/factionPalette";
+
+const pictureCache = new Map<string, HTMLCanvasElement>();
+
+/** Rasterise a vector once for this frame and this pixel size, then reuse it while neither changes. */
+function cachedPicture(source: CanvasImageSource, key: string, width: number, height: number): HTMLCanvasElement | null {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  const fullKey = `${key}|${w}x${h}`;
+  const hit = pictureCache.get(fullKey);
+  if (hit) {
+    pictureCache.delete(fullKey);
+    pictureCache.set(fullKey, hit);
+    return hit;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+  g.imageSmoothingEnabled = true;
+  g.drawImage(source, 0, 0, w, h);
+  pictureCache.set(fullKey, canvas);
+  while (pictureCache.size > 32) {
+    const oldest = pictureCache.keys().next().value;
+    if (oldest === undefined) break;
+    pictureCache.delete(oldest);
+  }
+  return canvas;
+}
 
 interface SavedUnit {
   factionId: string;
@@ -860,8 +891,16 @@ export function NativeBattlePreview() {
           if (scalable) {
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
+            const dw = blit.width * span;
+            const dh = blit.height * span;
+            const crisp = graphicsSettings().crispPictures;
+            const cached = cachedPicture(scalable, `${cacheKey}|${crisp ? "crisp" : "soft"}`, crisp ? dw : blit.width, crisp ? dh : blit.height);
             ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(scalable, blit.x * span + cam.x, blit.y * span + cam.y, blit.width * span, blit.height * span);
+            if (cached) {
+              ctx.drawImage(cached, blit.x * span + cam.x, blit.y * span + cam.y, dw, dh);
+            } else {
+              ctx.drawImage(scalable, blit.x * span + cam.x, blit.y * span + cam.y, dw, dh);
+            }
             ctx.restore();
           } else {
             ctx.imageSmoothingEnabled = false;
@@ -1188,6 +1227,7 @@ export function NativeBattlePreview() {
             {paused ? "Play" : "Pause"}
           </button>
         </div>
+        <GraphicsSettingsPanel />
       </header>
       {placed.length > 0 && (
         <ul className="field-test-units">

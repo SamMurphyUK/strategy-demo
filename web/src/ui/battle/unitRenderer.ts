@@ -27,6 +27,8 @@ import {
   WaterGeyser,
 } from './combatTypes';
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
+import { graphicsSettings } from './graphicsSettings';
+import { drawCoastalWaveRows, drawOceanWaveRows } from './seaTile';
 import { type FlagMotif, ipcLostCaption } from './flagMotif';
 import { MILITARY } from '../theme/militaryPalette';
 import {
@@ -448,20 +450,53 @@ function lightRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
  * Mist along the horizon in the sky's own horizon colour: a smooth gradient, thickest on the horizon
  * line, thinning up into the skyline and down the far ground. Never past 0.36, the old haze's strength.
  */
+const mistPlates = new Map<string, HTMLCanvasElement>();
+
 export function drawHorizonMist(ctx: CanvasRenderingContext2D, width: number, time: number) {
+  if (!graphicsSettings().mist) return;
   const {horizon} = getSkyState(skyCycle(time));
   const top = SKY_HORIZON_Y - 30;
-  const bottom = SKY_HORIZON_Y + 110;
-  const mist = ctx.createLinearGradient(0, top, 0, bottom);
-  const stop = (a: number) => `rgba(${horizon[0]},${horizon[1]},${horizon[2]},${a})`;
-  mist.addColorStop(0, stop(0));
-  mist.addColorStop(30 / 140, stop(0.34));
-  mist.addColorStop(0.5, stop(0.15));
-  mist.addColorStop(0.78, stop(0.04));
-  mist.addColorStop(1, stop(0));
+  const height = 140;
+  const key = `${Math.ceil(width)}|${horizon.map((channel) => channel >> 2).join(',')}`;
+  let plate = mistPlates.get(key);
+  if (!plate && typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(width));
+    canvas.height = height;
+    const g = canvas.getContext('2d');
+    if (g) {
+      const mist = g.createLinearGradient(0, 0, 0, height);
+      const stop = (a: number) => `rgba(${horizon[0]},${horizon[1]},${horizon[2]},${a})`;
+      mist.addColorStop(0, stop(0));
+      mist.addColorStop(30 / 140, stop(0.34));
+      mist.addColorStop(0.5, stop(0.15));
+      mist.addColorStop(0.78, stop(0.04));
+      mist.addColorStop(1, stop(0));
+      g.fillStyle = mist;
+      g.fillRect(0, 0, canvas.width, height);
+    }
+    plate = canvas;
+    mistPlates.set(key, plate);
+    while (mistPlates.size > 4) {
+      const oldest = mistPlates.keys().next().value;
+      if (oldest === undefined) break;
+      mistPlates.delete(oldest);
+    }
+  }
   ctx.save();
-  ctx.fillStyle = mist;
-  ctx.fillRect(0, top, width, bottom - top);
+  if (plate && plate.getContext('2d')) {
+    ctx.drawImage(plate, 0, top, width, height);
+  } else {
+    const mist = ctx.createLinearGradient(0, top, 0, top + height);
+    const stop = (a: number) => `rgba(${horizon[0]},${horizon[1]},${horizon[2]},${a})`;
+    mist.addColorStop(0, stop(0));
+    mist.addColorStop(30 / 140, stop(0.34));
+    mist.addColorStop(0.5, stop(0.15));
+    mist.addColorStop(0.78, stop(0.04));
+    mist.addColorStop(1, stop(0));
+    ctx.fillStyle = mist;
+    ctx.fillRect(0, top, width, height);
+  }
   ctx.restore();
 }
 
@@ -540,25 +575,42 @@ export function drawAmbientOcclusionShadow(
   ctx.restore();
 }
 
-/**
- * Renders the top skybox with smooth, gradual 60-second Day / Sunset / Night / Dawn
- * color interpolation, actual radial gradient bloom on celestial bodies, and
- * ambient occlusion beneath the horizon tree line.
- */
-export function drawSkyboxAndTreeline(
-  ctx: CanvasRenderingContext2D,
+const skyPlates = new Map<string, HTMLCanvasElement>();
+
+/** A sky plate is rebuilt only when its key changes. Eight are enough for the light steps in play. */
+function skyPlate(
+  key: string,
   width: number,
-  time: number,
-  bakedHorizon?: CanvasImageSource,
-  horizonView?: HorizonView,
-) {
-  const horizonY = 114;
-  const cycleSeconds = 60;
-  const cycle = (time % cycleSeconds) / cycleSeconds; // 0.0 to 1.0 continuous
+  height: number,
+  paint: (ctx: CanvasRenderingContext2D) => void,
+): HTMLCanvasElement | null {
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
+  const hit = skyPlates.get(key);
+  if (hit && hit.width === w && hit.height === h) return hit;
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext('2d');
+  if (!g) return null;
+  paint(g);
+  skyPlates.delete(key);
+  skyPlates.set(key, canvas);
+  while (skyPlates.size > 8) {
+    const oldest = skyPlates.keys().next().value;
+    if (oldest === undefined) break;
+    skyPlates.delete(oldest);
+  }
+  return canvas;
+}
 
-  ctx.save();
+function nightnessAt(cycle: number): number {
+  if (cycle < 0.48 || cycle > 0.92) return 0;
+  return Math.sin(((cycle - 0.48) / 0.44) * Math.PI);
+}
 
-  // 1. SMOOTH RGB SKY GRADIENT
+function paintSkyGradient(ctx: CanvasRenderingContext2D, width: number, horizonY: number, cycle: number) {
   const {top, mid, horizon} = getSkyColors(cycle);
   const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
   skyGrad.addColorStop(0, rgbStr(top));
@@ -566,113 +618,104 @@ export function drawSkyboxAndTreeline(
   skyGrad.addColorStop(1, rgbStr(horizon));
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, width, horizonY);
+}
 
-  // 2. STARS (Gradually fade in during night: cycle 0.48 .. 0.92)
-  let nightness = 0;
-  if (cycle >= 0.48 && cycle <= 0.92) {
-    nightness = Math.sin(((cycle - 0.48) / 0.44) * Math.PI);
-  }
-  if (nightness > 0.02) {
-    STARS.forEach((st) => {
-      const twinkle = Math.sin(time * 3.5 + st.seed);
-      if (twinkle > -0.2) {
-        ctx.fillStyle = twinkle > 0.4 ? PALETTE.sandCream : PALETTE.trenchMudBone;
-        ctx.globalAlpha = nightness * Math.max(0.1, (twinkle + 0.3) * 0.7);
-        ctx.fillRect(st.x, st.y, st.size, st.size);
-      }
-    });
-    ctx.globalAlpha = 1.0;
-  }
+function paintStars(ctx: CanvasRenderingContext2D, time: number, nightness: number) {
+  if (nightness <= 0.02) return;
+  STARS.forEach((st) => {
+    const twinkle = Math.sin(time * 3.5 + st.seed);
+    if (twinkle > -0.2) {
+      ctx.fillStyle = twinkle > 0.4 ? PALETTE.sandCream : PALETTE.trenchMudBone;
+      ctx.globalAlpha = nightness * Math.max(0.1, (twinkle + 0.3) * 0.7);
+      ctx.fillRect(st.x, st.y, st.size, st.size);
+    }
+  });
+  ctx.globalAlpha = 1.0;
+}
 
-  // 3. SUN (Arches smoothly across the sky during Day & Sunset: cycle 0.86 .. 0.54)
+function paintSun(ctx: CanvasRenderingContext2D, width: number, horizonY: number, cycle: number) {
   let sunP = -1;
   if (cycle >= 0.86) {
     sunP = (cycle - 0.86) / 0.68;
   } else if (cycle <= 0.54) {
     sunP = (cycle + 0.14) / 0.68;
   }
+  if (sunP < 0 || sunP > 1) return;
+  const sunX = Math.round(50 + sunP * (width - 100));
+  const sunY = Math.round(horizonY - 12 - Math.sin(sunP * Math.PI) * 78);
+  const sunAlpha = Math.max(0, Math.sin(sunP * Math.PI));
+  const isSunset = sunP > 0.62;
 
-  if (sunP >= 0 && sunP <= 1) {
-    const sunX = Math.round(50 + sunP * (width - 100));
-    const sunY = Math.round(horizonY - 12 - Math.sin(sunP * Math.PI) * 78);
-    const sunAlpha = Math.max(0, Math.sin(sunP * Math.PI));
-    const isSunset = sunP > 0.62;
-
-    // ACTUAL RADIAL GRADIENT BLOOM FOR SUN (lighter blend)
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const sunBloomR = 48;
-    const sBloom = ctx.createRadialGradient(sunX, sunY, 3, sunX, sunY, sunBloomR);
-    if (isSunset) {
-      sBloom.addColorStop(0, `rgba(255, 210, 110, ${0.9 * sunAlpha})`);
-      sBloom.addColorStop(0.25, `rgba(245, 130, 45, ${0.55 * sunAlpha})`);
-      sBloom.addColorStop(0.7, `rgba(210, 70, 20, ${0.2 * sunAlpha})`);
-      sBloom.addColorStop(1, 'rgba(180, 40, 10, 0)');
-    } else {
-      sBloom.addColorStop(0, `rgba(255, 245, 195, ${0.85 * sunAlpha})`);
-      sBloom.addColorStop(0.3, `rgba(245, 195, 105, ${0.45 * sunAlpha})`);
-      sBloom.addColorStop(0.7, `rgba(215, 140, 50, ${0.15 * sunAlpha})`);
-      sBloom.addColorStop(1, 'rgba(180, 90, 20, 0)');
-    }
-    ctx.fillStyle = sBloom;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, sunBloomR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Solid Sun Core
-    ctx.save();
-    ctx.globalAlpha = sunAlpha;
-    ctx.fillStyle = isSunset ? PALETTE.terracotta : PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const sunBloomR = 48;
+  const sBloom = ctx.createRadialGradient(sunX, sunY, 3, sunX, sunY, sunBloomR);
+  if (isSunset) {
+    sBloom.addColorStop(0, `rgba(255, 210, 110, ${0.9 * sunAlpha})`);
+    sBloom.addColorStop(0.25, `rgba(245, 130, 45, ${0.55 * sunAlpha})`);
+    sBloom.addColorStop(0.7, `rgba(210, 70, 20, ${0.2 * sunAlpha})`);
+    sBloom.addColorStop(1, 'rgba(180, 40, 10, 0)');
+  } else {
+    sBloom.addColorStop(0, `rgba(255, 245, 195, ${0.85 * sunAlpha})`);
+    sBloom.addColorStop(0.3, `rgba(245, 195, 105, ${0.45 * sunAlpha})`);
+    sBloom.addColorStop(0.7, `rgba(215, 140, 50, ${0.15 * sunAlpha})`);
+    sBloom.addColorStop(1, 'rgba(180, 90, 20, 0)');
   }
+  ctx.fillStyle = sBloom;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, sunBloomR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-  // 4. MOON (Arches smoothly across the sky during Night: cycle 0.48 .. 0.94)
-  if (cycle >= 0.48 && cycle <= 0.94) {
-    const moonP = (cycle - 0.48) / 0.46;
-    const moonX = Math.round(60 + moonP * (width - 120));
-    const moonY = Math.round(horizonY - 12 - Math.sin(moonP * Math.PI) * 72);
-    const moonAlpha = Math.max(0, Math.sin(moonP * Math.PI));
+  ctx.save();
+  ctx.globalAlpha = sunAlpha;
+  ctx.fillStyle = isSunset ? PALETTE.terracotta : PALETTE.sandCream;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.sandCream;
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 
-    // ACTUAL RADIAL GRADIENT BLOOM FOR MOON (lighter blend)
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const moonBloomR = 36;
-    const mBloom = ctx.createRadialGradient(moonX, moonY, 2, moonX, moonY, moonBloomR);
-    mBloom.addColorStop(0, `rgba(210, 235, 255, ${0.75 * moonAlpha})`);
-    mBloom.addColorStop(0.35, `rgba(140, 180, 220, ${0.3 * moonAlpha})`);
-    mBloom.addColorStop(0.75, `rgba(70, 100, 150, ${0.1 * moonAlpha})`);
-    mBloom.addColorStop(1, 'rgba(30, 50, 90, 0)');
-    ctx.fillStyle = mBloom;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, moonBloomR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+function paintMoon(ctx: CanvasRenderingContext2D, width: number, horizonY: number, cycle: number) {
+  if (cycle < 0.48 || cycle > 0.94) return;
+  const moonP = (cycle - 0.48) / 0.46;
+  const moonX = Math.round(60 + moonP * (width - 120));
+  const moonY = Math.round(horizonY - 12 - Math.sin(moonP * Math.PI) * 72);
+  const moonAlpha = Math.max(0, Math.sin(moonP * Math.PI));
 
-    // Moon crescent. The dark side is cut out of the sprite, so the night sky shows through it.
-    ctx.save();
-    ctx.globalAlpha = moonAlpha;
-    drawMoonCrescent(ctx, moonX, moonY);
-    ctx.restore();
-  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const moonBloomR = 36;
+  const mBloom = ctx.createRadialGradient(moonX, moonY, 2, moonX, moonY, moonBloomR);
+  mBloom.addColorStop(0, `rgba(210, 235, 255, ${0.75 * moonAlpha})`);
+  mBloom.addColorStop(0.35, `rgba(140, 180, 220, ${0.3 * moonAlpha})`);
+  mBloom.addColorStop(0.75, `rgba(70, 100, 150, ${0.1 * moonAlpha})`);
+  mBloom.addColorStop(1, 'rgba(30, 50, 90, 0)');
+  ctx.fillStyle = mBloom;
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, moonBloomR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-  // 5. DRIFTING ATMOSPHERIC CLOUDS
+  ctx.save();
+  ctx.globalAlpha = moonAlpha;
+  drawMoonCrescent(ctx, moonX, moonY);
+  ctx.restore();
+}
+
+function paintClouds(ctx: CanvasRenderingContext2D, width: number, time: number, nightness: number) {
   const clouds = [
     {baseX: 80, y: 16, w: 72, h: 14},
     {baseX: 380, y: 32, w: 96, h: 16},
     {baseX: 720, y: 18, w: 84, h: 15},
     {baseX: 1040, y: 28, w: 110, h: 18},
   ];
-  const cloudAlpha = 0.65 - nightness * 0.35;
   ctx.save();
-  ctx.globalAlpha = cloudAlpha;
+  ctx.globalAlpha = 0.65 - nightness * 0.35;
   clouds.forEach((cl) => {
     const cx = Math.round((cl.baseX + time * 7) % (width + cl.w * 2) - cl.w);
     ctx.fillStyle = PALETTE.sandCream;
@@ -682,22 +725,117 @@ export function drawSkyboxAndTreeline(
     ctx.fillRect(cx + 4, cl.y + cl.h - 5, cl.w - 8, 4);
   });
   ctx.restore();
+}
 
-  // 6. ACTUAL AMBIENT OCCLUSION CONTACT SHADOW BENEATH TREE LINE
+function paintTreeAo(ctx: CanvasRenderingContext2D, width: number, horizonY: number) {
   const treeAo = ctx.createLinearGradient(0, horizonY - 6, 0, horizonY + 8);
   treeAo.addColorStop(0, 'rgba(20, 16, 22, 0.7)');
   treeAo.addColorStop(0.5, 'rgba(30, 24, 32, 0.35)');
   treeAo.addColorStop(1, 'rgba(30, 24, 32, 0)');
   ctx.fillStyle = treeAo;
   ctx.fillRect(0, horizonY - 6, width, 14);
+}
 
-  // 7. HORIZON FOREST SILHOUETTE, or the region's baked skyline
-  if (bakedHorizon) {
-    drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
-  } else {
-    drawForestSilhouette(ctx, width, horizonY);
+function paintSeagulls(ctx: CanvasRenderingContext2D, width: number, time: number) {
+  SEAGULLS.forEach((gull) => {
+    const progress = gull.baseX + time * gull.speed;
+    const gx = Math.round((((progress % (width + 80)) + (width + 80)) % (width + 80)) - 40);
+    const gy = Math.round(gull.y + Math.sin(time * 2 + gull.seed) * 3);
+    const isFlapUp = Math.sin(time * gull.flapRate + gull.seed) > 0;
+
+    ctx.save();
+    ctx.translate(gx, gy);
+    if (gull.dir < 0) ctx.scale(-1, 1);
+
+    ctx.fillStyle = PALETTE.sandCream;
+    ctx.fillRect(-1, 0, 3, 2);
+    ctx.fillRect(2, 0, 1, 1);
+
+    if (isFlapUp) {
+      ctx.fillStyle = PALETTE.sandCream;
+      ctx.fillRect(-2, -1, 1, 2);
+      ctx.fillRect(1, -1, 1, 2);
+      ctx.fillStyle = PALETTE.trenchMudBone;
+      ctx.fillRect(-3, -3, 1, 2);
+      ctx.fillRect(2, -3, 1, 2);
+    } else {
+      ctx.fillStyle = PALETTE.sandCream;
+      ctx.fillRect(-2, 0, 1, 1);
+      ctx.fillRect(1, 0, 1, 1);
+      ctx.fillStyle = PALETTE.trenchMudBone;
+      ctx.fillRect(-4, 1, 2, 1);
+      ctx.fillRect(2, 1, 2, 1);
+    }
+
+    ctx.restore();
+  });
+}
+
+function paintSeaBars(ctx: CanvasRenderingContext2D, width: number, horizonY: number) {
+  ctx.fillStyle = PALETTE.bunkerCharcoal;
+  ctx.fillRect(0, horizonY - 2, width, 3);
+  ctx.fillStyle = PALETTE.navalSteel;
+  ctx.fillRect(0, horizonY, width, 2);
+}
+
+function paintSeaGlints(ctx: CanvasRenderingContext2D, width: number, horizonY: number, time: number) {
+  for (let x = 0; x < width; x += 16) {
+    const glint = Math.sin(time * 3 + x * 0.12);
+    if (glint > 0.45) {
+      ctx.fillStyle = PALETTE.sandCream;
+      ctx.fillRect(x, horizonY - 1, 7, 1);
+    }
   }
+}
 
+/**
+ * Renders the top skybox. The gradient stays on a plate until the light changes.
+ * The sun and the moon are drawn every frame, so they glide. Stars and clouds are painted
+ * over them while live sky is on, and held on a plate when it is off. The trees cover the sun.
+ */
+export function drawSkyboxAndTreeline(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  time: number,
+  bakedHorizon?: CanvasImageSource,
+  horizonView?: HorizonView,
+) {
+  const horizonY = 114;
+  const cycle = skyCycle(time);
+  const live = graphicsSettings().liveSky;
+  const night = nightnessAt(cycle);
+  const plateH = horizonY + 64;
+  const wKey = Math.ceil(width);
+  const lightKey = skyLight(time, width).key;
+  const back = skyPlate(`land-back|${wKey}|${lightKey}|${live ? 'live' : 'still'}`, width, plateH, (g) => {
+    paintSkyGradient(g, width, horizonY, cycle);
+    if (!live) paintStars(g, time, night);
+  });
+  const front = skyPlate(`land-front|${wKey}|${bakedHorizon ? 'open' : 'trees'}|${live ? 'live' : lightKey}`, width, plateH, (g) => {
+    if (!live) paintClouds(g, width, time, night);
+    paintTreeAo(g, width, horizonY);
+    if (!bakedHorizon) drawForestSilhouette(g, width, horizonY);
+  });
+
+  ctx.save();
+  if (back && front) {
+    ctx.drawImage(back, 0, 0);
+    if (live) paintStars(ctx, time, night);
+    paintSun(ctx, width, horizonY, cycle);
+    paintMoon(ctx, width, horizonY, cycle);
+    if (live) paintClouds(ctx, width, time, night);
+    ctx.drawImage(front, 0, 0);
+    if (bakedHorizon) drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
+  } else {
+    paintSkyGradient(ctx, width, horizonY, cycle);
+    paintStars(ctx, time, night);
+    paintSun(ctx, width, horizonY, cycle);
+    paintMoon(ctx, width, horizonY, cycle);
+    paintClouds(ctx, width, time, night);
+    paintTreeAo(ctx, width, horizonY);
+    if (bakedHorizon) drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
+    else drawForestSilhouette(ctx, width, horizonY);
+  }
   ctx.restore();
 }
 
@@ -789,9 +927,8 @@ const SEAGULLS = [
 
 /**
  * Renders the open sea skybox for NAVY TEST and high seas maps.
- * Completely eliminates the forest tree line!
- * In place of trees, renders distant rocky/tropical pixel islands with sandbars
- * and animated seagulls flying across the sky with 2-frame flapping V-wings.
+ * The gradient stays on a plate until the light changes. The sun and the moon are drawn every frame.
+ * Gulls run only while live sky is on. Islands and a frozen cloud plate cover the sun when it is low.
  */
 export function drawSeaSkyboxAndHorizon(
   ctx: CanvasRenderingContext2D,
@@ -801,194 +938,51 @@ export function drawSeaSkyboxAndHorizon(
   horizonView?: HorizonView,
 ) {
   const horizonY = 114;
-  const cycleSeconds = 60;
-  const cycle = (time % cycleSeconds) / cycleSeconds; // 0.0 to 1.0 continuous
-
-  ctx.save();
-
-  // 1. SMOOTH RGB SKY GRADIENT
-  const {top, mid, horizon} = getSkyColors(cycle);
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-  skyGrad.addColorStop(0, rgbStr(top));
-  skyGrad.addColorStop(0.55, rgbStr(mid));
-  skyGrad.addColorStop(1, rgbStr(horizon));
-  ctx.fillStyle = skyGrad;
-  ctx.fillRect(0, 0, width, horizonY);
-
-  // 2. STARS (Gradually fade in during night: cycle 0.48 .. 0.92)
-  let nightness = 0;
-  if (cycle >= 0.48 && cycle <= 0.92) {
-    nightness = Math.sin(((cycle - 0.48) / 0.44) * Math.PI);
-  }
-  if (nightness > 0.02) {
-    STARS.forEach((st) => {
-      const twinkle = Math.sin(time * 3.5 + st.seed);
-      if (twinkle > -0.2) {
-        ctx.fillStyle = twinkle > 0.4 ? PALETTE.sandCream : PALETTE.trenchMudBone;
-        ctx.globalAlpha = nightness * Math.max(0.1, (twinkle + 0.3) * 0.7);
-        ctx.fillRect(st.x, st.y, st.size, st.size);
-      }
-    });
-    ctx.globalAlpha = 1.0;
-  }
-
-  // 3. SUN
-  let sunP = -1;
-  if (cycle >= 0.86) {
-    sunP = (cycle - 0.86) / 0.68;
-  } else if (cycle <= 0.54) {
-    sunP = (cycle + 0.14) / 0.68;
-  }
-
-  if (sunP >= 0 && sunP <= 1) {
-    const sunX = Math.round(50 + sunP * (width - 100));
-    const sunY = Math.round(horizonY - 12 - Math.sin(sunP * Math.PI) * 78);
-    const sunAlpha = Math.max(0, Math.sin(sunP * Math.PI));
-    const isSunset = sunP > 0.62;
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const sunBloomR = 48;
-    const sBloom = ctx.createRadialGradient(sunX, sunY, 3, sunX, sunY, sunBloomR);
-    if (isSunset) {
-      sBloom.addColorStop(0, `rgba(255, 210, 110, ${0.9 * sunAlpha})`);
-      sBloom.addColorStop(0.25, `rgba(245, 130, 45, ${0.55 * sunAlpha})`);
-      sBloom.addColorStop(0.7, `rgba(210, 70, 20, ${0.2 * sunAlpha})`);
-      sBloom.addColorStop(1, 'rgba(180, 40, 10, 0)');
-    } else {
-      sBloom.addColorStop(0, `rgba(255, 245, 195, ${0.85 * sunAlpha})`);
-      sBloom.addColorStop(0.3, `rgba(245, 195, 105, ${0.45 * sunAlpha})`);
-      sBloom.addColorStop(0.7, `rgba(215, 140, 50, ${0.15 * sunAlpha})`);
-      sBloom.addColorStop(1, 'rgba(180, 90, 20, 0)');
-    }
-    ctx.fillStyle = sBloom;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, sunBloomR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = sunAlpha;
-    ctx.fillStyle = isSunset ? PALETTE.terracotta : PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // 4. MOON
-  if (cycle >= 0.48 && cycle <= 0.94) {
-    const moonP = (cycle - 0.48) / 0.46;
-    const moonX = Math.round(60 + moonP * (width - 120));
-    const moonY = Math.round(horizonY - 12 - Math.sin(moonP * Math.PI) * 72);
-    const moonAlpha = Math.max(0, Math.sin(moonP * Math.PI));
-
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const moonBloomR = 36;
-    const mBloom = ctx.createRadialGradient(moonX, moonY, 2, moonX, moonY, moonBloomR);
-    mBloom.addColorStop(0, `rgba(210, 235, 255, ${0.75 * moonAlpha})`);
-    mBloom.addColorStop(0.35, `rgba(140, 180, 220, ${0.3 * moonAlpha})`);
-    mBloom.addColorStop(0.75, `rgba(70, 100, 150, ${0.1 * moonAlpha})`);
-    mBloom.addColorStop(1, 'rgba(30, 50, 90, 0)');
-    ctx.fillStyle = mBloom;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, moonBloomR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = moonAlpha;
-    drawMoonCrescent(ctx, moonX, moonY);
-    ctx.restore();
-  }
-
-  // 5. DRIFTING ATMOSPHERIC CLOUDS
-  const clouds = [
-    {baseX: 80, y: 16, w: 72, h: 14},
-    {baseX: 380, y: 32, w: 96, h: 16},
-    {baseX: 720, y: 18, w: 84, h: 15},
-    {baseX: 1040, y: 28, w: 110, h: 18},
-  ];
-  const cloudAlpha = 0.65 - nightness * 0.35;
-  ctx.save();
-  ctx.globalAlpha = cloudAlpha;
-  clouds.forEach((cl) => {
-    const cx = Math.round((cl.baseX + time * 7) % (width + cl.w * 2) - cl.w);
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillRect(cx + 8, cl.y, cl.w - 16, cl.h - 4);
-    ctx.fillRect(cx + 18, cl.y - 4, cl.w - 38, 4);
-    ctx.fillStyle = PALETTE.trenchMudBone;
-    ctx.fillRect(cx + 4, cl.y + cl.h - 5, cl.w - 8, 4);
+  const cycle = skyCycle(time);
+  const live = graphicsSettings().liveSky;
+  const night = nightnessAt(cycle);
+  const plateH = horizonY + 64;
+  const wKey = Math.ceil(width);
+  const lightKey = skyLight(time, width).key;
+  const back = skyPlate(`sea-back|${wKey}|${lightKey}|${live ? 'live' : 'still'}`, width, plateH, (g) => {
+    paintSkyGradient(g, width, horizonY, cycle);
+    if (!live) paintStars(g, time, night);
   });
-  ctx.restore();
-
-  // 6. ANIMATED SEAGULLS (Rhythmic 2-Frame Flapping V-Wings across Open Sky)
-  SEAGULLS.forEach((g) => {
-    const progress = g.baseX + time * g.speed;
-    const gx = Math.round((((progress % (width + 80)) + (width + 80)) % (width + 80)) - 40);
-    const gy = Math.round(g.y + Math.sin(time * 2 + g.seed) * 3);
-    const isFlapUp = Math.sin(time * g.flapRate + g.seed) > 0;
-
-    ctx.save();
-    ctx.translate(gx, gy);
-    if (g.dir < 0) ctx.scale(-1, 1);
-
-    // Body core in sandCream #DFCE91
-    ctx.fillStyle = PALETTE.sandCream;
-    ctx.fillRect(-1, 0, 3, 2);
-    // Head / beak
-    ctx.fillRect(2, 0, 1, 1);
-
-    // Flapping V-Wings in #DFCE91 with #A69C90 wingtips
-    if (isFlapUp) {
-      // Frame 1: Upward V-wings (\_/)
-      ctx.fillStyle = PALETTE.sandCream;
-      ctx.fillRect(-2, -1, 1, 2);
-      ctx.fillRect(1, -1, 1, 2);
-      ctx.fillStyle = PALETTE.trenchMudBone; // Wingtips in #A69C90
-      ctx.fillRect(-3, -3, 1, 2);
-      ctx.fillRect(2, -3, 1, 2);
-    } else {
-      // Frame 2: Horizontal / Dipping Wings (- -)
-      ctx.fillStyle = PALETTE.sandCream;
-      ctx.fillRect(-2, 0, 1, 1);
-      ctx.fillRect(1, 0, 1, 1);
-      ctx.fillStyle = PALETTE.trenchMudBone; // Wingtips in #A69C90
-      ctx.fillRect(-4, 1, 2, 1);
-      ctx.fillRect(2, 1, 2, 1);
+  const front = skyPlate(`sea-front|${wKey}|${bakedHorizon ? 'open' : 'islands'}|${live ? 'live' : lightKey}`, width, plateH, (g) => {
+    if (!live) {
+      paintClouds(g, width, time, night);
+      paintSeagulls(g, width, time);
     }
-
-    ctx.restore();
+    if (!bakedHorizon) drawDistantSeaIslands(g, width, horizonY);
   });
 
-  // 7. OCCASIONAL DISTANT ROCKY & TROPICAL PIXEL ISLANDS ON HORIZON (Zero Trees!)
-  if (bakedHorizon) {
-    drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
+  ctx.save();
+  if (back && front) {
+    ctx.drawImage(back, 0, 0);
+    if (live) paintStars(ctx, time, night);
+    paintSun(ctx, width, horizonY, cycle);
+    paintMoon(ctx, width, horizonY, cycle);
+    if (live) {
+      paintClouds(ctx, width, time, night);
+      paintSeagulls(ctx, width, time);
+    }
+    ctx.drawImage(front, 0, 0);
+    if (bakedHorizon) drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
   } else {
-    drawDistantSeaIslands(ctx, width, horizonY);
+    paintSkyGradient(ctx, width, horizonY, cycle);
+    paintStars(ctx, time, night);
+    paintSun(ctx, width, horizonY, cycle);
+    paintMoon(ctx, width, horizonY, cycle);
+    paintClouds(ctx, width, time, night);
+    paintSeagulls(ctx, width, time);
+    if (bakedHorizon) drawHorizonLayer(ctx, bakedHorizon, time, horizonView);
+    else drawDistantSeaIslands(ctx, width, horizonY);
   }
-
-  // 8. Distant Calm Ocean Seam & Waterline Shimmer
-  ctx.fillStyle = PALETTE.bunkerCharcoal;
-  ctx.fillRect(0, horizonY - 2, width, 3);
-  ctx.fillStyle = PALETTE.navalSteel;
-  ctx.fillRect(0, horizonY, width, 2);
-
-  for (let x = 0; x < width; x += 16) {
-    const glint = Math.sin(time * 3 + x * 0.12);
-    if (glint > 0.45) {
-      ctx.fillStyle = PALETTE.sandCream;
-      ctx.fillRect(x, horizonY - 1, 7, 1);
-    }
-  }
-
+  paintSeaBars(ctx, width, horizonY);
+  if (live) paintSeaGlints(ctx, width, horizonY, time);
   ctx.restore();
 }
+
 
 /**
  * Draws occasional small distant rocky/tropical pixel islands with sandbars on the sea horizon
@@ -1152,11 +1146,12 @@ export function drawOpenOceanBattlefield(
   ctx.fillStyle = PALETTE.navalSteel;
   ctx.fillRect(0, horizonY - 2, width, 3);
   ctx.fillStyle = PALETTE.sandCream;
-  // Faint horizon glint
-  for (let x = 0; x < width; x += 18) {
-    const glint = Math.sin(time * 3 + x * 0.1);
-    if (glint > 0.4) {
-      ctx.fillRect(x, horizonY - 2, 8, 1);
+  if (graphicsSettings().liveSky) {
+    for (let x = 0; x < width; x += 18) {
+      const glint = Math.sin(time * 3 + x * 0.1);
+      if (glint > 0.4) {
+        ctx.fillRect(x, horizonY - 2, 8, 1);
+      }
     }
   }
 
@@ -1169,43 +1164,21 @@ export function drawOpenOceanBattlefield(
   ctx.fillStyle = oceanGrad;
   ctx.fillRect(0, horizonY, width, height - horizonY);
 
-  // 4. Horizontally scrolling 1-bit wave ticks and water foam swells
+  // 4. One repeating strip of wave ticks per colour, scrolled when the sea is set to move.
   const [tickA, tickB] = look?.ticks ?? [PALETTE.spruceSea, PALETTE.navalSteel];
-  for (let y = horizonY + 6; y < height; y += 10) {
-    // Dynamic open-sea swells
-    const swell = (Math.sin(time * 2.1 + y * 0.045 + phase) * 10 + Math.cos(time * 1.4 + y * 0.02 + phase) * 6) * swellScale;
-    const speed = (14 + ((y * 7) % 18)) * swellScale;
-    const scroll = (time * speed) % 44;
-
-    // 1-bit Wave Ticks in Spruce Sea and Naval Steel
-    ctx.fillStyle = (Math.floor(y / 10) % 2 === 0) ? tickA : tickB;
-    for (let x = -50; x < width + 50; x += 38) {
-      const wx = Math.round(x + scroll + swell);
-      ctx.fillRect(wx, y, 14, 2);
-
-      // 1-bit dither dots under wave tick
-      if (((Math.floor(wx / 4) + Math.floor(y / 10)) % 2) === 0) {
-        ctx.fillRect(wx + 2, y + 2, 2, 2);
-        ctx.fillRect(wx + 8, y + 2, 2, 2);
-      }
-    }
-
-    // Dynamic wave foam crests on occasional wave peaks
-    if ((Math.floor(y / 10) % 3) === 0) {
-      ctx.fillStyle = look?.foam ?? PALETTE.sandCream;
-      for (let x = -30; x < width + 50; x += 64) {
-        const fx = Math.round(x + scroll * 1.2 + swell);
-        ctx.fillRect(fx + 3, y - 1, 8, 1);
-        ctx.fillRect(fx + 5, y - 2, 4, 1);
-      }
-    }
-  }
+  const seaMoves = graphicsSettings().animatedSea;
+  drawOceanWaveRows(ctx, width, height, horizonY, time, swellScale, phase, {
+    tickA,
+    tickB,
+    foam: look?.foam ?? PALETTE.sandCream,
+  }, seaMoves);
 
   // 4b. Arctic zones carry drifting ice floes
   if (look?.ice) {
+    const drift = seaMoves ? time : 0;
     for (let i = 0; i < 9; i++) {
       const w = 18 + ((i * 37) % 30);
-      const fx = Math.round((((i * 151 + time * 4) % (width + 80)) + width + 80) % (width + 80)) - 40;
+      const fx = Math.round((((i * 151 + drift * 4) % (width + 80)) + width + 80) % (width + 80)) - 40;
       const fy = horizonY + 30 + ((i * 97) % (height - horizonY - 60));
       ctx.fillStyle = PALETTE.navalSteel;
       ctx.fillRect(fx + 2, fy + 3, w, 4);
@@ -1674,11 +1647,13 @@ export function drawAnimatedSea(
   time: number,
 ) {
   const seaTop = 525;
+  const animated = graphicsSettings().animatedSea;
+  const motion = animated ? time : 0;
 
   ctx.fillStyle = PALETTE.sandTan;
   ctx.fillRect(0, seaTop, width, 14);
 
-  const surfLapping = Math.sin(time * 2.2) * 4;
+  const surfLapping = Math.sin(motion * 2.2) * 4;
   ctx.fillStyle = PALETTE.khakiLeather;
   ctx.fillRect(0, seaTop + 8, width, 6);
 
@@ -1691,26 +1666,14 @@ export function drawAnimatedSea(
   ctx.fillStyle = PALETTE.bunkerCharcoal;
   ctx.fillRect(0, seaTop + 130, width, height - (seaTop + 130));
 
-  ctx.fillStyle = PALETTE.spruceSea;
-  for (let y = seaTop + 24; y < height; y += 22) {
-    const waveShift = Math.sin(time * 1.8 + y * 0.08) * 16;
-    for (let x = -20; x < width + 40; x += 36) {
-      ctx.fillRect(x + waveShift, y, 18, 3);
-    }
-  }
-
-  ctx.fillStyle = PALETTE.sandCream;
-  for (let y = seaTop + 34; y < height; y += 30) {
-    const foamShift = Math.cos(time * 2.1 + y * 0.07) * 20;
-    for (let x = 10; x < width + 40; x += 48) {
-      ctx.fillRect(x + foamShift, y, 10, 2);
-      ctx.fillRect(x + foamShift + 3, y - 1, 4, 1);
-    }
-  }
+  drawCoastalWaveRows(ctx, width, seaTop, height, time, {
+    wave: PALETTE.spruceSea,
+    foam: PALETTE.sandCream,
+  }, animated);
 
   ctx.fillStyle = PALETTE.sandCream;
   for (let x = 0; x < width; x += 12) {
-    const waveEdge = Math.sin(time * 3 + x * 0.05) * 3 + surfLapping;
+    const waveEdge = Math.sin(motion * 3 + x * 0.05) * 3 + surfLapping;
     ctx.fillRect(x, seaTop + 14 + waveEdge, 10, 3);
   }
 
