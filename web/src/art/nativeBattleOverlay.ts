@@ -569,10 +569,10 @@ export function walkFrameAt(
 export function heldClipAt(
   time: number,
   count: number,
-  clip: "idle" | "fire",
-): { clip: "idle" | "fire"; index: number; firing: boolean; label: string } {
+  clip: "idle" | "fire" | "damaged",
+): { clip: "idle" | "fire" | "damaged"; index: number; firing: boolean; label: string } {
   const index = count > 0 ? ((poseStep(time) % count) + count) % count : 0;
-  const title = clip === "fire" ? "Firing" : "Idle";
+  const title = clip === "fire" ? "Firing" : clip === "damaged" ? "Falling" : "Idle";
   return { clip, index, firing: clip === "fire", label: count > 1 ? `${title} ${index + 1}` : title };
 }
 

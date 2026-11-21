@@ -1103,6 +1103,18 @@
       "grade": "polished"
     },
     {
+      "dir": "assets/units/vector/frames/jap_infantry_v2",
+      "source": "public/assets/units/frames/jap_infantry_v2/clips.json",
+      "unitId": "jap_infantry_v2",
+      "factionId": "JAP",
+      "unitTypeId": "infantry",
+      "width": 80,
+      "height": 80,
+      "frames": 21,
+      "preview": "assets/units/vector/frames/jap_infantry_v2/idle_0.svg",
+      "polished": false
+    },
+    {
       "dir": "assets/units/vector/frames/jap_tank_seed1_QUICK",
       "source": "public/assets/units/frames/jap_tank_seed1_QUICK/clips.json",
       "unitId": "jap_tank_seed1_QUICK",

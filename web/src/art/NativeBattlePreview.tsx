@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { UNIT_TYPE_LABEL } from "./archetypeLayers";
+import { isVehicleUnitType, UNIT_TYPE_LABEL } from "./archetypeLayers";
 import { AS_DRAWN_LUT, exhaustPuff, frameRgba, fromFrameFile, readClipsFile, type FrameClipsFile } from "./frameClips";
 import { loadMotionDocument, readUnitFile } from "./layeredUnit";
 import { playbackBeatAt, type PlaybackBeat } from "./motionPreview";
@@ -37,9 +37,26 @@ import {
   walkFrameAt,
   type Footprint,
 } from "./nativeBattleOverlay";
+import { createVehicleStage, type VehicleSvgUnit } from "./fieldVehicleStage";
+import { FACTION_LUTS } from "./paperDoll";
+import { foldLayerShift, resolveUnitAnimProfile, type UnitAnimProfile } from "./unitAnimationProfiles";
 import { horizonShiftX } from "./horizonParallax";
+import { buildPaintedRig, buildTankView, splitStillView, tankLayerSources, tankRasterLayers, type TankView } from "./tankView";
+import {
+  advanceVehicle,
+  createPreviewClock,
+  createVehicleAnim,
+  easeVehicle,
+  motionMode,
+  previewModes,
+  vehicleOffsets,
+  type FieldMotion,
+  type VehicleAnim,
+  type VehicleMode,
+  type VehicleOffsets,
+} from "./vehicleMotion";
 import type { UnitPaintDocument } from "./pixelPaint";
-import { preferStamped } from "./unitShelf";
+import { preferStamped, unitTypeLabel } from "./unitShelf";
 import { GraphicsSettingsPanel } from "./GraphicsSettingsPanel";
 import { graphicsSettings } from "../ui/battle/graphicsSettings";
 import { drawSceneryEdge, drawWWIIBattlefield } from "../ui/battle/unitRenderer";
@@ -107,12 +124,14 @@ interface FrameActor {
   idleFrames: OffscreenCanvas[];
   walk: OffscreenCanvas[];
   fire: OffscreenCanvas[];
+  damaged: OffscreenCanvas[];
   /** Bitmap pixels along one logical pixel. A traced walk is 4; the pixel walk is 1. */
   resolution: number;
   scalableIdle: HTMLImageElement | null;
   scalableIdleFrames: HTMLImageElement[];
   scalableWalk: HTMLImageElement[];
   scalableFire: HTMLImageElement[];
+  scalableDamaged: HTMLImageElement[];
   /** Exhaust, in the picture's pixels. */
   smoke: { x: number; y: number } | null;
   /** Barrel tip, in the picture's pixels. The flash is drawn in front of it. */
@@ -121,6 +140,8 @@ interface FrameActor {
   flashFrames: number[];
   /** Idle and fire indexes that let the exhaust rise. */
   puffFrames: { idle: number[]; fire: number[] };
+  /** Tracks, torso, head, and weapon split in memory. Null when this picture has no rig. */
+  tank: TankView | null;
 }
 
 interface StillActor {
@@ -156,6 +177,74 @@ function quantizedTwin(path: string): string {
 }
 
 type FieldActor = PlateActor | FrameActor | StillActor;
+
+const NO_SHIFT: VehicleOffsets = {
+  root: { x: 0, y: 0 },
+  tracks: { x: 0, y: 0 },
+  torso: { x: 0, y: 0 },
+  head: { x: 0, y: 0 },
+  weapon: { x: 0, y: 0 },
+  hull: { x: 0, y: 0 },
+  turret: { x: 0, y: 0 },
+};
+
+function actorUnitType(actor: FieldActor): string {
+  return actor.kind === "plate" ? actor.doc.blueprint.unitTypeId : actor.unitTypeId;
+}
+
+function inkedOffsets(profile: UnitAnimProfile, offsets: VehicleOffsets): VehicleOffsets {
+  const parts = foldLayerShift(profile, offsets);
+  return { ...offsets, ...parts, hull: parts.torso, turret: parts.head };
+}
+
+function paintContact(ctx: CanvasRenderingContext2D, spot: { x: number; y: number; rx: number; ry: number }): void {
+  ctx.save();
+  ctx.translate(spot.x, spot.y);
+  ctx.scale(1, spot.ry / spot.rx);
+  const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.rx);
+  pool.addColorStop(0, shadowColor(1));
+  pool.addColorStop(0.55, shadowColor(0.75));
+  pool.addColorStop(1, shadowColor(0));
+  ctx.fillStyle = pool;
+  ctx.beginPath();
+  ctx.arc(0, 0, spot.rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+async function tankFor(
+  file: FrameClipsFile,
+  unitTypeId: string,
+  idle: OffscreenCanvas[],
+  walk: OffscreenCanvas[],
+  fire: OffscreenCanvas[],
+  vectorBase: string | null,
+): Promise<TankView | null> {
+  if (!isVehicleUnitType(unitTypeId)) {
+    return null;
+  }
+  return buildTankView({
+    rigId: file.unitId.replace(/_QUICK$/i, ""),
+    artWidth: file.width,
+    artHeight: file.height,
+    idle,
+    walk,
+    fire,
+    vectorBase,
+  });
+}
+
+function vehiclePose(
+  mode: VehicleMode,
+  frame: number,
+  actor: FrameActor,
+): { clip: "idle" | "walk" | "fire"; index: number; firing: boolean; label: string } {
+  const clip = mode === "firing" ? "fire" : mode === "idle" ? "idle" : "walk";
+  const count = clip === "fire" ? actor.fire.length : clip === "walk" ? actor.walk.length : actor.idleFrames.length;
+  const index = count > 0 ? frame % count : 0;
+  const title = mode === "firing" ? "Firing" : mode === "idle" ? "Idle" : "Walking";
+  return { clip, index, firing: mode === "firing", label: count > 1 ? `${title} ${index + 1}` : title };
+}
 
 function clipMarks(file: FrameClipsFile): Pick<FrameActor, "smoke" | "muzzle" | "flashFrames" | "puffFrames"> {
   return {
@@ -202,6 +291,7 @@ interface PlacedUnit {
 }
 
 const WALK_URL = "/assets/units/frames/jap_infantry";
+const WALK_V2_URL = "/assets/units/frames/jap_infantry_v2";
 const POLISHED_WALK_URL = "/assets/units/frames/jap_infantry_polished";
 const QUICK_TANK_URL = "/assets/units/frames/ger_tank_seed1_QUICK";
 const QUICK_TANK_VECTOR_URL = "/assets/units/vector/frames/ger_tank_seed1_QUICK";
@@ -214,8 +304,38 @@ const QUICK_US_TANK_VECTOR_URL = "/assets/units/vector/frames/us_tank_seed1_QUIC
 const QUICK_JAP_TANK_URL = "/assets/units/frames/jap_tank_seed1_QUICK";
 const QUICK_JAP_TANK_VECTOR_URL = "/assets/units/vector/frames/jap_tank_seed1_QUICK";
 const VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry";
+const VECTOR_WALK_V2_URL = "/assets/units/vector/frames/jap_infantry_v2";
 const POLISHED_VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry_polished";
 const FACTION_ORDER = ["GER", "UK", "US", "USSR", "JAP"];
+
+const QUICK_FACTIONS = [
+  { id: "GER", prefix: "ger" },
+  { id: "USSR", prefix: "ussr" },
+  { id: "UK", prefix: "uk" },
+  { id: "US", prefix: "us" },
+  { id: "JAP", prefix: "jap" },
+] as const;
+
+const QUICK_TYPES = [
+  "mech_infantry",
+  "artillery",
+  "aaa",
+  "fighter",
+  "tac_bomber",
+  "bomber",
+  "battleship",
+  "cruiser",
+  "destroyer",
+  "submarine",
+  "transport",
+] as const;
+
+const QUIET_MARKS: Pick<FrameActor, "smoke" | "muzzle" | "flashFrames" | "puffFrames"> = {
+  smoke: null,
+  muzzle: null,
+  flashFrames: [],
+  puffFrames: { idle: [], fire: [] },
+};
 
 const BEAT_LABEL: Record<string, string> = {
   idle: "Idle",
@@ -335,7 +455,49 @@ async function fetchJson(url: string): Promise<unknown> {
   return response.json();
 }
 
-async function loadPicture(path: string, row?: PictureRow): Promise<StillActor> {
+function rigIdOnPath(factionId: string, unitTypeId: string, path: string): string | null {
+  const faction = QUICK_FACTIONS.find((item) => item.id === factionId);
+  if (!faction) {
+    return null;
+  }
+  const folder = unitTypeId === "tactical_bomber" ? "tac_bomber" : unitTypeId === "strategic_bomber" ? "bomber" : unitTypeId;
+  const rigId = `${faction.prefix}_${folder}_seed1`;
+  return path.includes(`/${rigId}.`) ? rigId : null;
+}
+
+async function withRigLayers(still: StillActor, canvas: OffscreenCanvas, rigId: string | null, withPictures: boolean): Promise<FieldActor> {
+  if (!rigId) {
+    return still;
+  }
+  const view = await splitStillView(rigId, canvas, withPictures);
+  if (!view || view.artWidth !== still.width || view.artHeight !== still.height || view.resolution !== still.resolution) {
+    return still;
+  }
+  return {
+    kind: "frames",
+    title: still.title,
+    factionId: still.factionId,
+    unitTypeId: still.unitTypeId,
+    width: still.width,
+    height: still.height,
+    feet: still.feet,
+    idle: canvas,
+    idleFrames: [canvas],
+    walk: [canvas],
+    fire: [canvas],
+    damaged: [],
+    resolution: still.resolution,
+    scalableIdle: still.scalable ?? null,
+    scalableIdleFrames: still.scalable ? [still.scalable] : [],
+    scalableWalk: [],
+    scalableFire: [],
+    scalableDamaged: [],
+    ...QUIET_MARKS,
+    tank: view,
+  };
+}
+
+async function loadPicture(path: string, row?: PictureRow): Promise<FieldActor> {
   const image = await loadImage(`/__dev/bake-file?path=${encodeURIComponent(path)}`);
   const canvas = new OffscreenCanvas(image.naturalWidth, image.naturalHeight);
   const ctx = canvas.getContext("2d");
@@ -349,7 +511,7 @@ async function loadPicture(path: string, row?: PictureRow): Promise<StillActor> 
   const polished = path.endsWith(".outlined.polished.png");
   const stamped = path.endsWith(".outlined.stamped.png");
   const grade = stamped ? "stamped" : polished ? "polished" : null;
-  return {
+  const still: StillActor = {
     kind: "still",
     title: `${row ? pictureLabel(grade ? { ...row, grade } : row) : name}${grade && row ? `, ${grade}` : ""}, ${canvas.width} by ${canvas.height}`,
     factionId: row?.factionId ?? "GER",
@@ -360,6 +522,7 @@ async function loadPicture(path: string, row?: PictureRow): Promise<StillActor> 
     canvas,
     resolution: 1,
   };
+  return withRigLayers(still, canvas, rigIdOnPath(still.factionId, still.unitTypeId, path), false);
 }
 
 function vectorRows(value: unknown): VectorRow[] {
@@ -384,7 +547,7 @@ function vectorRows(value: unknown): VectorRow[] {
   return rows;
 }
 
-async function loadVector(file: string, row?: VectorRow): Promise<StillActor> {
+async function loadVector(file: string, row?: VectorRow): Promise<FieldActor> {
   const image = await loadImage(`/${file.replace(/^\/+/, "")}`);
   const rasterWidth = Math.max(1, image.naturalWidth);
   const rasterHeight = Math.max(1, image.naturalHeight);
@@ -401,7 +564,7 @@ async function loadVector(file: string, row?: VectorRow): Promise<StillActor> {
   const resolution = rasterWidth / logicalW;
   const feet = opaqueFeet(pixels.data, canvas.width, canvas.height);
   const name = file.split("/").pop() ?? file;
-  return {
+  const still: StillActor = {
     kind: "still",
     title: row ? `${pictureLabel(row)}, ${row.stamped === true ? "stamped vector" : row.polished === true ? "polished vector" : "vector"}` : `${name}, vector`,
     factionId: row?.factionId ?? "GER",
@@ -416,6 +579,7 @@ async function loadVector(file: string, row?: VectorRow): Promise<StillActor> {
     resolution,
     scalable: image,
   };
+  return withRigLayers(still, canvas, rigIdOnPath(still.factionId, still.unitTypeId, file), true);
 }
 
 async function loadWalk(): Promise<FrameActor> {
@@ -424,10 +588,11 @@ async function loadWalk(): Promise<FrameActor> {
     const frame = fromFrameFile(await fetchJson(`${WALK_URL}/${name}.json`));
     return paintRgba(frameRgba(frame, AS_DRAWN_LUT), frame.width, frame.height);
   };
-  const [idle, walk, fire] = await Promise.all([
+  const [idle, walk, fire, damaged] = await Promise.all([
     Promise.all(file.clips.idle.map(paint)),
     Promise.all(file.clips.walk.map(paint)),
     Promise.all(file.clips.fire.map(paint)),
+    Promise.all(file.clips.damaged.map(paint)),
   ]);
   return {
     kind: "frames",
@@ -441,12 +606,15 @@ async function loadWalk(): Promise<FrameActor> {
     idleFrames: idle,
     walk,
     fire,
+    damaged,
     resolution: 1,
     scalableIdle: null,
     scalableIdleFrames: [],
     scalableWalk: [],
     scalableFire: [],
+    scalableDamaged: [],
     ...clipMarks(file),
+    tank: null,
   };
 }
 
@@ -464,10 +632,11 @@ async function loadPngWalk(base: string, title: string, factionId: string, unitT
     ctx.drawImage(image, 0, 0);
     return canvas;
   };
-  const [idle, walk, fire] = await Promise.all([
+  const [idle, walk, fire, damaged] = await Promise.all([
     Promise.all(file.clips.idle.map(paint)),
     Promise.all(file.clips.walk.map(paint)),
     Promise.all(file.clips.fire.map(paint)),
+    Promise.all(file.clips.damaged.map(paint)),
   ]);
   return {
     kind: "frames",
@@ -481,12 +650,15 @@ async function loadPngWalk(base: string, title: string, factionId: string, unitT
     idleFrames: idle,
     walk,
     fire,
+    damaged,
     resolution: 1,
     scalableIdle: null,
     scalableIdleFrames: [],
     scalableWalk: [],
     scalableFire: [],
+    scalableDamaged: [],
     ...clipMarks(file),
+    tank: await tankFor(file, unitTypeId, idle, walk, fire, null),
   };
 }
 function loadPolishedWalk(): Promise<FrameActor> {
@@ -514,10 +686,11 @@ async function loadVectorWalk(
 ): Promise<FrameActor> {
   const file = readClipsFile(await fetchJson(`${base}/clips.json`));
   const load = (name: string) => rasterVector(`${base}/${name}.svg`);
-  const [idle, walk, fire] = await Promise.all([
+  const [idle, walk, fire, damaged] = await Promise.all([
     Promise.all(file.clips.idle.map(load)),
     Promise.all(file.clips.walk.map(load)),
     Promise.all(file.clips.fire.map(load)),
+    Promise.all(file.clips.damaged.map(load)),
   ]);
   const sample = idle[0] ?? walk[0] ?? fire[0];
   const resolution = sample && file.width > 0 ? sample.canvas.width / file.width : 1;
@@ -533,18 +706,117 @@ async function loadVectorWalk(
     idleFrames: idle.map((frame) => frame.canvas),
     walk: walk.map((frame) => frame.canvas),
     fire: fire.map((frame) => frame.canvas),
+    damaged: damaged.map((frame) => frame.canvas),
     resolution,
     scalableIdle: idle[0]?.image ?? null,
     scalableIdleFrames: idle.map((frame) => frame.image),
     scalableWalk: walk.map((frame) => frame.image),
     scalableFire: fire.map((frame) => frame.image),
+    scalableDamaged: damaged.map((frame) => frame.image),
     ...clipMarks(file),
+    tank: await tankFor(file, unitTypeId, idle.map((frame) => frame.canvas), walk.map((frame) => frame.canvas), fire.map((frame) => frame.canvas), base),
+  };
+}
+
+function factionOfRig(rigId: string): (typeof QUICK_FACTIONS)[number]["id"] {
+  const faction = QUICK_FACTIONS.find((item) => rigId.startsWith(`${item.prefix}_`));
+  return faction?.id ?? "GER";
+}
+
+function typeOfRig(rigId: string): string {
+  const faction = QUICK_FACTIONS.find((item) => rigId.startsWith(`${item.prefix}_`));
+  const rest = faction ? rigId.slice(faction.prefix.length + 1) : rigId;
+  return rest.replace(/_seed\d+$/, "");
+}
+
+function lutFor(factionId: string): readonly string[] {
+  if (factionId === "GER" || factionId === "UK" || factionId === "USSR" || factionId === "US" || factionId === "JAP") {
+    return FACTION_LUTS[factionId];
+  }
+  return AS_DRAWN_LUT;
+}
+
+async function loadQuickUnit(rigId: string, asVector: boolean): Promise<FrameActor> {
+  const factionId = factionOfRig(rigId);
+  const unitTypeId = typeOfRig(rigId);
+  const label = `${factionId} ${unitTypeLabel(unitTypeId).toLowerCase()}, QUICK`;
+  if (asVector) {
+    for (const grade of ["stamped", "polished"] as const) {
+      try {
+        const image = await loadImage(`/assets/units/vector/${factionId}/${rigId}.${grade}.svg`);
+        const canvas = new OffscreenCanvas(Math.max(1, image.naturalWidth), Math.max(1, image.naturalHeight));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          throw new Error("The browser would not open a canvas.");
+        }
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(image, 0, 0);
+        const view = await splitStillView(rigId, canvas, true);
+        if (view && canvas.width === view.artWidth * view.resolution && canvas.height === view.artHeight * view.resolution) {
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const feet = opaqueFeet(pixels.data, canvas.width, canvas.height);
+          return {
+            kind: "frames",
+            title: `${label}, vector, ${view.artWidth} by ${view.artHeight}`,
+            factionId,
+            unitTypeId,
+            width: view.artWidth,
+            height: view.artHeight,
+            feet: { x: Math.round(feet.x / view.resolution), y: Math.floor(feet.y / view.resolution) },
+            idle: canvas,
+            idleFrames: [canvas],
+            walk: [canvas],
+            fire: [canvas],
+            damaged: [],
+            resolution: view.resolution,
+            scalableIdle: image,
+            scalableIdleFrames: [image],
+            scalableWalk: [],
+            scalableFire: [],
+            scalableDamaged: [],
+            ...QUIET_MARKS,
+            tank: view,
+          };
+        }
+      } catch {
+        // A missing trace falls through to the rig's own drawings.
+      }
+    }
+  }
+  const painted = await buildPaintedRig(rigId, lutFor(factionId), asVector);
+  if (!painted) {
+    throw new Error("That sprite could not be opened.");
+  }
+  return {
+    kind: "frames",
+    title: `${label}${asVector ? ", vector" : ""}, ${painted.width} by ${painted.height}`,
+    factionId,
+    unitTypeId,
+    width: painted.width,
+    height: painted.height,
+    feet: painted.feet,
+    idle: painted.idle,
+    idleFrames: [painted.idle],
+    walk: painted.walk,
+    fire: painted.fire,
+    damaged: [],
+    resolution: 1,
+    scalableIdle: null,
+    scalableIdleFrames: [],
+    scalableWalk: [],
+    scalableFire: [],
+    scalableDamaged: [],
+    ...QUIET_MARKS,
+    tank: painted.view,
   };
 }
 
 function frameScalable(actor: FrameActor, clip: string, index: number): HTMLImageElement | undefined {
   if (actor.resolution <= 1) {
     return undefined;
+  }
+  if (clip === "damaged") {
+    return actor.scalableDamaged[index] ?? actor.scalableIdle ?? undefined;
   }
   if (clip === "fire") {
     return actor.scalableFire[index] ?? actor.scalableIdle ?? undefined;
@@ -590,7 +862,11 @@ function pictureRows(value: unknown): PictureRow[] {
 export function NativeBattlePreview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pausedRef = useRef(false);
-  const motionRef = useRef<"march" | "idle" | "fire">("march");
+  const motionRef = useRef<FieldMotion>("move");
+  const damagedRef = useRef(false);
+  const motionClockRef = useRef(createPreviewClock());
+  const vehicleAnimsRef = useRef(new Map<number, VehicleAnim>());
+  const frontRef = useRef<HTMLCanvasElement>(null);
   const creepRef = useRef(new Map<number, { time: number }>());
   const regionPicked = useRef(false);
   const ticket = useRef(0);
@@ -646,9 +922,11 @@ export function NativeBattlePreview() {
     return Number.isFinite(value) ? (((value % 1) + 1) % 1) * 60 : null;
   }, []);
   const [paused, setPaused] = useState(false);
-  const [motion, setMotion] = useState<"march" | "idle" | "fire">("march");
+  const [motion, setMotion] = useState<FieldMotion>("move");
+  const [damaged, setDamaged] = useState(false);
   motionRef.current = motion;
-  const [caption, setCaption] = useState("Marching");
+  damagedRef.current = damaged;
+  const [caption, setCaption] = useState("Moving");
   const [loadError, setLoadError] = useState("");
   const [cursor, setCursor] = useState("grab");
   placedRef.current = placed;
@@ -737,6 +1015,12 @@ export function NativeBattlePreview() {
     if (key === "walk:jap") {
       return loadWalk();
     }
+    if (key === "walk:jap_infantry_v2") {
+      return loadPngWalk(WALK_V2_URL, "Japanese walk, v2", "JAP", "infantry");
+    }
+    if (key === "walk:jap_infantry_v2:vector") {
+      return loadVectorWalk(VECTOR_WALK_V2_URL, "vector", "JAP", "infantry", "Japanese walk, v2");
+    }
     if (key === "walk:jap:polished") {
       return loadPolishedWalk();
     }
@@ -793,6 +1077,11 @@ export function NativeBattlePreview() {
       const file = key.slice("vec:".length);
       return loadVector(file, vectors.find((item) => item.file === file));
     }
+    const quick = /^walk:([a-z0-9_]+)_QUICK(?::(vector|png|rig))?$/i.exec(key);
+    if (quick?.[1]) {
+      const kind = quick[2]?.toLowerCase();
+      return loadQuickUnit(quick[1].toLowerCase(), kind === "vector" || kind === "rig");
+    }
     throw new Error("That sprite could not be opened.");
   }
 
@@ -836,6 +1125,21 @@ export function NativeBattlePreview() {
     let pausedTotal = 0;
     let pauseStarted: number | null = null;
     const origin = performance.now();
+    let lastElapsed: number | null = null;
+    const stage = stageRef.current;
+    const front = frontRef.current;
+    const frontCtx = front?.getContext("2d") ?? null;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "field-test-vectors");
+    svg.setAttribute("aria-hidden", "true");
+    if (stage) {
+      if (front) {
+        stage.insertBefore(svg, front);
+      } else {
+        stage.appendChild(svg);
+      }
+    }
+    const vehicleStage = createVehicleStage(svg);
 
     const beatCanvas = (key: string, doc: UnitPaintDocument, beat: PlaybackBeat): OffscreenCanvas | null => {
       const name = `${key}:${beat.name}`;
@@ -938,8 +1242,63 @@ export function NativeBattlePreview() {
       const units = placedRef.current;
       ctx.font = "12px Segoe UI, sans-serif";
       ctx.textAlign = "center";
-      let lead = "Marching";
-      const sprites: (() => void)[] = [];
+      if (front && frontCtx) {
+        if (front.width !== bufW || front.height !== bufH) {
+          front.width = bufW;
+          front.height = bufH;
+        }
+        frontCtx.setTransform(1, 0, 0, 1, 0, 0);
+        frontCtx.clearRect(0, 0, front.width, front.height);
+        frontCtx.setTransform(span, 0, 0, span, cam.x, cam.y);
+        frontCtx.imageSmoothingEnabled = false;
+        frontCtx.font = "12px Segoe UI, sans-serif";
+        frontCtx.textAlign = "center";
+      }
+      const hold = motionRef.current;
+      const preview = motionClockRef.current;
+      const anims = vehicleAnimsRef.current;
+      const rawDt = lastElapsed == null ? 0 : elapsed - lastElapsed;
+      lastElapsed = elapsed;
+      // Ease the kick first, then step the 8 Hz clock, so a new shot draws at full strength.
+      const motionStep = previewModes(preview, hold, rawDt);
+      if (motionStep.changed) {
+        creepRef.current.clear();
+      }
+      for (const id of [...anims.keys()]) {
+        if (!units.some((unit) => unit.id === id)) {
+          anims.delete(id);
+        }
+      }
+      for (const anim of anims.values()) {
+        easeVehicle(anim, motionStep.dt);
+      }
+      for (const item of units) {
+        const type = actorUnitType(item.actor);
+        const profiled = isVehicleUnitType(type);
+        const clocked = profiled || (item.actor.kind === "frames" && hold === "all");
+        if (!clocked) {
+          continue;
+        }
+        const profile = profiled ? resolveUnitAnimProfile(type) : undefined;
+        let anim = anims.get(item.id);
+        if (!anim) {
+          anim = createVehicleAnim(motionMode(hold, preview.allTime));
+          anim.damaged = damagedRef.current && profiled;
+          anims.set(item.id, anim);
+        } else {
+          anim.damaged = damagedRef.current && profiled;
+          advanceVehicle(anim, hold, preview.allTime, motionStep.changed, motionStep.modes, Math.random, profile);
+        }
+      }
+
+      let lead = "Moving";
+      const backShadows: (() => void)[] = [];
+      const backSprites: (() => void)[] = [];
+      const frontShadows: (() => void)[] = [];
+      const frontSprites: (() => void)[] = [];
+      const svgUnits: VehicleSvgUnit[] = [];
+      let seenSvg = false;
+      const crisp = graphicsSettings().crispPictures;
       // Back lane first, so a unit on a lower lane covers the one behind it.
       depthOrder(units).forEach((item) => {
         const index = units.indexOf(item);
@@ -950,49 +1309,83 @@ export function NativeBattlePreview() {
         let cacheKey = `${item.id}:still`;
         let markClip = "";
         let markIndex = -1;
+        const unitType = actorUnitType(actor);
+        const profile = isVehicleUnitType(unitType) ? resolveUnitAnimProfile(unitType) : null;
+        let offsets = NO_SHIFT;
+        const heldAnim = anims.get(item.id);
+        if (profile && heldAnim) {
+          offsets = inkedOffsets(profile, vehicleOffsets(heldAnim, profile));
+        }
+        if (actor.kind !== "frames" && profile && heldAnim && heldAnim.mode === "moving" && dragRef.current?.id !== item.id && motionStep.dt > 0) {
+          item.station = { x: item.station.x + marchDistance(motionStep.dt), y: item.station.y };
+        }
         if (actor.kind === "plate") {
           cacheKey = `${item.id}:${beat.name}`;
           shown = beatCanvas(String(item.id), actor.doc, beat);
         } else if (actor.kind === "frames") {
-          const hold = motionRef.current;
-          const step =
-            hold === "idle"
-              ? heldClipAt(elapsed, actor.idleFrames.length, "idle")
-              : hold === "fire"
-                ? heldClipAt(elapsed, actor.fire.length, "fire")
-                : walkFrameAt(elapsed, actor.walk.length, actor.fire.length);
-          firing = step.firing;
-          markClip = step.clip;
-          markIndex = step.index;
-          cacheKey = `${item.id}:${step.clip}:${step.index}`;
-          shown =
-            step.clip === "fire"
-              ? (actor.fire[step.index] ?? actor.walk[0] ?? actor.idle)
-              : step.clip === "walk"
-                ? (actor.walk[step.index] ?? actor.idle)
-                : (actor.idleFrames[step.index] ?? actor.idle);
-          scalable = frameScalable(actor, step.clip, step.index);
-          const prior = creepRef.current.get(item.id);
-          if (prior && hold !== "idle" && hold !== "fire" && dragRef.current?.id !== item.id) {
-            const gained = marchDistance(elapsed - prior.time);
-            if (gained !== 0) {
-              item.station = { x: item.station.x + gained, y: item.station.y };
-            }
+          const anim = anims.get(item.id);
+          const showFalling = damagedRef.current && actor.damaged.length > 0 && profile == null;
+          const clocked = !showFalling && (profile != null || hold === "all");
+          const pose = showFalling
+            ? heldClipAt(elapsed, actor.damaged.length, "damaged")
+            : clocked && anim
+              ? vehiclePose(anim.mode, anim.frame, actor)
+              : hold === "idle"
+                ? heldClipAt(elapsed, actor.idleFrames.length, "idle")
+                : hold === "fire"
+                  ? heldClipAt(elapsed, actor.fire.length, "fire")
+                  : walkFrameAt(elapsed, actor.walk.length, actor.fire.length);
+          if (clocked && anim && anim.mode === "moving" && dragRef.current?.id !== item.id && motionStep.dt > 0) {
+            item.station = { x: item.station.x + marchDistance(motionStep.dt), y: item.station.y };
           }
-          creepRef.current.set(item.id, { time: elapsed });
+          if (!clocked) {
+            const prior = creepRef.current.get(item.id);
+            if (prior && !showFalling && hold !== "idle" && hold !== "fire" && dragRef.current?.id !== item.id) {
+              const gained = marchDistance(elapsed - prior.time);
+              if (gained !== 0) {
+                item.station = { x: item.station.x + gained, y: item.station.y };
+              }
+            }
+            creepRef.current.set(item.id, { time: elapsed });
+          }
+          firing = pose.firing;
+          markClip = pose.clip;
+          markIndex = pose.index;
+          cacheKey = `${item.id}:${pose.clip}:${pose.index}`;
+          shown =
+            pose.clip === "damaged"
+              ? (actor.damaged[pose.index] ?? actor.idle)
+              : pose.clip === "fire"
+                ? (actor.fire[pose.index] ?? actor.walk[0] ?? actor.idle)
+                : pose.clip === "walk"
+                  ? (actor.walk[pose.index] ?? actor.idle)
+                  : (actor.idleFrames[pose.index] ?? actor.idle);
+          scalable = frameScalable(actor, pose.clip, pose.index);
           if (index === 0) {
-            lead = actor.resolution > 1 ? `Vector · ${step.label}` : step.label;
+            const body = actor.resolution > 1 ? `Vector · ${pose.label}` : pose.label;
+            lead = hold === "all" ? `All · ${body}` : body;
           }
         } else {
           firing = false;
           shown = actor.canvas;
           scalable = actor.scalable;
           if (index === 0) {
-            lead = actor.scalable ? "Vector" : "Still";
+            if (profile && heldAnim) {
+              const title = heldAnim.mode === "firing" ? "Firing" : heldAnim.mode === "idle" ? "Idle" : "Moving";
+              const body = actor.scalable ? `Vector · ${title}` : title;
+              lead = hold === "all" ? `All · ${body}` : body;
+            } else {
+              lead = actor.scalable ? "Vector" : "Still";
+            }
           }
         }
         if (index === 0 && actor.kind === "plate") {
-          lead = firing ? `Firing · ${detail}` : `Marching · ${detail}`;
+          if (profile && heldAnim) {
+            const title = heldAnim.mode === "firing" ? "Firing" : heldAnim.mode === "idle" ? "Idle" : "Moving";
+            lead = hold === "all" ? `All · ${title}` : title;
+          } else {
+            lead = firing ? `Firing · ${detail}` : `Marching · ${detail}`;
+          }
         }
         if (!shown) {
           return;
@@ -1003,60 +1396,154 @@ export function NativeBattlePreview() {
         const bitmap = useHalf ? halfCanvas(cacheKey, shown) : shown;
         const pixelPicture = actor.kind !== "frames" || actor.resolution <= 1;
         const blit = fieldBlit(bitmap, actorSize(actor), actorFeet(actor), item.station, scale, viewScale, dpr, useHalf, pixelPicture);
-
-        // The contact shadow goes down first, for every unit, so it never darkens a sprite.
-        const spot = contactShadow(footprintOf(item.id, shown, resolution), actorFeet(actor), item.station, scale);
-        ctx.save();
-        ctx.translate(spot.x, spot.y);
-        ctx.scale(1, spot.ry / spot.rx);
-        const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.rx);
-        pool.addColorStop(0, shadowColor(1));
-        pool.addColorStop(0.55, shadowColor(0.75));
-        pool.addColorStop(1, shadowColor(0));
-        ctx.fillStyle = pool;
-        ctx.beginPath();
-        ctx.arc(0, 0, spot.rx, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        sprites.push(() => {
-          if (scalable) {
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            const dw = blit.width * span;
-            const dh = blit.height * span;
-            const crisp = graphicsSettings().crispPictures;
-            const cached = cachedPicture(scalable, `${cacheKey}|${crisp ? "crisp" : "soft"}`, crisp ? dw : blit.width, crisp ? dh : blit.height);
-            ctx.imageSmoothingEnabled = true;
-            if (cached) {
-              ctx.drawImage(cached, blit.x * span + cam.x, blit.y * span + cam.y, dw, dh);
-            } else {
-              ctx.drawImage(scalable, blit.x * span + cam.x, blit.y * span + cam.y, dw, dh);
-            }
-            ctx.restore();
-          } else {
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(bitmap, blit.x, blit.y, blit.width, blit.height);
+        const art = actorSize(actor);
+        const pixelW = blit.width / Math.max(1, art.width);
+        const pixelH = blit.height / Math.max(1, art.height);
+        let parts: VehicleSvgUnit["parts"] | null = null;
+        if (actor.kind === "frames" && crisp && (resolution > 1 || actor.tank?.raster.urls)) {
+          const anim = anims.get(item.id);
+          const sources = actor.tank ? tankLayerSources(actor.tank, anim?.mode ?? "moving", anim?.frame ?? 0) : null;
+          if (sources) {
+            parts = sources.map((source) => ({
+              role: source.role,
+              href: source.href,
+              x: offsets[source.role].x,
+              y: offsets[source.role].y,
+              width: actor.width,
+              height: actor.height,
+              resolution: source.resolution,
+            }));
+          } else if (scalable && !actor.tank) {
+            parts = [
+              {
+                role: "torso",
+                href: scalable.currentSrc || scalable.src,
+                x: 0,
+                y: 0,
+                width: actor.width,
+                height: actor.height,
+                resolution: actor.resolution,
+              },
+            ];
           }
+        }
+        const onFront = parts == null && seenSvg;
+        if (parts) {
+          seenSvg = true;
+        }
+        const paintCtx = onFront && frontCtx ? frontCtx : ctx;
+        const shadowList = onFront && frontCtx ? frontShadows : backShadows;
+        const spriteList = onFront && frontCtx ? frontSprites : backSprites;
+        const spot = contactShadow(footprintOf(item.id, shown, resolution), actorFeet(actor), item.station, scale);
+        const shifted = { ...spot, x: spot.x + offsets.root.x * pixelW, y: spot.y + offsets.root.y * pixelH };
+        shadowList.push(() => paintContact(paintCtx, shifted));
+
+        const paintChrome = (context: CanvasRenderingContext2D) => {
           if (dragRef.current?.id === item.id) {
-            ctx.strokeStyle = "#f4e7b0";
-            ctx.lineWidth = 1;
-            ctx.strokeRect(blit.x + 0.5, blit.y + 0.5, Math.max(0, blit.width - 1), Math.max(0, blit.height - 1));
+            context.strokeStyle = "#f4e7b0";
+            context.lineWidth = 1;
+            context.strokeRect(
+              blit.x + offsets.root.x * pixelW + 0.5,
+              blit.y + offsets.root.y * pixelH + 0.5,
+              Math.max(0, blit.width - 1),
+              Math.max(0, blit.height - 1),
+            );
           }
           const markX = pixelPicture ? snapDeviceOrigin(item.station.x, dpr, viewScale) : item.station.x;
           const markY = pixelPicture ? snapDeviceOrigin(item.station.y, dpr, viewScale) : item.station.y;
-          ctx.fillStyle = "#1A1614";
-          ctx.fillText(actorMark(actor), markX, markY + 16);
+          context.fillStyle = "#1A1614";
+          context.fillText(actorMark(actor), markX, markY + 16);
           if (actor.kind === "frames" && markClip) {
-            paintSpriteMarks(ctx, actor, blit, markClip, markIndex);
+            paintSpriteMarks(
+              context,
+              actor,
+              {
+                x: blit.x + (offsets.root.x + offsets.hull.x) * pixelW,
+                y: blit.y + (offsets.root.y + offsets.hull.y) * pixelH,
+                width: blit.width,
+                height: blit.height,
+              },
+              markClip,
+              markIndex,
+            );
           }
+        };
+
+        if (parts) {
+          svgUnits.push({
+            id: item.id,
+            x: blit.x,
+            y: blit.y,
+            unitScale: scale,
+            rootX: offsets.root.x,
+            rootY: offsets.root.y,
+            parts,
+          });
+          frontSprites.push(() => paintChrome(frontCtx ?? ctx));
+          return;
+        }
+
+        spriteList.push(() => {
+          const smooth = actor.kind === "frames" && actor.resolution > 1;
+          if (actor.kind === "frames" && actor.tank) {
+            const anim = anims.get(item.id);
+            const layers = tankRasterLayers(actor.tank, anim?.mode ?? "moving", anim?.frame ?? 0);
+            paintCtx.imageSmoothingEnabled = smooth;
+            const drawLayer = (canvas: OffscreenCanvas, shift: { x: number; y: number }, name: string) => {
+              const image = useHalf ? halfCanvas(`${cacheKey}:${name}`, canvas) : canvas;
+              paintCtx.drawImage(
+                image,
+                blit.x + (offsets.root.x + shift.x) * pixelW,
+                blit.y + (offsets.root.y + shift.y) * pixelH,
+                blit.width,
+                blit.height,
+              );
+            };
+            drawLayer(layers.tracks, offsets.tracks, "tracks");
+            drawLayer(layers.torso, offsets.torso, "torso");
+            drawLayer(layers.head, offsets.head, "head");
+            drawLayer(layers.weapon, offsets.weapon, "weapon");
+          } else if (scalable && crisp) {
+            paintCtx.save();
+            paintCtx.setTransform(1, 0, 0, 1, 0, 0);
+            const dw = blit.width * span;
+            const dh = blit.height * span;
+            const cached = cachedPicture(scalable, `${cacheKey}|crisp`, dw, dh);
+            paintCtx.imageSmoothingEnabled = true;
+            const originX = (blit.x + offsets.root.x * pixelW) * span + cam.x;
+            const originY = (blit.y + offsets.root.y * pixelH) * span + cam.y;
+            if (cached) {
+              paintCtx.drawImage(cached, originX, originY, dw, dh);
+            } else {
+              paintCtx.drawImage(scalable, originX, originY, dw, dh);
+            }
+            paintCtx.restore();
+          } else {
+            paintCtx.imageSmoothingEnabled = smooth;
+            paintCtx.drawImage(bitmap, blit.x + offsets.root.x * pixelW, blit.y + offsets.root.y * pixelH, blit.width, blit.height);
+          }
+          paintChrome(paintCtx);
         });
       });
-      for (const paint of sprites) {
+      for (const paint of backShadows) {
+        paint();
+      }
+      for (const paint of backSprites) {
+        paint();
+      }
+      vehicleStage.sync(
+        { cssWidth: cssW, cssHeight: cssH, camX: cam.x / dpr, camY: cam.y / dpr, viewScale },
+        svgUnits,
+      );
+      for (const paint of frontShadows) {
+        paint();
+      }
+      for (const paint of frontSprites) {
         paint();
       }
 
-      const captionText = units.length === 0 ? "Empty field" : units.length === 1 ? lead : `${units.length} units · ${lead}`;
+      const shownLead = units.length > 0 && damagedRef.current ? `Damaged · ${lead}` : lead;
+      const captionText = units.length === 0 ? "Empty field" : units.length === 1 ? shownLead : `${units.length} units · ${shownLead}`;
       setCaption((current) => (current === captionText ? current : captionText));
       frame = requestAnimationFrame(tick);
     };
@@ -1065,6 +1552,8 @@ export function NativeBattlePreview() {
     return () => {
       stopped = true;
       cancelAnimationFrame(frame);
+      vehicleStage.clear();
+      svg.remove();
     };
   }, [regionId]);
 
@@ -1316,6 +1805,8 @@ export function NativeBattlePreview() {
                 <option value="walk:jap:polished">Japanese walk, polished</option>
                 <option value="walk:jap:vector">Japanese walk, vector</option>
                 <option value="walk:jap:polished-vector">Japanese walk, polished vector</option>
+                <option value="walk:jap_infantry_v2">Japanese walk, v2</option>
+                <option value="walk:jap_infantry_v2:vector">Japanese walk, v2, vector</option>
                 <option value="walk:ger_tank_seed1_QUICK">GER tank, QUICK</option>
                 <option value="walk:ger_tank_seed1_QUICK:vector">GER tank, QUICK, vector</option>
                 <option value="walk:ussr_tank_seed1_QUICK">USSR tank, QUICK</option>
@@ -1327,6 +1818,22 @@ export function NativeBattlePreview() {
                 <option value="walk:jap_tank_seed1_QUICK">JAP tank, QUICK</option>
                 <option value="walk:jap_tank_seed1_QUICK:vector">JAP tank, QUICK, vector</option>
               </optgroup>
+              {QUICK_FACTIONS.map((faction) => (
+                <optgroup key={faction.id} label={`${faction.id}, QUICK`}>
+                  {QUICK_TYPES.map((folder) => {
+                    const name = `${faction.id} ${unitTypeLabel(folder).toLowerCase()}, QUICK`;
+                    const id = `${faction.prefix}_${folder}_seed1_QUICK`;
+                    return [
+                      <option key={id} value={`walk:${id}`}>
+                        {name}
+                      </option>,
+                      <option key={`${id}-vector`} value={`walk:${id}:vector`}>
+                        {name}, vector
+                      </option>,
+                    ];
+                  })}
+                </optgroup>
+              ))}
               {vectors.length > 0 && (
                 <optgroup label="Vector">
                   {preferStamped(vectors).map((row) => (
@@ -1358,24 +1865,43 @@ export function NativeBattlePreview() {
               ))}
             </select>
           </label>
-          <label>
-            Motion
-            <select
-              className="field-test-motion"
-              aria-label="Motion"
-              value={motion}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next === "march" || next === "idle" || next === "fire") {
-                  setMotion(next);
-                }
-              }}
-            >
-              <option value="march">March</option>
-              <option value="idle">Idle</option>
-              <option value="fire">Shot</option>
-            </select>
-          </label>
+          <div className="field-test-motion-wrap">
+            <span id="field-motion-label">Motion</span>
+            <div className="field-test-motion" role="group" aria-labelledby="field-motion-label">
+              {(
+                [
+                  ["move", "Move"],
+                  ["idle", "Idle"],
+                  ["fire", "Fire"],
+                  ["all", "All"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={motion === value}
+                  className={motion === value ? "is-on" : undefined}
+                  onClick={() => {
+                    motionRef.current = value;
+                    setMotion(value);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="field-test-damaged">
+              <input
+                type="checkbox"
+                checked={damaged}
+                onChange={(event) => {
+                  damagedRef.current = event.target.checked;
+                  setDamaged(event.target.checked);
+                }}
+              />
+              Damaged
+            </label>
+          </div>
           <button type="button" onClick={() => void addSprite()}>
             Add
           </button>
@@ -1434,11 +1960,12 @@ export function NativeBattlePreview() {
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
         />
+        <canvas ref={frontRef} className="field-test-front" aria-hidden="true" />
       </div>
       <p className="field-test-note">
         {loadError
           ? loadError
-          : "The wheel zooms the map and keeps the spot under the pointer. Drag empty ground to move the view. Drag a sprite to move it. Size changes that picture only. View jumps to 1×, 2×, 3×, or 4×. Space pauses."}
+          : "The wheel zooms the map and keeps the spot under the pointer. Drag empty ground to move the view. Drag a sprite to move it. Size changes that picture only. View jumps to 1×, 2×, 3×, or 4×. Space pauses. All plays ten seconds of moving, four of idle, and one of firing. Damaged sags the unit and worsens its ride."}
       </p>
       <style>{STYLE}</style>
     </section>
@@ -1486,6 +2013,15 @@ const STYLE = `
   border-radius: 2px;
 }
 .field-test-sprite { max-width: 320px; }
+.field-test-motion-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-test-motion { display: flex; }
+.field-test-motion button { border-radius: 0; }
+.field-test-motion button + button { border-left: 0; }
+.field-test-motion button.is-on { background: #4b3d44; color: #f5f0e6; }
 .field-test label {
   display: flex;
   align-items: center;
@@ -1523,6 +2059,20 @@ const STYLE = `
   width: 100%;
   height: 100%;
   background: #1c1917;
+}
+.field-test canvas.field-test-front {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.field-test-vectors {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
 }
 .field-test-note {
   margin: 0;

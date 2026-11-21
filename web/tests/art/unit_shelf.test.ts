@@ -125,6 +125,10 @@ describe("unit shelf", () => {
     expect(tank?.label).toBe("USSR Tank 1, polished vector");
     const walk = vectorShelf(MANIFEST).find((unit) => unit.kind === "clips");
     expect(walk?.fieldPick).toBe(POLISHED_WALK_KEY);
+    const gun = vectorShelf(MANIFEST).find((unit) => unit.unitTypeId === "artillery" && unit.polished);
+    expect(gun?.fieldPick).toBe("walk:uk_artillery_seed1_QUICK:vector");
+    const aaa = candidateShelf(CANDIDATES).find((unit) => unit.unitTypeId === "aaa");
+    expect(aaa?.fieldPick).toBe("walk:uk_aaa_seed1_QUICK:vector");
     expect(walk?.preview).toBe("/assets/units/vector/frames/jap_infantry_polished/idle_0.svg");
   });
 

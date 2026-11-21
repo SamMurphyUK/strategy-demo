@@ -658,6 +658,16 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       return;
     }
     if (shelfPick.kind === "clips") {
+      if (shelfPick.key.endsWith("/jap_infantry_v2")) {
+        const savedV2 = await savedRigAt("jap_infantry_v2");
+        if (savedV2) {
+          if (!window.confirm("Load Japanese walk v2? It replaces what is open. Ctrl+Z does not bring the open sprite back.")) {
+            return;
+          }
+          openRig(savedV2, "soldier", "Opened Japanese walk v2 with the layers saved on it.");
+          return;
+        }
+      }
       if (!window.confirm("Load the Japanese walk? It replaces what is open. Ctrl+Z does not bring the open sprite back.")) {
         return;
       }

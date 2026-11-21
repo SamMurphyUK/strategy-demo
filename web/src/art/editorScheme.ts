@@ -47,9 +47,10 @@ export function editorSchemeForUnitType(unitTypeId: string): EditorScheme {
 
 /** `ger_battleship_seed1` is a battleship. The Japanese walk is infantry. A halftrack id ends in `_infantry` too, so the seed is read first. */
 export function unitTypeFromRigId(unitId: string): string {
-  const seeded = /^[a-z0-9]+_(.+)_seed\d+$/.exec(unitId);
+  const clean = unitId.replace(/_v\d+$/i, "");
+  const seeded = /^[a-z0-9]+_(.+)_seed\d+$/.exec(clean);
   if (seeded) return seeded[1];
-  if (unitId === "jap_infantry" || unitId.endsWith("_infantry")) return "infantry";
+  if (clean === "jap_infantry" || clean.endsWith("_infantry")) return "infantry";
   return "infantry";
 }
 

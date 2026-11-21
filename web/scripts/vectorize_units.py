@@ -493,6 +493,15 @@ def vectorize_clips(clips_path: Path, palette: list[tuple[int, int, int]], backi
             cleaned.append(frame)
             names.append(frame)
         ordered[clip_name] = cleaned
+    damaged_frames = clips.get("damaged")
+    if isinstance(damaged_frames, list) and damaged_frames:
+        cleaned_damaged: list[str] = []
+        for frame in damaged_frames:
+            if not isinstance(frame, str) or not re.fullmatch(r"damaged_\d+", frame):
+                raise SystemExit(f"Bad frame name in damaged: {frame}")
+            cleaned_damaged.append(frame)
+            names.append(frame)
+        ordered["damaged"] = cleaned_damaged
     unit_id = data.get("unitId") if isinstance(data.get("unitId"), str) and data.get("unitId") else path.parent.name
     # unify_shading.py keeps the unitId and puts the polished frames in <folder>_polished.
     # The traced copy gets the same suffix so it never lands on the plain traced walk.

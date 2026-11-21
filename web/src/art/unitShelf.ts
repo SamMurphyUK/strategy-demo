@@ -76,6 +76,47 @@ function safePath(file: string): boolean {
   return !file.includes("..");
 }
 
+const FACTION_PREFIX: Record<string, string> = { GER: "ger", USSR: "ussr", UK: "uk", US: "us", JAP: "jap" };
+
+const RIG_FOLDER: Record<string, string> = {
+  tactical_bomber: "tac_bomber",
+  strategic_bomber: "bomber",
+};
+
+const SEED_RIG_TYPES = new Set([
+  "tank",
+  "mech_infantry",
+  "artillery",
+  "aaa",
+  "fighter",
+  "tac_bomber",
+  "tactical_bomber",
+  "bomber",
+  "strategic_bomber",
+  "battleship",
+  "cruiser",
+  "destroyer",
+  "submarine",
+  "transport",
+]);
+
+/** The seed-1 rig id for a shelf row, such as `uk_artillery_seed1`. A renamed picture such as a T-34 has none. */
+export function seedRigId(factionId: string, unitTypeId: string): string | null {
+  const prefix = FACTION_PREFIX[factionId];
+  if (!prefix || !SEED_RIG_TYPES.has(unitTypeId)) {
+    return null;
+  }
+  return `${prefix}_${RIG_FOLDER[unitTypeId] ?? unitTypeId}_seed1`;
+}
+
+function quickPick(factionId: string, unitTypeId: string, path: string): string | null {
+  const rigId = seedRigId(factionId, unitTypeId);
+  if (!rigId || !path.includes(`/${rigId}.`)) {
+    return null;
+  }
+  return `walk:${rigId}_QUICK:vector`;
+}
+
 /** The overnight batch names the bombers the short way. */
 const SHORT_TYPE_LABEL: Record<string, string> = {
   bomber: UNIT_TYPE_LABEL.strategic_bomber ?? "Strategic bomber",
@@ -128,7 +169,7 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
       preview: publicUrl(file),
       picture,
       stampSource,
-      fieldPick: picture ?? null,
+      fieldPick: quickPick(factionId, unitTypeId, file) ?? picture ?? null,
       label: shelfLabel(factionId, unitTypeId, seed, stamped ? "stamped vector" : polished ? "polished vector" : "vector"),
     });
   }
@@ -145,7 +186,8 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
     }
     const polished = clip.polished === true;
     const preview = text(clip.preview);
-    const walk = polished && clip.unitId === "jap_infantry";
+    const unitId = text(clip.unitId) ?? "";
+    const walk = polished && unitId === "jap_infantry";
     units.push({
       key: `clips:${dir}`,
       kind: "clips",
@@ -157,8 +199,8 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
       polished,
       stamped: false,
       preview: publicUrl(preview && preview.endsWith(".svg") && safePath(preview) ? preview : `${dir}/idle_0.svg`),
-      fieldPick: walk ? POLISHED_WALK_KEY : null,
-      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk${text(clip.unitId)?.endsWith("_QUICK") ? ", QUICK" : ""}, ${polished ? "polished vector" : "vector"}`,
+      fieldPick: walk ? POLISHED_WALK_KEY : unitId.endsWith("_QUICK") || unitId.endsWith("_v2") ? `walk:${unitId}:vector` : null,
+      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk${unitId.endsWith("_QUICK") ? ", QUICK" : unitId.endsWith("_v2") ? ", v2" : ""}, ${polished ? "polished vector" : "vector"}`,
     });
   }
   return units;
@@ -189,7 +231,7 @@ export function candidateShelf(candidates: readonly ShelfCandidate[]): ShelfUnit
       stamped: false,
       preview: `/__dev/bake-file?path=${encodeURIComponent(path)}`,
       picture: path,
-      fieldPick: path,
+      fieldPick: quickPick(factionId, unitTypeId, path) ?? path,
       label: shelfLabel(factionId, unitTypeId, row.seed, row.grade === "outlined" ? "picture, outlines" : "picture"),
     });
   }
