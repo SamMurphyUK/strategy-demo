@@ -11,7 +11,7 @@ export interface VehicleStageCamera {
 }
 
 export interface VehicleSvgPart {
-  role: "tracks" | "torso" | "head" | "weapon";
+  role: "tracks" | "torso" | "head" | "weapon" | "shadow";
   href: string;
   maskHref?: string;
   x: number;
@@ -19,6 +19,14 @@ export interface VehicleSvgPart {
   width: number;
   height: number;
   resolution: number;
+  /** Pivot for foreshortening / bank, in sprite pixels. */
+  pivotX?: number;
+  pivotY?: number;
+  scaleX?: number;
+  scaleY?: number;
+  skewXDeg?: number;
+  rotateDeg?: number;
+  opacity?: number;
 }
 
 export interface VehicleSvgUnit {
@@ -44,11 +52,42 @@ export interface VehicleStage {
 }
 
 function signatureOf(parts: readonly VehicleSvgPart[]): string {
-  return parts.map((part) => `${part.role}|${part.resolution}|${part.width}|${part.height}|${part.maskHref ? "m" : "o"}`).join(";");
+  return parts
+    .map(
+      (part) =>
+        `${part.role}|${part.resolution}|${part.width}|${part.height}|${part.maskHref ? "m" : "o"}|${part.pivotX ?? 0}|${part.pivotY ?? 0}`,
+    )
+    .join(";");
 }
 
 function element<T extends SVGElement>(name: string): T {
   return document.createElementNS(SVG_NS, name) as T;
+}
+
+function affineTransform(part: VehicleSvgPart): string {
+  const res = part.resolution > 0 ? 1 / part.resolution : 1;
+  const scaleX = part.scaleX ?? 1;
+  const scaleY = part.scaleY ?? 1;
+  const skewX = part.skewXDeg ?? 0;
+  const rotate = part.rotateDeg ?? 0;
+  const pivotX = part.pivotX ?? 0;
+  const pivotY = part.pivotY ?? 0;
+  const bits = [`translate(${part.x} ${part.y})`];
+  if (rotate !== 0 || skewX !== 0 || scaleX !== 1 || scaleY !== 1) {
+    bits.push(`translate(${pivotX} ${pivotY})`);
+    if (rotate !== 0) {
+      bits.push(`rotate(${rotate})`);
+    }
+    if (skewX !== 0) {
+      bits.push(`skewX(${skewX})`);
+    }
+    if (scaleX !== 1 || scaleY !== 1) {
+      bits.push(`scale(${scaleX} ${scaleY})`);
+    }
+    bits.push(`translate(${-pivotX} ${-pivotY})`);
+  }
+  bits.push(`scale(${res})`);
+  return bits.join(" ");
 }
 
 export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
@@ -117,9 +156,15 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
       if (!layer) {
         return;
       }
-      layer.setAttribute("transform", `translate(${part.x} ${part.y})`);
+      layer.setAttribute("transform", affineTransform(part));
+      if (part.opacity != null && part.opacity < 1) {
+        layer.setAttribute("opacity", String(part.opacity));
+      } else {
+        layer.removeAttribute("opacity");
+      }
       const scale = layer.querySelector("[data-scale]");
-      scale?.setAttribute("transform", `scale(${part.resolution > 0 ? 1 / part.resolution : 1})`);
+      // Resolution scale is folded into affineTransform; keep inner group identity.
+      scale?.setAttribute("transform", "");
       const image = layer.querySelector("image");
       if (!image) {
         return;

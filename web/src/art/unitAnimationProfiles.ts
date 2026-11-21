@@ -187,6 +187,7 @@ const DECK_GUN: readonly FireKick[] = [{ frame: 1, weaponDx: -2, recoilX: 1 }];
 const SAME_INK: LayerInk = { tracks: "tracks", torso: "torso", head: "head", weapon: "weapon" };
 const GUN_ON_HEAD: LayerInk = { tracks: "tracks", torso: "torso", head: "head", weapon: "head" };
 const GUN_ON_TORSO: LayerInk = { tracks: "tracks", torso: "torso", head: "head", weapon: "torso" };
+/** Flat aircraft: prop on torso, airframe on tracks. The `_25D` fighter skips this fold in the preview. */
 const AIRFRAME_INK: LayerInk = { tracks: "tracks", torso: "torso", head: "tracks", weapon: "torso" };
 
 export const LAYER_INK: Record<AnimArchetype, LayerInk> = {

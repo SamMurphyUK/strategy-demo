@@ -37,7 +37,18 @@ import {
   walkFrameAt,
   type Footprint,
 } from "./nativeBattleOverlay";
-import { createVehicleStage, type VehicleSvgUnit } from "./fieldVehicleStage";
+import { createVehicleStage, type VehicleSvgPart, type VehicleSvgUnit } from "./fieldVehicleStage";
+import {
+  FIGHTER_25D_ID,
+  FIGHTER_25D_WING_ROOT,
+  FIGHTER_25D_Z_ORDER,
+  fighter25DAltitude,
+  fighter25DLayerUrl,
+  fighter25DPose,
+  fighter25DTheta,
+  FIGHTER_25D_ROLE_SLOT,
+  isFighter25DId,
+} from "./fighter25D";
 import { FACTION_LUTS } from "./paperDoll";
 import { foldLayerShift, resolveUnitAnimProfile, type UnitAnimProfile } from "./unitAnimationProfiles";
 import { horizonShiftX } from "./horizonParallax";
@@ -142,6 +153,8 @@ interface FrameActor {
   puffFrames: { idle: number[]; fire: number[] };
   /** Tracks, torso, head, and weapon split in memory. Null when this picture has no rig. */
   tank: TankView | null;
+  /** Articulated 2.5D wing foreshortening prototype. */
+  fighter25D?: boolean;
 }
 
 interface StillActor {
@@ -726,7 +739,7 @@ function factionOfRig(rigId: string): (typeof QUICK_FACTIONS)[number]["id"] {
 function typeOfRig(rigId: string): string {
   const faction = QUICK_FACTIONS.find((item) => rigId.startsWith(`${item.prefix}_`));
   const rest = faction ? rigId.slice(faction.prefix.length + 1) : rigId;
-  return rest.replace(/_seed\d+$/, "");
+  return rest.replace(/_seed\d+(?:_25D|_QUICK)?$/i, "").replace(/_(?:25D|QUICK)$/i, "");
 }
 
 function lutFor(factionId: string): readonly string[] {
@@ -736,7 +749,87 @@ function lutFor(factionId: string): readonly string[] {
   return AS_DRAWN_LUT;
 }
 
+async function loadFighter25D(asVector: boolean): Promise<FrameActor> {
+  const rigId = FIGHTER_25D_ID;
+  const factionId = "GER";
+  const unitTypeId = "fighter";
+  const label = asVector ? "GER fighter, 25D, vector" : "GER fighter, 25D";
+  if (asVector) {
+    const painted = await buildPaintedRig(rigId, lutFor(factionId), false);
+    if (!painted) {
+      throw new Error("The 25D fighter rig could not be opened.");
+    }
+    const idleImage = await loadImage(fighter25DLayerUrl("fuselage"));
+    // Composite preview plate from the flat idle clip so feet / blit stay correct.
+    const clipIdle = await loadImage(`/assets/units/vector/frames/${rigId}/idle_0.svg`);
+    const canvas = new OffscreenCanvas(painted.width, painted.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("The browser would not open a canvas.");
+    }
+    // Draw the resolution-4 SVG scaled down to 1 unit = 1 sprite pixel for the blit plate.
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(clipIdle, 0, 0, painted.width, painted.height);
+    void idleImage;
+    return {
+      kind: "frames",
+      title: `${label}, ${painted.width} by ${painted.height}`,
+      factionId,
+      unitTypeId,
+      width: painted.width,
+      height: painted.height,
+      feet: painted.feet,
+      idle: canvas,
+      idleFrames: [canvas],
+      walk: [canvas],
+      fire: [canvas],
+      damaged: [],
+      resolution: 4,
+      scalableIdle: clipIdle,
+      scalableIdleFrames: [clipIdle],
+      scalableWalk: [],
+      scalableFire: [],
+      scalableDamaged: [],
+      ...QUIET_MARKS,
+      muzzle: { x: 133, y: 72 },
+      tank: null,
+      fighter25D: true,
+    };
+  }
+  const painted = await buildPaintedRig(rigId, lutFor(factionId), true);
+  if (!painted) {
+    throw new Error("The 25D fighter rig could not be opened.");
+  }
+  return {
+    kind: "frames",
+    title: `${label}, ${painted.width} by ${painted.height}`,
+    factionId,
+    unitTypeId,
+    width: painted.width,
+    height: painted.height,
+    feet: painted.feet,
+    idle: painted.idle,
+    idleFrames: [painted.idle],
+    walk: painted.walk,
+    fire: painted.fire,
+    damaged: [],
+    resolution: 1,
+    scalableIdle: null,
+    scalableIdleFrames: [],
+    scalableWalk: [],
+    scalableFire: [],
+    scalableDamaged: [],
+    ...QUIET_MARKS,
+    muzzle: { x: 133, y: 72 },
+    tank: painted.view,
+    fighter25D: true,
+  };
+}
+
 async function loadQuickUnit(rigId: string, asVector: boolean): Promise<FrameActor> {
+  if (isFighter25DId(rigId) || rigId === FIGHTER_25D_ID) {
+    return loadFighter25D(asVector);
+  }
   const factionId = factionOfRig(rigId);
   const unitTypeId = typeOfRig(rigId);
   const label = `${factionId} ${unitTypeLabel(unitTypeId).toLowerCase()}, QUICK`;
@@ -1054,6 +1147,12 @@ export function NativeBattlePreview() {
     if (key === "walk:jap_tank_seed1_QUICK:vector") {
       return loadVectorWalk(QUICK_JAP_TANK_VECTOR_URL, "vector", "JAP", "tank", "JAP tank, QUICK");
     }
+    if (key === "walk:ger_fighter_seed1_25D") {
+      return loadFighter25D(false);
+    }
+    if (key === "walk:ger_fighter_seed1_25D:vector") {
+      return loadFighter25D(true);
+    }
     if (key === "walk:jap:vector") {
       return loadVectorWalk();
     }
@@ -1314,7 +1413,10 @@ export function NativeBattlePreview() {
         let offsets = NO_SHIFT;
         const heldAnim = anims.get(item.id);
         if (profile && heldAnim) {
-          offsets = inkedOffsets(profile, vehicleOffsets(heldAnim, profile));
+          const raw = vehicleOffsets(heldAnim, profile);
+          // 25D keeps farWing/fuselage/prop/nearWing on separate ladder slots.
+          offsets =
+            actor.kind === "frames" && actor.fighter25D ? { ...raw, hull: raw.torso, turret: raw.head } : inkedOffsets(profile, raw);
         }
         if (actor.kind !== "frames" && profile && heldAnim && heldAnim.mode === "moving" && dragRef.current?.id !== item.id && motionStep.dt > 0) {
           item.station = { x: item.station.x + marchDistance(motionStep.dt), y: item.station.y };
@@ -1400,7 +1502,50 @@ export function NativeBattlePreview() {
         const pixelW = blit.width / Math.max(1, art.width);
         const pixelH = blit.height / Math.max(1, art.height);
         let parts: VehicleSvgUnit["parts"] | null = null;
-        if (actor.kind === "frames" && crisp && (resolution > 1 || actor.tank?.raster.urls)) {
+        if (actor.kind === "frames" && actor.fighter25D && crisp) {
+          const bankMode: "idle" | "moving" | "firing" | "all" =
+            hold === "all" ? "all" : hold === "idle" ? "idle" : hold === "fire" ? "firing" : "moving";
+          const pose = fighter25DPose(fighter25DTheta(elapsed, bankMode), fighter25DAltitude(elapsed, bankMode));
+          const root = FIGHTER_25D_WING_ROOT;
+          const layerRes = 4;
+          parts = FIGHTER_25D_Z_ORDER.map((role): VehicleSvgPart => {
+            if (role === "shadow") {
+              return {
+                role: "shadow",
+                href: fighter25DLayerUrl("shadow"),
+                x: pose.shadow.dx,
+                y: pose.shadow.dy + pose.shadow.groundY,
+                width: actor.width,
+                height: actor.height,
+                resolution: layerRes,
+                pivotX: root.x,
+                pivotY: root.y,
+                scaleX: pose.shadow.scaleX,
+                scaleY: pose.shadow.scaleY,
+                skewXDeg: pose.shadow.skewXDeg,
+                opacity: pose.shadow.opacity,
+              };
+            }
+            const slot = FIGHTER_25D_ROLE_SLOT[role];
+            const aff = pose[role];
+            return {
+              role: slot,
+              href: fighter25DLayerUrl(role),
+              x: offsets[slot].x + aff.dx,
+              y: offsets[slot].y + aff.dy,
+              width: actor.width,
+              height: actor.height,
+              resolution: layerRes,
+              pivotX: root.x,
+              pivotY: root.y,
+              scaleX: aff.scaleX,
+              scaleY: aff.scaleY,
+              skewXDeg: aff.skewXDeg,
+              rotateDeg: aff.rotateDeg,
+              opacity: aff.opacity,
+            };
+          });
+        } else if (actor.kind === "frames" && crisp && (resolution > 1 || actor.tank?.raster.urls)) {
           const anim = anims.get(item.id);
           const sources = actor.tank ? tankLayerSources(actor.tank, anim?.mode ?? "moving", anim?.frame ?? 0) : null;
           if (sources) {
@@ -1817,6 +1962,8 @@ export function NativeBattlePreview() {
                 <option value="walk:us_tank_seed1_QUICK:vector">US tank, QUICK, vector</option>
                 <option value="walk:jap_tank_seed1_QUICK">JAP tank, QUICK</option>
                 <option value="walk:jap_tank_seed1_QUICK:vector">JAP tank, QUICK, vector</option>
+                <option value="walk:ger_fighter_seed1_25D">GER fighter, 25D</option>
+                <option value="walk:ger_fighter_seed1_25D:vector">GER fighter, 25D, vector</option>
               </optgroup>
               {QUICK_FACTIONS.map((faction) => (
                 <optgroup key={faction.id} label={`${faction.id}, QUICK`}>

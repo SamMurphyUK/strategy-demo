@@ -1078,6 +1078,18 @@
   ],
   "clips": [
     {
+      "dir": "assets/units/vector/frames/ger_fighter_seed1_25D",
+      "source": "public/assets/units/frames/ger_fighter_seed1_25D/clips.json",
+      "unitId": "ger_fighter_seed1_25D",
+      "factionId": "GER",
+      "unitTypeId": "fighter",
+      "width": 144,
+      "height": 160,
+      "frames": 16,
+      "preview": "assets/units/vector/frames/ger_fighter_seed1_25D/idle_0.svg",
+      "polished": false
+    },
+    {
       "dir": "assets/units/vector/frames/ger_tank_seed1_QUICK",
       "source": "public/assets/units/frames/ger_tank_seed1_QUICK/clips.json",
       "unitId": "ger_tank_seed1_QUICK",

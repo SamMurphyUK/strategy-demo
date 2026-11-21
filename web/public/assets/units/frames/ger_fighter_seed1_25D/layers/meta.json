@@ -1,0 +1,11 @@
+{
+  "wingRootX": 93,
+  "wingRootY": 77,
+  "zOrder": [
+    "shadow",
+    "farWing",
+    "fuselage",
+    "prop",
+    "nearWing"
+  ]
+}

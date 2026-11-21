@@ -1,6 +1,6 @@
 # Art plan, in plain English
 
-For working through the art. Not a to-do list for the code.
+For working through the art. Not a to-do list for the code. The coordinates, clocks, and layer names the code uses are in [art-pipeline.md](art-pipeline.md).
 
 You can paint whenever you want. None of the code steps need a finished set of pictures.
 

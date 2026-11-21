@@ -1,0 +1,45 @@
+{
+  "kind": "sprite-clips",
+  "version": 1,
+  "unitId": "ger_fighter_seed1_25D",
+  "width": 144,
+  "height": 160,
+  "feet": {
+    "x": 97,
+    "y": 159
+  },
+  "scale": 4,
+  "polished": false,
+  "clips": {
+    "idle": [
+      "idle_0",
+      "idle_1",
+      "idle_2",
+      "idle_3"
+    ],
+    "walk": [
+      "walk_0",
+      "walk_1",
+      "walk_2",
+      "walk_3",
+      "walk_4",
+      "walk_5",
+      "walk_6",
+      "walk_7"
+    ],
+    "fire": [
+      "fire_0",
+      "fire_1"
+    ],
+    "damaged": [
+      "damaged_0",
+      "damaged_1"
+    ]
+  },
+  "factionId": "GER",
+  "unitTypeId": "fighter",
+  "muzzle": {
+    "x": 133,
+    "y": 72
+  }
+}
