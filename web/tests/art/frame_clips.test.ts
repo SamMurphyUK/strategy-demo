@@ -12,6 +12,8 @@ import {
   fillTorsoUnderWeapon,
   frameRgba,
   fromFrameFile,
+  exhaustPuff,
+  muzzleFlashPixels,
   nudgeLayer,
   paintCell,
   shotFrom,
@@ -153,5 +155,13 @@ describe("sprite frames from the walk sheet", () => {
         layers: {},
       }),
     ).toThrow();
+  });
+
+  it("puts the muzzle flash in front of the barrel and lifts the exhaust", () => {
+    expect(muzzleFlashPixels({ x: 10, y: 10 }).every((pixel) => pixel.x > 10)).toBe(true);
+    const first = exhaustPuff(0).map(([, y]) => y);
+    const later = exhaustPuff(2).map(([, y]) => y);
+    expect(Math.min(...later)).toBeLessThan(Math.min(...first));
+    expect(exhaustPuff(2).some(([x]) => x < 0)).toBe(true);
   });
 });

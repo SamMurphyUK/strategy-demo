@@ -1078,6 +1078,18 @@
   ],
   "clips": [
     {
+      "dir": "assets/units/vector/frames/ger_tank_seed1_QUICK",
+      "source": "public/assets/units/frames/ger_tank_seed1_QUICK/clips.json",
+      "unitId": "ger_tank_seed1_QUICK",
+      "factionId": "GER",
+      "unitTypeId": "tank",
+      "width": 192,
+      "height": 96,
+      "frames": 24,
+      "preview": "assets/units/vector/frames/ger_tank_seed1_QUICK/idle_0.svg",
+      "polished": false
+    },
+    {
       "dir": "assets/units/vector/frames/jap_infantry_polished",
       "source": "public/assets/units/frames/jap_infantry_polished/clips.json",
       "unitId": "jap_infantry",
@@ -1089,6 +1101,54 @@
       "preview": "assets/units/vector/frames/jap_infantry_polished/idle_0.svg",
       "polished": true,
       "grade": "polished"
+    },
+    {
+      "dir": "assets/units/vector/frames/jap_tank_seed1_QUICK",
+      "source": "public/assets/units/frames/jap_tank_seed1_QUICK/clips.json",
+      "unitId": "jap_tank_seed1_QUICK",
+      "factionId": "JAP",
+      "unitTypeId": "tank",
+      "width": 176,
+      "height": 96,
+      "frames": 24,
+      "preview": "assets/units/vector/frames/jap_tank_seed1_QUICK/idle_0.svg",
+      "polished": false
+    },
+    {
+      "dir": "assets/units/vector/frames/uk_tank_seed1_QUICK",
+      "source": "public/assets/units/frames/uk_tank_seed1_QUICK/clips.json",
+      "unitId": "uk_tank_seed1_QUICK",
+      "factionId": "UK",
+      "unitTypeId": "tank",
+      "width": 176,
+      "height": 96,
+      "frames": 24,
+      "preview": "assets/units/vector/frames/uk_tank_seed1_QUICK/idle_0.svg",
+      "polished": false
+    },
+    {
+      "dir": "assets/units/vector/frames/us_tank_seed1_QUICK",
+      "source": "public/assets/units/frames/us_tank_seed1_QUICK/clips.json",
+      "unitId": "us_tank_seed1_QUICK",
+      "factionId": "US",
+      "unitTypeId": "tank",
+      "width": 144,
+      "height": 96,
+      "frames": 24,
+      "preview": "assets/units/vector/frames/us_tank_seed1_QUICK/idle_0.svg",
+      "polished": false
+    },
+    {
+      "dir": "assets/units/vector/frames/ussr_tank_seed1_QUICK",
+      "source": "public/assets/units/frames/ussr_tank_seed1_QUICK/clips.json",
+      "unitId": "ussr_tank_seed1_QUICK",
+      "factionId": "USSR",
+      "unitTypeId": "tank",
+      "width": 192,
+      "height": 96,
+      "frames": 24,
+      "preview": "assets/units/vector/frames/ussr_tank_seed1_QUICK/idle_0.svg",
+      "polished": false
     }
   ]
 }

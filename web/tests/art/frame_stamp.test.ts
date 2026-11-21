@@ -93,14 +93,26 @@ describe("stamping a frame at its native size", () => {
         expect(drawing).toBe(before.drawings[pose]);
       }
     });
-    for (const layer of ["legs", "head", "weapon"] as const) {
-      expect(wornPart(stamped, layer)).toBe(wornPart(rig, layer));
-    }
-    const shown = resolveFrame(stamped, frame).layers.torso;
     const cells = frameStampCells(rig, frame, "torso", bitmap, at.x, at.y, false);
     expect(cells).toHaveLength(opaque);
+    const covered = new Set(cells.map((cell) => cell.y * rig.width + cell.x));
+    const shown = resolveFrame(stamped, frame).layers.torso;
     for (const cell of cells) {
       expect(shown[cell.y * rig.width + cell.x]).toBe(cell.slot);
+    }
+    for (const layer of ["legs", "head", "weapon"] as const) {
+      const beforePart = wornPart(rig, layer);
+      const afterPart = wornPart(stamped, layer);
+      afterPart.drawings.forEach((drawing, pose) => {
+        if (pose !== frame.pose) {
+          expect(drawing).toBe(beforePart.drawings[pose]);
+        }
+      });
+      const beforeLayer = beforePart.drawings[frame.pose] ?? [];
+      const afterLayer = afterPart.drawings[frame.pose] ?? [];
+      afterLayer.forEach((slot, index) => {
+        expect(slot).toBe(covered.has(index) ? 0 : beforeLayer[index]);
+      });
     }
   });
 

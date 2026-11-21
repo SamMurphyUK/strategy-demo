@@ -17,15 +17,16 @@ describe("editor layers", () => {
     expect(labels("bomber")).toEqual(["Chassis", "Propeller"]);
     expect(labels("artillery")).toEqual(["Wheel", "Carriage", "Gun"]);
     expect(labels("aaa")).toEqual(["Wheel", "Carriage", "Gun"]);
-    expect(labels("tank")).toEqual(["Tracks", "Hull", "Gun"]);
+    expect(labels("tank")).toEqual(["Tracks", "Hull", "Turret", "Gun"]);
     expect(labels("mech_infantry")).toEqual(["Tracks", "Hull", "Gun"]);
   });
 
   it("reads the stack back from a saved rig id", () => {
     expect(editorSchemeForRig("ger_battleship_seed1").layers.map((layer) => layer.label)).toEqual(["Hull", "Guns", "Top deck"]);
     expect(editorSchemeForRig("jap_infantry").muzzle).toBe("weapon");
-    expect(editorSchemeForRig("us_tank_seed1").muzzle).toBe("head");
+    expect(editorSchemeForRig("us_tank_seed1").muzzle).toBe("weapon");
     expect(editorSchemeForRig("uk_fighter_seed1").picture).toBe("legs");
+    expect(editorSchemeForRig("ger_mech_infantry_seed1").layers.map((layer) => layer.label)).toEqual(["Tracks", "Hull", "Gun"]);
   });
 
   it("seats a ship picture on the hull and leaves the guns empty", () => {

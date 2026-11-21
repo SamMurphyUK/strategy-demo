@@ -22,6 +22,9 @@ import {
   opaqueFeet,
   snapDeviceOrigin,
   stampHolds,
+  heldClipAt,
+  MARCH_PIXELS_PER_SECOND,
+  marchDistance,
   pictureLabel,
   vectorStandIn,
   walkFrameAt,
@@ -143,9 +146,27 @@ describe("native battle overlay", () => {
     const walking = walkFrameAt(4.2 / 11, 8, 1);
     expect(walking.clip).toBe("walk");
     expect(walking.firing).toBe(false);
-    expect(walking.index).toBe(4);
-    expect(walking.label).toBe("Walking 5");
-    expect(walkFrameAt(0, 8, 0).clip).toBe("walk");
+    expect(walking.index).toBe(2);
+    expect(walking.label).toBe("Walking 3");
+    expect(walkFrameAt(0, 8, 0)).toMatchObject({ clip: "walk", index: 0 });
+    const played: number[] = [];
+    for (let step = 0; step < 18; step += 1) {
+      const frame = walkFrameAt((step + 0.2) / 11, 8, 1);
+      if (frame.clip === "walk") {
+        played.push(frame.index);
+      }
+    }
+    expect(played).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5]);
+  });
+
+  it("plays an idle or a shot on its own, then starts again", () => {
+    expect(heldClipAt(0, 8, "idle")).toEqual({ clip: "idle", index: 0, firing: false, label: "Idle 1" });
+    expect(heldClipAt(5.2 / 11, 8, "fire")).toMatchObject({ clip: "fire", index: 5, firing: true, label: "Firing 6" });
+    expect(heldClipAt(8.2 / 11, 8, "idle").index).toBe(0);
+    expect(marchDistance(0)).toBe(0);
+    expect(marchDistance(-1)).toBe(0);
+    expect(MARCH_PIXELS_PER_SECOND).toBeCloseTo((11 * 14 * 1.2) / 16);
+    expect(marchDistance(16 / 11)).toBeCloseTo(14 * 1.2);
   });
 
   it("stands a still picture on the bottom of its ink", () => {

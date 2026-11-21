@@ -30,12 +30,14 @@ const SHIP = scheme(["Hull", "Guns", "Top deck"], "legs", "torso");
 const AIRCRAFT = scheme(["Chassis", "Propeller"], "legs", "legs");
 const ARTILLERY = scheme(["Wheel", "Carriage", "Gun"], "torso", "head");
 const VEHICLE = scheme(["Tracks", "Hull", "Gun"], "torso", "head");
+const TANK = scheme(["Tracks", "Hull", "Turret", "Gun"], "torso", "weapon");
 
 export function editorSchemeForArchetype(archetype: ArchetypeKey | null): EditorScheme {
   if (archetype === "ship") return SHIP;
   if (archetype === "aircraft") return AIRCRAFT;
   if (archetype === "artillery") return ARTILLERY;
-  if (archetype === "tank" || archetype === "mech_infantry") return VEHICLE;
+  if (archetype === "tank") return TANK;
+  if (archetype === "mech_infantry") return VEHICLE;
   return INFANTRY;
 }
 
@@ -43,11 +45,12 @@ export function editorSchemeForUnitType(unitTypeId: string): EditorScheme {
   return editorSchemeForArchetype(archetypeForUnitType(unitTypeId));
 }
 
-/** `ger_battleship_seed1` is a battleship. The Japanese walk is infantry. */
+/** `ger_battleship_seed1` is a battleship. The Japanese walk is infantry. A halftrack id ends in `_infantry` too, so the seed is read first. */
 export function unitTypeFromRigId(unitId: string): string {
-  if (unitId === "jap_infantry" || unitId.endsWith("_infantry")) return "infantry";
   const seeded = /^[a-z0-9]+_(.+)_seed\d+$/.exec(unitId);
-  return seeded?.[1] ?? "infantry";
+  if (seeded) return seeded[1];
+  if (unitId === "jap_infantry" || unitId.endsWith("_infantry")) return "infantry";
+  return "infantry";
 }
 
 export function editorSchemeForRig(unitId: string): EditorScheme {

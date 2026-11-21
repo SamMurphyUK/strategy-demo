@@ -1,0 +1,23 @@
+---
+description: How a sprite walk is generated, one skeleton at a time
+alwaysApply: true
+---
+
+# Sprite motion
+
+Generate one skeleton at a time. Finish one faction until its walk loops on the battle map, then repeat that motion for the other factions of the same skeleton. Leave the next skeleton alone.
+
+The moving part is the only layer that changes drawing. Everything else stays the idle picture and shifts by whole pixels. An eight-frame cycle must join: the frame after the last one is the first. The battle shot takes two ticks out of every sixteen, and those ticks are not walk frames, so a walk index counts walk frames shown.
+
+After the frames look right, vectorize that clip folder:
+
+`npm run vectorize:units -- --clips public/assets/units/frames/<id>/clips.json`
+
+A quick test copy uses the `_QUICK` suffix and names its faction and unit type in the clip list.
+
+- Tank. Tracks roll for eight frames. The tread is an eight-pixel repeat, so the last frame joins the first. The bottom struts and the wheel hubs are drawn on the idle and on the first walk frame. Hull, turret, and gun stay the idle drawing, and each moves on its own tick. A positive step is down. Where two of those parts separate, the gap is the tank's dark shade. Idle uses the same lifts as the roll, and the tracks stay on the idle drawing. On the roll, frames 1 to 3 stay level. Frame 4 lifts the hull one pixel. Frame 5 is level while the turret and gun are still lifted. Frame 6 drops the hull one pixel. Frame 7 drops the turret and gun. Frame 8 is level. The tracks stay on the ground. While it marches, the tank moves right at a steady speed, a fifth quicker than one pixel for each walk frame that is shown, and that move is not drawn into the picture. A vector keeps the fractional place. The shot kicks the barrel back three pixels on frame 2 and the hull and turret back one. Frames 3 to 5 bring the barrel forward two, then one, then home. Frames 6 to 8 stay still while smoke rises from the exhaust at the back.
+- Mechanised infantry. Wheels and tracks step. The body and crew lift one pixel on the second step. Fire kicks the gun back one.
+- Artillery and anti-aircraft. The first moving frame is the idle picture. The second settles the shield and barrel one pixel. Fire rolls the carriage back one and the barrel two. A flak gun slides one back and one down.
+- Infantry. The legs have their own drawings. Move 1 reaches, Move 2 drops a pixel, and fire pulls the rifle back.
+- Aircraft. The propeller blur steps. The second frame slides the engines one pixel toward a wingtip. Fire pulls the airframe back one.
+- Ship. The first frame adds foam at the bow and stern. The second lifts the ship one pixel and changes the foam. Fire rolls it down one pixel.

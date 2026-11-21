@@ -2,7 +2,7 @@ import { rosterUnitType, UNIT_TYPE_LABEL } from "./archetypeLayers";
 import { PLATE_DRAW_SCALE } from "./pixelGrain";
 import { beatGrid } from "./layeredUnit";
 import { slotHex, type UnitPaintDocument } from "./pixelPaint";
-import { poseStep, type PlaybackBeat } from "./motionPreview";
+import { POSE_FPS, poseStep, type PlaybackBeat } from "./motionPreview";
 import { FACTION_MILITARY_MAPPINGS } from "./starterParts";
 import { UNIT_DEFINITIONS, type CombatUnit, type UnitType } from "../ui/battle/combatTypes";
 import { laneScale, SHADOW_ALPHA, SHADOW_RGB } from "../ui/battle/scenery/perspective";
@@ -333,7 +333,8 @@ export interface FieldBlit {
 /**
  * Where a beat bitmap is copied.
  * A half bitmap at unit scale 1/2 and below is copied 1:1 (each reduced pixel covers `unitScale / 0.5` battle pixels).
- * Any other bitmap fills the logical stamp. The origin is snapped onto a whole device pixel.
+ * Any other bitmap fills the logical stamp. A pixel picture's origin is snapped onto a whole device pixel.
+ * A vector keeps the fractional place, so a march can slide instead of jumping a pixel at a time.
  */
 export function fieldBlit(
   bitmap: { width: number; height: number },
@@ -344,6 +345,7 @@ export function fieldBlit(
   viewScale: number,
   dpr: number,
   half: boolean,
+  snap = true,
 ): FieldBlit {
   const stamp = nativeStamp(size, ground, station, unitScale);
   let width = stamp.width;
@@ -358,8 +360,8 @@ export function fieldBlit(
     y = station.y - (ground.y / 2) * cover;
   }
   return {
-    x: snapDeviceOrigin(x, dpr, viewScale),
-    y: snapDeviceOrigin(y, dpr, viewScale),
+    x: snap ? snapDeviceOrigin(x, dpr, viewScale) : x,
+    y: snap ? snapDeviceOrigin(y, dpr, viewScale) : y,
     width,
     height,
   };
@@ -538,8 +540,10 @@ export function vectorStandIn(unitType: UnitType, recoil: number, marching: bool
 }
 
 /**
- * Which frame of a walk to show. The walk loops. Every 16 ticks the shot takes the first two,
- * when a firing frame exists, so it lines up with the plate's shot.
+ * Which frame of a walk to show. The walk plays in order and then starts again.
+ * The shot still takes the first two ticks of every 16, the same ticks as a plate.
+ * Those ticks are not walk frames. Counting them as walk frames skips the first two
+ * pictures of an eight-frame cycle, so the last frame joins the third instead of the first.
  */
 export function walkFrameAt(
   time: number,
@@ -551,10 +555,40 @@ export function walkFrameAt(
     return { clip: "fire", index: 0, firing: true, label: "Firing" };
   }
   if (walkCount > 0) {
-    const index = step % walkCount;
+    const walkTicks = fireCount > 0 ? Math.floor(step / 16) * 14 + (step % 16) - 2 : step;
+    const index = ((walkTicks % walkCount) + walkCount) % walkCount;
     return { clip: "walk", index, firing: false, label: `Walking ${index + 1}` };
   }
   return { clip: "idle", index: 0, firing: false, label: "Idle" };
+}
+
+/**
+ * One frame of a clip played on its own. The frame after the last one is the first.
+ * Marching uses `walkFrameAt` instead, so the shot can take its two ticks.
+ */
+export function heldClipAt(
+  time: number,
+  count: number,
+  clip: "idle" | "fire",
+): { clip: "idle" | "fire"; index: number; firing: boolean; label: string } {
+  const index = count > 0 ? ((poseStep(time) % count) + count) % count : 0;
+  const title = clip === "fire" ? "Firing" : "Idle";
+  return { clip, index, firing: clip === "fire", label: count > 1 ? `${title} ${index + 1}` : title };
+}
+
+/**
+ * Picture-pixels per second on a march.
+ * The old pace was one pixel for each walk frame that was shown. Fourteen of every sixteen
+ * pose ticks are walk frames. This is that pace, a fifth quicker, and it does not wait for the frame.
+ */
+export const MARCH_PIXELS_PER_SECOND = (POSE_FPS * 14 * 1.2) / 16;
+
+/** How far a march travels in `seconds`, in picture-pixels. */
+export function marchDistance(seconds: number): number {
+  if (!(seconds > 0)) {
+    return 0;
+  }
+  return seconds * MARCH_PIXELS_PER_SECOND;
 }
 
 /** The bottom row of opaque pixels, halfway between the outer ones. */

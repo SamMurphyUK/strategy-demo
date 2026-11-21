@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fillLayerInk, fillPart, paintBrush, wornPart, type PartRig, type RigFrame } from "../../src/art/partRig";
+import { fillLayerInk, fillPart, paintBrush, paintPart, wornPart, type PartRig, type RigFrame } from "../../src/art/partRig";
 import type { PartCategory } from "../../src/art/paperDoll";
 
 function drawing(slots: Record<number, number> = {}): number[] {
@@ -79,6 +79,17 @@ describe("fill a part", () => {
     expect(cells[1]).toBe(7);
   });
 
+  it("clears the connected squares of the clicked colour and stops at a different colour", () => {
+    const { rig, frame } = rigWith(drawing({ 4: 2, 5: 2, 6: 5, 7: 2 }));
+    const cleared = fillPart(rig, frame, "torso", 0, 1, 0);
+    const cells = wornPart(cleared, "torso").drawings[0] ?? [];
+    expect(cells[4]).toBe(0);
+    expect(cells[5]).toBe(0);
+    expect(cells[6]).toBe(5);
+    expect(cells[7]).toBe(2);
+    expect(fillPart(rig, frame, "torso", 0, 0, 0)).toBe(rig);
+  });
+
   it("leaves the rig when the square is already the paint colour", () => {
     const { rig, frame } = rigWith(drawing({ 5: 2, 6: 2 }));
     expect(fillPart(rig, frame, "torso", 1, 1, 2)).toBe(rig);
@@ -94,6 +105,43 @@ describe("fill a part", () => {
     expect(cells[5]).toBe(4);
     expect(cells[6]).toBe(2);
     expect(cells.filter((slot) => slot !== 0)).toHaveLength(2);
+  });
+
+  it("takes a painted square off the other layers", () => {
+    const { rig, frame } = rigWith(drawing({ 5: 2 }));
+    const withOverlap = {
+      ...rig,
+      parts: rig.parts.map((part) =>
+        part.layer === "legs" || part.layer === "head"
+          ? { ...part, drawings: [drawing({ 5: part.layer === "legs" ? 4 : 8 })] }
+          : part,
+      ),
+    };
+    const painted = paintBrush(withOverlap, frame, "torso", 1, 1, 3, 1);
+    expect(wornPart(painted, "torso").drawings[0]?.[5]).toBe(3);
+    expect(wornPart(painted, "legs").drawings[0]?.[5]).toBe(0);
+    expect(wornPart(painted, "head").drawings[0]?.[5]).toBe(0);
+    expect(wornPart(painted, "legs").drawings[0]?.[6]).toBe(0);
+
+    const again = paintPart(painted, frame, "torso", 1, 1, 3);
+    expect(again).toBe(painted);
+
+    const cleared = paintPart(painted, frame, "torso", 1, 1, 0);
+    expect(wornPart(cleared, "torso").drawings[0]?.[5]).toBe(0);
+    expect(wornPart(cleared, "weapon").drawings[0]?.[5]).toBe(0);
+  });
+
+  it("takes a recolour off the other layers and leaves them when the fill is empty ground", () => {
+    const { rig, frame } = rigWith(drawing({ 4: 2, 5: 2 }));
+    const covered = {
+      ...rig,
+      parts: rig.parts.map((part) => (part.layer === "legs" ? { ...part, drawings: [drawing({ 4: 6, 0: 6 })] } : part)),
+    };
+    const filled = fillPart(covered, frame, "torso", 0, 1, 3);
+    expect(wornPart(filled, "torso").drawings[0]?.[4]).toBe(3);
+    expect(wornPart(filled, "legs").drawings[0]?.[4]).toBe(0);
+    const ground = fillPart(covered, frame, "torso", 0, 0, 4);
+    expect(wornPart(ground, "legs").drawings[0]?.[0]).toBe(6);
   });
 
   it("paints a square centred on the pencil", () => {

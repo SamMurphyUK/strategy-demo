@@ -136,4 +136,59 @@ describe("vehicle clips", () => {
       }).clips.damaged,
     ).toEqual([]);
   });
+
+  it("keeps a frame's section name", () => {
+    const rgba = rgbaOf(1, 1, (_index, out) => {
+      out[3] = 0;
+    });
+    const rig = rigFromPicture("jap_infantry", rgba, 1, 1);
+    const frame = rig.clips.idle[0];
+    if (!frame) {
+      throw new Error("Idle has no frame.");
+    }
+    frame.name = "Idle 2";
+    const opened = assembleRig(
+      toRigFile(rig),
+      rig.parts.map((part) => toPartFile(rig, part)),
+    );
+    expect(opened.clips.idle[0]?.name).toBe("Idle 2");
+  });
+
+  it("keeps an exhaust point on the frame it was saved with", () => {
+    const rgba = rgbaOf(1, 1, (_index, out) => {
+      out[3] = 0;
+    });
+    const rig = rigFromPicture("ger_tank_seed1", rgba, 1, 1);
+    const file = toRigFile(rig);
+    const idle = file.clips.idle[0];
+    if (!idle) {
+      throw new Error("Idle has no frame.");
+    }
+    idle.smoke = { x: 1, y: 0 };
+    const opened = assembleRig(
+      JSON.parse(JSON.stringify(file)) as unknown,
+      rig.parts.map((part) => toPartFile(rig, part)),
+    );
+    expect(opened.clips.idle[0]?.smoke).toEqual({ x: 1, y: 0 });
+    expect(
+      readClipsFile({
+        kind: "sprite-clips",
+        version: 1,
+        unitId: "ger_tank_seed1_QUICK",
+        width: 1,
+        height: 1,
+        feet: { x: 0, y: 0 },
+        smoke: { x: 16, y: 40 },
+        muzzle: { x: 191, y: 26 },
+        flashFrames: [0],
+        puffFrames: { idle: [6, 7], fire: [5, 6, 7] },
+        clips: { idle: ["idle_0"], walk: ["walk_0"], fire: ["fire_0"] },
+      }),
+    ).toMatchObject({
+      smoke: { x: 16, y: 40 },
+      muzzle: { x: 191, y: 26 },
+      flashFrames: [0],
+      puffFrames: { idle: [6, 7], fire: [5, 6, 7] },
+    });
+  });
 });

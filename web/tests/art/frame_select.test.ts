@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rectMask } from "../../src/art/pixelPaint";
-import { claimUnselected, feedIdleCopies, idleSource, paintedSelection, resolveFrame, rigBundle, rigFromBundle, sendShownToLayer, wornPart, type PartRig, type RigFrame } from "../../src/art/partRig";
+import { claimBrush, claimUnselected, feedIdleCopies, idleSource, paintedSelection, resolveFrame, rigBundle, rigFromBundle, sendShownToLayer, wornPart, type PartRig, type RigFrame } from "../../src/art/partRig";
 import type { PartCategory } from "../../src/art/paperDoll";
 
 function drawing(slots: Record<number, number> = {}): number[] {
@@ -66,6 +66,48 @@ describe("send a selection to a layer", () => {
     expect(sent.moved).toBe(1);
     expect(wornPart(sent.rig, "weapon").drawings[0]?.[4]).toBe(3);
     expect(wornPart(sent.rig, "torso").drawings[0]?.[5]).toBe(0);
+  });
+
+  it("takes a separated part off the layer it left, even when the hole would be filled", () => {
+    const { rig, frame } = rigWith(drawing(), drawing());
+    const legs = drawing({ 0: 4, 1: 4 });
+    const outlined = legs.map((slot) => (slot === 0 ? 0 : 1));
+    const separated: PartRig = {
+      ...rig,
+      outlines: { legs: [outlined], torso: [drawing()] },
+      parts: rig.parts.map((part) => (part.layer === "legs" ? { ...part, drawings: [legs] } : part)),
+    };
+    const sent = sendShownToLayer(separated, frame, rectMask(4, 4, { x: 0, y: 0 }, { x: 1, y: 0 }), "torso", true);
+    expect(sent.moved).toBe(2);
+    expect(wornPart(sent.rig, "legs").drawings[0]?.[0]).toBe(0);
+    expect(wornPart(sent.rig, "legs").drawings[0]?.[1]).toBe(0);
+    expect(wornPart(sent.rig, "torso").drawings[0]?.[0]).toBe(4);
+    expect(wornPart(sent.rig, "torso").drawings[0]?.[1]).toBe(4);
+    expect(sent.rig.outlines.legs[0]?.[0]).toBe(0);
+    expect(sent.rig.outlines.legs[0]?.[1]).toBe(0);
+    expect(sent.rig.outlines.torso[0]?.[0]).toBe(1);
+    expect(sent.rig.outlines.torso[0]?.[1]).toBe(1);
+  });
+
+  it("takes a covered square off the layer underneath as well", () => {
+    const { rig, frame } = rigWith(drawing({ 5: 3 }), drawing());
+    const covered: PartRig = {
+      ...rig,
+      parts: rig.parts.map((part) => (part.layer === "legs" ? { ...part, drawings: [drawing({ 5: 8 })] } : part)),
+    };
+    const sent = sendShownToLayer(covered, frame, rectMask(4, 4, { x: 1, y: 1 }, { x: 1, y: 1 }), "head", false);
+    expect(wornPart(sent.rig, "head").drawings[0]?.[5]).toBe(3);
+    expect(wornPart(sent.rig, "torso").drawings[0]?.[5]).toBe(0);
+    expect(wornPart(sent.rig, "legs").drawings[0]?.[5]).toBe(0);
+  });
+
+  it("moves the brushed pixels onto the layer and keeps their colour", () => {
+    const { rig, frame } = rigWith(drawing({ 5: 4, 6: 9 }), drawing());
+    const claimed = claimBrush(rig, frame, "head", 1, 1, 1, false);
+    expect(wornPart(claimed, "head").drawings[0]?.[5]).toBe(4);
+    expect(wornPart(claimed, "torso").drawings[0]?.[5]).toBe(0);
+    expect(wornPart(claimed, "torso").drawings[0]?.[6]).toBe(9);
+    expect(claimBrush(rig, frame, "head", 0, 0, 1, false)).toBe(rig);
   });
 
   it("drops empty ground from a selection and keeps the painted pixel", () => {

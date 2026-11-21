@@ -17,9 +17,12 @@ import {
   partStrip,
   removeBuild,
   removePart,
+  paintCoveringStamps,
   resolveFrame,
   retakeOutline,
   rigFromClips,
+  rigFromPicture,
+  sendShownToLayer,
   saveBuild,
   shotFrame,
   spreadDrawing,
@@ -311,6 +314,35 @@ describe("a rig of swappable parts built from the walk", () => {
     const { builds: _dropped, ...older } = rigFile;
     expect(assembleRig(older, partFiles).builds).toEqual([]);
     expect(() => assembleRig({ ...rigFile, builds: [{ id: "x", name: "", colours: "GER", wearing: {} }] }, partFiles)).toThrow(/build/);
+  });
+
+  it("paints a stamp on the layer that covers it", () => {
+    const width = 16;
+    const height = 16;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let y = 2; y < 14; y += 1) {
+      for (let x = 2; x < 14; x += 1) {
+        const offset = (y * width + x) * 4;
+        rgba[offset] = 0x4e;
+        rgba[offset + 1] = 0x54;
+        rgba[offset + 2] = 0x63;
+        rgba[offset + 3] = 255;
+      }
+    }
+    const seated = rigFromPicture("ger_tank_seed1", rgba, width, height);
+    const stamp = { emblem: "ger_balkenkreuz" as const, size: 13, x: 8, y: 8, flip: false, turn: false, onlyOnSprite: true };
+    const centre = 8 * width + 8;
+    expect(paintCoveringStamps(seated, [])).toBe(seated);
+    const onBody = paintCoveringStamps(seated, [stamp], "torso");
+    expect(wornPart(onBody, "torso").drawings[0]?.[centre]).not.toBe(wornPart(seated, "torso").drawings[0]?.[centre]);
+    expect(wornPart(onBody, "head").drawings[0]?.every((slot) => slot === 0)).toBe(true);
+
+    const region = { width, height, cells: new Uint8Array(width * height).fill(1) };
+    const raised = sendShownToLayer(seated, first(seated.clips.idle), region, "head", false).rig;
+    const onTurret = paintCoveringStamps(raised, [stamp], "torso");
+    expect(wornPart(onTurret, "head").drawings[0]?.[centre]).not.toBe(0);
+    expect(wornPart(onTurret, "head").drawings[0]?.[centre]).not.toBe(wornPart(raised, "head").drawings[0]?.[centre]);
+    expect(wornPart(onTurret, "torso").drawings[0]?.[centre]).toBe(0);
   });
 
   it("saves and opens again as a rig file and one file per part", () => {

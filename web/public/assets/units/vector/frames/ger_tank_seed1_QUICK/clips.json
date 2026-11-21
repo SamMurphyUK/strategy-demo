@@ -1,0 +1,66 @@
+{
+  "kind": "sprite-clips",
+  "version": 1,
+  "unitId": "ger_tank_seed1_QUICK",
+  "width": 192,
+  "height": 96,
+  "feet": {
+    "x": 87,
+    "y": 95
+  },
+  "scale": 4,
+  "polished": false,
+  "clips": {
+    "idle": [
+      "idle_0",
+      "idle_1",
+      "idle_2",
+      "idle_3",
+      "idle_4",
+      "idle_5",
+      "idle_6",
+      "idle_7"
+    ],
+    "walk": [
+      "walk_0",
+      "walk_1",
+      "walk_2",
+      "walk_3",
+      "walk_4",
+      "walk_5",
+      "walk_6",
+      "walk_7"
+    ],
+    "fire": [
+      "fire_0",
+      "fire_1",
+      "fire_2",
+      "fire_3",
+      "fire_4",
+      "fire_5",
+      "fire_6",
+      "fire_7"
+    ]
+  },
+  "factionId": "GER",
+  "unitTypeId": "tank",
+  "smoke": {
+    "x": 16,
+    "y": 40
+  },
+  "muzzle": {
+    "x": 191,
+    "y": 26
+  },
+  "puffFrames": {
+    "idle": [
+      6,
+      7
+    ],
+    "fire": [
+      5,
+      6,
+      7
+    ]
+  }
+}

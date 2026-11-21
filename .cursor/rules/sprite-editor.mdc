@@ -1,0 +1,10 @@
+---
+description: Pixel edits to a sprite go through the in-browser sprite editor
+alwaysApply: true
+---
+
+# Sprite editor
+
+When a sprite needs a pixel change, make it in the dev sprite editor in the browser (`?bake=1`), with that editor's tools. Onion skin is the toggle for matching a frame to the frames beside it.
+
+Write the rig files directly only when the change is a whole clip import, or the editor cannot do it. Do not overwrite a rig the editor has open unless the user asks to save.

@@ -68,6 +68,14 @@ export interface FrameClipsFile {
   height: number;
   feet: PixelPoint;
   clips: Record<ClipKey, string[]>;
+  /** Exhaust, in the picture's pixels. The hull is still when a puff frame is shown. */
+  smoke?: PixelPoint;
+  /** Barrel tip, in the picture's pixels, on the frame where the flash is drawn. */
+  muzzle?: PixelPoint;
+  /** Fire-clip indexes that draw the muzzle flash. */
+  flashFrames?: number[];
+  /** Idle and fire indexes that let the exhaust rise. */
+  puffFrames?: { idle: number[]; fire: number[] };
 }
 
 /**
@@ -429,6 +437,34 @@ const FLASH: readonly (readonly [number, number, string])[] = [
   [2, 1, MILITARY.cream],
 ];
 
+/** The flash in front of a barrel tip. It can sit past the picture's edge. */
+export function muzzleFlashPixels(tip: PixelPoint): { x: number; y: number; hex: string }[] {
+  return FLASH.map(([dx, dy, hex]) => ({ x: tip.x + dx, y: tip.y + dy, hex }));
+}
+
+/** A short exhaust wisp. Later phases are higher and drift back, toward the left. */
+const EXHAUST: readonly (readonly (readonly [number, number, string])[])[] = [
+  [
+    [0, -2, MILITARY.charcoal],
+    [-1, -3, MILITARY.taupe],
+  ],
+  [
+    [-1, -5, MILITARY.charcoal],
+    [0, -6, MILITARY.feldgrau],
+    [-2, -4, MILITARY.taupe],
+  ],
+  [
+    [-2, -8, MILITARY.taupe],
+    [-1, -9, MILITARY.feldgrau],
+    [-3, -7, MILITARY.charcoal],
+  ],
+];
+
+export function exhaustPuff(phase: number): readonly (readonly [number, number, string])[] {
+  const index = Math.min(EXHAUST.length - 1, Math.max(0, Math.floor(phase)));
+  return EXHAUST[index] ?? EXHAUST[0];
+}
+
 function writeHex(out: Uint8ClampedArray, offset: number, hex: string): void {
   const rgb = Number.parseInt(hex.slice(1, 7), 16);
   out[offset] = (rgb >> 16) & 255;
@@ -450,11 +486,9 @@ export function frameRgba(frame: SpriteFrame, lut: readonly string[]): Uint8Clam
   const tips = frame.muzzles && frame.muzzles.length > 0 ? frame.muzzles : frame.muzzle ? [frame.muzzle] : [];
   if (frame.flash) {
     for (const tip of tips) {
-      for (const [dx, dy, hex] of FLASH) {
-        const x = tip.x + dx;
-        const y = tip.y + dy;
-        if (inside(frame, x, y)) {
-          writeHex(out, (y * frame.width + x) * 4, hex);
+      for (const pixel of muzzleFlashPixels(tip)) {
+        if (inside(frame, pixel.x, pixel.y)) {
+          writeHex(out, (pixel.y * frame.width + pixel.x) * 4, pixel.hex);
         }
       }
     }
@@ -576,6 +610,12 @@ export function readClipsFile(value: unknown): FrameClipsFile {
     }
     clips[key] = names as string[];
   }
+  const smoke = isPoint(value.smoke) ? { x: value.smoke.x, y: value.smoke.y } : undefined;
+  const muzzle = isPoint(value.muzzle) ? { x: value.muzzle.x, y: value.muzzle.y } : undefined;
+  const flashFrames = indexList(value.flashFrames);
+  const puffIdle = isRecord(value.puffFrames) ? indexList(value.puffFrames.idle) : undefined;
+  const puffFire = isRecord(value.puffFrames) ? indexList(value.puffFrames.fire) : undefined;
+  const puffFrames = puffIdle || puffFire ? { idle: puffIdle ?? [], fire: puffFire ?? [] } : undefined;
   return {
     kind: "sprite-clips",
     version: 1,
@@ -584,5 +624,16 @@ export function readClipsFile(value: unknown): FrameClipsFile {
     height: Number(value.height),
     feet: { x: value.feet.x, y: value.feet.y },
     clips,
+    ...(smoke ? { smoke } : {}),
+    ...(muzzle ? { muzzle } : {}),
+    ...(flashFrames ? { flashFrames } : {}),
+    ...(puffFrames ? { puffFrames } : {}),
   };
+}
+
+function indexList(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || !value.every((item) => Number.isInteger(item) && (item as number) >= 0)) {
+    return undefined;
+  }
+  return value as number[];
 }

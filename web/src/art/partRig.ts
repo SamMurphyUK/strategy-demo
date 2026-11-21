@@ -12,6 +12,7 @@ import {
   type SpriteFrame,
 } from "./frameClips";
 import type { PartCategory, PixelPoint } from "./paperDoll";
+import { EMBLEM_HEX, placementCells, type StampPlacement } from "./spriteStamps";
 
 /** The layers whose parts must keep the skeleton's outline, pose by pose. */
 export const OUTLINED_LAYERS = ["legs", "torso"] as const;
@@ -39,6 +40,10 @@ export interface RigFrame {
   muzzle: PixelPoint | null;
   /** Every barrel tip, in the same space as `muzzle`. Absent on older frames, which have `muzzle` alone. */
   muzzles?: PixelPoint[];
+  /** Exhaust on the hull, in the hull's own space, before the hull moves. */
+  smoke?: PixelPoint;
+  /** A section name, such as Idle 2 or Damage 1. Absent on the original clips. */
+  name?: string;
 }
 
 /** One soldier out of the library: a part for each layer and a colour set, under a name. */
@@ -505,8 +510,47 @@ function indexSpan(indexes: readonly number[]): string {
   return runs.join(", ");
 }
 
-/** Paint one pixel of the worn part, as seen on a frame. The frame's movement is taken off first. */
-export function paintPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: number, y: number, slot: number): PartRig {
+function setOutlineMark(rig: PartRig, layer: PartCategory, pose: number, index: number, mark: 0 | 1): PartRig {
+  if (!isOutlined(layer) || index < 0) {
+    return rig;
+  }
+  const outline = rig.outlines[layer][pose];
+  if (!outline || outline[index] === mark) {
+    return rig;
+  }
+  const row = outline.slice();
+  row[index] = mark;
+  return {
+    ...rig,
+    outlines: {
+      ...rig.outlines,
+      [layer]: rig.outlines[layer].map((item, at) => (at === pose ? row : item)),
+    },
+  };
+}
+
+/** A painted edge-neighbour on the part, or 0 when the square no longer touches that part. */
+function edgeNeighbourSlot(cells: readonly number[], width: number, height: number, x: number, y: number): number {
+  const around = [
+    [x - 1, y],
+    [x + 1, y],
+    [x, y - 1],
+    [x, y + 1],
+  ];
+  for (const [nx, ny] of around) {
+    if (nx === undefined || ny === undefined || nx < 0 || ny < 0 || nx >= width || ny >= height) {
+      continue;
+    }
+    const slot = cells[ny * width + nx] ?? 0;
+    if (slot !== 0) {
+      return slot;
+    }
+  }
+  return 0;
+}
+
+/** Write one pixel of the worn part. Other layers are left as they are. */
+function writePartCell(rig: PartRig, frame: RigFrame, layer: PartCategory, x: number, y: number, slot: number): PartRig {
   const inFrame = (cx: number, cy: number) =>
     Number.isInteger(cx) && Number.isInteger(cy) && cx >= 0 && cy >= 0 && cx < rig.width && cy < rig.height;
   const px = x - frame.move[layer].x;
@@ -527,6 +571,38 @@ export function paintPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x:
   const cells = drawing.slice();
   cells[index] = next;
   return withDrawing(rig, part, frame.pose, cells);
+}
+
+/** Take this frame square off every worn part except `keep`. */
+function clearOtherLayers(rig: PartRig, frame: RigFrame, keep: PartCategory, x: number, y: number): PartRig {
+  let next = rig;
+  for (const layer of LAYER_ORDER) {
+    if (layer === keep) {
+      continue;
+    }
+    next = writePartCell(next, frame, layer, x, y, 0);
+  }
+  return next;
+}
+
+function paintLands(rig: PartRig, frame: RigFrame, layer: PartCategory, x: number, y: number): boolean {
+  const onCanvas = (cx: number, cy: number) =>
+    Number.isInteger(cx) && Number.isInteger(cy) && cx >= 0 && cy >= 0 && cx < rig.width && cy < rig.height;
+  const px = x - frame.move[layer].x;
+  const py = y - frame.move[layer].y;
+  return onCanvas(x, y) && onCanvas(px, py) && wornPart(rig, layer).drawings[frame.pose] !== undefined;
+}
+
+/**
+ * Paint one pixel of the worn part, as seen on a frame. The frame's movement is taken off first.
+ * A colour takes that square off the other layers. Clearing a square leaves the other layers.
+ */
+export function paintPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: number, y: number, slot: number): PartRig {
+  const next = writePartCell(rig, frame, layer, x, y, slot);
+  if (Math.max(0, Math.min(13, Math.round(slot))) === 0 || !paintLands(rig, frame, layer, x, y)) {
+    return next;
+  }
+  return clearOtherLayers(next, frame, layer, x, y);
 }
 
 /** Clear the pixel on every layer's worn part. */
@@ -551,11 +627,11 @@ export function fillPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: 
   if (!drawing) {
     return rig;
   }
-  const next = Math.max(0, Math.min(13, Math.round(slot)));
+  const colour = Math.max(0, Math.min(13, Math.round(slot)));
   const width = rig.width;
   const start = py * width + px;
   const from = drawing[start] ?? 0;
-  if (from === next) {
+  if (from === colour) {
     return rig;
   }
   const cells = drawing.slice();
@@ -567,7 +643,7 @@ export function fillPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: 
     if (index === undefined || (drawing[index] ?? 0) !== from) {
       continue;
     }
-    cells[index] = next;
+    cells[index] = colour;
     const cx = index % width;
     const cy = (index - cx) / width;
     const neighbours = [
@@ -583,7 +659,21 @@ export function fillPart(rig: PartRig, frame: RigFrame, layer: PartCategory, x: 
       }
     }
   }
-  return withDrawing(rig, part, frame.pose, cells);
+  let painted = withDrawing(rig, part, frame.pose, cells);
+  // Recolouring ink takes those squares off the other layers. A fill of empty ground does not,
+  // because that flood covers the canvas around the picture.
+  if (colour !== 0 && from !== 0) {
+    const move = frame.move[layer];
+    for (let index = 0; index < cells.length; index += 1) {
+      if (cells[index] === (drawing[index] ?? 0)) {
+        continue;
+      }
+      const cx = index % width;
+      const cy = (index - cx) / width;
+      painted = clearOtherLayers(painted, frame, layer, cx + move.x, cy + move.y);
+    }
+  }
+  return painted;
 }
 
 /** Idle's first frame. Layer splits are taken from this picture. */
@@ -644,8 +734,10 @@ export function feedIdleCopies(before: PartRig, after: PartRig): PartRig {
 
 /**
  * Move the ink that shows inside a region onto one layer, on the pose this frame shows.
- * A pixel already on that layer stays. Lifting a pixel can paint the layer it left, so the
- * body under a raised part does not go empty. The rig is unchanged when nothing moves.
+ * That square is taken off the other layers. A pixel already on that layer stays.
+ * Filling the hole puts the colour back only where the part it left still touches the square.
+ * A part moved off entirely is not painted back, and its outline no longer includes the square.
+ * The rig is unchanged when nothing moves.
  */
 export function sendShownToLayer(
   rig: PartRig,
@@ -659,12 +751,9 @@ export function sendShownToLayer(
   }
   const shown = resolveFrame(rig, frame);
   const toIndex = LAYER_ORDER.indexOf(to);
-  const fill = {} as Record<PartCategory, number>;
-  for (const layer of LAYER_ORDER) {
-    fill[layer] = commonSlot(wornPart(rig, layer).drawings[frame.pose] ?? []);
-  }
   let next = rig;
   let moved = 0;
+  const vacated: { layer: PartCategory; x: number; y: number }[] = [];
   for (let y = 0; y < rig.height; y += 1) {
     for (let x = 0; x < rig.width; x += 1) {
       if ((region.cells[y * rig.width + x] ?? 0) === 0) {
@@ -690,16 +779,53 @@ export function sendShownToLayer(
       if (!onPart) {
         continue;
       }
-      let step = paintPart(next, frame, to, x, y, slot);
-      step = paintPart(step, frame, owner, x, y, 0);
-      if (heal && LAYER_ORDER.indexOf(owner) < toIndex && fill[owner] !== 0) {
-        step = paintPart(step, frame, owner, x, y, fill[owner]);
+      let step = writePartCell(next, frame, to, x, y, slot);
+      step = clearOtherLayers(step, frame, to, x, y);
+      if (isOutlined(to)) {
+        step = setOutlineMark(step, to, frame.pose, py * rig.width + px, 1);
       }
       if (step === next) {
         continue;
       }
       next = step;
+      vacated.push({ layer: owner, x, y });
       moved += 1;
+    }
+  }
+  const restored = new Set<string>();
+  if (heal) {
+    const pending: { layer: PartCategory; x: number; y: number; slot: number }[] = [];
+    for (const cell of vacated) {
+      if (LAYER_ORDER.indexOf(cell.layer) >= toIndex) {
+        continue;
+      }
+      const drawing = wornPart(next, cell.layer).drawings[frame.pose];
+      if (!drawing) {
+        continue;
+      }
+      const px = cell.x - frame.move[cell.layer].x;
+      const py = cell.y - frame.move[cell.layer].y;
+      const slot = edgeNeighbourSlot(drawing, rig.width, rig.height, px, py);
+      if (slot !== 0) {
+        pending.push({ layer: cell.layer, x: cell.x, y: cell.y, slot });
+      }
+    }
+    for (const cell of pending) {
+      next = writePartCell(next, frame, cell.layer, cell.x, cell.y, cell.slot);
+      restored.add(`${cell.layer}:${cell.x}:${cell.y}`);
+    }
+  }
+  for (const cell of vacated) {
+    for (const layer of ["legs", "torso"] as const) {
+      if (layer === to || restored.has(`${layer}:${cell.x}:${cell.y}`)) {
+        continue;
+      }
+      const px = cell.x - frame.move[layer].x;
+      const py = cell.y - frame.move[layer].y;
+      if (px < 0 || py < 0 || px >= rig.width || py >= rig.height) {
+        continue;
+      }
+      next = setOutlineMark(next, layer, frame.pose, py * rig.width + px, 0);
     }
   }
   return { rig: next, moved };
@@ -726,6 +852,35 @@ export function paintedSelection(
     }
   }
   return { width: shown.width, height: shown.height, cells };
+}
+
+/**
+ * Move the ink under the brush onto one layer, keeping each pixel's colour.
+ * That square is taken off the other layers. Empty ground stays empty.
+ * A pixel already on that layer stays.
+ */
+export function claimBrush(
+  rig: PartRig,
+  frame: RigFrame,
+  layer: PartCategory,
+  x: number,
+  y: number,
+  size = 1,
+  heal = false,
+): PartRig {
+  const span = Math.max(1, Math.min(8, Math.round(size) || 1));
+  const origin = -Math.floor((span - 1) / 2);
+  const cells = new Uint8Array(rig.width * rig.height);
+  for (let dy = 0; dy < span; dy += 1) {
+    for (let dx = 0; dx < span; dx += 1) {
+      const cx = x + origin + dx;
+      const cy = y + origin + dy;
+      if (cx >= 0 && cy >= 0 && cx < rig.width && cy < rig.height) {
+        cells[cy * rig.width + cx] = 1;
+      }
+    }
+  }
+  return sendShownToLayer(rig, frame, { width: rig.width, height: rig.height, cells }, layer, heal).rig;
 }
 
 /** Paint a square of the worn part, centred on the pixel under the pencil. */
@@ -815,8 +970,8 @@ export function claimUnselected(
       if (!owner || owner === layer || owner !== seat) {
         continue;
       }
-      let step = paintPart(next, frame, layer, x, y, slot);
-      step = paintPart(step, frame, owner, x, y, 0);
+      let step = writePartCell(next, frame, layer, x, y, slot);
+      step = writePartCell(step, frame, owner, x, y, 0);
       if (step === next) {
         continue;
       }
@@ -1123,6 +1278,91 @@ function pictureCells(
 function drawnChannels(hex: string): [number, number, number] {
   const body = hex.replace("#", "");
   return [Number.parseInt(body.slice(0, 2), 16), Number.parseInt(body.slice(2, 4), 16), Number.parseInt(body.slice(4, 6), 16)];
+}
+
+/**
+ * Paint each stamp onto the layer that already covers that pixel, on the idle pose.
+ * A pixel with nothing under it goes on `fallback`, which is the body the picture was seated on.
+ * The rig is unchanged when the stamps are already there.
+ */
+export function paintCoveringStamps(rig: PartRig, stamps: readonly StampPlacement[], fallback: PartCategory = "torso"): PartRig {
+  if (stamps.length === 0 || rig.poses < 1) {
+    return rig;
+  }
+  const pose = 0;
+  const drawings = {} as Record<PartCategory, number[]>;
+  for (const layer of LAYER_ORDER) {
+    drawings[layer] = drawingOf(rig, layer, pose).slice();
+  }
+  const count = rig.width * rig.height;
+  const ink = new Uint8Array(count);
+  for (const layer of LAYER_ORDER) {
+    const drawing = drawings[layer];
+    for (let index = 0; index < count; index += 1) {
+      if ((drawing[index] ?? 0) !== 0) {
+        ink[index] = 1;
+      }
+    }
+  }
+  const onSprite = (x: number, y: number) => x >= 0 && y >= 0 && x < rig.width && y < rig.height && ink[y * rig.width + x] === 1;
+  let changed = false;
+  for (const placement of stamps) {
+    for (const cell of placementCells({ width: rig.width, height: rig.height }, placement, onSprite)) {
+      const index = cell.y * rig.width + cell.x;
+      let owner: PartCategory | null = null;
+      for (let at = LAYER_ORDER.length - 1; at >= 0; at -= 1) {
+        const layer = LAYER_ORDER[at] ?? fallback;
+        if ((drawings[layer][index] ?? 0) !== 0) {
+          owner = layer;
+          break;
+        }
+      }
+      const target = owner ?? fallback;
+      const [red, green, blue] = drawnChannels(EMBLEM_HEX[cell.slot] ?? "#000000");
+      const slot = nearestDrawnSlot(red, green, blue);
+      if ((drawings[target][index] ?? 0) === slot) {
+        continue;
+      }
+      drawings[target][index] = slot;
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return rig;
+  }
+  let next = rig;
+  for (const layer of LAYER_ORDER) {
+    const part = wornPart(next, layer);
+    const before = part.drawings[pose] ?? [];
+    if (drawings[layer].some((value, index) => value !== (before[index] ?? 0))) {
+      next = withDrawing(next, part, pose, drawings[layer]);
+    }
+  }
+  for (const layer of OUTLINED_LAYERS) {
+    const outline = next.outlines[layer][pose];
+    if (!outline) {
+      continue;
+    }
+    const drawing = drawings[layer];
+    let dirty = false;
+    const filled = outline.slice();
+    for (let index = 0; index < count; index += 1) {
+      if ((drawing[index] ?? 0) !== 0 && filled[index] !== 1) {
+        filled[index] = 1;
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      next = {
+        ...next,
+        outlines: {
+          ...next.outlines,
+          [layer]: next.outlines[layer].map((item, at) => (at === pose ? filled : item)),
+        },
+      };
+    }
+  }
+  return next;
 }
 
 /** Nearest of the 13 editor colours. Slot 0 stays empty, so ink never lands on it. */
@@ -1751,12 +1991,16 @@ export function assembleRig(value: unknown, partFiles: readonly unknown[]): Part
       }
       const stored = Array.isArray(frame.muzzles) ? frame.muzzles.filter(isPoint).map((point) => ({ x: point.x, y: point.y })) : [];
       const muzzle = isPoint(frame.muzzle) ? { x: frame.muzzle.x, y: frame.muzzle.y } : (stored[0] ?? null);
+      const name = typeof frame.name === "string" ? frame.name.trim() : "";
+      const smoke = isPoint(frame.smoke) ? { x: frame.smoke.x, y: frame.smoke.y } : undefined;
       return {
         pose: frame.pose as number,
         move,
         flash: frame.flash === true,
         muzzle,
         ...(stored.length > 0 ? { muzzles: stored } : {}),
+        ...(smoke ? { smoke } : {}),
+        ...(name !== "" ? { name } : {}),
       };
     });
   }

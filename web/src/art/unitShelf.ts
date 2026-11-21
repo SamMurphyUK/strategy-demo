@@ -158,7 +158,7 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
       stamped: false,
       preview: publicUrl(preview && preview.endsWith(".svg") && safePath(preview) ? preview : `${dir}/idle_0.svg`),
       fieldPick: walk ? POLISHED_WALK_KEY : null,
-      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk, ${polished ? "polished vector" : "vector"}`,
+      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk${text(clip.unitId)?.endsWith("_QUICK") ? ", QUICK" : ""}, ${polished ? "polished vector" : "vector"}`,
     });
   }
   return units;

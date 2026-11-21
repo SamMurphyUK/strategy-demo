@@ -32,18 +32,20 @@ import { EMBLEMS, emblemBitmap, emblemById, emblemForFaction, type EmblemId } fr
 import { frameSlotsFor, frameStampCells, stampFramePart, stampPreviewRgba } from "./frameStamp";
 import { maskCount, polygonMask, rectMask, type CellMask } from "./pixelPaint";
 import { autoGrainLabel, deupscaleToNativeArtPixels, detectPixelBlockSize, resolveGrainBlock, type GrainOverride } from "./pixelGrain";
-import { editorSchemeForRig, editorSchemeForUnitType } from "./editorScheme";
+import { editorSchemeForRig, editorSchemeForUnitType, unitTypeFromRigId } from "./editorScheme";
 import { FRAME_ZOOMS, viewFrameZoom, zoomLabel } from "./frameView";
 import { isVehicleUnitType, steelToolFor, type SteelTool } from "./archetypeLayers";
 import type { ShelfUnit } from "./unitShelf";
 import { FACTION_LUTS, FACTION_PRESET_LABEL, SLOT_LABELS, type FactionPresetId, type PartCategory } from "./paperDoll";
 import { GEN_ROOM_MAX, harvestPart, planGeneration, type GenPicture, type GenPlan, type GenSheet, type GenSpread } from "./partGen";
 import { purpleSheet } from "./purpleSheet";
+import { polishedPngFor, readStampSidecar, type StampPlacement } from "./spriteStamps";
 import {
   assembleRig,
   breathFrame,
   buildGaps,
   buildMotion,
+  claimBrush,
   claimUnselected,
   paintSteel,
   clearMoves,
@@ -63,6 +65,7 @@ import {
   outlineFit,
   ownPose,
   paintBrush,
+  paintCoveringStamps,
   paintedSelection,
   paintPart,
   partFromDrawings,
@@ -147,22 +150,58 @@ const GEN_HELP: Record<PartCategory, (room: number, each: boolean) => string> = 
     `The weapon is sent on its own${each ? ", once for every pose" : ""}. The weapon and ${room} pixels around it are open to repainting.`,
 };
 
-type Tool = "pencil" | "fill" | "eraser" | "feet" | "muzzle" | "stamp" | "box" | "lasso" | "drag";
+type Tool = "layer" | "sprite" | "pipette" | "fill" | "eraser" | "erasefill" | "feet" | "muzzle" | "stamp" | "box" | "lasso" | "drag";
+
+/** A light wash so each layer reads apart while the sprite's own colours stay recognisable. */
+const LAYER_WASH: Record<PartCategory, { rgb: readonly [number, number, number]; tint: string }> = {
+  legs: { rgb: [70, 130, 210], tint: "blue" },
+  torso: { rgb: [70, 160, 90], tint: "green" },
+  head: { rgb: [210, 180, 60], tint: "gold" },
+  weapon: { rgb: [200, 70, 60], tint: "red" },
+};
+
+function washRgb(hex: string, tint: readonly [number, number, number]): [number, number, number] {
+  const value = Number.parseInt(hex.slice(1, 7), 16);
+  const mix = 0.34;
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return [
+    Math.round(red * (1 - mix) + tint[0] * mix),
+    Math.round(green * (1 - mix) + tint[1] * mix),
+    Math.round(blue * (1 - mix) + tint[2] * mix),
+  ];
+}
 
 const PENCIL_SIZES = [1, 2, 3, 4, 5] as const;
 
 const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
   {
-    id: "pencil",
-    label: "Pencil",
-    help: "Paint the picked colour onto the part the picked layer is wearing. The size under the tools sets how many pixels it covers. Alt-click picks up a colour.",
+    id: "layer",
+    label: "Layer pencil",
+    help: "Move painted pixels onto the picked layer. That square is taken off the other layers. The colour stays. Empty ground is left alone. The size under the tools sets how many pixels it covers. Alt-click picks up the layer and the colour.",
+  },
+  {
+    id: "sprite",
+    label: "Sprite pencil",
+    help: "Paint the picked colour onto this layer. That square is taken off the other layers. Empty ground gains a pixel, and a pixel already on this layer changes colour. The size under the tools sets how many pixels it covers. Alt-click picks up a colour.",
+  },
+  {
+    id: "pipette",
+    label: "Pipette",
+    help: "Click a painted pixel to pick its colour. The sprite pencil is then selected.",
   },
   {
     id: "fill",
     label: "Fill",
-    help: "Replace every connected square of the same colour on the picked layer's part. Squares join by their edges. One click is one undo step.",
+    help: "Replace every connected square of the same colour on the picked layer's part, and take those squares off the other layers. A fill of empty ground leaves the other layers. Squares join by their edges. One click is one undo step.",
   },
   { id: "eraser", label: "Eraser", help: "Clear the square on every layer's part." },
+  {
+    id: "erasefill",
+    label: "Eraser fill",
+    help: "Clear every connected square of the same colour on the picked layer's part. Squares join by their edges. Other layers stay. One click is one undo step.",
+  },
   {
     id: "feet",
     label: "Feet",
@@ -176,7 +215,7 @@ const TOOLS: readonly { id: Tool; label: string; help: string }[] = [
   {
     id: "stamp",
     label: "Stamp",
-    help: "Put an emblem or a marking on the picked layer's part, centred on the click. The faint picture follows the pointer. One click is one undo step.",
+    help: "Put an emblem or a marking on the picked layer's part, centred on the click. Squares the emblem covers are taken off the other layers. The faint picture follows the pointer. One click is one undo step.",
   },
   {
     id: "box",
@@ -254,6 +293,27 @@ async function savedRig(): Promise<PartRig | null> {
   return savedRigAt(UNIT_ID);
 }
 
+/** The stamps placed on this picture. Missing and unreadable files count as none. */
+async function stampsForPicture(picture: string): Promise<StampPlacement[]> {
+  const polished = polishedPngFor(picture);
+  if (!polished) {
+    return [];
+  }
+  const response = await fetch(`/__dev/unit-stamps?path=${encodeURIComponent(polished)}`).catch(() => null);
+  if (!response?.ok) {
+    return [];
+  }
+  const json = (await response.json().catch(() => null)) as { file?: unknown } | null;
+  if (!json?.file) {
+    return [];
+  }
+  try {
+    return readStampSidecar(json.file).stamps;
+  } catch {
+    return [];
+  }
+}
+
 function cellsRgba(cells: readonly number[], lut: readonly string[]): Uint8ClampedArray {
   const out = new Uint8ClampedArray(cells.length * 4);
   cells.forEach((slot, index) => {
@@ -322,10 +382,11 @@ function rigIdFor(pick: ShelfUnit): string {
 export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null }) {
   const [rig, setRigState] = useState<PartRig | null>(null);
   const [clip, setClip] = useState<ClipKey>("idle");
+  const [section, setSection] = useState("idle");
   const [index, setIndex] = useState(0);
   const [layer, setLayer] = useState<PartCategory>("torso");
   const [sheetOn, setSheetOn] = useState<PartCategory[]>([...LAYER_ORDER]);
-  const [tool, setTool] = useState<Tool>("pencil");
+  const [tool, setTool] = useState<Tool>("sprite");
   const [pencilSize, setPencilSize] = useState(1);
   const [slot, setSlot] = useState(2);
   const [faction, setFaction] = useState<ColourSet>("SHEET");
@@ -346,6 +407,9 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
   const [grain, setGrain] = useState<GrainOverride>("auto");
   const [dropping, setDropping] = useState(false);
   const [dimOthers, setDimOthers] = useState(false);
+  const [pixelGrid, setPixelGrid] = useState(false);
+  const [onion, setOnion] = useState(false);
+  const [gridGround, setGridGround] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
   const [addFrom, setAddFrom] = useState("walk:0");
   const [partName, setPartName] = useState("");
@@ -384,9 +448,40 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     () => SLOT_LABELS.map((label, value) => ({ key: value, label, hex: lut[value] ?? "#000000" })).slice(1),
     [lut],
   );
-  const vehicleClips = rig ? isVehicleClipSet(rig.clips) : false;
+  const vehicleClips = rig ? isVehicleUnitType(unitTypeFromRigId(rig.unitId)) && isVehicleClipSet(rig.clips) : false;
   const titleFor = (key: ClipKey) => clipTitle(key, vehicleClips);
-  const clipTabs = CLIP_KEYS.filter((key) => key !== "damaged" || vehicleClips || key === clip);
+  const sections = useMemo(() => {
+    if (!rig) {
+      return [];
+    }
+    const indexes = (key: ClipKey, pred: (frame: RigFrame) => boolean) =>
+      rig.clips[key].flatMap((frame, at) => (pred(frame) ? [at] : []));
+    const list: { id: string; clip: ClipKey; label: string; at: number[] }[] = [
+      { id: "idle", clip: "idle", label: "Idle", at: indexes("idle", (frame) => frame.name !== "Idle 2") },
+    ];
+    const idle2 = indexes("idle", (frame) => frame.name === "Idle 2");
+    if (idle2.length > 0) {
+      list.push({ id: "idle2", clip: "idle", label: "Idle 2", at: idle2 });
+    }
+    list.push(
+      { id: "walk", clip: "walk", label: titleFor("walk"), at: indexes("walk", () => true) },
+      { id: "fire", clip: "fire", label: "Firing", at: indexes("fire", () => true) },
+    );
+    const damage1 = indexes("damaged", (frame) => frame.name === "Damage 1");
+    const damage2 = indexes("damaged", (frame) => frame.name === "Damage 2");
+    const otherDamage = indexes("damaged", (frame) => frame.name !== "Damage 1" && frame.name !== "Damage 2");
+    if (damage1.length > 0) {
+      list.push({ id: "damage1", clip: "damaged", label: "Damage 1", at: damage1 });
+    }
+    if (damage2.length > 0) {
+      list.push({ id: "damage2", clip: "damaged", label: "Damage 2", at: damage2 });
+    }
+    if (otherDamage.length > 0) {
+      list.push({ id: "damaged", clip: "damaged", label: titleFor("damaged"), at: otherDamage });
+    }
+    return list;
+  }, [rig, vehicleClips]);
+  const board = sections.find((item) => item.id === section) ?? sections[0] ?? null;
   const frames = rig?.clips[clip] ?? [];
   const frameIndex = frames.length === 0 ? -1 : Math.min(index, frames.length - 1);
   const frame = frames[frameIndex] ?? null;
@@ -538,6 +633,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       undoRef.current = [];
       setRig(next);
       setClip("idle");
+      setSection("idle");
       setIndex(0);
       setPlaying(false);
       setSelection(null);
@@ -581,7 +677,9 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       if (!window.confirm(`Load ${shelfPick.label}? It opens the layers saved on this sprite. Ctrl+Z does not bring the open sprite back.`)) {
         return;
       }
-      openRig(saved, steelToolFor(shelfPick.unitTypeId), `Opened ${shelfPick.label} with the layers saved on it.`);
+      const baked = paintCoveringStamps(saved, await stampsForPicture(shelfPick.picture), scheme.picture);
+      const marks = baked === saved ? "" : " Stamps are on the layer they cover.";
+      openRig(baked, steelToolFor(shelfPick.unitTypeId), `Opened ${shelfPick.label} with the layers saved on it.${marks}`);
       return;
     }
     const agreed = window.confirm(
@@ -613,7 +711,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
           scheme.layers.find((item) => item.id === layer)?.label ?? null,
         );
         const prepared = scheme.muzzle === "weapon" ? seated : { ...seated, muzzleLayer: scheme.muzzle };
-        const next = vehicle ? withVehicleClips(prepared) : prepared;
+        const next = paintCoveringStamps(vehicle ? withVehicleClips(prepared) : prepared, await stampsForPicture(shelfPick.picture), scheme.picture);
         const tool = steelToolFor(shelfPick.unitTypeId);
         const steel =
           tool === "tread"
@@ -628,7 +726,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
           : "";
         const resting = scheme.layers.filter((item) => item.id !== scheme.picture).map((item) => item.label.toLowerCase());
         const listed =
-          scheme.layers.length === 4
+          shelfPick.unitTypeId === "infantry"
             ? "Legs, head, and weapon are empty."
             : resting.length === 1
               ? `${resting[0]} is empty.`
@@ -695,7 +793,8 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     return () => window.clearInterval(timer);
   }, [playing, fps, frames.length]);
 
-  const cardFrame = playing && shown.length > 0 ? shown[tick % shown.length] : shownFrame;
+  const sectionShown = board ? board.at.map((at) => shown[at]).filter((item): item is NonNullable<typeof item> => item !== undefined) : shown;
+  const cardFrame = playing && sectionShown.length > 0 ? sectionShown[tick % sectionShown.length] : shownFrame;
 
   useEffect(() => {
     if (!rig || !cardFrame) {
@@ -717,46 +816,133 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
     ctx.imageSmoothingEnabled = false;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        ctx.fillStyle = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? "#3a332e" : "#2f2925";
-        ctx.fillRect(x * scale, y * scale, scale, scale);
+    if (gridGround) {
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          ctx.fillStyle = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? "#3a332e" : "#2f2925";
+          ctx.fillRect(x * scale, y * scale, scale, scale);
+        }
       }
+    } else {
+      ctx.fillStyle = "#ff00ff";
+      ctx.fillRect(0, 0, width * scale, height * scale);
     }
     if (!frame || !shownFrame) {
       return;
     }
-    const only: SpriteFrame = dimOthers
-      ? { ...shownFrame, layers: { legs: [], torso: [], head: [], weapon: [], [layer]: shownFrame.layers[layer] } }
-      : shownFrame;
-    const ghost = dimOthers ? frameRgba(shownFrame, lut) : null;
-    const rgba = frameRgba(only, lut);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const offset = (y * width + x) * 4;
-        const source = (rgba[offset + 3] ?? 0) > 0 ? rgba : ghost && (ghost[offset + 3] ?? 0) > 0 ? ghost : null;
-        if (!source) {
-          continue;
+    if (tool === "layer") {
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          let owner: PartCategory | null = null;
+          let slotIndex = 0;
+          for (let index = LAYER_ORDER.length - 1; index >= 0; index -= 1) {
+            const name = LAYER_ORDER[index] ?? "legs";
+            const value = shownFrame.layers[name][y * width + x] ?? 0;
+            if (value !== 0) {
+              owner = name;
+              slotIndex = value;
+              break;
+            }
+          }
+          const hex = owner ? lut[slotIndex] : undefined;
+          if (!owner || !hex) {
+            continue;
+          }
+          const [red, green, blue] = washRgb(hex, LAYER_WASH[owner].rgb);
+          ctx.globalAlpha = dimOthers && owner !== layer ? 0.28 : 1;
+          ctx.fillStyle = `rgb(${red},${green},${blue})`;
+          ctx.fillRect(x * scale, y * scale, scale, scale);
         }
-        ctx.globalAlpha = source === rgba ? 1 : 0.3;
-        ctx.fillStyle = `rgb(${source[offset]},${source[offset + 1]},${source[offset + 2]})`;
-        ctx.fillRect(x * scale, y * scale, scale, scale);
       }
+      ctx.globalAlpha = 1;
+    } else {
+      const only: SpriteFrame = dimOthers
+        ? { ...shownFrame, layers: { legs: [], torso: [], head: [], weapon: [], [layer]: shownFrame.layers[layer] } }
+        : shownFrame;
+      const ghost = dimOthers ? frameRgba(shownFrame, lut) : null;
+      const rgba = frameRgba(only, lut);
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const offset = (y * width + x) * 4;
+          const source = (rgba[offset + 3] ?? 0) > 0 ? rgba : ghost && (ghost[offset + 3] ?? 0) > 0 ? ghost : null;
+          if (!source) {
+            continue;
+          }
+          ctx.globalAlpha = source === rgba ? 1 : 0.3;
+          ctx.fillStyle = `rgb(${source[offset]},${source[offset + 1]},${source[offset + 2]})`;
+          ctx.fillRect(x * scale, y * scale, scale, scale);
+        }
+      }
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
-    if (scale >= 6) {
-      ctx.strokeStyle = "rgba(28, 25, 23, 0.35)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x <= width; x += 1) {
-        ctx.moveTo(x * scale + 0.5, 0);
-        ctx.lineTo(x * scale + 0.5, height * scale);
+    if (onion && shown.length > 1 && frameIndex >= 0) {
+      const current = frameRgba(shownFrame, lut);
+      const paintGhost = (sprite: SpriteFrame, alpha: number) => {
+        const rgba = frameRgba(sprite, lut);
+        ctx.globalAlpha = alpha;
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const offset = (y * width + x) * 4;
+            if ((rgba[offset + 3] ?? 0) === 0) {
+              continue;
+            }
+            const same =
+              (current[offset + 3] ?? 0) > 0 &&
+              current[offset] === rgba[offset] &&
+              current[offset + 1] === rgba[offset + 1] &&
+              current[offset + 2] === rgba[offset + 2];
+            if (same) {
+              continue;
+            }
+            ctx.fillStyle = `rgb(${rgba[offset]},${rgba[offset + 1]},${rgba[offset + 2]})`;
+            ctx.fillRect(x * scale, y * scale, scale, scale);
+          }
+        }
+      };
+      const count = shown.length;
+      const previous = (frameIndex - 1 + count) % count;
+      const following = (frameIndex + 1) % count;
+      const behind = shown[previous];
+      if (behind) {
+        paintGhost(behind, 0.55);
       }
-      for (let y = 0; y <= height; y += 1) {
-        ctx.moveTo(0, y * scale + 0.5);
-        ctx.lineTo(width * scale, y * scale + 0.5);
+      const ahead = shown[following];
+      if (ahead && following !== previous) {
+        paintGhost(ahead, 0.4);
       }
-      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (pixelGrid && scale >= 2) {
+      const minor = gridGround ? "rgba(28, 25, 23, 0.28)" : "rgba(60, 0, 60, 0.32)";
+      const major = gridGround ? "rgba(12, 10, 9, 0.9)" : "rgba(40, 0, 40, 0.92)";
+      const strokeLines = (style: string, every: number) => {
+        ctx.strokeStyle = style;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x <= width; x += 1) {
+          if (x % 4 !== 0 && every === 4) {
+            continue;
+          }
+          if (x % 4 === 0 && every === 1) {
+            continue;
+          }
+          ctx.moveTo(x * scale + 0.5, 0);
+          ctx.lineTo(x * scale + 0.5, height * scale);
+        }
+        for (let y = 0; y <= height; y += 1) {
+          if (y % 4 !== 0 && every === 4) {
+            continue;
+          }
+          if (y % 4 === 0 && every === 1) {
+            continue;
+          }
+          ctx.moveTo(0, y * scale + 0.5);
+          ctx.lineTo(width * scale, y * scale + 0.5);
+        }
+        ctx.stroke();
+      };
+      strokeLines(minor, 1);
+      strokeLines(major, 4);
     }
     const outline = showOutline && (layer === "legs" || layer === "torso") ? rig.outlines[layer][frame.pose] : undefined;
     if (outline) {
@@ -794,8 +980,14 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       for (const muzzle of frameMuzzles(rig, frame)) {
         cross(muzzle.x, muzzle.y, MILITARY.crimson);
       }
+      if (frame.smoke) {
+        const exhaustX = frame.smoke.x + frame.move.torso.x;
+        const exhaustY = frame.smoke.y + frame.move.torso.y;
+        ctx.fillStyle = MILITARY.feldgrau;
+        ctx.fillRect(exhaustX * scale, exhaustY * scale, Math.max(1, scale), Math.max(1, scale));
+      }
     }
-  }, [rig, dimOthers, frame, shownFrame, layer, lut, showOutline, zoom]);
+  }, [rig, dimOthers, frame, frameIndex, shown, shownFrame, layer, lut, showOutline, zoom, gridGround, pixelGrid, onion, tool]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -870,9 +1062,25 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       }
       return;
     }
+    if (tool === "pipette" && first) {
+      const pixels = resolveFrame(current, target);
+      for (const name of [...LAYER_ORDER].reverse()) {
+        const found = pixels.layers[name][y * current.width + x] ?? 0;
+        if (found !== 0) {
+          setSlot(found);
+          setTool("sprite");
+          setNote(`Picked ${SLOT_LABELS[found]}. Sprite pencil is ready.`);
+          return;
+        }
+      }
+      setNote("No painted pixel there.");
+      return;
+    }
     let next = current;
-    if (tool === "pencil") {
+    if (tool === "sprite") {
       next = paintBrush(current, target, layer, x, y, slot, pencilSize);
+    } else if (tool === "layer") {
+      next = claimBrush(current, target, layer, x, y, pencilSize, heal);
     } else if (tool === "fill" && first) {
       const partX = x - target.move[layer].x;
       const partY = y - target.move[layer].y;
@@ -883,6 +1091,18 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
           next === current
             ? `That square is already ${SLOT_LABELS[slot]}.`
             : `Filled the connected squares on “${wornPart(current, layer).name}”, pose ${target.pose}. Ctrl+Z takes it back.`,
+        );
+      }
+    } else if (tool === "erasefill" && first) {
+      const partX = x - target.move[layer].x;
+      const partY = y - target.move[layer].y;
+      const onPart = partX >= 0 && partY >= 0 && partX < current.width && partY < current.height;
+      next = onPart ? fillPart(current, target, layer, x, y, 0) : current;
+      if (onPart) {
+        setNote(
+          next === current
+            ? "Nothing to erase there."
+            : `Erased the connected squares on “${wornPart(current, layer).name}”, pose ${target.pose}. Ctrl+Z puts them back.`,
         );
       }
     } else if (tool === "eraser") {
@@ -999,7 +1219,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       setRig(withRigFrame(current, clip, frameIndex, { ...target, move: { ...target.move, [layer]: moved } }));
       return;
     }
-    if ((tool !== "pencil" && tool !== "eraser") || event.altKey) {
+    if ((tool !== "sprite" && tool !== "layer" && tool !== "eraser") || event.altKey) {
       return;
     }
     applyTool(point.x, point.y, false, false);
@@ -1021,7 +1241,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
         ? CLIP_KEYS.flatMap((key) =>
             rig.clips[key].map((_, at) => ({
               value: `${key}:${at}`,
-              label: `${clipTitle(key, isVehicleClipSet(rig.clips))} ${at}`,
+              label: `${clipTitle(key, vehicleClips)} ${at}`,
             })),
           )
         : [],
@@ -1039,7 +1259,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     commit(withClip(current, clip, list));
     setIndex(at);
     setPlaying(false);
-    setNote(`${label} is ${clipTitle(clip, isVehicleClipSet(current.clips))} ${at}.`);
+    setNote(`${label} is ${clipTitle(clip, isVehicleUnitType(unitTypeFromRigId(current.unitId)) && isVehicleClipSet(current.clips))} ${at}.`);
   };
 
   const addCopy = () => {
@@ -1050,7 +1270,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     const [key, at] = addFrom.split(":") as [ClipKey, string];
     const source = current.clips[key]?.[Number(at)];
     if (source) {
-      insertFrame({ ...source, move: { ...source.move } }, `A copy of ${clipTitle(key, isVehicleClipSet(current.clips))} ${at}`);
+      insertFrame({ ...source, move: { ...source.move } }, `A copy of ${clipTitle(key, isVehicleUnitType(unitTypeFromRigId(current.unitId)) && isVehicleClipSet(current.clips))} ${at}`);
     }
   };
 
@@ -1062,7 +1282,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     const list = current.clips[clip].filter((_, at) => at !== frameIndex);
     commit(withClip(current, clip, list));
     setIndex(Math.max(0, frameIndex - 1));
-    setNote(`Deleted ${clipTitle(clip, isVehicleClipSet(current.clips))} ${frameIndex}. Ctrl+Z brings it back.`);
+    setNote(`Deleted ${clipTitle(clip, isVehicleUnitType(unitTypeFromRigId(current.unitId)) && isVehicleClipSet(current.clips))} ${frameIndex}. Ctrl+Z brings it back.`);
   };
 
   const moveFrame = (step: number) => {
@@ -1158,7 +1378,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       return;
     }
     const name = editorLayerLabel(rigRef.current?.unitId ?? "", layer).toLowerCase();
-    const moving = clipTitle("walk", isVehicleClipSet(current.clips));
+    const moving = clipTitle("walk", isVehicleUnitType(unitTypeFromRigId(current.unitId)) && isVehicleClipSet(current.clips));
     if (
       !window.confirm(
         `Replace ${moving} and Firing from this pose? Idle stays. The first walk frame steps the gun metal on the ${name}. Ctrl+Z brings the old clips back.`,
@@ -1168,6 +1388,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
     }
     commit(buildMotion(current, target, { bob, recoil, stride, along, links: layer }));
     setClip("walk");
+    setSection("walk");
     setIndex(0);
     setPlaying(false);
     setNote(
@@ -1616,7 +1837,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
   const savedBuild = wornBuild(rig, faction);
   const scheme = editorSchemeForRig(rig.unitId);
   const shownLayers = scheme.layers.map((item) => item.id);
-  const infantryScheme = scheme.layers.length === 4;
+  const infantryScheme = unitTypeFromRigId(rig.unitId) === "infantry";
   const sheetLayers = shownLayers.filter((id) => sheetOn.includes(id));
 
   const downloadPurple = async (which: "all" | "picked") => {
@@ -1677,6 +1898,10 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
               </option>
             ))}
           </select>
+        </label>
+        <label className="frame-editor-check" title="The sprite sits on magenta. Turn this on for the dark grid.">
+          <input type="checkbox" checked={gridGround} onChange={(event) => setGridGround(event.target.checked)} />
+          Grid
         </label>
         <div className="frame-editor-zoom" role="group" aria-label="Zoom">
           {FRAME_ZOOMS.map((value) => (
@@ -1749,42 +1974,43 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
       </header>
 
       <div className="frame-editor-clips" role="tablist" aria-label="Clips">
-        {clipTabs.map((key) => (
+        {sections.map((item) => (
           <button
-            key={key}
+            key={item.id}
             type="button"
             role="tab"
-            aria-selected={key === clip}
+            aria-selected={item.id === board?.id}
             onClick={() => {
-              setClip(key);
-              setIndex(0);
+              setSection(item.id);
+              setClip(item.clip);
+              setIndex(item.at[0] ?? 0);
               setTick(0);
             }}
           >
-            {titleFor(key)} <small>{rig.clips[key].length}</small>
+            {item.label} <small>{item.at.length}</small>
           </button>
         ))}
       </div>
 
-      <div className="frame-editor-strip" role="group" aria-label={`${titleFor(clip)} frames`}>
-        {shown.map((item, at) => (
+      <div className="frame-editor-strip" role="group" aria-label={`${board?.label ?? titleFor(clip)} frames`}>
+        {(board?.at ?? []).map((at, local) => (
           <button
             key={at}
             type="button"
             aria-pressed={at === frameIndex}
-            aria-label={`${titleFor(clip)} ${at}`}
+            aria-label={`${board?.label ?? titleFor(clip)} ${local}`}
             onClick={() => {
               setIndex(at);
               setPlaying(false);
             }}
           >
-            <FrameThumb frame={item} lut={lut} />
+            {shown[at] && <FrameThumb frame={shown[at]} lut={lut} />}
             <small>
-              {at} · pose {frames[at]?.pose}
+              {local} · pose {frames[at]?.pose}
             </small>
           </button>
         ))}
-        {frames.length === 0 && <p className="frame-editor-note">No frames yet. Add one below.</p>}
+        {(board?.at.length ?? 0) === 0 && <p className="frame-editor-note">No frames yet. Add one below.</p>}
       </div>
 
       <div className="frame-editor-row frame-editor-parts" role="group" aria-label="Purple sheet">
@@ -1989,7 +2215,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
               </Fragment>
             ))}
           </div>
-          {tool === "pencil" && (
+          {(tool === "sprite" || tool === "layer") && (
             <div className="frame-editor-zoom" role="group" aria-label="Pencil size">
               {PENCIL_SIZES.map((size) => (
                 <button
@@ -2003,6 +2229,15 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
                 </button>
               ))}
             </div>
+          )}
+          {tool === "layer" && (
+            <label
+              className="frame-editor-check"
+              title="When a pixel is lifted onto a layer above, fill the hole if that part still touches the square. A part moved off entirely is not painted back."
+            >
+              <input type="checkbox" checked={heal} onChange={(event) => setHeal(event.target.checked)} />
+              Fill the hole underneath
+            </label>
           )}
           {tool === "stamp" && emblem && (
             <>
@@ -2062,7 +2297,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
               <p className="frame-editor-note">{selection ? `${maskCount(selection)} pixels` : "Draw on the frame."}</p>
               <label
                 className="frame-editor-check"
-                title="When a pixel is lifted onto a layer above, paint the layer it left with that part's usual colour so the body stays."
+                title="When a pixel is lifted onto a layer above, fill the hole if that part still touches the square. A part moved off entirely is not painted back."
               >
                 <input type="checkbox" checked={heal} onChange={(event) => setHeal(event.target.checked)} />
                 Fill the hole underneath
@@ -2108,13 +2343,19 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
                 key={item.id}
                 type="button"
                 aria-pressed={layer === item.id}
-                title={`The pencil paints the ${item.label.toLowerCase()}. Arrow keys move it on this frame. Shift and an arrow key slide the drawing. [ and ] switch layers. Underneath to on top: ${scheme.layers.map((layerItem) => layerItem.label).join(", ")}.`}
+                title={`Sprite pencil paints the ${item.label.toLowerCase()}. Layer pencil moves pixels onto it. Arrow keys move it on this frame. Shift and an arrow key slide the drawing. [ and ] switch layers. Underneath to on top: ${scheme.layers.map((layerItem) => layerItem.label).join(", ")}.`}
                 onClick={() => setLayer(item.id)}
               >
                 {item.label}
               </button>
             ))}
           </div>
+          {tool === "layer" && (
+            <p className="frame-editor-note">
+              Each pixel is tinted with the layer that owns it. A covered layer does not show through.{" "}
+              {scheme.layers.map((item) => `${item.label} ${LAYER_WASH[item.id].tint}`).join(", ")}.
+            </p>
+          )}
           <button
             type="button"
             onClick={claimLayer}
@@ -2125,6 +2366,17 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
           <label className="frame-editor-check">
             <input type="checkbox" checked={dimOthers} onChange={(event) => setDimOthers(event.target.checked)} />
             Fade other layers
+          </label>
+          <label className="frame-editor-check" title="Draw a line between every pixel, and a stronger line every 4. It shows from 2× zoom up.">
+            <input type="checkbox" checked={pixelGrid} onChange={(event) => setPixelGrid(event.target.checked)} />
+            Pixel grid
+          </label>
+          <label
+            className="frame-editor-check"
+            title="Show the previous frame of this clip faintly, and the next frame lighter, wherever those frames differ from this one. Matching pixels stay as they are. The clip loops, so the first frame sits on the last."
+          >
+            <input type="checkbox" checked={onion} onChange={(event) => setOnion(event.target.checked)} />
+            Onion skin
           </label>
           <label className="frame-editor-check">
             <input
@@ -2383,17 +2635,9 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
                   : ""}
             The other layers bob, then the weapon kicks back.
           </p>
-          <h3>Colour</h3>
-          <SwatchPalette
-            swatches={swatches}
-            picked={slot}
-            onPick={(value) => {
-              setSlot(value);
-              setTool((current) => (current === "fill" ? current : "pencil"));
-            }}
-          />
         </aside>
 
+        <div className="frame-editor-stage-wrap">
         <div
           ref={canvasHostRef}
           className={dropping ? "frame-editor-canvas frame-editor-drop" : "frame-editor-canvas"}
@@ -2453,6 +2697,18 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
           )}
           <p className="frame-editor-note">{note}</p>
         </div>
+          <div className="frame-editor-colours">
+            <h3>Colour</h3>
+            <SwatchPalette
+              swatches={swatches}
+              picked={slot}
+              onPick={(value) => {
+                setSlot(value);
+                setTool((current) => (current === "fill" || current === "layer" ? current : "sprite"));
+              }}
+            />
+          </div>
+        </div>
 
         <figure className="frame-editor-card">
           <figcaption>In the game</figcaption>
@@ -2473,7 +2729,7 @@ export function FrameEditor({ shelfPick = null }: { shelfPick?: ShelfUnit | null
             </label>
           </div>
           <p className="frame-editor-note">
-            The cream cross is the feet. The game stands them on the card's ground point. The red crosses are the muzzles.
+            The cream cross is the feet. The game stands them on the card's ground point. The red crosses are the muzzles. The grey square is the exhaust.
           </p>
         </figure>
       </div>
@@ -2758,12 +3014,23 @@ const FRAME_EDITOR_CSS = `
   align-items: flex-start;
   flex-wrap: wrap;
 }
-.frame-editor-canvas {
+.frame-editor-stage-wrap {
   flex: 1 1 320px;
   min-width: 0;
   max-width: 100%;
-  max-height: min(560px, calc(100vh - 280px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.frame-editor-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(560px, calc(100vh - 360px));
   overflow: auto;
+}
+.frame-editor-colours h3 {
+  margin-bottom: 4px;
 }
 .frame-editor-tools {
   display: flex;

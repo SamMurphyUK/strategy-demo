@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { UNIT_TYPE_LABEL } from "./archetypeLayers";
-import { AS_DRAWN_LUT, frameRgba, fromFrameFile, readClipsFile } from "./frameClips";
+import { AS_DRAWN_LUT, exhaustPuff, frameRgba, fromFrameFile, readClipsFile, type FrameClipsFile } from "./frameClips";
 import { loadMotionDocument, readUnitFile } from "./layeredUnit";
 import { playbackBeatAt, type PlaybackBeat } from "./motionPreview";
 import {
@@ -24,6 +24,8 @@ import {
   fieldViewScale,
   fieldWheelZoom,
   fieldZoomLabel,
+  heldClipAt,
+  marchDistance,
   nativeBeatPixels,
   nativeStamp,
   footprintSpan,
@@ -101,13 +103,24 @@ interface FrameActor {
   height: number;
   feet: { x: number; y: number };
   idle: OffscreenCanvas | null;
+  /** Every idle picture. `idle` stays the first, for a frame that has nothing else to show. */
+  idleFrames: OffscreenCanvas[];
   walk: OffscreenCanvas[];
   fire: OffscreenCanvas[];
   /** Bitmap pixels along one logical pixel. A traced walk is 4; the pixel walk is 1. */
   resolution: number;
   scalableIdle: HTMLImageElement | null;
+  scalableIdleFrames: HTMLImageElement[];
   scalableWalk: HTMLImageElement[];
   scalableFire: HTMLImageElement[];
+  /** Exhaust, in the picture's pixels. */
+  smoke: { x: number; y: number } | null;
+  /** Barrel tip, in the picture's pixels. The flash is drawn in front of it. */
+  muzzle: { x: number; y: number } | null;
+  /** Fire-clip indexes that draw the muzzle flash. */
+  flashFrames: number[];
+  /** Idle and fire indexes that let the exhaust rise. */
+  puffFrames: { idle: number[]; fire: number[] };
 }
 
 interface StillActor {
@@ -144,6 +157,39 @@ function quantizedTwin(path: string): string {
 
 type FieldActor = PlateActor | FrameActor | StillActor;
 
+function clipMarks(file: FrameClipsFile): Pick<FrameActor, "smoke" | "muzzle" | "flashFrames" | "puffFrames"> {
+  return {
+    smoke: file.smoke ?? null,
+    muzzle: file.muzzle ?? null,
+    flashFrames: file.flashFrames ?? [],
+    puffFrames: file.puffFrames ?? { idle: [], fire: [] },
+  };
+}
+
+/** The exhaust wisp, in the picture's own pixels. */
+function paintSpriteMarks(
+  ctx: CanvasRenderingContext2D,
+  actor: FrameActor,
+  blit: { x: number; y: number; width: number; height: number },
+  clip: string,
+  index: number,
+): void {
+  if (actor.width <= 0 || actor.height <= 0 || !actor.smoke) {
+    return;
+  }
+  const listed = clip === "idle" ? actor.puffFrames.idle : clip === "fire" ? actor.puffFrames.fire : [];
+  const phase = listed.indexOf(index);
+  if (phase < 0) {
+    return;
+  }
+  const pixelW = blit.width / actor.width;
+  const pixelH = blit.height / actor.height;
+  for (const [dx, dy, hex] of exhaustPuff(phase)) {
+    ctx.fillStyle = hex;
+    ctx.fillRect(blit.x + (actor.smoke.x + dx) * pixelW, blit.y + (actor.smoke.y + dy) * pixelH, pixelW, pixelH);
+  }
+}
+
 interface PlacedUnit {
   id: number;
   actor: FieldActor;
@@ -157,6 +203,16 @@ interface PlacedUnit {
 
 const WALK_URL = "/assets/units/frames/jap_infantry";
 const POLISHED_WALK_URL = "/assets/units/frames/jap_infantry_polished";
+const QUICK_TANK_URL = "/assets/units/frames/ger_tank_seed1_QUICK";
+const QUICK_TANK_VECTOR_URL = "/assets/units/vector/frames/ger_tank_seed1_QUICK";
+const QUICK_USSR_TANK_URL = "/assets/units/frames/ussr_tank_seed1_QUICK";
+const QUICK_USSR_TANK_VECTOR_URL = "/assets/units/vector/frames/ussr_tank_seed1_QUICK";
+const QUICK_UK_TANK_URL = "/assets/units/frames/uk_tank_seed1_QUICK";
+const QUICK_UK_TANK_VECTOR_URL = "/assets/units/vector/frames/uk_tank_seed1_QUICK";
+const QUICK_US_TANK_URL = "/assets/units/frames/us_tank_seed1_QUICK";
+const QUICK_US_TANK_VECTOR_URL = "/assets/units/vector/frames/us_tank_seed1_QUICK";
+const QUICK_JAP_TANK_URL = "/assets/units/frames/jap_tank_seed1_QUICK";
+const QUICK_JAP_TANK_VECTOR_URL = "/assets/units/vector/frames/jap_tank_seed1_QUICK";
 const VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry";
 const POLISHED_VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry_polished";
 const FACTION_ORDER = ["GER", "UK", "US", "USSR", "JAP"];
@@ -382,20 +438,23 @@ async function loadWalk(): Promise<FrameActor> {
     height: file.height,
     feet: file.feet,
     idle: idle[0] ?? null,
+    idleFrames: idle,
     walk,
     fire,
     resolution: 1,
     scalableIdle: null,
+    scalableIdleFrames: [],
     scalableWalk: [],
     scalableFire: [],
+    ...clipMarks(file),
   };
 }
 
-/** The shaded copy of the Japanese walk: the same clips, read from PNGs, drawn through the pixel path. */
-async function loadPolishedWalk(): Promise<FrameActor> {
-  const file = readClipsFile(await fetchJson(`${POLISHED_WALK_URL}/clips.json`));
+/** A walk saved as frame pictures. The clip list names each PNG, and the battle plays those frames. */
+async function loadPngWalk(base: string, title: string, factionId: string, unitTypeId: string): Promise<FrameActor> {
+  const file = readClipsFile(await fetchJson(`${base}/clips.json`));
   const paint = async (name: string) => {
-    const image = await loadImage(`${POLISHED_WALK_URL}/${name}.png`);
+    const image = await loadImage(`${base}/${name}.png`);
     const canvas = new OffscreenCanvas(Math.max(1, image.naturalWidth), Math.max(1, image.naturalHeight));
     const ctx = canvas.getContext("2d");
     if (!ctx) {
@@ -412,20 +471,26 @@ async function loadPolishedWalk(): Promise<FrameActor> {
   ]);
   return {
     kind: "frames",
-    title: `Japanese walk, polished, ${file.width} by ${file.height}`,
-    factionId: "JAP",
-    unitTypeId: "infantry",
+    title: `${title}, ${file.width} by ${file.height}`,
+    factionId,
+    unitTypeId,
     width: file.width,
     height: file.height,
     feet: file.feet,
     idle: idle[0] ?? null,
+    idleFrames: idle,
     walk,
     fire,
     resolution: 1,
     scalableIdle: null,
+    scalableIdleFrames: [],
     scalableWalk: [],
     scalableFire: [],
+    ...clipMarks(file),
   };
+}
+function loadPolishedWalk(): Promise<FrameActor> {
+  return loadPngWalk(POLISHED_WALK_URL, "Japanese walk, polished", "JAP", "infantry");
 }
 
 async function rasterVector(src: string): Promise<{ canvas: OffscreenCanvas; image: HTMLImageElement }> {
@@ -440,7 +505,13 @@ async function rasterVector(src: string): Promise<{ canvas: OffscreenCanvas; ima
   return { canvas, image };
 }
 
-async function loadVectorWalk(base = VECTOR_WALK_URL, label = "vector"): Promise<FrameActor> {
+async function loadVectorWalk(
+  base = VECTOR_WALK_URL,
+  label = "vector",
+  factionId = "JAP",
+  unitTypeId = "infantry",
+  name = "Japanese walk",
+): Promise<FrameActor> {
   const file = readClipsFile(await fetchJson(`${base}/clips.json`));
   const load = (name: string) => rasterVector(`${base}/${name}.svg`);
   const [idle, walk, fire] = await Promise.all([
@@ -452,19 +523,22 @@ async function loadVectorWalk(base = VECTOR_WALK_URL, label = "vector"): Promise
   const resolution = sample && file.width > 0 ? sample.canvas.width / file.width : 1;
   return {
     kind: "frames",
-    title: `Japanese walk, ${label}, ${file.width} by ${file.height}`,
-    factionId: "JAP",
-    unitTypeId: "infantry",
+    title: `${name}, ${label}, ${file.width} by ${file.height}`,
+    factionId,
+    unitTypeId,
     width: file.width,
     height: file.height,
     feet: file.feet,
     idle: idle[0]?.canvas ?? null,
+    idleFrames: idle.map((frame) => frame.canvas),
     walk: walk.map((frame) => frame.canvas),
     fire: fire.map((frame) => frame.canvas),
     resolution,
     scalableIdle: idle[0]?.image ?? null,
+    scalableIdleFrames: idle.map((frame) => frame.image),
     scalableWalk: walk.map((frame) => frame.image),
     scalableFire: fire.map((frame) => frame.image),
+    ...clipMarks(file),
   };
 }
 
@@ -478,7 +552,7 @@ function frameScalable(actor: FrameActor, clip: string, index: number): HTMLImag
   if (clip === "walk") {
     return actor.scalableWalk[index] ?? actor.scalableIdle ?? undefined;
   }
-  return actor.scalableIdle ?? undefined;
+  return actor.scalableIdleFrames[index] ?? actor.scalableIdle ?? undefined;
 }
 
 /** The overnight row for a handed-over picture, so it lands on land or sea. A polished or stamped PNG uses its quantized twin's row. */
@@ -516,6 +590,8 @@ function pictureRows(value: unknown): PictureRow[] {
 export function NativeBattlePreview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pausedRef = useRef(false);
+  const motionRef = useRef<"march" | "idle" | "fire">("march");
+  const creepRef = useRef(new Map<number, { time: number }>());
   const regionPicked = useRef(false);
   const ticket = useRef(0);
   const placeId = useRef(0);
@@ -570,6 +646,8 @@ export function NativeBattlePreview() {
     return Number.isFinite(value) ? (((value % 1) + 1) % 1) * 60 : null;
   }, []);
   const [paused, setPaused] = useState(false);
+  const [motion, setMotion] = useState<"march" | "idle" | "fire">("march");
+  motionRef.current = motion;
   const [caption, setCaption] = useState("Marching");
   const [loadError, setLoadError] = useState("");
   const [cursor, setCursor] = useState("grab");
@@ -661,6 +739,36 @@ export function NativeBattlePreview() {
     }
     if (key === "walk:jap:polished") {
       return loadPolishedWalk();
+    }
+    if (key === "walk:ger_tank_seed1_QUICK") {
+      return loadPngWalk(QUICK_TANK_URL, "GER tank, QUICK", "GER", "tank");
+    }
+    if (key === "walk:ger_tank_seed1_QUICK:vector") {
+      return loadVectorWalk(QUICK_TANK_VECTOR_URL, "vector", "GER", "tank", "GER tank, QUICK");
+    }
+    if (key === "walk:ussr_tank_seed1_QUICK") {
+      return loadPngWalk(QUICK_USSR_TANK_URL, "USSR tank, QUICK", "USSR", "tank");
+    }
+    if (key === "walk:ussr_tank_seed1_QUICK:vector") {
+      return loadVectorWalk(QUICK_USSR_TANK_VECTOR_URL, "vector", "USSR", "tank", "USSR tank, QUICK");
+    }
+    if (key === "walk:uk_tank_seed1_QUICK") {
+      return loadPngWalk(QUICK_UK_TANK_URL, "UK tank, QUICK", "UK", "tank");
+    }
+    if (key === "walk:uk_tank_seed1_QUICK:vector") {
+      return loadVectorWalk(QUICK_UK_TANK_VECTOR_URL, "vector", "UK", "tank", "UK tank, QUICK");
+    }
+    if (key === "walk:us_tank_seed1_QUICK") {
+      return loadPngWalk(QUICK_US_TANK_URL, "US tank, QUICK", "US", "tank");
+    }
+    if (key === "walk:us_tank_seed1_QUICK:vector") {
+      return loadVectorWalk(QUICK_US_TANK_VECTOR_URL, "vector", "US", "tank", "US tank, QUICK");
+    }
+    if (key === "walk:jap_tank_seed1_QUICK") {
+      return loadPngWalk(QUICK_JAP_TANK_URL, "JAP tank, QUICK", "JAP", "tank");
+    }
+    if (key === "walk:jap_tank_seed1_QUICK:vector") {
+      return loadVectorWalk(QUICK_JAP_TANK_VECTOR_URL, "vector", "JAP", "tank", "JAP tank, QUICK");
     }
     if (key === "walk:jap:vector") {
       return loadVectorWalk();
@@ -840,15 +948,38 @@ export function NativeBattlePreview() {
         let shown: OffscreenCanvas | null = null;
         let scalable: HTMLImageElement | undefined;
         let cacheKey = `${item.id}:still`;
+        let markClip = "";
+        let markIndex = -1;
         if (actor.kind === "plate") {
           cacheKey = `${item.id}:${beat.name}`;
           shown = beatCanvas(String(item.id), actor.doc, beat);
         } else if (actor.kind === "frames") {
-          const step = walkFrameAt(elapsed, actor.walk.length, actor.fire.length);
+          const hold = motionRef.current;
+          const step =
+            hold === "idle"
+              ? heldClipAt(elapsed, actor.idleFrames.length, "idle")
+              : hold === "fire"
+                ? heldClipAt(elapsed, actor.fire.length, "fire")
+                : walkFrameAt(elapsed, actor.walk.length, actor.fire.length);
           firing = step.firing;
+          markClip = step.clip;
+          markIndex = step.index;
           cacheKey = `${item.id}:${step.clip}:${step.index}`;
-          shown = step.clip === "fire" ? (actor.fire[step.index] ?? actor.walk[0] ?? actor.idle) : step.clip === "walk" ? (actor.walk[step.index] ?? actor.idle) : actor.idle;
+          shown =
+            step.clip === "fire"
+              ? (actor.fire[step.index] ?? actor.walk[0] ?? actor.idle)
+              : step.clip === "walk"
+                ? (actor.walk[step.index] ?? actor.idle)
+                : (actor.idleFrames[step.index] ?? actor.idle);
           scalable = frameScalable(actor, step.clip, step.index);
+          const prior = creepRef.current.get(item.id);
+          if (prior && hold !== "idle" && hold !== "fire" && dragRef.current?.id !== item.id) {
+            const gained = marchDistance(elapsed - prior.time);
+            if (gained !== 0) {
+              item.station = { x: item.station.x + gained, y: item.station.y };
+            }
+          }
+          creepRef.current.set(item.id, { time: elapsed });
           if (index === 0) {
             lead = actor.resolution > 1 ? `Vector · ${step.label}` : step.label;
           }
@@ -870,7 +1001,8 @@ export function NativeBattlePreview() {
         const resolution = actor.kind === "plate" ? 1 : actor.resolution;
         const useHalf = resolution === 1 && (scale <= 0.5 || viewScale <= 0.5);
         const bitmap = useHalf ? halfCanvas(cacheKey, shown) : shown;
-        const blit = fieldBlit(bitmap, actorSize(actor), actorFeet(actor), item.station, scale, viewScale, dpr, useHalf);
+        const pixelPicture = actor.kind !== "frames" || actor.resolution <= 1;
+        const blit = fieldBlit(bitmap, actorSize(actor), actorFeet(actor), item.station, scale, viewScale, dpr, useHalf, pixelPicture);
 
         // The contact shadow goes down first, for every unit, so it never darkens a sprite.
         const spot = contactShadow(footprintOf(item.id, shown, resolution), actorFeet(actor), item.station, scale);
@@ -911,10 +1043,13 @@ export function NativeBattlePreview() {
             ctx.lineWidth = 1;
             ctx.strokeRect(blit.x + 0.5, blit.y + 0.5, Math.max(0, blit.width - 1), Math.max(0, blit.height - 1));
           }
-          const markX = snapDeviceOrigin(item.station.x, dpr, viewScale);
-          const markY = snapDeviceOrigin(item.station.y, dpr, viewScale);
+          const markX = pixelPicture ? snapDeviceOrigin(item.station.x, dpr, viewScale) : item.station.x;
+          const markY = pixelPicture ? snapDeviceOrigin(item.station.y, dpr, viewScale) : item.station.y;
           ctx.fillStyle = "#1A1614";
           ctx.fillText(actorMark(actor), markX, markY + 16);
+          if (actor.kind === "frames" && markClip) {
+            paintSpriteMarks(ctx, actor, blit, markClip, markIndex);
+          }
         });
       });
       for (const paint of sprites) {
@@ -1181,6 +1316,16 @@ export function NativeBattlePreview() {
                 <option value="walk:jap:polished">Japanese walk, polished</option>
                 <option value="walk:jap:vector">Japanese walk, vector</option>
                 <option value="walk:jap:polished-vector">Japanese walk, polished vector</option>
+                <option value="walk:ger_tank_seed1_QUICK">GER tank, QUICK</option>
+                <option value="walk:ger_tank_seed1_QUICK:vector">GER tank, QUICK, vector</option>
+                <option value="walk:ussr_tank_seed1_QUICK">USSR tank, QUICK</option>
+                <option value="walk:ussr_tank_seed1_QUICK:vector">USSR tank, QUICK, vector</option>
+                <option value="walk:uk_tank_seed1_QUICK">UK tank, QUICK</option>
+                <option value="walk:uk_tank_seed1_QUICK:vector">UK tank, QUICK, vector</option>
+                <option value="walk:us_tank_seed1_QUICK">US tank, QUICK</option>
+                <option value="walk:us_tank_seed1_QUICK:vector">US tank, QUICK, vector</option>
+                <option value="walk:jap_tank_seed1_QUICK">JAP tank, QUICK</option>
+                <option value="walk:jap_tank_seed1_QUICK:vector">JAP tank, QUICK, vector</option>
               </optgroup>
               {vectors.length > 0 && (
                 <optgroup label="Vector">
@@ -1211,6 +1356,24 @@ export function NativeBattlePreview() {
                     ))}
                 </optgroup>
               ))}
+            </select>
+          </label>
+          <label>
+            Motion
+            <select
+              className="field-test-motion"
+              aria-label="Motion"
+              value={motion}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next === "march" || next === "idle" || next === "fire") {
+                  setMotion(next);
+                }
+              }}
+            >
+              <option value="march">March</option>
+              <option value="idle">Idle</option>
+              <option value="fire">Shot</option>
             </select>
           </label>
           <button type="button" onClick={() => void addSprite()}>

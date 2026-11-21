@@ -520,6 +520,9 @@ def vectorize_clips(clips_path: Path, palette: list[tuple[int, int, int]], backi
         "polished": polished,
         "clips": ordered,
     }
+    for key in ("factionId", "unitTypeId", "smoke", "muzzle", "flashFrames", "puffFrames"):
+        if key in data:
+            document[key] = data[key]
     clips_out = out_dir / "clips.json"
     clips_out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     print(f"clips {clips_out}")
@@ -534,12 +537,16 @@ def vectorize_clips(clips_path: Path, palette: list[tuple[int, int, int]], backi
         public_dir = out_dir.resolve().relative_to(PUBLIC_ROOT).as_posix()
     except ValueError as error:
         raise SystemExit(f"{out_dir} is outside {PUBLIC_ROOT}, so the battle map cannot serve it.") from error
+    named_faction = data.get("factionId")
+    named_type = data.get("unitTypeId")
+    faction_id = named_faction if isinstance(named_faction, str) and named_faction else (identity.group(1).upper() if identity else "")
+    unit_type_id = named_type if isinstance(named_type, str) and named_type else (identity.group(2) if identity else base_id)
     record = {
         "dir": public_dir,
         "source": source,
         "unitId": unit_id,
-        "factionId": identity.group(1).upper() if identity else "",
-        "unitTypeId": identity.group(2) if identity else base_id,
+        "factionId": faction_id,
+        "unitTypeId": unit_type_id,
         "width": data.get("width"),
         "height": data.get("height"),
         "frames": len(set(names)),

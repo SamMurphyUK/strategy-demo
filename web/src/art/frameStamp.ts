@@ -1,7 +1,7 @@
 import { composite } from "./frameClips";
 import { emblemCells, type EmblemBitmap } from "./emblems";
 import type { PartCategory } from "./paperDoll";
-import { resolveFrame, wornPart, type PartRig, type RigFrame } from "./partRig";
+import { paintPart, resolveFrame, type PartRig, type RigFrame } from "./partRig";
 import type { EmblemSlotKey } from "./skeletonSchema";
 
 /**
@@ -90,7 +90,7 @@ export function frameStampCells(
 /**
  * Stamp an emblem onto the worn part of a layer, on the pose the frame shows. Like the pencil, the
  * frame's movement is taken off first, so every frame on that pose shows the emblem in the same place
- * on the part. The rig comes back unchanged when nothing would be written.
+ * on the part. A square the emblem covers is taken off the other layers. The rig comes back unchanged when nothing would be written.
  */
 export function stampFramePart(
   rig: PartRig,
@@ -102,27 +102,11 @@ export function stampFramePart(
   onlySprite: boolean,
   slots: Readonly<Record<EmblemSlotKey, number>> = EMBLEM_FRAME_SLOT,
 ): PartRig {
-  const part = wornPart(rig, layer);
-  const drawing = part.drawings[frame.pose];
-  if (!drawing) {
-    return rig;
-  }
-  const move = frame.move[layer];
-  let cells: number[] | null = null;
+  let next = rig;
   for (const cell of frameStampCells(rig, frame, layer, bitmap, x, y, onlySprite, slots)) {
-    const index = (cell.y - move.y) * rig.width + (cell.x - move.x);
-    if ((drawing[index] ?? 0) === cell.slot) {
-      continue;
-    }
-    cells ??= drawing.slice();
-    cells[index] = cell.slot;
+    next = paintPart(next, frame, layer, cell.x, cell.y, cell.slot);
   }
-  if (!cells) {
-    return rig;
-  }
-  const changed = cells;
-  const drawings = part.drawings.map((item, pose) => (pose === frame.pose ? changed : item));
-  return { ...rig, parts: rig.parts.map((item) => (item.id === part.id ? { ...part, drawings } : item)) };
+  return next;
 }
 
 /** The preview cells as straight RGBA at the frame's size, faint, in the colour set on screen. */
