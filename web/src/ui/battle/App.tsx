@@ -483,6 +483,10 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   const smokePuffsRef = useRef<SmokePuff[]>([]);
   const cratersRef = useRef<GroundCrater[]>([]);
   const groundFiresRef = useRef<GroundFire[]>([]);
+  /** Last board exhaust-cloud spawn time per unit uid (moving vehicles). */
+  const vehicleExhaustAtRef = useRef<Map<string, number>>(new Map());
+  /** Uids that already spawned post-fire linger for the current recoil pulse. */
+  const fireLingerArmedRef = useRef<Set<string>>(new Set());
   const shockwavesRef = useRef<Shockwave[]>([]);
   const activeSortiesRef = useRef<PlaneSortie[]>([]);
   const casualtyRecordsRef = useRef<CasualtyRecord[]>([]);
@@ -763,6 +767,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     flyingDebrisRef.current = [];
     smokePuffsRef.current = [];
     cratersRef.current = [];
+    vehicleExhaustAtRef.current.clear();
+    fireLingerArmedRef.current.clear();
     groundFiresRef.current = [];
     shockwavesRef.current = [];
     activeSortiesRef.current = [];
@@ -1243,7 +1249,28 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       // MISS: NO beep sound on miss!
       spawnSparks(x, y, 5);
       if (!isNavyTest && !isAirStrikeTest) {
-        spawnSmoke(x, y, 5, 14, PALETTE.trenchMudBone, 3.5, 'crater_plume');
+        spawnSmoke(x, y, 6, 18, PALETTE.trenchMudBone, 6.5, 'crater_plume');
+        spawnSmoke(
+          x + (Math.random() - 0.5) * 10,
+          y - 4,
+          4,
+          12,
+          PALETTE.deepTaupe,
+          5.5,
+          'crater_plume',
+        );
+        // Small lasting scar — half the size of a hit crater.
+        if (cratersRef.current.length < 80) {
+          cratersRef.current.push({
+            id: `miss_crater_${Math.random()}`,
+            x: x + (Math.random() - 0.5) * 4,
+            y: y + 2,
+            rx: 5 + Math.random() * 2.5,
+            ry: 3 + Math.random() * 1.5,
+            theater: currentTheaterRef.current,
+            alpha: 0.85,
+          });
+        }
       }
     }
   };
@@ -3506,6 +3533,53 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     // Update active unit anim recoil & sinking ship simulation
     const updateUnitSimulation = (u: CombatUnit) => {
       if (u.animRecoil > 0) u.animRecoil = decayRecoil(u.animRecoil, deltaTime);
+
+      const def = UNIT_DEFINITIONS[u.type];
+      const alive =
+        u.status === 'alive' && !u.isDestroyed && !u.isPendingCasualty && !u.isPermanentCasualty;
+      if (alive && def && u.type !== 'infantry' && u.type !== 'carrier') {
+        const now = gameTimeRef.current;
+        const pos = getUnitScreenPos(u);
+        const face = u.side === 'attacker' ? 1 : -1;
+        // Soft exhaust clouds while vehicles / ships march into position.
+        if (u.isMarching && def.category !== 'air') {
+          const last = vehicleExhaustAtRef.current.get(u.uid) ?? 0;
+          if (now - last >= 0.45) {
+            vehicleExhaustAtRef.current.set(u.uid, now);
+            spawnSmoke(
+              pos.x - 16 * face + (Math.random() - 0.5) * 4,
+              pos.y - 10 + (Math.random() - 0.5) * 3,
+              3.5,
+              11,
+              Math.random() > 0.5 ? PALETTE.deepTaupe : PALETTE.bunkerCharcoal,
+              2.6,
+              'muzzle_small',
+            );
+          }
+        }
+        // Lingering muzzle smoke after a shot; once per recoil pulse.
+        if (u.animRecoil >= 0.9) {
+          if (!fireLingerArmedRef.current.has(u.uid)) {
+            fireLingerArmedRef.current.add(u.uid);
+            const tipX = pos.x + 18 * face;
+            const tipY = pos.y - 4;
+            spawnSmoke(tipX, tipY, 5, 16, PALETTE.deepTaupe, 7.5, 'muzzle_small');
+            spawnSmoke(
+              tipX + 3 * face,
+              tipY - 3,
+              4,
+              12,
+              PALETTE.bunkerCharcoal,
+              6.2,
+              u.type === 'artillery' || u.type === 'tank' || u.type === 'battleship'
+                ? 'muzzle_heavy'
+                : 'muzzle_small',
+            );
+          }
+        } else if (u.animRecoil <= 0.02) {
+          fireLingerArmedRef.current.delete(u.uid);
+        }
+      }
 
       // Carrier moving forward / floating back movement
       if (u.type === 'carrier') {

@@ -7,7 +7,9 @@
 import { resolveQuickClip, quickFrameUrl, type QuickClipRef } from "./quickUnitCatalog";
 import { quickAnchor, quickFxRects, quickMuzzleBloom, type QuickFxPose } from "./quickUnitFx";
 import { resolveUnitAnimProfile } from "./unitAnimationProfiles";
+import { lightUnitSprite, type UnitSkyLight } from "./unitLighting";
 import { MILITARY } from "../ui/theme/militaryPalette";
+import { graphicsSettings } from "../ui/battle/graphicsSettings";
 import {
   createVehicleAnim,
   easeVehicle,
@@ -85,6 +87,10 @@ export interface QuickDrawRequest {
   feetY: number;
   /** Battle recoil, 0 to 1. Above 0.25 the muzzle blooms while the fire clip plays. */
   recoil?: number;
+  /** Sky light for the unit-lighting toggle. Absent skips the tint. */
+  light?: UnitSkyLight | null;
+  /** Board x of the feet; picks which side the sun/moon rim falls from. */
+  boardX?: number;
 }
 
 function vehicleMode(mode: QuickDrawMode): VehicleMode {
@@ -210,13 +216,18 @@ export function drawQuickUnit(
   const scale = request.pixelScale;
   const drawW = clip.width * scale;
   const drawH = clip.height * scale;
+  const lit =
+    graphicsSettings().unitLighting && request.light
+      ? lightUnitSprite(image, image.naturalWidth || clip.width * clip.resolution, image.naturalHeight || clip.height * clip.resolution, request.light, request.boardX ?? 0)
+      : null;
+  const picture = lit ?? image;
 
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.translate(request.feetX, request.feetY);
   ctx.scale(request.face, 1);
   ctx.drawImage(
-    image,
+    picture,
     -clip.feet.x * scale + offsets.root.x * scale,
     -clip.feet.y * scale + offsets.root.y * scale,
     drawW,

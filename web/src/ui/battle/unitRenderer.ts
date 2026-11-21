@@ -28,6 +28,7 @@ import {
 } from './combatTypes';
 import { drawQuickUnit, hasQuickUnit } from '../../art/quickUnitDraw';
 import { resolveQuickClip } from '../../art/quickUnitCatalog';
+import { lightDrawnUnitRect } from '../../art/unitLighting';
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { graphicsSettings } from './graphicsSettings';
 import { drawCoastalWaveRows, drawOceanWaveRows } from './seaTile';
@@ -1885,6 +1886,7 @@ function drawBattleQuickUnit(
   factionId: string,
   time: number,
   scale: number,
+  boardX: number,
 ): boolean {
   const clip = resolveQuickClip(factionId, unit.type);
   if (!clip) {
@@ -1904,6 +1906,8 @@ function drawBattleQuickUnit(
     feetX: 0,
     feetY: 0,
     recoil: unit.animRecoil,
+    light: graphicsSettings().unitLighting ? skyLight(time) : null,
+    boardX,
   });
 }
 
@@ -1959,13 +1963,15 @@ export function drawProceduralUnit(
   }
 
   const rosterFaction = factionId ?? (unit.side === 'attacker' ? 'US' : 'GER');
+  // Board x before local translate — rim side for unit lighting.
+  const boardX = Math.round(x);
   // The QUICK draw paints the clip muzzle flash and exhaust before returning.
   if (
     !isCasualty &&
     unit.type !== 'infantry' &&
     unit.type !== 'carrier' &&
     hasQuickUnit(rosterFaction, unit.type) &&
-    drawBattleQuickUnit(ctx, unit, rosterFaction, time, scale)
+    drawBattleQuickUnit(ctx, unit, rosterFaction, time, scale, boardX)
   ) {
     ctx.restore();
     return;
@@ -2035,6 +2041,11 @@ export function drawProceduralUnit(
     case 'transport':
       drawNavalTransportToken(ctx, factionColor, time);
       break;
+  }
+
+  // Flat sky tint on the silhouette (no heightmap). Muzzle bloom paints after so it stays bright.
+  if (graphicsSettings().unitLighting && !isCasualty) {
+    lightDrawnUnitRect(ctx, -48, -56, 96, 72, skyLight(time), boardX);
   }
 
   // ACTUAL RADIAL GRADIENT BLOOM ON MUZZLE FLASH

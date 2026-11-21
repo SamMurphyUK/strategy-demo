@@ -23,6 +23,11 @@ const ROWS: { key: keyof GraphicsSettings; label: string; hint: string }[] = [
     label: "Animated sea",
     hint: "The sea is a tile. On, the tile scrolls. Off, it sits still.",
   },
+  {
+    key: "unitLighting",
+    label: "Unit lighting",
+    hint: "Tint units with the sky's light. Off draws them as painted.",
+  },
 ];
 
 /** The four picture switches. The battle map and a real battle read the same saved choices. */

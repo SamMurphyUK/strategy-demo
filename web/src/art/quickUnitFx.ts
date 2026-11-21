@@ -64,7 +64,7 @@ function listedPhase(marks: QuickFxMarks, pose: QuickFxPose, frame: number): num
   return phase < 0 ? null : phase;
 }
 
-/** Puff phases to stamp. Walk has none unless the hull is hurt. */
+/** Puff phases to stamp. Walk cycles a light exhaust; damaged always smokes. */
 function puffPhases(marks: QuickFxMarks, pose: QuickFxPose, frame: number, options: QuickFxOptions): number[] {
   if (!marks.smoke) {
     return [];
@@ -73,6 +73,10 @@ function puffPhases(marks: QuickFxMarks, pose: QuickFxPose, frame: number, optio
   const listed = listedPhase(marks, pose, frame);
   if (listed != null) {
     phases.add(listed);
+  }
+  if (pose === "walk") {
+    // Steady exhaust while moving: one rising phase per walk frame.
+    phases.add(frame % 3);
   }
   if (options.damaged) {
     // The whole wisp: a hurt hull smokes on every picture, including walk.

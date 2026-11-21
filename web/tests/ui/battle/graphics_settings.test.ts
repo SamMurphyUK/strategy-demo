@@ -9,6 +9,7 @@ describe("graphical settings", () => {
       liveSky: true,
       crispPictures: true,
       animatedSea: true,
+      unitLighting: true,
     });
     expect(graphicsFromJson(null)).toEqual(GRAPHICS_DEFAULTS);
   });
@@ -18,16 +19,21 @@ describe("graphical settings", () => {
       ...GRAPHICS_DEFAULTS,
       mist: false,
     });
+    expect(graphicsFromJson(JSON.stringify({ unitLighting: false }))).toEqual({
+      ...GRAPHICS_DEFAULTS,
+      unitLighting: false,
+    });
     expect(graphicsFromJson("not json")).toEqual(GRAPHICS_DEFAULTS);
   });
 
   it("applies a switch for this visit", () => {
-    setGraphicsSettings({ animatedSea: false, crispPictures: false });
+    setGraphicsSettings({ animatedSea: false, crispPictures: false, unitLighting: false });
     try {
       expect(graphicsSettings().animatedSea).toBe(false);
       expect(graphicsSettings().crispPictures).toBe(false);
+      expect(graphicsSettings().unitLighting).toBe(false);
     } finally {
-      setGraphicsSettings({ animatedSea: true, crispPictures: true });
+      setGraphicsSettings({ animatedSea: true, crispPictures: true, unitLighting: true });
     }
     expect(graphicsSettings()).toEqual(expect.objectContaining(GRAPHICS_DEFAULTS));
   });

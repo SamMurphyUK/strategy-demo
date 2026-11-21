@@ -9,6 +9,8 @@ export interface GraphicsSettings {
   crispPictures: boolean;
   /** The sea tile scrolls. Off, the water keeps its shape and does not move. */
   animatedSea: boolean;
+  /** Tint units with the sky's light (no heightmaps). Off draws them as painted. */
+  unitLighting: boolean;
 }
 
 export const GRAPHICS_DEFAULTS: GraphicsSettings = {
@@ -16,6 +18,7 @@ export const GRAPHICS_DEFAULTS: GraphicsSettings = {
   liveSky: true,
   crispPictures: true,
   animatedSea: true,
+  unitLighting: true,
 };
 
 const STORAGE_KEY = "strategy-demo.graphics";
@@ -38,6 +41,7 @@ export function graphicsFromJson(raw: string | null): GraphicsSettings {
       liveSky: on(parsed.liveSky, GRAPHICS_DEFAULTS.liveSky),
       crispPictures: on(parsed.crispPictures, GRAPHICS_DEFAULTS.crispPictures),
       animatedSea: on(parsed.animatedSea, GRAPHICS_DEFAULTS.animatedSea),
+      unitLighting: on(parsed.unitLighting, GRAPHICS_DEFAULTS.unitLighting),
     };
   } catch {
     return {...GRAPHICS_DEFAULTS};
@@ -57,7 +61,8 @@ export function setGraphicsSettings(patch: Partial<GraphicsSettings>): void {
     next.mist === current.mist &&
     next.liveSky === current.liveSky &&
     next.crispPictures === current.crispPictures &&
-    next.animatedSea === current.animatedSea
+    next.animatedSea === current.animatedSea &&
+    next.unitLighting === current.unitLighting
   ) {
     return;
   }
