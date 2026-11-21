@@ -26,6 +26,8 @@ import {
   CasualtyRecord,
   WaterGeyser,
 } from './combatTypes';
+import { drawQuickUnit, hasQuickUnit } from '../../art/quickUnitDraw';
+import { resolveQuickClip } from '../../art/quickUnitCatalog';
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { graphicsSettings } from './graphicsSettings';
 import { drawCoastalWaveRows, drawOceanWaveRows } from './seaTile';
@@ -1856,6 +1858,49 @@ function drawNavalTransportToken(
  * Draws a procedural combat unit facing East (if Attacker) or West (if Defender),
  * using actual ambient occlusion drop shadows underneath and radial gradient bloom on muzzle flashes.
  */
+function battleQuickMode(unit: CombatUnit): 'idle' | 'moving' | 'firing' {
+  if (unit.animRecoil > 0.04 || unit.carrierFloatState === 'FIRING_GUNS') {
+    return 'firing';
+  }
+  if (
+    unit.isMarching ||
+    (unit.marchCurrentOffsetX != null && unit.marchCurrentOffsetX > 1) ||
+    unit.carrierFloatState === 'MOVING_FORWARD' ||
+    (unit.victoryAdvanceX != null && unit.victoryAdvanceX > 0)
+  ) {
+    return 'moving';
+  }
+  return 'idle';
+}
+
+function drawBattleQuickUnit(
+  ctx: CanvasRenderingContext2D,
+  unit: CombatUnit,
+  factionId: string,
+  time: number,
+  scale: number,
+): boolean {
+  const clip = resolveQuickClip(factionId, unit.type);
+  if (!clip) {
+    return false;
+  }
+  // Procedural tanks sit near 40–50px wide; map the art width onto that footprint.
+  const pixelScale = Math.max(0.2, Math.min(0.45, (48 * scale) / clip.width));
+  const damaged = unit.maxHp > 0 && unit.currentHp / unit.maxHp < 0.5;
+  return drawQuickUnit(ctx, {
+    key: `battle:${unit.uid}`,
+    factionId,
+    unitTypeId: unit.type,
+    mode: battleQuickMode(unit),
+    damaged,
+    face: 1,
+    time,
+    pixelScale,
+    feetX: 0,
+    feetY: 0,
+  });
+}
+
 export function drawProceduralUnit(
   ctx: CanvasRenderingContext2D,
   unit: CombatUnit,
@@ -1891,6 +1936,34 @@ export function drawProceduralUnit(
   // 1. FREEZE CASUALTY MOVEMENT: ZERO BOBBING, ZERO SHUDDER, ZERO IDLE DRIFT
   // Static Cannons & Flak Guns (No Bobbing): Wheels, carriage, and mounts firmly anchored to ground
   const isCasualty = unit.status === 'downed' || unit.status === 'dead' || unit.isPendingCasualty;
+
+  // Apply hull listing angle (e.g. 10 deg listing if injured, 45 deg if sinking)
+  if (unit.listingAngle) {
+    ctx.rotate(unit.listingAngle);
+  }
+
+  if (unit.status === 'downed') {
+    drawDownedUnit(ctx, unit, factionColor, time, smokeAlpha, noFire);
+    ctx.restore();
+    return;
+  }
+
+  if (unit.isDestroyed) {
+    ctx.globalAlpha = 0.25;
+  }
+
+  const rosterFaction = factionId ?? (unit.side === 'attacker' ? 'US' : 'GER');
+  if (
+    !isCasualty &&
+    unit.type !== 'infantry' &&
+    unit.type !== 'carrier' &&
+    hasQuickUnit(rosterFaction, unit.type) &&
+    drawBattleQuickUnit(ctx, unit, rosterFaction, time, scale)
+  ) {
+    ctx.restore();
+    return;
+  }
+
   const isStaticMount = unit.type === 'artillery' || unit.type === 'aaa' || unit.type === 'aa';
   const bob = (isCasualty || isStaticMount) ? 0 : Math.sin(time * 3 + unit.animBobOffset) * 1.5;
   let recoilX = 0;
@@ -1909,21 +1982,6 @@ export function drawProceduralUnit(
   }
 
   ctx.translate(Math.round(recoilX), Math.round(recoilY));
-
-  // Apply hull listing angle (e.g. 10 deg listing if injured, 45 deg if sinking)
-  if (unit.listingAngle) {
-    ctx.rotate(unit.listingAngle);
-  }
-
-  if (unit.status === 'downed') {
-    drawDownedUnit(ctx, unit, factionColor, time, smokeAlpha, noFire);
-    ctx.restore();
-    return;
-  }
-
-  if (unit.isDestroyed) {
-    ctx.globalAlpha = 0.25;
-  }
 
   switch (unit.type) {
     case 'infantry':

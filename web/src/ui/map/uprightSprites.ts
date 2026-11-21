@@ -14,6 +14,8 @@ import {
   type TankCue,
 } from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
+import { drawQuickUnit, hasQuickUnit, prefetchQuickIdle } from "../../art/quickUnitDraw";
+import { resolveQuickClip } from "../../art/quickUnitCatalog";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -637,6 +639,16 @@ function spriteSheet(unitType: string, factionId: string, face: FaceSign): Canva
   return baked;
 }
 
+/** How many CSS pixels one art pixel covers so a `_QUICK` tank sits on the plinth. */
+function quickPixelScale(unitType: string, factionId: string, tokenPx: number): number {
+  const clip = resolveQuickClip(factionId, unitType);
+  if (!clip) {
+    return tokenPx / 48;
+  }
+  // Fit the hull into roughly the old 56px-tall bake, feet on the plinth.
+  return Math.max(0.18, Math.min(0.55, (tokenPx * 1.35) / clip.height));
+}
+
 /** Foreshortened baseplate, then the upright sprite standing on its centre. */
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
@@ -660,18 +672,43 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
 
   const color = factionPalette(paint.factionId).primary;
   const face = paint.face ?? 1;
-  const sheet = typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, face) : null;
-  const bob = paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
+  const useQuick = paint.unitType !== "infantry" && hasQuickUnit(paint.factionId, paint.unitType);
+  if (useQuick) {
+    prefetchQuickIdle(paint.factionId, paint.unitType);
+  }
+  const sheet = !useQuick && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, face) : null;
+  const bob = useQuick || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
+  const pixelScale = useQuick ? quickPixelScale(paint.unitType, paint.factionId, paint.tokenPx) : 1;
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = squadOffsets(paint.count).slice().sort((a, b) => a.y - b.y);
-    for (const off of figures) {
+    for (let i = 0; i < figures.length; i += 1) {
+      const off = figures[i]!;
       ctx.save();
-      ctx.translate(at(x + off.x), at(y + off.y + bob));
-      if (sheet) {
-        ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
+      if (useQuick) {
+        const drawn = drawQuickUnit(ctx, {
+          key: `map:${paint.factionId}:${paint.unitType}:${i}`,
+          factionId: paint.factionId,
+          unitTypeId: paint.unitType,
+          mode: "idle",
+          face,
+          time: paint.idleTime ?? 0,
+          pixelScale,
+          feetX: at(x + off.x),
+          feetY: at(y + off.y),
+        });
+        if (!drawn) {
+          ctx.translate(at(x + off.x), at(y + off.y + bob));
+          if (face < 0) ctx.scale(-1, 1);
+          drawUprightBody(ctx, paint.unitType, color, paint.factionId);
+        }
       } else {
-        if (face < 0) ctx.scale(-1, 1);
-        drawUprightBody(ctx, paint.unitType, color, paint.factionId);
+        ctx.translate(at(x + off.x), at(y + off.y + bob));
+        if (sheet) {
+          ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
+        } else {
+          if (face < 0) ctx.scale(-1, 1);
+          drawUprightBody(ctx, paint.unitType, color, paint.factionId);
+        }
       }
       ctx.restore();
     }
