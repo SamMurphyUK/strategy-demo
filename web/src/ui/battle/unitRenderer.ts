@@ -1873,6 +1873,12 @@ function battleQuickMode(unit: CombatUnit): 'idle' | 'moving' | 'firing' {
   return 'idle';
 }
 
+function quickBattleHurt(unit: CombatUnit): boolean {
+  const ratio = unit.maxHp > 0 ? unit.currentHp / unit.maxHp : 1;
+  const listing = unit.listingAngle != null && unit.listingAngle !== 0;
+  return ratio < 0.5 || unit.damageSmokeParticles || listing;
+}
+
 function drawBattleQuickUnit(
   ctx: CanvasRenderingContext2D,
   unit: CombatUnit,
@@ -1886,18 +1892,18 @@ function drawBattleQuickUnit(
   }
   // Procedural tanks sit near 40–50px wide; map the art width onto that footprint.
   const pixelScale = Math.max(0.2, Math.min(0.45, (48 * scale) / clip.width));
-  const damaged = unit.maxHp > 0 && unit.currentHp / unit.maxHp < 0.5;
   return drawQuickUnit(ctx, {
     key: `battle:${unit.uid}`,
     factionId,
     unitTypeId: unit.type,
     mode: battleQuickMode(unit),
-    damaged,
+    damaged: quickBattleHurt(unit),
     face: 1,
     time,
     pixelScale,
     feetX: 0,
     feetY: 0,
+    recoil: unit.animRecoil,
   });
 }
 
@@ -1953,6 +1959,7 @@ export function drawProceduralUnit(
   }
 
   const rosterFaction = factionId ?? (unit.side === 'attacker' ? 'US' : 'GER');
+  // The QUICK draw paints the clip muzzle flash and exhaust before returning.
   if (
     !isCasualty &&
     unit.type !== 'infantry' &&

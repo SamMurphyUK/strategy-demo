@@ -3,6 +3,8 @@
  * Pure: no DOM. Missing art is reported, never invented.
  */
 
+import type { QuickFxMarks } from "./quickUnitFx";
+
 export const QUICK_FACTIONS = ["GER", "USSR", "UK", "US", "JAP"] as const;
 export type QuickFaction = (typeof QUICK_FACTIONS)[number];
 
@@ -47,13 +49,86 @@ const TYPE_FOLDER: Record<QuickUnitType, string> = {
   transport: "transport",
 };
 
-/** Logical art size for every shipped `_QUICK` vector clip. Resolution 4 lives in the SVG viewBox. */
-const QUICK_CLIPS: Record<string, { width: number; height: number; feet: { x: number; y: number }; idle: number; walk: number; fire: number; damaged: number }> = {
-  ger_tank_seed1_QUICK: { width: 192, height: 96, feet: { x: 87, y: 95 }, idle: 8, walk: 8, fire: 8, damaged: 0 },
-  ussr_tank_seed1_QUICK: { width: 192, height: 96, feet: { x: 87, y: 95 }, idle: 8, walk: 8, fire: 8, damaged: 0 },
-  uk_tank_seed1_QUICK: { width: 176, height: 96, feet: { x: 80, y: 95 }, idle: 8, walk: 8, fire: 8, damaged: 0 },
-  us_tank_seed1_QUICK: { width: 144, height: 96, feet: { x: 66, y: 95 }, idle: 8, walk: 8, fire: 8, damaged: 0 },
-  jap_tank_seed1_QUICK: { width: 176, height: 96, feet: { x: 80, y: 95 }, idle: 8, walk: 8, fire: 8, damaged: 0 },
+interface QuickClipMeta {
+  width: number;
+  height: number;
+  feet: { x: number; y: number };
+  idle: number;
+  walk: number;
+  fire: number;
+  damaged: number;
+  fx: QuickFxMarks;
+}
+
+/** Fire index where the tank barrel is kicked back. That picture draws the flash. */
+const TANK_FLASH: readonly number[] = [1];
+const TANK_PUFF = { idle: [6, 7] as const, fire: [5, 6, 7] as const };
+
+function tankMarks(smoke: { x: number; y: number }, muzzle: { x: number; y: number }): QuickFxMarks {
+  return {
+    smoke,
+    muzzle,
+    flashFrames: TANK_FLASH,
+    puffFrames: { idle: TANK_PUFF.idle, fire: TANK_PUFF.fire },
+  };
+}
+
+/**
+ * Logical art size for every shipped `_QUICK` vector clip. Resolution 4 lives in the SVG viewBox.
+ * Smoke, and the German muzzle, are the clip marks. The other muzzles are the top pixel of the
+ * barrel's rightmost column on idle_0, which is where the German mark sits. No flame SVG is shipped.
+ */
+const QUICK_CLIPS: Record<string, QuickClipMeta> = {
+  ger_tank_seed1_QUICK: {
+    width: 192,
+    height: 96,
+    feet: { x: 87, y: 95 },
+    idle: 8,
+    walk: 8,
+    fire: 8,
+    damaged: 0,
+    fx: tankMarks({ x: 16, y: 40 }, { x: 191, y: 26 }),
+  },
+  ussr_tank_seed1_QUICK: {
+    width: 192,
+    height: 96,
+    feet: { x: 87, y: 95 },
+    idle: 8,
+    walk: 8,
+    fire: 8,
+    damaged: 0,
+    fx: tankMarks({ x: 15, y: 48 }, { x: 187, y: 26 }),
+  },
+  uk_tank_seed1_QUICK: {
+    width: 176,
+    height: 96,
+    feet: { x: 80, y: 95 },
+    idle: 8,
+    walk: 8,
+    fire: 8,
+    damaged: 0,
+    fx: tankMarks({ x: 11, y: 56 }, { x: 168, y: 39 }),
+  },
+  us_tank_seed1_QUICK: {
+    width: 144,
+    height: 96,
+    feet: { x: 66, y: 95 },
+    idle: 8,
+    walk: 8,
+    fire: 8,
+    damaged: 0,
+    fx: tankMarks({ x: 6, y: 58 }, { x: 138, y: 40 }),
+  },
+  jap_tank_seed1_QUICK: {
+    width: 176,
+    height: 96,
+    feet: { x: 80, y: 95 },
+    idle: 8,
+    walk: 8,
+    fire: 8,
+    damaged: 0,
+    fx: tankMarks({ x: 5, y: 55 }, { x: 172, y: 28 }),
+  },
 };
 
 export interface QuickClipRef {
@@ -71,6 +146,8 @@ export interface QuickClipRef {
   walk: number;
   fire: number;
   damaged: number;
+  /** Exhaust and barrel tip in picture pixels. */
+  fx: QuickFxMarks;
   /** True when this clip belongs to a different faction than the one asked for. */
   fallback: boolean;
 }
@@ -142,6 +219,7 @@ function refFor(unitId: string, factionId: QuickFaction, unitTypeId: QuickUnitTy
     walk: meta.walk,
     fire: meta.fire,
     damaged: meta.damaged,
+    fx: meta.fx,
     fallback,
   };
 }
@@ -206,12 +284,22 @@ export function auditQuickCoverage(): QuickAuditRow[] {
       if (hit.fallback) {
         gaps.push(`using ${hit.factionId} seed`);
       }
+      if (!hit.fx.smoke) {
+        gaps.push("no exhaust mark");
+      }
+      if (!hit.fx.muzzle) {
+        gaps.push("no muzzle mark");
+      }
+      const notes = [...gaps];
+      if (hit.fx.smoke && hit.fx.muzzle) {
+        notes.push("exhaust and muzzle");
+      }
       rows.push({
         factionId,
         unitTypeId,
         quick: hit.fallback ? "fallback" : "yes",
         unitId: hit.unitId,
-        notes: gaps.length > 0 ? gaps.join("; ") : "idle/walk/fire present",
+        notes: notes.length > 0 ? notes.join("; ") : "idle/walk/fire present",
       });
     }
     rows.push({

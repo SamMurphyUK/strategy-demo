@@ -1,10 +1,13 @@
 /**
  * Rasterize `_QUICK` vector frames for the campaign LoD-2 sprites and the battle board.
  * Keeps facing, stack copies, and unitAnimationProfiles idle/move/fire/damaged offsets.
+ * Muzzle flash and exhaust use the clip marks, scaled with the sprite.
  */
 
 import { resolveQuickClip, quickFrameUrl, type QuickClipRef } from "./quickUnitCatalog";
+import { quickAnchor, quickFxRects, quickMuzzleBloom, type QuickFxPose } from "./quickUnitFx";
 import { resolveUnitAnimProfile } from "./unitAnimationProfiles";
+import { MILITARY } from "../ui/theme/militaryPalette";
 import {
   createVehicleAnim,
   easeVehicle,
@@ -80,13 +83,15 @@ export interface QuickDrawRequest {
   /** Feet land on this point in the current transform. */
   feetX: number;
   feetY: number;
+  /** Battle recoil, 0 to 1. Above 0.25 the muzzle blooms while the fire clip plays. */
+  recoil?: number;
 }
 
 function vehicleMode(mode: QuickDrawMode): VehicleMode {
   return mode === "firing" ? "firing" : mode === "moving" ? "moving" : "idle";
 }
 
-function clipMode(mode: QuickDrawMode, clip: QuickClipRef): "idle" | "walk" | "fire" {
+function clipMode(mode: QuickDrawMode, clip: QuickClipRef): QuickFxPose {
   if (mode === "firing" && clip.fire > 0) {
     return "fire";
   }
@@ -96,9 +101,67 @@ function clipMode(mode: QuickDrawMode, clip: QuickClipRef): "idle" | "walk" | "f
   return "idle";
 }
 
+function paintQuickFx(
+  ctx: CanvasRenderingContext2D,
+  clip: QuickClipRef,
+  pose: QuickFxPose,
+  frame: number,
+  root: { x: number; y: number },
+  pixelScale: number,
+  recoil: number,
+  damaged: boolean,
+): void {
+  const rects = quickFxRects(clip.fx, clip.feet, pose, frame, pixelScale, {
+    damaged,
+    rootX: root.x,
+    rootY: root.y,
+  });
+  for (const rect of rects) {
+    if (rect.kind !== "smoke") {
+      continue;
+    }
+    ctx.fillStyle = rect.hex;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+  for (const rect of rects) {
+    if (rect.kind !== "muzzle") {
+      continue;
+    }
+    ctx.fillStyle = rect.hex;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+  const bloom = pose === "fire" && clip.fx.muzzle ? quickMuzzleBloom(clip.width, pixelScale, recoil) : null;
+  if (!bloom || !clip.fx.muzzle) {
+    return;
+  }
+  const tip = quickAnchor(clip.fx.muzzle, clip.feet, pixelScale, root.x, root.y);
+  const inner = Math.min(bloom.radius * 0.35, Math.max(pixelScale, 0.5));
+  if (bloom.radius > inner + 0.5) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const grad = ctx.createRadialGradient(tip.x, tip.y, inner, tip.x, tip.y, bloom.radius);
+    grad.addColorStop(0, "rgba(255, 250, 210, 0.95)");
+    grad.addColorStop(0.3, "rgba(255, 190, 70, 0.6)");
+    grad.addColorStop(0.7, "rgba(230, 100, 30, 0.2)");
+    grad.addColorStop(1, "rgba(180, 40, 10, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, bloom.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  if (bloom.core > 0) {
+    ctx.fillStyle = MILITARY.cream;
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, bloom.core, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 /**
  * Draw one `_QUICK` vector if present. Returns false when this type still uses its placeholder.
  * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
+ * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
  */
 export function drawQuickUnit(
   ctx: CanvasRenderingContext2D,
@@ -159,6 +222,7 @@ export function drawQuickUnit(
     drawW,
     drawH,
   );
+  paintQuickFx(ctx, clip, pose, index, offsets.root, scale, request.recoil ?? 0, request.damaged === true);
   ctx.restore();
   return true;
 }
