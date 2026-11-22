@@ -17,61 +17,40 @@ describe("battle cinematic camera", () => {
     expect(baseScaleForLiveCount(10)).toBeGreaterThan(baseScaleForLiveCount(20));
   });
 
-  it("focuses the dice while rolling, then the firing row and the hits", () => {
-    const shooters = [{ x: 200, y: 300 }];
-    const track = [{ x: 700, y: 320 }];
-    const hits = [{ x: 900, y: 340 }];
-
-    const rolling = desiredCinematicView({
+  it("holds on the units, and pans toward a mover with only a slight zoom", () => {
+    const units = [
+      { x: 180, y: 280 },
+      { x: 900, y: 320 },
+    ];
+    const held = desiredCinematicView({
       canvasW: 1280,
       canvasH: 720,
-      liveCount: 12,
-      subPhase: "ROLLING",
-      shooterPoints: shooters,
-      trackPoints: [],
-      hitPoints: [],
-      allocation: false,
+      unitPoints: units,
+      motionPoints: [],
     });
-    expect(rolling.focusY).toBeGreaterThan(500);
-    expect(rolling.scale).toBeGreaterThan(1.2);
+    expect(held.focusX).toBeCloseTo(540);
+    expect(held.focusY).toBeCloseTo(300);
+    expect(held.scale).toBeLessThan(1.2);
 
-    const onShooters = desiredCinematicView({
+    const following = desiredCinematicView({
       canvasW: 1280,
       canvasH: 720,
-      liveCount: 12,
-      subPhase: "FIRING",
-      shooterPoints: shooters,
-      trackPoints: [],
-      hitPoints: [],
-      allocation: false,
+      unitPoints: units,
+      motionPoints: [{ x: 900, y: 320 }],
     });
-    expect(onShooters.focusX).toBeCloseTo(200);
-    expect(onShooters.scale).toBeGreaterThan(1.3);
+    expect(following.focusX).toBeGreaterThan(held.focusX);
+    expect(following.focusX).toBeLessThan(900);
+    expect(following.scale - held.scale).toBeGreaterThan(0);
+    expect(following.scale - held.scale).toBeLessThan(0.15);
 
-    const onTrack = desiredCinematicView({
+    const empty = desiredCinematicView({
       canvasW: 1280,
       canvasH: 720,
-      liveCount: 12,
-      subPhase: "FIRING",
-      shooterPoints: shooters,
-      trackPoints: track,
-      hitPoints: [],
-      allocation: false,
+      unitPoints: [],
+      motionPoints: [{ x: 640, y: 600 }],
     });
-    expect(onTrack.focusX).toBeGreaterThan(200);
-    expect(onTrack.focusX).toBeLessThan(700);
-
-    const onHits = desiredCinematicView({
-      canvasW: 1280,
-      canvasH: 720,
-      liveCount: 12,
-      subPhase: "FIRING",
-      shooterPoints: [],
-      trackPoints: [],
-      hitPoints: hits,
-      allocation: false,
-    });
-    expect(onHits.focusX).toBeCloseTo(900);
+    expect(empty.focusX).toBeCloseTo(640);
+    expect(empty.focusY).toBeCloseTo(360);
   });
 
   it("keeps the board point under the cursor when zooming", () => {
@@ -102,6 +81,10 @@ describe("battle cinematic camera", () => {
     const mid = lerpCam(a, b, 1 / 60);
     expect(mid.scale).toBeGreaterThan(1);
     expect(mid.scale).toBeLessThan(2);
+    const eased = lerpCam(a, { scale: 1.2, focusX: 20, focusY: 20 }, 1 / 30, 1.05, 0.32);
+    const panShare = (a.focusX - eased.focusX) / (a.focusX - 20);
+    const zoomShare = (eased.scale - a.scale) / 0.2;
+    expect(panShare).toBeGreaterThan(zoomShare);
     expect(pruneCinematicHits([{ x: 1, y: 2, until: 5 }, { x: 3, y: 4, until: 1 }], 2)).toEqual([
       { x: 1, y: 2, until: 5 },
     ]);

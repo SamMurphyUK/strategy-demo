@@ -364,12 +364,26 @@
     touch-action: none;
   }
 
+  & .map-vectors,
+  & .map-figure-chrome {
+    position: absolute;
+    inset: 0;
+    display: block;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 1;
+  }
+
+  & .map-figure-chrome {
+    z-index: 2;
+  }
+
   & .map-arrows {
     position: absolute;
     inset: 0;
     display: block;
     pointer-events: none;
-    z-index: 1;
+    z-index: 3;
   }
 
   & .map-error {

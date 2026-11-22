@@ -822,6 +822,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             idleTime: game.idleTime,
             idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
             aim: facing(layout.region.id, entry.faction_id),
+            vectorKey: `${layout.region.id}|${layout.copyDx}|${counter.slot.key}`,
           });
         },
       });

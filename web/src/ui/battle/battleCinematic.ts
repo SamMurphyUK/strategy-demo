@@ -1,6 +1,6 @@
 import { fieldViewScale, fieldWheelZoom } from "../../art/nativeBattleOverlay";
 
-/** Auto camera for a battle: zoom on few units, follow a firing row, then return to the dice. */
+/** Auto camera for a battle: pan with the units, and change the zoom only a little. */
 
 export interface CamView {
   scale: number;
@@ -16,27 +16,40 @@ export interface CinematicHitMark {
 
 export const CINEMATIC_SCALE_MIN = 0.72;
 export const CINEMATIC_SCALE_MAX = 2.4;
-/** Dice tray centre (1280×720 board). */
-export const DICE_FOCUS = {x: 640, y: 600};
+/** How quickly the frame slides toward the units. About a second to settle. */
+export const CINEMATIC_PAN_RATE = 1.05;
+/** Zoom trails the pan, so a move reads as a slide with a small scale change. */
+export const CINEMATIC_ZOOM_RATE = 0.32;
+/** Share of the way from the formation to a moving unit. The pan does the tracking. */
+export const CINEMATIC_MOTION_PULL = 0.7;
+/** Added on top of the resting scale while a unit is moving. */
+export const CINEMATIC_MOTION_ZOOM = 0.07;
 
 export function identityCam(canvasW: number, canvasH: number): CamView {
   return {scale: 1, focusX: canvasW / 2, focusY: canvasH / 2};
 }
 
-/** Closer when few units are left on the board. */
+/** A small step closer when few units are left. The spread stays readable. */
 export function baseScaleForLiveCount(live: number): number {
-  if (live <= 4) return 1.55;
-  if (live <= 8) return 1.32;
-  if (live <= 14) return 1.16;
-  return 1.05;
+  if (live <= 4) return 1.12;
+  if (live <= 8) return 1.08;
+  if (live <= 14) return 1.05;
+  return 1.02;
 }
 
-export function lerpCam(current: CamView, target: CamView, dt: number, rate = 3.4): CamView {
-  const t = 1 - Math.exp(-rate * Math.max(0, dt));
+export function lerpCam(
+  current: CamView,
+  target: CamView,
+  dt: number,
+  rate = 3.4,
+  zoomRate = rate,
+): CamView {
+  const pan = 1 - Math.exp(-rate * Math.max(0, dt));
+  const zoom = 1 - Math.exp(-zoomRate * Math.max(0, dt));
   return {
-    scale: current.scale + (target.scale - current.scale) * t,
-    focusX: current.focusX + (target.focusX - current.focusX) * t,
-    focusY: current.focusY + (target.focusY - current.focusY) * t,
+    scale: current.scale + (target.scale - current.scale) * zoom,
+    focusX: current.focusX + (target.focusX - current.focusX) * pan,
+    focusY: current.focusY + (target.focusY - current.focusY) * pan,
   };
 }
 
@@ -129,64 +142,28 @@ export function pruneCinematicHits(hits: CinematicHitMark[], now: number): Cinem
   return hits.filter((h) => h.until > now);
 }
 
-export type CinematicSubPhase = 'IDLE' | 'ROLLING' | 'FIRING' | 'RESOLVED';
-
 /**
- * Pick where the camera should look for the current combat beat.
- * Firing: shooters → in-flight shots → recent hits. Rolling / waiting: the dice tray.
+ * Frame the units. A moving unit pulls the frame toward it. The zoom only steps up a little,
+ * so the slide is what follows the motion.
  */
 export function desiredCinematicView(input: {
   canvasW: number;
   canvasH: number;
-  liveCount: number;
-  subPhase: CinematicSubPhase | string;
-  shooterPoints: ReadonlyArray<{x: number; y: number}>;
-  trackPoints: ReadonlyArray<{x: number; y: number}>;
-  hitPoints: ReadonlyArray<{x: number; y: number}>;
-  allocation: boolean;
+  unitPoints: ReadonlyArray<{x: number; y: number}>;
+  motionPoints: ReadonlyArray<{x: number; y: number}>;
 }): CamView {
-  const base = baseScaleForLiveCount(input.liveCount);
-  const centre = {x: input.canvasW / 2, y: input.canvasH / 2 - 24};
-
-  if (input.allocation) {
-    return {scale: base, focusX: centre.x, focusY: centre.y};
+  const formation = averagePoint(input.unitPoints);
+  if (!formation) {
+    return identityCam(input.canvasW, input.canvasH);
   }
-
-  if (input.subPhase === 'ROLLING') {
-    return {
-      scale: Math.max(base, 1.38),
-      focusX: DICE_FOCUS.x,
-      focusY: DICE_FOCUS.y,
-    };
+  const motion = averagePoint(input.motionPoints);
+  const scale = baseScaleForLiveCount(input.unitPoints.length) + (motion ? CINEMATIC_MOTION_ZOOM : 0);
+  if (!motion) {
+    return {scale, focusX: formation.x, focusY: formation.y};
   }
-
-  if (input.subPhase === 'FIRING') {
-    const shooters = averagePoint(input.shooterPoints);
-    const track = averagePoint(input.trackPoints);
-    const hits = averagePoint(input.hitPoints);
-
-    if (track && shooters) {
-      return {
-        scale: Math.max(base, 1.42),
-        focusX: shooters.x * 0.28 + track.x * 0.72,
-        focusY: shooters.y * 0.28 + track.y * 0.72,
-      };
-    }
-    if (track) {
-      return {scale: Math.max(base, 1.4), focusX: track.x, focusY: track.y};
-    }
-    if (hits) {
-      return {scale: Math.max(base, 1.36), focusX: hits.x, focusY: hits.y};
-    }
-    if (shooters) {
-      return {scale: Math.max(base, 1.52), focusX: shooters.x, focusY: shooters.y};
-    }
-  }
-
-  // Waiting to roll, or settling after a volley — hold on the dice.
   return {
-    scale: Math.max(base, 1.12),
-    focusX: DICE_FOCUS.x,
-    focusY: DICE_FOCUS.y,
+    scale,
+    focusX: formation.x + (motion.x - formation.x) * CINEMATIC_MOTION_PULL,
+    focusY: formation.y + (motion.y - formation.y) * CINEMATIC_MOTION_PULL,
   };
 }

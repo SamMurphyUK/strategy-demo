@@ -1686,7 +1686,7 @@ export function NativeBattlePreview() {
 
         if (parts) {
           svgUnits.push({
-            id: item.id,
+            id: String(item.id),
             x: blit.x,
             y: blit.y,
             unitScale: scale,

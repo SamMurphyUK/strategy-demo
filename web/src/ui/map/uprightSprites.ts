@@ -15,10 +15,9 @@ import {
   type TankCue,
 } from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
-import { drawQuickUnit, hasQuickUnit, prefetchQuickIdle } from "../../art/quickUnitDraw";
-import { resolveQuickClip } from "../../art/quickUnitCatalog";
-import { graphicsSettings } from "../battle/graphicsSettings";
-import { skyLight } from "../battle/unitRenderer";
+import { hasQuickUnit } from "../../art/quickUnitDraw";
+import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
+import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -62,6 +61,8 @@ export interface UprightPaint {
    * (1 southeast … 4 west … 7 northeast). The plinth and badges stay put.
    */
   aim?: FaceOctant;
+  /** Stable id for the vector overlay. One stack keeps its SVG node while the camera moves. */
+  vectorKey?: string;
 }
 
 /** The guns are drawn toward +x, so +1 faces right and -1 faces left. */
@@ -269,6 +270,7 @@ function regionIsHostile(
 
 const STILL_UNITS = new Set(["artillery", "aa", "aaa"]);
 const SEA_UNITS = new Set(["submarine", "sub", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+const AIR_UNITS = new Set(["fighter", "tactical_bomber", "strategic_bomber", "tac_bomber", "bomber"]);
 /** Tanks and vehicles sit five pixels under the infantry line so the tracks meet the plinth. */
 const VEHICLE_SINK_PX = 5;
 const VEHICLE_SINK = new Set([
@@ -282,6 +284,34 @@ const VEHICLE_SINK = new Set([
 ]);
 /** Placeholder figures stand about this tall, in CSS pixels, and they do not grow with a closer zoom. */
 const UPRIGHT_FIGURE_PX = 24;
+/** Every zoomed sprite, on top of that height. */
+const UPRIGHT_BOOST = 1.4;
+/** Planes and ships, on top of the boost above. */
+const BULK_BOOST = 1.6;
+
+function uprightScale(unitType: string): number {
+  const bulk = AIR_UNITS.has(unitType) || SEA_UNITS.has(unitType) ? BULK_BOOST : 1;
+  return UPRIGHT_BOOST * bulk;
+}
+
+interface CampaignFrame {
+  vectors: VehicleSvgUnit[];
+  chrome: ((ctx: CanvasRenderingContext2D) => void)[];
+}
+
+let campaignFrame: CampaignFrame | null = null;
+
+/** The next upright draw records vectors instead of painting them into the map bitmap. */
+export function beginCampaignFigures(): void {
+  campaignFrame = { vectors: [], chrome: [] };
+}
+
+/** Vectors for the SVG overlay, and the badges that must sit above them. */
+export function takeCampaignFigures(): CampaignFrame {
+  const frame = campaignFrame ?? { vectors: [], chrome: [] };
+  campaignFrame = null;
+  return frame;
+}
 
 /** Stable phase in `[0, 2π)` for one stack. */
 export function idlePhase(regionId: string, unitType: string): number {
@@ -712,17 +742,7 @@ function spriteSheet(unitType: string, factionId: string, face: FaceSign): Canva
   return baked;
 }
 
-/** How many CSS pixels one art pixel covers so a quick sprite matches the placeholder figures. */
-function quickPixelScale(unitType: string, factionId: string): number {
-  const clip = resolveQuickClip(factionId, unitType);
-  if (!clip || clip.height < 1) {
-    return 1;
-  }
-  return UPRIGHT_FIGURE_PX / clip.height;
-}
-
-/**
- * Distance between squad copies, in CSS pixels. The baked offsets suit a rifleman.
+/** Distance between squad copies, in CSS pixels. The baked offsets suit a rifleman.
  * A tank or a plane is wider than that step, so the extra copies would sit inside the first.
  */
 function squadStep(figureW: number): number {
@@ -771,65 +791,104 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const color = factionPalette(paint.factionId).primary;
   const pose = facingPose(paint.aim ?? 0);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
-  if (useQuick) {
-    prefetchQuickIdle(paint.factionId, paint.unitType);
-  }
-  const sheet = !useQuick && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
-  const unitLight = graphicsSettings().unitLighting ? skyLight(paint.idleTime ?? 0) : null;
-  const bob = useQuick || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
-  const pixelScale = useQuick ? quickPixelScale(paint.unitType, paint.factionId) : 1;
-  const clipW = useQuick ? (resolveQuickClip(paint.factionId, paint.unitType)?.width ?? 0) : 0;
-  const figureW = clipW > 0 ? clipW * pixelScale : 16;
+  const clip = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
+  const sheet = !clip && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
+  const bob = clip || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
+  const figureScale = uprightScale(paint.unitType);
+  const pixelScale = clip && clip.height > 0 ? (UPRIGHT_FIGURE_PX * figureScale) / clip.height : 1;
+  const figureW = clip ? clip.width * pixelScale : 16 * figureScale;
   const sink = VEHICLE_SINK.has(paint.unitType) ? VEHICLE_SINK_PX : 0;
+  const poseName = clip && clip.idle > 0 ? "idle" : "walk";
+  const poseCount = clip ? clip[poseName] : 0;
+  const frameIndex = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / 0.125) % poseCount : 0;
+  const href = clip && poseCount > 0 ? quickFrameUrl(clip, poseName, frameIndex) : null;
+  const asVector = campaignFrame != null && clip != null && href != null;
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = placedSquad(paint.count, squadStep(figureW))
       .slice()
       .sort((a, b) => a.y - b.y);
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
-      ctx.save();
-      if (useQuick) {
-        const drawn = drawQuickUnit(ctx, {
-          key: `map:${paint.factionId}:${paint.unitType}:${i}`,
-          factionId: paint.factionId,
-          unitTypeId: paint.unitType,
-          mode: "idle",
+      if (asVector && clip && href) {
+        campaignFrame?.vectors.push({
+          id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
+          x: x + off.x,
+          y: y + off.y + sink,
+          unitScale: pixelScale,
+          rootX: -clip.feet.x,
+          rootY: -clip.feet.y,
+          // Side-view shelf art. Mirror it toward the enemy; a turn would tip the picture over.
           face: pose.face,
-          turn: pose.turn,
-          time: paint.idleTime ?? 0,
-          pixelScale,
-          feetX: at(x + off.x),
-          feetY: at(y + off.y + sink),
-          light: unitLight,
-          boardX: x + off.x,
+          turnDeg: 0,
+          parts: [
+            {
+              role: "torso",
+              href,
+              x: 0,
+              y: 0,
+              width: clip.width,
+              height: clip.height,
+              resolution: clip.resolution,
+            },
+          ],
         });
-        if (!drawn) {
-          ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
-          if (pose.turn) ctx.rotate(pose.turn);
-          if (pose.face < 0) ctx.scale(-1, 1);
-          drawUprightBody(ctx, paint.unitType, color, paint.factionId);
-        }
+        continue;
+      }
+      ctx.save();
+      ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
+      ctx.scale(figureScale, figureScale);
+      if (pose.face < 0) ctx.scale(-1, 1);
+      if (sheet) {
+        ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
       } else {
-        ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
-        if (pose.turn) ctx.rotate(pose.turn);
-        if (pose.face < 0) ctx.scale(-1, 1);
-        if (sheet) {
-          ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
-        } else {
-          drawUprightBody(ctx, paint.unitType, color, paint.factionId);
-        }
+        drawUprightBody(ctx, paint.unitType, color, paint.factionId);
       }
       ctx.restore();
     }
-    if (paint.count > 1) {
+    if (!asVector && paint.count > 1) {
       drawHardwareBadge(ctx, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
     }
-    if (paint.fuel != null) {
+    if (!asVector && paint.fuel != null) {
       drawHardwareBadge(ctx, String(paint.fuel), at(x - rx - 4) - 20, at(y) - 6, paint.active ? TEAL_NUM : GOLD_NUM);
     }
   });
 
-  if (paint.loaded) {
+  const paintMarks = (target: CanvasRenderingContext2D) => {
+    target.save();
+    target.setTransform(paint.dpr, 0, 0, paint.dpr, 0, 0);
+    withCrisp(target, paint.dpr, (at) => {
+      if (paint.count > 1) {
+        drawHardwareBadge(target, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
+      }
+      if (paint.fuel != null) {
+        drawHardwareBadge(target, String(paint.fuel), at(x - rx - 4) - 20, at(y) - 6, paint.active ? TEAL_NUM : GOLD_NUM);
+      }
+    });
+    if (paint.loaded) {
+      const aboard = paint.cargoCount ?? 0;
+      if (aboard > 0) {
+        drawHardwareBadge(target, `⚓+${aboard}`, x - rx, y - ry - 16, GOLD_NUM);
+      } else {
+        const s = Math.max(3, Math.round(radius * 0.28));
+        target.fillStyle = GOLD;
+        target.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
+      }
+    }
+    if (paint.selected || paint.unmoved) {
+      target.beginPath();
+      target.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
+      target.lineWidth = paint.selected ? 2.5 : 1.5;
+      target.strokeStyle = paint.selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
+      target.setLineDash(paint.selected ? [] : [4, 3]);
+      target.stroke();
+      target.setLineDash([]);
+    }
+    target.restore();
+  };
+
+  if (asVector) {
+    campaignFrame?.chrome.push(paintMarks);
+  } else if (paint.loaded) {
     const aboard = paint.cargoCount ?? 0;
     if (aboard > 0) {
       drawHardwareBadge(ctx, `⚓+${aboard}`, x - rx, y - ry - 16, GOLD_NUM);
@@ -839,7 +898,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       ctx.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
     }
   }
-  if (paint.selected || paint.unmoved) {
+  if (!asVector && (paint.selected || paint.unmoved)) {
     ctx.beginPath();
     ctx.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
     ctx.lineWidth = paint.selected ? 2.5 : 1.5;

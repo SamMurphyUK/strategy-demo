@@ -31,7 +31,7 @@ const ROWS: { key: keyof GraphicsSettings; label: string; hint: string }[] = [
   {
     key: "cinematicCamera",
     label: "Cinematic camera",
-    hint: "Zoom in for few units, then on each firing row, track the hits, and return to the dice. Wheel zoom cancels it for that round.",
+    hint: "Pans with the units. The zoom only shifts a little. Wheel zoom cancels it for that round.",
   },
 ];
 

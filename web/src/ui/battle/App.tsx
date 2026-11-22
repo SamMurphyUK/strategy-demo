@@ -110,15 +110,15 @@ import {FIELD_VIEW_SCALES, fieldZoomLabel} from '../../art/nativeBattleOverlay';
 import {horizonShiftX} from '../../art/horizonParallax';
 import {
   applyCamTransform,
+  CINEMATIC_PAN_RATE,
+  CINEMATIC_ZOOM_RATE,
   desiredCinematicView,
   identityCam,
   jumpCamScale,
   lerpCam,
-  pruneCinematicHits,
   screenToWorld,
   zoomCamField,
   type CamView,
-  type CinematicHitMark,
 } from './battleCinematic';
 
 export type RankStepState = 'READY_TO_FIRE' | 'FIRING' | 'RESOLVED';
@@ -489,9 +489,6 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   const activeDiceRef = useRef<DiceResult[]>([]);
   const floatingTextsRef = useRef<FloatingText[]>([]);
   const combatShellsRef = useRef<CombatShell[]>([]);
-  /** Uids of the units firing in the current rank volley (cinematic zoom target). */
-  const cinematicShooterUidsRef = useRef<string[]>([]);
-  const cinematicHitsRef = useRef<CinematicHitMark[]>([]);
   const cinematicCamRef = useRef<CamView>(identityCam(canvasWidth, canvasHeight));
   const [viewScale, setViewScale] = useState(1);
   const cinematicOn = useSyncExternalStore(
@@ -786,8 +783,6 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     activeDiceRef.current = [];
     floatingTextsRef.current = [];
     combatShellsRef.current = [];
-    cinematicShooterUidsRef.current = [];
-    cinematicHitsRef.current = [];
     cinematicCamRef.current = identityCam(canvasWidth, canvasHeight);
     cinematicCancelledRoundRef.current = -1;
     planeBulletsRef.current = [];
@@ -1203,11 +1198,6 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       // 2. Spawn floating pixel text HIT directly above struck target unit
       const hitX = Math.round(x);
       const hitY = Math.round(y - 6);
-      cinematicHitsRef.current.push({
-        x: hitX,
-        y: hitY,
-        until: gameTimeRef.current + 1.35,
-      });
       floatingTextsRef.current.push({
         id: `hit_unit_${Math.random()}`,
         x: hitX,
@@ -2350,7 +2340,6 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
       setRankStepState('FIRING');
       setRankSubPhase('ROLLING');
-      cinematicShooterUidsRef.current = shooters.map((u) => u.uid);
 
       // If Attacker Carrier firing at Rank 1 from Rank III, glide forward to Rank 1
       if (side === 'attacker' && rankNumber === 1) {
@@ -2533,7 +2522,6 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     setRankSubPhase('ROLLING');
 
     const aaGuns = defenderUnitsRef.current.filter((u) => isCombatActive(u) && u.type === 'aaa');
-    cinematicShooterUidsRef.current = aaGuns.map((u) => u.uid);
     const airUnits = attackerUnitsRef.current.filter(
       (u) => isCombatActive(u) && UNIT_DEFINITIONS[u.type].category === 'air',
     );
@@ -4233,45 +4221,54 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       if (sw.life <= 0) shockwavesRef.current.splice(i, 1);
     }
 
-    // Cinematic camera: ease toward the dice, the firing row, or the tracked hits.
-    cinematicHitsRef.current = pruneCinematicHits(cinematicHitsRef.current, gameTimeRef.current);
+    // Cinematic camera: slide toward the units. A moving unit pulls the frame. Zoom lags behind.
     const gfx = graphicsSettings();
     const camCancelled =
       !gfx.cinematicCamera || cinematicCancelledRoundRef.current === roundNumberRef.current;
     if (gfx.cinematicCamera && !camCancelled) {
       const allUnits = [...attackerUnitsRef.current, ...defenderUnitsRef.current];
-      const liveCount = allUnits.filter(isCombatActive).length;
-      const shooterPoints = cinematicShooterUidsRef.current
-        .map((uid) => allUnits.find((u) => u.uid === uid))
-        .filter((u): u is CombatUnit => !!u && isCombatActive(u))
-        .map((u) => getUnitScreenPos(u));
-      const trackPoints: {x: number; y: number}[] = [];
-      for (const shell of combatShellsRef.current) {
-        const t = Math.min(1, Math.max(0, shell.progress));
-        const arc = Math.sin(t * Math.PI) * shell.arcHeight;
-        trackPoints.push({
-          x: shell.startX + (shell.endX - shell.startX) * t,
-          y: shell.startY + (shell.endY - shell.startY) * t - arc,
-        });
+      const unitPoints: {x: number; y: number}[] = [];
+      const motionPoints: {x: number; y: number}[] = [];
+      for (const unit of allUnits) {
+        if (unit.status === 'dead' || (unit.fadeAlpha !== undefined && unit.fadeAlpha <= 0)) {
+          continue;
+        }
+        const sortie =
+          unit.type !== 'carrier'
+            ? activeSortiesRef.current.find((flight) => flight.unitUid === unit.uid)
+            : undefined;
+        if (sortie) {
+          const at = {x: sortie.currentX, y: sortie.currentY};
+          unitPoints.push(at);
+          motionPoints.push(at);
+          continue;
+        }
+        if (!isCombatActive(unit)) {
+          continue;
+        }
+        const pos = getUnitScreenPos(unit);
+        unitPoints.push(pos);
+        const marching = unit.isMarching || (unit.marchCurrentOffsetX != null && Math.abs(unit.marchCurrentOffsetX) > 1);
+        const advancing = (unit.victoryAdvanceX != null && Math.abs(unit.victoryAdvanceX) > 1)
+          || (unit.victoryAscentY != null && Math.abs(unit.victoryAscentY) > 1)
+          || (unit.sinkingY != null && Math.abs(unit.sinkingY) > 1);
+        if (marching || advancing) {
+          motionPoints.push(pos);
+        }
       }
-      for (const b of droppingBombsRef.current) {
-        trackPoints.push({x: b.x, y: b.y});
-      }
-      for (const bullet of planeBulletsRef.current) {
-        trackPoints.push({x: bullet.x, y: bullet.y});
-      }
-      const phase = battlePhaseRef.current;
       const target = desiredCinematicView({
         canvasW: canvasWidth,
         canvasH: canvasHeight,
-        liveCount,
-        subPhase: rankSubPhaseRef.current,
-        shooterPoints,
-        trackPoints,
-        hitPoints: cinematicHitsRef.current,
-        allocation: phase === 'ALLOCATION' || phase === 'AA_ALLOCATION',
+        unitPoints,
+        motionPoints,
       });
-      cinematicCamRef.current = lerpCam(cinematicCamRef.current, target, deltaTime);
+      cinematicCamRef.current = lerpCam(
+        cinematicCamRef.current,
+        target,
+        deltaTime,
+        CINEMATIC_PAN_RATE,
+        CINEMATIC_ZOOM_RATE,
+      );
     } else if (!gfx.cinematicCamera && cinematicCancelledRoundRef.current < 0) {
       // Toggle off with no manual zoom: ease back to the full board.
       cinematicCamRef.current = lerpCam(
@@ -5059,7 +5056,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
         </label>
         <label
           className="flex items-center gap-1.5 text-[#DFCE91] font-bold cursor-pointer"
-          title="Follows the dice, a firing row, and the hits. The wheel still zooms, and that look holds until the next round."
+          title="Follows the units. It pans with anything that is moving, and the zoom only shifts a little. The wheel still zooms, and that look holds until the next round."
         >
           <input
             type="checkbox"

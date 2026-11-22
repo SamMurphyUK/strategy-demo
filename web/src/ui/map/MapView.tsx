@@ -29,7 +29,8 @@ import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
-import type { FacingStacks } from "./uprightSprites";
+import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
+import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
   battleScarDescriptors,
@@ -237,6 +238,9 @@ export function MapView(props: MapViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const referenceRef = useRef<HTMLImageElement | null>(null);
   const arrowRef = useRef<HTMLCanvasElement>(null);
+  const vectorRef = useRef<SVGSVGElement>(null);
+  const vectorStage = useRef<VehicleStage | null>(null);
+  const chromeRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverId, setHoverId] = useState("");
@@ -525,6 +529,48 @@ export function MapView(props: MapViewProps) {
   }, [props.bindCamera]);
 
   useEffect(() => {
+    const svg = vectorRef.current;
+    if (!svg) {
+      return;
+    }
+    const stage = createVehicleStage(svg);
+    vectorStage.current = stage;
+    return () => {
+      stage.clear();
+      vectorStage.current = null;
+    };
+  }, []);
+
+  const paintCampaignVectors = (dpr: number, cssW: number, cssH: number, fade: number) => {
+    const frame = takeCampaignFigures();
+    const stage = vectorStage.current;
+    if (stage && cssW > 0 && cssH > 0) {
+      stage.sync({ cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1 }, frame.vectors, null);
+      if (vectorRef.current) {
+        vectorRef.current.style.opacity = fade < 1 ? String(Math.max(0, fade)) : "";
+      }
+    }
+    const chrome = chromeRef.current;
+    const cctx = chrome?.getContext("2d");
+    if (!chrome || !cctx) {
+      return;
+    }
+    const pixelW = Math.round(cssW * dpr);
+    const pixelH = Math.round(cssH * dpr);
+    if (pixelW > 0 && (chrome.width !== pixelW || chrome.height !== pixelH)) {
+      chrome.width = pixelW;
+      chrome.height = pixelH;
+    }
+    cctx.setTransform(1, 0, 0, 1, 0, 0);
+    cctx.clearRect(0, 0, chrome.width, chrome.height);
+    cctx.globalAlpha = Math.max(0, Math.min(1, fade));
+    for (const paint of frame.chrome) {
+      paint(cctx);
+    }
+    cctx.globalAlpha = 1;
+  };
+
+  useEffect(() => {
     if (props.suspended) {
       spritesSettled.current = false;
       return;
@@ -656,10 +702,14 @@ export function MapView(props: MapViewProps) {
       };
     }
     if (editor) {
+      beginCampaignFigures();
       drawEditorUnits(ctx, scene, overlay);
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
+      paintCampaignVectors(dpr, size.w, size.h, 0);
     } else {
+      beginCampaignFigures();
       drawGameOverlay(ctx, scene, overlay);
+      paintCampaignVectors(dpr, size.w, size.h, unitFade);
       if (props.warningRegionId) {
         const pulse = 0.5 + 0.5 * Math.sin(warningPulse / 2);
         strokeWarningRing(ctx, dpr, layouts, props.warningRegionId, pulse);
@@ -718,7 +768,9 @@ export function MapView(props: MapViewProps) {
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(hold, 0, 0);
+      beginCampaignFigures();
       drawGameOverlay(ctx, frame.scene, { ...frame.overlay, idleTime: performance.now() / 1000 });
+      paintCampaignVectors(frame.scene.dpr, frame.scene.width, frame.scene.height, frame.scene.unitFade ?? 1);
       if (frame.warningRegionId) {
         const pulse = 0.5 + 0.5 * Math.sin(frame.warningPulse / 2);
         strokeWarningRing(ctx, frame.scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);
@@ -1316,6 +1368,8 @@ export function MapView(props: MapViewProps) {
           }
         }}
       />
+      <svg ref={vectorRef} className="map-vectors" aria-hidden="true" />
+      <canvas ref={chromeRef} className="map-figure-chrome" style={{ width: size.w, height: size.h }} />
       <canvas ref={arrowRef} className="map-arrows" style={{ width: size.w, height: size.h }} />
       <div className="map-controls">
         <button

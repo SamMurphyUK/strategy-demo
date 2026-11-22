@@ -34,12 +34,16 @@ export interface VehicleSvgPart {
 }
 
 export interface VehicleSvgUnit {
-  id: number;
+  id: string;
   x: number;
   y: number;
   unitScale: number;
   rootX: number;
   rootY: number;
+  /** +1 keeps the picture. -1 mirrors it around the feet before the turn. */
+  face?: 1 | -1;
+  /** Clockwise degrees around the feet, after the mirror. */
+  turnDeg?: number;
   parts: VehicleSvgPart[];
 }
 
@@ -101,7 +105,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   const defs = element<SVGDefsElement>("defs");
   const camera = element<SVGGElement>("g");
   svg.replaceChildren(defs, camera);
-  const units = new Map<number, UnitNode>();
+  const units = new Map<string, UnitNode>();
   const filterId = `field-unit-light-${++stageSerial}`;
   let lightKey = "";
 
@@ -136,7 +140,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
     camera.setAttribute("filter", `url(#${filterId})`);
   };
 
-  const dropMasks = (id: number) => {
+  const dropMasks = (id: string) => {
     for (const mask of [...defs.querySelectorAll("mask")]) {
       if (mask.id.startsWith(`veh-${id}-`)) {
         mask.remove();
@@ -186,7 +190,14 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   };
 
   const paint = (node: UnitNode, unit: VehicleSvgUnit) => {
-    node.group.setAttribute("transform", `translate(${unit.x} ${unit.y}) scale(${unit.unitScale})`);
+    const face = unit.face ?? 1;
+    const turn = unit.turnDeg ?? 0;
+    const mirror = face < 0 ? ` scale(${face} 1)` : "";
+    const spin = turn !== 0 ? ` rotate(${turn})` : "";
+    node.group.setAttribute(
+      "transform",
+      `translate(${unit.x} ${unit.y})${spin}${mirror} scale(${unit.unitScale})`,
+    );
     node.root.setAttribute("transform", `translate(${unit.rootX} ${unit.rootY})`);
     unit.parts.forEach((part, index) => {
       const layer = node.parts[index];
