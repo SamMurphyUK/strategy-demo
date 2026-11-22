@@ -123,6 +123,23 @@ describe("fills", () => {
     expect(regionFill("a", "axis", mode).r).toBeCloseTo(0.648);
   });
 
+  it("paints a landing spot green or amber ahead of the attack wash", () => {
+    const mode = {
+      kind: "move" as const,
+      from: "a",
+      legal: ["b", "field"],
+      hover: "b",
+      landing: [
+        { regionId: "field", tone: "safe" as const },
+        { regionId: "deck", tone: "tight" as const },
+      ],
+    };
+    expect(regionFill("b", "axis", mode)).toEqual({ r: 0.95, g: 0.15, b: 0.12, a: 0.68 });
+    expect(regionFill("field", "axis", mode)).toEqual({ r: 36 / 255, g: 140 / 255, b: 72 / 255, a: 0.52 });
+    expect(regionFill("deck", "", mode).r).toBeCloseTo(196 / 255);
+    expect(regionFill("deck", "", { ...mode, hover: "deck" }).a).toBe(0.68);
+  });
+
   it("keeps owner colour on mobilize targets", () => {
     const mode = { kind: "mobilize" as const, legal: ["b"], hover: "b" };
     expect(regionFill("b", "allies", mode)).toEqual({ r: 0.5, g: 0.85, b: 0.5, a: 0.62 });

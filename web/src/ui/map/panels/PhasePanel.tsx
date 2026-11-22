@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { describeStranded, fuelRemaining, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
+import { describeStranded, fuelRemaining, planesMustLandMessage, sortieCost, strandedPlanes } from "../../../engine/air/air_fuel";
 import { combatCargoCommit, strandedCargoGate } from "../../../engine/transport/cargo_rules";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Battle } from "../../../engine/combat/combat";
@@ -16,6 +16,7 @@ interface Props {
   selection: Selection;
   setSelection(s: Selection): void;
   legalTargets: string[];
+  hoverRegionId?: string;
   pending: PurchaseLine[];
   /** Zoom to the territory, then open the attack card, then the battle. */
   onFight(regionId: string): void;
@@ -30,6 +31,7 @@ export function PhasePanel({
   selection,
   setSelection,
   legalTargets,
+  hoverRegionId = "",
   pending,
   onFight,
   onStrandedCargo,
@@ -69,7 +71,13 @@ export function PhasePanel({
       )}
 
       {(phase === "combat_move" || phase === "noncombat_move") && (
-        <MoveBody selection={selection} setSelection={setSelection} legalTargets={legalTargets} game={game} />
+        <MoveBody
+          selection={selection}
+          setSelection={setSelection}
+          legalTargets={legalTargets}
+          hoverRegionId={hoverRegionId}
+          game={game}
+        />
       )}
 
       {phase === "combat" && <CombatBody battles={battles} onFight={onFight} />}
@@ -254,13 +262,22 @@ function MoveBody({
   selection,
   setSelection,
   legalTargets,
+  hoverRegionId,
 }: {
   game: GameSessionHandle;
   selection: Selection;
   setSelection(s: Selection): void;
   legalTargets: string[];
+  hoverRegionId: string;
 }) {
   const state = game.session.state;
+  const roundTrip =
+    selection?.kind === "stack" &&
+    state.current_phase === "combat_move" &&
+    state.unit_types[selection.unitTypeId]?.category === "air" &&
+    legalTargets.includes(hoverRegionId)
+      ? sortieCost(state, state.current_faction_id, selection.unitTypeId, selection.regionId, hoverRegionId)
+      : null;
   if (selection?.kind !== "stack") {
     return (
       <p className="muted">
@@ -282,6 +299,7 @@ function MoveBody({
           </b>
         </p>
       )}
+      {roundTrip != null && <p className="deck-round">ROUND-TRIP REQUIRED: {roundTrip}</p>}
       {selection.max > 1 && (
         <div className="row stepper">
           <button

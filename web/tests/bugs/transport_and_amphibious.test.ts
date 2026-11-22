@@ -16,6 +16,7 @@ import {
   combatCargoCommit,
   type CargoLine,
 } from "../../src/engine";
+import { applyRecordedMove } from "../../src/engine/movement/phase_orders";
 import type { UnitStackEntry } from "../../src/engine/model/types";
 
 function region(state: GameState, id: string, land: boolean, owner: string): void {
@@ -185,5 +186,53 @@ describe("transport cargo and amphibious assault", () => {
     expect(bombardment).toHaveLength(1);
     expect(bombardment[0].rank).toBe(4);
     expect(combat.legalRetreats()).toEqual([]);
+  });
+
+  it("assaults one cargo unit and leaves the other aboard", () => {
+    const state = transportBoard();
+    state.region_units.coast = [stack("red", "infantry", 1), stack("red", "tank", 1)];
+    state.region_units.beach = [stack("blue", "infantry", 1)];
+    region(state, "next", false, "");
+    link(state, "sea", "next");
+    state.region_units.sea.push(stack("red", "battleship", 1));
+    beginMovementPhase(state);
+    load(state, [
+      { unit_type_id: "infantry", count: 1 },
+      { unit_type_id: "tank", count: 1 },
+    ]);
+    applyCargoCommand(
+      state,
+      Command.fromDict({
+        player_id: "red",
+        type: CommandType.DESIGNATE_AMPHIBIOUS,
+        payload: {
+          transport_instance_id: "transport_red_001",
+          origin_sea_zone_id: "sea",
+          target_region_id: "beach",
+          units: [{ unit_type_id: "infantry", count: 1 }],
+        },
+      }),
+      new MovementEngine(state),
+      new AmphibiousEngine(state),
+    );
+    expect(state.transport_instances.transport_red_001.cargo).toEqual([{ unit_type_id: "tank", count: 1 }]);
+    expect(state.pending_amphibious_assaults[0]?.cargo).toEqual([{ unit_type_id: "infantry", count: 1 }]);
+
+    applyRecordedMove(
+      state,
+      Command.fromDict({
+        player_id: "red",
+        type: CommandType.MOVE_UNITS,
+        payload: {
+          moves: [{ from_region_id: "sea", to_region_id: "next", units: [{ unit_type_id: "battleship", count: 1 }] }],
+        },
+      }),
+      new MovementEngine(state),
+    );
+    const moveId = state.phase_orders.find((order) => order.unitType === "battleship")?.id ?? "";
+    cancel_phase_order(state, moveId);
+    expect(state.transport_instances.transport_red_001.cargo).toEqual([{ unit_type_id: "tank", count: 1 }]);
+    expect(state.pending_amphibious_assaults[0]?.cargo).toEqual([{ unit_type_id: "infantry", count: 1 }]);
+    expect(countOf(state, "sea", "red", "battleship")).toBe(1);
   });
 });

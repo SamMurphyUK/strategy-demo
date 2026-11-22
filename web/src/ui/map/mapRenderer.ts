@@ -555,6 +555,8 @@ export interface GameOverlay {
   isLoaded?(entry: StackEntry): boolean;
   /** How many land units are aboard, for the cargo pill. */
   cargoCount?(entry: StackEntry): number;
+  /** Filled seats under a transport or carrier. Null when the token has no hold. 0 draws two empty circles. */
+  holdsFor?(regionId: string, entry: StackEntry): number | null;
   /** Unit type id to land, air or sea, from the scenario's unit data. */
   categories?: Record<string, string>;
   /** The token under the pointer. Drawn last so a tucked card comes to the front. */
@@ -683,6 +685,11 @@ function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, outer:
   ctx.stroke();
 }
 
+function holdFill(game: GameOverlay, regionId: string, entry: StackEntry): number | undefined {
+  const filled = game.holdsFor?.(regionId, entry);
+  return filled == null ? undefined : filled;
+}
+
 /**
  * One region's unit tokens, back to front, with the rings that mark a selected or unmoved stack. A hovered
  * token is drawn last so a card tucked under the fan comes to the front. A capped fan grows a [+] on the lead.
@@ -703,6 +710,7 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       loaded: game.isLoaded?.(entry) ?? false,
       cargoCount: game.cargoCount?.(entry) ?? 0,
       fuel: game.fuelFor?.(region.id, entry) ?? null,
+      holds: holdFill(game, region.id, entry),
     });
     const selected = game.selectedStack?.regionId === region.id && game.selectedStack.key === counter.slot.key;
     const unmoved = game.isUnmoved(region.id, entry);
@@ -819,6 +827,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             fuel: game.fuelFor?.(layout.region.id, entry) ?? null,
             loaded: game.isLoaded?.(entry) ?? false,
             cargoCount: game.cargoCount?.(entry) ?? 0,
+            holds: holdFill(game, layout.region.id, entry),
             idleTime: game.idleTime,
             idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
             aim: facing(layout.region.id, entry.faction_id),

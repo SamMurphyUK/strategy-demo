@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
-import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
+import { fuelForDisplayEntry, landingMarks, offeredMoveDestinations } from "../../engine/air/air_fuel";
 import { loadJson } from "../../engine/content/res";
 import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
@@ -17,7 +17,7 @@ import {
   type MapCamera,
   panToTerritory,
 } from "./combatCamera";
-import { seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
+import { movesOnlyInNoncombat, seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorStart } from "./editor/EditorStart";
 import { EditorToolbar } from "./editor/EditorToolbar";
@@ -31,7 +31,9 @@ import { type CombatMarker, MapView } from "./MapView";
 import { concealNeutralGarrison } from "./neutralGarrison";
 import type { MasterLand } from "./svgLandLoader";
 import { useMasterLand } from "./useMasterLand";
+import { holdMarks, presentRegionUnits } from "./shipHold";
 import { EventLog } from "./panels/EventLog";
+import { DeckManifest } from "./panels/DeckManifest";
 import { PendingOrders } from "./panels/PendingOrders";
 import { PhasePanel } from "./panels/PhasePanel";
 import { RegionPanel } from "./panels/RegionPanel";
@@ -52,7 +54,17 @@ import { type PlayChoice } from "./session/play_map";
 import { useCampaignSession } from "./session/use_campaign_session";
 
 export type Selection =
-  | { kind: "stack"; regionId: string; key: string; unitTypeId: string; instanceId: string; max: number; count: number }
+  | {
+      kind: "stack";
+      regionId: string;
+      key: string;
+      unitTypeId: string;
+      instanceId: string;
+      /** Set when the selection is one transport's cargo rather than the ship. */
+      cargoOf: string;
+      max: number;
+      count: number;
+    }
   | { kind: "place"; unitTypeId: string }
   | null;
 
@@ -354,12 +366,15 @@ export function App() {
       if (region != null && concealNeutralGarrison(owner, region.isLandRegion(), atWar.has(id))) {
         continue;
       }
-      out[id] = RegionUnitDisplay.buildDisplayEntries(state.region_units[id]);
+      out[id] = RegionUnitDisplay.buildDisplayEntries(presentRegionUnits(state, id, state.region_units[id] ?? []));
     }
     return out;
   }, [state, version]);
 
-  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string) => {
+  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string, cargoOf = "") => {
+    if (cargoOf !== "") {
+      return session.getLegalUnloadDestinations(cargoOf, faction);
+    }
     const moves = offeredMoveDestinations(
       state,
       phase,
@@ -380,7 +395,7 @@ export function App() {
 
   const legalTargets = useMemo(() => {
     if (selection?.kind === "stack") {
-      return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId);
+      return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId, selection.cargoOf);
     }
     if (selection?.kind === "place") {
       return session.getLegalMobilizeRegions(faction, selection.unitTypeId);
@@ -391,6 +406,11 @@ export function App() {
   const highlight: HighlightMode = useMemo(() => {
     if (selection?.kind === "stack") {
       const naval = state.unit_types[selection.unitTypeId]?.category === "sea";
+      const air = state.unit_types[selection.unitTypeId]?.category === "air";
+      const landing =
+        air && (phase !== "combat_move" || legalTargets.includes(hoverRegionId))
+          ? landingMarks(state, faction, selection.unitTypeId, selection.regionId, hoverRegionId, phase)
+          : [];
       return {
         kind: "move",
         from: selection.regionId,
@@ -398,13 +418,14 @@ export function App() {
         hover: hoverRegionId,
         tone: phase === "noncombat_move" ? "move" : "attack",
         hostile: naval ? legalTargets.filter((id) => state.holdsEnemyNavalUnit(id, faction)) : undefined,
+        landing,
       };
     }
     if (selection?.kind === "place") {
       return { kind: "mobilize", legal: legalTargets, hover: hoverRegionId };
     }
     return { kind: "none" };
-  }, [selection, legalTargets, hoverRegionId, phase]);
+  }, [selection, legalTargets, hoverRegionId, phase, state, faction, version]);
 
   const combatMarkers: CombatMarker[] = useMemo(() => {
     if (phase !== "combat_move" || faction === "") {
@@ -449,6 +470,20 @@ export function App() {
       return;
     }
     if (selection?.kind === "stack" && legalTargets.includes(regionId)) {
+      if (selection.cargoOf !== "") {
+        commitMove(
+          selection.regionId,
+          {
+            unit_type_id: selection.unitTypeId,
+            faction_id: faction,
+            count: selection.count,
+            cargoOf: selection.cargoOf,
+          },
+          regionId,
+          selection.count,
+        );
+        return;
+      }
       const unit: Record<string, unknown> = { unit_type_id: selection.unitTypeId, count: selection.count };
       if (selection.instanceId !== "") {
         unit.instance_id = selection.instanceId;
@@ -490,6 +525,18 @@ export function App() {
     if (!MOVEMENT_PHASES.includes(phase) || !isActiveFaction(entry.faction_id, faction)) {
       return 0;
     }
+    if (entry.cargoOf) {
+      if (phase === "combat_move" && movesOnlyInNoncombat(state, entry.unit_type_id)) {
+        return 0;
+      }
+      const aboard = (state.transport_instances[entry.cargoOf]?.cargo ?? [])
+        .filter((line) => line.unit_type_id === entry.unit_type_id)
+        .reduce((sum, line) => sum + Math.max(0, Math.trunc(Number(line.count ?? 0))), 0);
+      if (aboard <= 0 || session.getLegalUnloadDestinations(entry.cargoOf, faction).length === 0) {
+        return 0;
+      }
+      return Math.min(aboard, Math.max(1, entry.count || aboard));
+    }
     const base = entry.instance_id
       ? state.hasInstanceMoved(entry.instance_id)
         ? 0
@@ -521,12 +568,21 @@ export function App() {
     setSelection(
       max <= 0
         ? null
-        : { kind: "stack", regionId, key: stackKey(entry), unitTypeId: entry.unit_type_id, instanceId: entry.instance_id ?? "", max, count: max },
+        : {
+            kind: "stack",
+            regionId,
+            key: stackKey(entry),
+            unitTypeId: entry.unit_type_id,
+            instanceId: entry.instance_id ?? "",
+            cargoOf: entry.cargoOf ?? "",
+            max,
+            count: max,
+          },
     );
   };
 
   /** Move `count` of a stack. The map drag, its split popover, and an inspector drop all come through here. */
-  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number) => {
+  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null) => {
     if (!isMyTurn) {
       return;
     }
@@ -535,20 +591,52 @@ export function App() {
       setSelection(null);
       return;
     }
-    const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "");
+    const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "");
     if (!legal.includes(target)) {
       setSelection(null);
       return;
     }
+    if (entry.cargoOf) {
+      const transportId = entry.cargoOf;
+      const sea = transportSeaZone(state, transportId);
+      const hostile = phase === "combat_move" && state.isRegionHostileTo(target, entry.faction_id);
+      const units = [{ unit_type_id: entry.unit_type_id, count: Math.min(max, Math.max(1, count)) }];
+      const result = hostile
+        ? game.send("designate_amphibious", {
+            transport_instance_id: transportId,
+            origin_sea_zone_id: sea,
+            target_region_id: target,
+            units,
+          })
+        : game.send("unload_transport", {
+            transport_instance_id: transportId,
+            to_region_id: target,
+            units,
+          });
+      if (result.result_type === "ok") {
+        setSelection(null);
+        setSelectedRegionId(target);
+        soundManager.play(hostile ? "battle_arrow_lock" : "token_drop");
+      }
+      return;
+    }
     const category = state.unit_types[entry.unit_type_id]?.category;
     if (category === "land" && state.regions[target]?.isSeaRegion()) {
-      const transportId = session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
-      if (transportId === "") {
+      const ontoCarrier = Math.trunc(Number(state.unit_types[onto?.unit_type_id ?? ""]?.special?.fighter_capacity ?? 0)) > 0;
+      if (ontoCarrier) {
+        setSelection(null);
+        return;
+      }
+      const chosen =
+        onto?.unit_type_id === "transport" && onto.instance_id
+          ? onto.instance_id
+          : session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
+      if (chosen === "") {
         setSelection(null);
         return;
       }
       const loaded = game.send("load_transport", {
-        transport_instance_id: transportId,
+        transport_instance_id: chosen,
         from_region_id: regionId,
         units: [{ unit_type_id: entry.unit_type_id, count: Math.min(max, Math.max(1, count)) }],
       });
@@ -617,6 +705,7 @@ export function App() {
             key: stackKey(entry),
             unitTypeId: entry.unit_type_id,
             instanceId: entry.instance_id ?? "",
+            cargoOf: entry.cargoOf ?? "",
             max,
             count: Math.min(max, Math.max(1, count)),
           },
@@ -646,6 +735,7 @@ export function App() {
       key,
       unitTypeId: entry.unit_type_id,
       instanceId: entry.instance_id ?? "",
+      cargoOf: entry.cargoOf ?? "",
       max,
       count: max,
     });
@@ -804,7 +894,9 @@ export function App() {
           }}
           registerDropResolver={registerDropResolver}
           movableMax={(regionId, entry) => (isMyTurn ? movableCount(regionId, entry) : 0)}
-          legalMovesFor={(regionId, entry) => destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "")}
+          legalMovesFor={(regionId, entry) =>
+            destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "")
+          }
           onArmDrag={armDrag}
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
           onDragCancel={() => setSelection(null)}
@@ -860,6 +952,15 @@ export function App() {
               0,
             );
           }}
+          holdsFor={
+            editing
+              ? undefined
+              : (regionId, entry) => {
+                  const marks = holdMarks(state, regionId, entry);
+                  return marks == null ? null : marks.length;
+                }
+          }
+          holdMarksFor={editing ? undefined : (regionId, entry) => holdMarks(state, regionId, entry)}
           warningRegionId={warningSea}
           editor={editing ? editor.binding : undefined}
           bindCamera={bindCamera}
@@ -881,11 +982,22 @@ export function App() {
                 selection={selection}
                 setSelection={setSelection}
                 legalTargets={legalTargets}
+                hoverRegionId={hoverRegionId}
                 pending={pendingForFaction}
                 commandsEnabled={isMyTurn}
                 onFight={approachBattle}
                 onStrandedCargo={focusStrandedTransport}
               />
+              {selectedRegionId !== "" && (
+                <DeckManifest
+                  game={game}
+                  regionId={selectedRegionId}
+                  selection={selection}
+                  hoverRegionId={hoverRegionId}
+                  legalTargets={legalTargets}
+                  onSelectStack={selectStack}
+                />
+              )}
               {hoverRegionId !== "" && seaZoneCargoLabel(state, hoverRegionId) !== "" && (
                 <p className="cargo-hover">{seaZoneCargoLabel(state, hoverRegionId)}</p>
               )}

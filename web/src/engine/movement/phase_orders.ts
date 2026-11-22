@@ -1,6 +1,6 @@
 // Movement phases keep a clone from the moment they begin. Cancelling an order
 // restores that clone and plays the other orders forward again.
-import { isAirUnit, noteAirArrival } from "../air/air_fuel";
+import { ferryPassengers, isAirUnit, noteAirArrival, type FerryPassenger } from "../air/air_fuel";
 import { Faction } from "../model/faction";
 import { Command, CommandType } from "../model/command";
 import type { GameEvent } from "../model/event";
@@ -30,6 +30,8 @@ export interface MoveOrder {
   kind?: "move" | "load_transport" | "unload_transport" | "amphibious_assault";
   transportInstanceId?: string;
   cargo?: { unit_type_id: string; count: number }[];
+  /** Same-faction planes riding this carrier. Stored when the order is recorded so commit does not recompute after the hold. */
+  passengers?: FerryPassenger[];
 }
 
 /** `structuredClone` of a `GameState`. Region, unit, and faction prototypes are put back on restore. */
@@ -114,6 +116,7 @@ function orderIsHeld(state: GameState): boolean {
  * the units stay where they are until the phase ends, and can be cancelled one by one.
  */
 export function applyRecordedMove(state: GameState, command: Command, movement: MovementEngine): GameEvent[] {
+  const plans = passengerPlans(state, command);
   const moves = (command.payload.moves ?? []) as unknown[];
   const going: Dict[] = [];
   for (const move of moves) {
@@ -136,13 +139,121 @@ export function applyRecordedMove(state: GameState, command: Command, movement: 
   events[0].payload = { faction_id: command.player_id, moves: command.payload.moves ?? [] };
   const marked = state.phase_orders.length;
   recordMoveOrders(state, command);
-  for (const order of state.phase_orders.slice(marked)) {
+  const recorded = state.phase_orders.slice(marked);
+  attachPassengers(state, movement, recorded, plans);
+  for (const order of recorded) {
     if (orderIsHeld(state)) {
       continue;
     }
     noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, order.unitType, order.stepsUsed);
   }
   return events;
+}
+
+interface PassengerPlan {
+  from: string;
+  unitType: string;
+  count: number;
+  passengers: FerryPassenger[];
+}
+
+/** Plan the ride before anyone moves. Planes named in this command keep their own order. */
+function passengerPlans(state: GameState, command: Command): PassengerPlan[] {
+  const reserved: Record<string, number> = {};
+  const moves = Array.isArray(command.payload.moves) ? command.payload.moves : [];
+  for (const move of moves) {
+    if (!isRecord(move)) {
+      continue;
+    }
+    const units = Array.isArray(move.units) ? move.units : [];
+    for (const unit of units) {
+      if (!isRecord(unit)) {
+        continue;
+      }
+      const unitType = String(unit.unit_type_id ?? "");
+      if (!isAirUnit(state, unitType)) {
+        continue;
+      }
+      const key = `${command.player_id}|${unitType}`;
+      reserved[key] = (reserved[key] ?? 0) + Math.trunc(Number(unit.count ?? 1));
+    }
+  }
+  const plans: PassengerPlan[] = [];
+  for (const move of moves) {
+    if (!isRecord(move)) {
+      continue;
+    }
+    const from = String(move.from_region_id ?? "");
+    const units = Array.isArray(move.units) ? move.units : [];
+    for (const unit of units) {
+      if (!isRecord(unit)) {
+        continue;
+      }
+      const unitType = String(unit.unit_type_id ?? "");
+      const count = Math.trunc(Number(unit.count ?? 1));
+      const passengers = ferryPassengers(state, command.player_id, from, unitType, count, reserved);
+      if (passengers.length === 0) {
+        continue;
+      }
+      for (const passenger of passengers) {
+        const key = `${command.player_id}|${passenger.unitType}`;
+        reserved[key] = (reserved[key] ?? 0) + passenger.count;
+      }
+      plans.push({ from, unitType, count, passengers });
+    }
+  }
+  return plans;
+}
+
+function attachPassengers(
+  state: GameState,
+  movement: MovementEngine,
+  orders: MoveOrder[],
+  plans: PassengerPlan[],
+): void {
+  const pending = plans.slice();
+  for (const order of orders) {
+    if (order.kind != null && order.kind !== "move") {
+      continue;
+    }
+    const index = pending.findIndex(
+      (plan) => plan.from === order.fromRegionId && plan.unitType === order.unitType && plan.count === order.count,
+    );
+    if (index < 0) {
+      continue;
+    }
+    const plan = pending.splice(index, 1)[0];
+    order.passengers = plan.passengers;
+    if (orderIsHeld(state)) {
+      for (const passenger of plan.passengers) {
+        holdAttack(state, order.faction, order.fromRegionId, {
+          unit_type_id: passenger.unitType,
+          count: passenger.count,
+        });
+      }
+      continue;
+    }
+    for (const passenger of plan.passengers) {
+      movement.processMove(commandForPassenger(order, passenger));
+      noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, passenger.unitType, 0);
+    }
+  }
+}
+
+function commandForPassenger(order: MoveOrder, passenger: FerryPassenger): Command {
+  return Command.fromDict({
+    player_id: order.faction,
+    type: CommandType.MOVE_UNITS,
+    payload: {
+      moves: [
+        {
+          from_region_id: order.fromRegionId,
+          to_region_id: order.toRegionId,
+          units: [{ unit_type_id: passenger.unitType, count: passenger.count }],
+        },
+      ],
+    },
+  });
 }
 
 function commitOrders(state: GameState, orders: readonly MoveOrder[]): void {
@@ -156,6 +267,11 @@ function commitOrders(state: GameState, orders: readonly MoveOrder[]): void {
     }
     movement.processMove(commandForOrder(order));
     noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, order.unitType, order.stepsUsed);
+    for (const passenger of order.passengers ?? []) {
+      state.releaseAttackHold(order.faction, order.fromRegionId, passenger.unitType, passenger.count);
+      movement.processMove(commandForPassenger(order, passenger));
+      noteAirArrival(state, order.faction, order.fromRegionId, order.toRegionId, passenger.unitType, 0);
+    }
   }
   for (const key of Object.keys(state.units_attacking_this_phase)) {
     delete state.units_attacking_this_phase[key];
@@ -257,7 +373,9 @@ export function applyCargoCommand(
   }
   if (command.type === CommandType.DESIGNATE_AMPHIBIOUS) {
     const events = (amphibious ?? new AmphibiousEngine(state)).designateAssault(command);
-    rememberCargo(state, command, "amphibious_assault");
+    if (events.length > 0) {
+      rememberCargo(state, command, "amphibious_assault");
+    }
     return events;
   }
   return [];
@@ -353,6 +471,7 @@ function commandForCargo(order: MoveOrder): Command {
       transport_instance_id: order.transportInstanceId,
       origin_sea_zone_id: order.fromRegionId,
       target_region_id: order.toRegionId,
+      units: order.cargo ?? [],
     },
   });
 }

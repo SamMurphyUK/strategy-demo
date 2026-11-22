@@ -2,9 +2,9 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useStat
 import { DRAG_PITCH_OFFSET, dragPitchStep, soundManager } from "../../audio/sound_manager";
 import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
-import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
+import { facilityAnchorOf, stackKey, type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
-import { buildCutterPaths, buildRegionPaths, pickCounter, pickFrontCounter, pickPlus, pickRegion } from "./hitTest";
+import { buildCutterPaths, buildRegionPaths, pickCounter, pickFrontCounter, pickHold, pickPlus, pickRegion } from "./hitTest";
 import {
   drawBattleIcons,
   drawFootIcons,
@@ -23,6 +23,7 @@ import {
   TOKEN_PX,
 } from "./mapRenderer";
 import type { OperationalOrder } from "./operationalArrows";
+import type { HoldMark } from "./shipHold";
 import { BAKE_PAINT, TerrainBake } from "./mapBake";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
@@ -110,6 +111,10 @@ export interface MapViewProps {
   isLoaded?(entry: StackEntry): boolean;
   /** Pieces aboard, drawn as the cargo pill. */
   cargoCount?(entry: StackEntry): number;
+  /** Filled seats under a transport or carrier. Null when the token has no hold. */
+  holdsFor?(regionId: string, entry: StackEntry): number | null;
+  /** The units in those seats, for dragging one circle. Null when the token has no hold. */
+  holdMarksFor?(regionId: string, entry: StackEntry): HoldMark[] | null;
   /** Sea zone to ring while combat-move cargo is still aboard. */
   warningRegionId?: string;
   /** A capped fan or its [+] was clicked: select the region and open the inspector. */
@@ -126,8 +131,8 @@ export interface MapViewProps {
   onDragCount?(count: number): void;
   /** The drag or the split popover was dismissed without a move. */
   onDragCancel?(): void;
-  /** Drop committed: move `count` of the stack onto `target`. */
-  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number): void;
+  /** Drop committed: move `count` of the stack onto `target`. `onto` is the token under the pointer, when the drop landed on one. */
+  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null): void;
   /** Display name for a stack in the split popover. Falls back to the type id. */
   unitTitle?(entry: StackEntry): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
@@ -396,8 +401,42 @@ export function MapView(props: MapViewProps) {
   }, [mapLod, editor]);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach };
+  const tokenPx = TOKEN_PX * unitScale;
+  const upright = mapLod === 2;
+  const live = useRef({
+    view,
+    size,
+    layouts,
+    paths,
+    props,
+    fitK,
+    bounds,
+    exact,
+    only,
+    wrap,
+    tokenHitPx,
+    plusHitPx,
+    uprightReach,
+    tokenPx,
+    upright,
+  });
+  live.current = {
+    view,
+    size,
+    layouts,
+    paths,
+    props,
+    fitK,
+    bounds,
+    exact,
+    only,
+    wrap,
+    tokenHitPx,
+    plusHitPx,
+    uprightReach,
+    tokenPx,
+    upright,
+  };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -674,6 +713,7 @@ export function MapView(props: MapViewProps) {
       fuelFor: props.fuelFor,
       isLoaded: props.isLoaded,
       cargoCount: props.cargoCount,
+      holdsFor: props.holdsFor,
       categories: props.unitCategories,
       idleTime: settled ? performance.now() / 1000 : undefined,
       sameTeam: props.sameTeam,
@@ -788,6 +828,21 @@ export function MapView(props: MapViewProps) {
     // The upright picture is wider and taller than the token, and a squad stands out to either side.
     return reach > 0 ? pickFrontCounter(ls, sp, Math.max(hit, 48), Math.max(reach, 52)) : pickCounter(ls, sp, hit);
   };
+
+  const pickSeat = (ls: RegionLayout[], sp: Vec2) => {
+    const { props: p, tokenPx: px, upright: stand } = live.current;
+    if (!p.holdMarksFor) {
+      return null;
+    }
+    return pickHold(ls, sp, px, stand, p.holdMarksFor);
+  };
+
+  const seatStack = (mark: HoldMark): StackEntry => ({
+    unit_type_id: mark.unitType,
+    faction_id: mark.factionId,
+    count: 1,
+    cargoOf: mark.transportId || undefined,
+  });
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -942,6 +997,16 @@ export function MapView(props: MapViewProps) {
       p.onOpenInspector?.(plus.region.id);
       return;
     }
+    const seat = pickSeat(ls, sp);
+    if (seat) {
+      if (seat.mark && !seat.mark.pending) {
+        const entry = seatStack(seat.mark);
+        p.onStackClick(seat.counter.regionId, entry, stackKey(entry));
+        return;
+      }
+      p.onStackClick(seat.counter.regionId, seat.counter.slot.entry, seat.counter.slot.key);
+      return;
+    }
     const picked = pickUnit(ls, sp);
     if (picked) {
       if (picked.layout.capped) {
@@ -1007,26 +1072,38 @@ export function MapView(props: MapViewProps) {
       // Knife: dragging draws the cut. Alt-drag still pans.
       drag.current = { kind: "swipe", from, points: [], moved: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
     } else if (!ed && pickPlus(ls, sp, plusHit) === null) {
-      const picked = pickUnit(ls, sp);
-      const max = picked ? (p.movableMax?.(picked.counter.regionId, picked.counter.slot.entry) ?? 0) : 0;
-      if (picked && max > 0) {
-        const slotWorld = screenToWorld(v, { x: picked.counter.x, y: picked.counter.y });
+      const seat = pickSeat(ls, sp);
+      const dragged = seat?.mark && !seat.mark.pending ? seatStack(seat.mark) : null;
+      const seatMax = dragged ? Math.min(1, p.movableMax?.(seat!.counter.regionId, dragged) ?? 0) : 0;
+      const picked = dragged && seatMax > 0 ? null : pickUnit(ls, sp);
+      const max = dragged && seatMax > 0 ? seatMax : picked ? (p.movableMax?.(picked.counter.regionId, picked.counter.slot.entry) ?? 0) : 0;
+      const gestureEntry = dragged && seatMax > 0 ? dragged : picked?.counter.slot.entry;
+      const gestureRegion = dragged && seatMax > 0 ? seat!.counter.regionId : picked?.counter.regionId;
+      const gestureKey = dragged && seatMax > 0 ? stackKey(dragged) : picked?.counter.slot.key;
+      const gesturePoint =
+        dragged && seatMax > 0
+          ? { x: seat!.counter.x, y: seat!.counter.y }
+          : picked
+            ? { x: picked.counter.x, y: picked.counter.y }
+            : null;
+      if (gestureEntry && gestureRegion && gestureKey && gesturePoint && max > 0) {
+        const slotWorld = screenToWorld(v, gesturePoint);
         const originWorld = {
           x: live.current.wrap ? wrapWorldX(slotWorld.x, live.current.bounds) : slotWorld.x,
           y: slotWorld.y,
         };
         const next: UnitGesture = {
-          regionId: picked.counter.regionId,
-          key: picked.counter.slot.key,
-          entry: picked.counter.slot.entry,
+          regionId: gestureRegion,
+          key: gestureKey,
+          entry: gestureEntry,
           originWorld,
           max,
-          count: max,
+          count: dragged && seatMax > 0 ? 1 : max,
           adjusted: false,
           moved: false,
           armed: false,
           pointer: sp,
-          legal: p.legalMovesFor?.(picked.counter.regionId, picked.counter.slot.entry) ?? [],
+          legal: p.legalMovesFor?.(gestureRegion, gestureEntry) ?? [],
           startX: e.clientX,
           startY: e.clientY,
           wheel: 0,
@@ -1125,6 +1202,7 @@ export function MapView(props: MapViewProps) {
       p.onRegionHover(id);
     }
     const picked = pickUnit(ls, sp);
+    const seat = pickSeat(ls, sp);
     const overPlus = pickPlus(ls, sp, live.current.plusHitPx) !== null;
     const nextHover = picked
       ? { regionId: picked.counter.regionId, key: picked.counter.slot.key, copyDx: picked.layout.copyDx }
@@ -1139,7 +1217,7 @@ export function MapView(props: MapViewProps) {
       p.editor?.overlay.tool === "lattice" ||
       sculptAim === "pen" ||
       sculptAim === "blob";
-    canvasRef.current!.style.cursor = aiming ? "crosshair" : overPlus || picked !== null || id !== "" ? "pointer" : "default";
+    canvasRef.current!.style.cursor = aiming ? "crosshair" : overPlus || seat !== null || picked !== null || id !== "" ? "pointer" : "default";
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -1148,7 +1226,7 @@ export function MapView(props: MapViewProps) {
     if (!d) {
       return;
     }
-    const { view: v, paths: ps, props: p, exact: ex } = live.current;
+    const { view: v, layouts: ls, paths: ps, props: p, exact: ex } = live.current;
     if (d.kind === "lattice") {
       const end = screenToWorld(v, pointer(e));
       p.editor?.onLattice?.(end, { erase: d.erase, shift: e.shiftKey, done: true });
@@ -1194,7 +1272,15 @@ export function MapView(props: MapViewProps) {
         return;
       }
       if (result.type === "commit") {
-        p.onDropMove?.(g.regionId, g.entry, result.target, result.count);
+        const ontoSeat = pickSeat(ls, sp);
+        const ontoUnit = pickUnit(ls, sp);
+        const onto =
+          ontoSeat && ontoSeat.counter.regionId === result.target
+            ? ontoSeat.counter.slot.entry
+            : ontoUnit && ontoUnit.counter.regionId === result.target
+              ? ontoUnit.counter.slot.entry
+              : null;
+        p.onDropMove?.(g.regionId, g.entry, result.target, result.count, onto);
         return;
       }
       setSplit({

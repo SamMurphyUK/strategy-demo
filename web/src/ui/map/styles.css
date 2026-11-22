@@ -643,6 +643,55 @@
     color: var(--teal);
   }
 
+  & .deck-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  & .deck-list button,
+  & .deck-static {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 6px 10px 6px 14px;
+    text-align: left;
+  }
+
+  & .deck-static {
+    background: var(--paper);
+    border: 1px solid var(--hair);
+  }
+
+  & .fuel-pips {
+    display: flex;
+    gap: 3px;
+    margin-top: 4px;
+  }
+
+  & .fuel-pip {
+    display: block;
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--teal);
+    background: transparent;
+  }
+
+  & .fuel-pip.full {
+    background: var(--teal);
+  }
+
+  & .deck-round {
+    margin-top: 4px;
+    font: 700 11px/1.3 var(--mono);
+    letter-spacing: 0.04em;
+    color: var(--gold-text);
+  }
+
   & .pending .unit-name {
     flex: 1;
   }

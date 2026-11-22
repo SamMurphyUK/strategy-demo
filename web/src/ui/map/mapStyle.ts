@@ -1,6 +1,6 @@
 // Colours for the layered map. Pure, so the highlight rules are testable.
 import { type FactionKey, factionPalette, resolveFaction } from "../theme/factionPalette";
-import type { HighlightMode } from "./geometry";
+import { type HighlightMode, landingTone } from "./geometry";
 
 export const OCEAN_COLOR = "#b3c6c3";
 export const LAND_PARCHMENT = "#e6e1d6";
@@ -38,6 +38,18 @@ const REACHABLE: [number, number, number] = [242, 38, 31];
 /** Noncombat destinations. Combat move keeps the red wash. */
 const MOVE_BLUE: [number, number, number] = [36, 112, 210];
 const SEA_TARGET: [number, number, number] = [60, 110, 140];
+/** Friendly land with fuel left after the plane arrives. */
+const LANDING_SAFE: [number, number, number] = [36, 140, 72];
+/** A carrier deck, or a field that uses the last point of fuel. */
+const LANDING_TIGHT: [number, number, number] = [196, 132, 42];
+
+function landingWash(regionId: string, mode: HighlightMode): [number, number, number] | null {
+  const tone = landingTone(regionId, mode);
+  if (tone == null) {
+    return null;
+  }
+  return tone === "safe" ? LANDING_SAFE : LANDING_TIGHT;
+}
 
 function moveWash(mode: HighlightMode): [number, number, number] {
   return mode.kind === "move" && mode.tone === "move" ? MOVE_BLUE : REACHABLE;
@@ -50,6 +62,10 @@ export function landFill(regionId: string, owner: string, mode: HighlightMode): 
   if (mode.kind === "move") {
     if (regionId === mode.from) {
       return base ? rgba(lighten(base, 0.18), OWNED_ALPHA) : rgba([255, 255, 255], 0.35);
+    }
+    const spot = landingWash(regionId, mode);
+    if (spot) {
+      return rgba(spot, regionId === mode.hover ? 0.68 : 0.52);
     }
     if (mode.legal.includes(regionId)) {
       return rgba(moveWash(mode), regionId === mode.hover ? 0.68 : 0.52);
@@ -77,6 +93,10 @@ export function seaFill(regionId: string, mode: HighlightMode): string {
   if (mode.kind === "move") {
     if (regionId === mode.from) {
       return rgba([255, 255, 255], 0.3);
+    }
+    const spot = landingWash(regionId, mode);
+    if (spot) {
+      return rgba(spot, regionId === mode.hover ? 0.68 : 0.52);
     }
     if (mode.legal.includes(regionId)) {
       return rgba(seaTargetWash(regionId, mode), regionId === mode.hover ? 0.6 : 0.42);
@@ -145,7 +165,10 @@ export function highlightLandFill(regionId: string, owner: string, mode: Highlig
   if (mode.kind === "none") {
     return null;
   }
-  const picked = mode.kind === "move" ? regionId === mode.from || mode.legal.includes(regionId) : mode.legal.includes(regionId);
+  const picked =
+    mode.kind === "move"
+      ? regionId === mode.from || mode.legal.includes(regionId) || landingTone(regionId, mode) != null
+      : mode.legal.includes(regionId);
   return picked ? landFill(regionId, owner, mode) : null;
 }
 
@@ -154,6 +177,9 @@ export function highlightSeaFill(regionId: string, mode: HighlightMode): string 
   if (mode.kind === "none") {
     return null;
   }
-  const picked = mode.kind === "move" ? regionId === mode.from || mode.legal.includes(regionId) : mode.legal.includes(regionId);
+  const picked =
+    mode.kind === "move"
+      ? regionId === mode.from || mode.legal.includes(regionId) || landingTone(regionId, mode) != null
+      : mode.legal.includes(regionId);
   return picked ? seaFill(regionId, mode) : null;
 }

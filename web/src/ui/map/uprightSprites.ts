@@ -23,6 +23,8 @@ import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
+import { drawHoldCircles } from "./mapToken";
+import { holdCircleCenters } from "./shipHold";
 import { squadOffsets } from "./zoomLod";
 
 const CHARCOAL = MILITARY.charcoal;
@@ -53,6 +55,8 @@ export interface UprightPaint {
   fuel: number | null;
   loaded: boolean;
   cargoCount?: number;
+  /** Filled seats under a transport or carrier. Absent for every other unit. 0 draws two empty circles. */
+  holds?: number;
   /** Seconds since the page clock, present only while the upright sprites are settled. */
   idleTime?: number;
   /** Per-stack offset so neighbours do not rise together. Radians. */
@@ -875,7 +879,15 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       target.stroke();
       target.setLineDash([]);
     }
+    paintDeck(target);
     target.restore();
+  };
+
+  const paintDeck = (target: CanvasRenderingContext2D) => {
+    if (paint.holds == null) {
+      return;
+    }
+    drawHoldCircles(target, holdCircleCenters(x, y, paint.tokenPx, true), paint.holds);
   };
 
   if (asVector) {
@@ -898,6 +910,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     ctx.setLineDash(paint.selected ? [] : [4, 3]);
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+  if (!asVector) {
+    paintDeck(ctx);
   }
   ctx.restore();
 }
