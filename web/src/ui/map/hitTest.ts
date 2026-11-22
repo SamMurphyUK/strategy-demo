@@ -7,8 +7,9 @@
 // Until the land SVG has loaded there is no true shape. Then the rough cutters are used instead, and
 // the old two-stage test applies: cutters overhang the shore, so ask the land stencil which kind of
 // region the point is in (when it is available) before testing only those.
-import type { RegionShape, Vec2 } from "./geometry";
+import type { RegionShape, StackEntry, Vec2 } from "./geometry";
 import type { PlacedCounter, RegionLayout } from "./mapRenderer";
+import { holdCircleCenters, type HoldMark } from "./shipHold";
 import { frontMostIndex } from "./unitStacks";
 import type { MultiPolygon } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
@@ -131,6 +132,46 @@ export function pickPlus(layouts: RegionLayout[], p: Vec2, radius: number): Regi
  * The unit counter under a screen point. Counters are stored back to front, so the walk is reversed and the
  * front-most token wins, even when a tucked token's centre is closer.
  */
+export interface PickedHold {
+  layout: RegionLayout;
+  counter: PlacedCounter;
+  /** 0 is the left circle. */
+  index: number;
+  /** Null when that circle is empty. */
+  mark: HoldMark | null;
+}
+
+/**
+ * A hold circle under a transport or carrier. The front-most ship wins, then the circle under the point.
+ * Empty circles are hits too, so a click on an open seat still selects the ship.
+ */
+export function pickHold(
+  layouts: RegionLayout[],
+  p: Vec2,
+  tokenPx: number,
+  upright: boolean,
+  marksFor: (regionId: string, entry: StackEntry) => HoldMark[] | null,
+): PickedHold | null {
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const layout = layouts[i];
+    for (let c = layout.counters.length - 1; c >= 0; c--) {
+      const counter = layout.counters[c];
+      const marks = marksFor(counter.regionId, counter.slot.entry);
+      if (marks == null) {
+        continue;
+      }
+      const circles = holdCircleCenters(counter.x, counter.y, tokenPx, upright);
+      for (let s = circles.length - 1; s >= 0; s--) {
+        const circle = circles[s];
+        if (Math.hypot(circle.x - p.x, circle.y - p.y) <= circle.r + 3) {
+          return { layout, counter, index: s, mark: marks[s] ?? null };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function pickCounter(layouts: RegionLayout[], p: Vec2, radius: number): PickedCounter | null {
   for (let i = layouts.length - 1; i >= 0; i--) {
     const layout = layouts[i];

@@ -431,6 +431,38 @@ describe("highlights drawn over the baked map", () => {
     expect(highlightSeaFill("fleet", mode)).toContain("242, 38, 31");
   });
 
+  it("paints a spare airfield green and a carrier deck amber", () => {
+    const mode = {
+      kind: "move" as const,
+      from: "home",
+      legal: ["enemy"],
+      hover: "enemy",
+      tone: "attack" as const,
+      landing: [
+        { regionId: "field", tone: "safe" as const },
+        { regionId: "deck", tone: "tight" as const },
+      ],
+    };
+    expect(highlightLandFill("enemy", "", mode)).toContain("242, 38, 31");
+    expect(highlightLandFill("field", "ussr", mode)).toContain("36, 140, 72");
+    expect(highlightSeaFill("deck", mode)).toContain("196, 132, 42");
+    expect(highlightLandFill("field", "ussr", { ...mode, hover: "field" })).toContain("0.68");
+    expect(highlightSeaFill("elsewhere", mode)).toBeNull();
+  });
+
+  it("lets a landing colour replace the noncombat blue wash", () => {
+    const mode = {
+      kind: "move" as const,
+      from: "home",
+      legal: ["field"],
+      hover: "",
+      tone: "move" as const,
+      landing: [{ regionId: "field", tone: "safe" as const }],
+    };
+    expect(highlightLandFill("field", "", mode)).toContain("36, 140, 72");
+    expect(highlightLandFill("field", "", mode)).not.toContain("36, 112, 210");
+  });
+
   it("tints the legal targets of a mobilize", () => {
     const mode = { kind: "mobilize" as const, legal: ["b"], hover: "" };
     expect(highlightLandFill("b", "ussr", mode)).not.toBeNull();

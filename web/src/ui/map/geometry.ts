@@ -164,6 +164,8 @@ export const IPC_LABEL_FONT_SIZE = 16;
 export const SELECTED_OUTLINE: Rgba = { r: 1, g: 1, b: 0, a: 0.8 };
 export const SELECTED_OUTLINE_WIDTH = 4;
 const REACHABLE_HIGHLIGHT: Rgba = { r: 0.95, g: 0.15, b: 0.12, a: 0.55 };
+const LANDING_SAFE: Rgba = { r: 36 / 255, g: 140 / 255, b: 72 / 255, a: 0.52 };
+const LANDING_TIGHT: Rgba = { r: 196 / 255, g: 132 / 255, b: 42 / 255, a: 0.52 };
 
 export function buildMapGeometry(mapJson: Dict): MapGeometry {
   const regions: RegionShape[] = [];
@@ -324,6 +326,8 @@ export interface StackEntry {
   faction_id: string;
   count: number;
   instance_id?: string;
+  /** Land cargo being moved off this transport, one circle at a time. */
+  cargoOf?: string;
 }
 
 export interface PlacedStack {
@@ -375,6 +379,9 @@ export function layoutStackSlots(entries: StackEntry[]): StackSlot[] {
 }
 
 export function stackKey(entry: StackEntry): string {
+  if (entry.cargoOf) {
+    return `cargo|${entry.cargoOf}|${entry.unit_type_id}`;
+  }
   const base = `${entry.unit_type_id}|${entry.faction_id}`;
   return entry.instance_id ? `${base}|${entry.instance_id}` : base;
 }
@@ -394,6 +401,9 @@ export function ownerFill(owner: string): Rgba {
   }
 }
 
+/** A landing spot still inside the fuel that remains. Land with fuel to spare is safe; a carrier, or the last point of fuel, is tight. */
+export type LandingTone = "safe" | "tight";
+
 export type HighlightMode =
   | { kind: "none" }
   | {
@@ -404,14 +414,33 @@ export type HighlightMode =
       tone?: "attack" | "move";
       /** Sea zones in `legal` that hold an enemy ship. Absent keeps the tone for every legal sea. */
       hostile?: readonly string[];
+      /** Where the selected aircraft can still land. These paints replace the move wash on the same region. */
+      landing?: readonly { regionId: string; tone: LandingTone }[];
     }
   | { kind: "mobilize"; legal: string[]; hover: string };
+
+export function landingTone(regionId: string, mode: HighlightMode): LandingTone | null {
+  if (mode.kind !== "move" || mode.landing == null) {
+    return null;
+  }
+  for (const mark of mode.landing) {
+    if (mark.regionId === regionId) {
+      return mark.tone;
+    }
+  }
+  return null;
+}
 
 export function regionFill(regionId: string, owner: string, mode: HighlightMode): Rgba {
   const base = ownerFill(owner);
   if (mode.kind === "move") {
     if (regionId === mode.from) {
       return lightened(base, 0.12);
+    }
+    const spot = landingTone(regionId, mode);
+    if (spot) {
+      const color = spot === "safe" ? LANDING_SAFE : LANDING_TIGHT;
+      return { ...color, a: regionId === mode.hover ? 0.68 : 0.52 };
     }
     if (mode.legal.includes(regionId)) {
       return { ...REACHABLE_HIGHLIGHT, a: regionId === mode.hover ? 0.68 : 0.52 };

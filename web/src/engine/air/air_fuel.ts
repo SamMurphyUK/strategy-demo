@@ -497,3 +497,311 @@ export function offeredMoveDestinations(
   }
   return [...dests];
 }
+
+export interface DeckPlane {
+  unitType: string;
+  factionId: string;
+  count: number;
+}
+
+export interface CarrierDeck {
+  carrierUnitType: string;
+  carrierFactionId: string;
+  capacity: number;
+  parked: DeckPlane[];
+}
+
+interface CarrierSeat {
+  unitType: string;
+  factionId: string;
+  capacity: number;
+  hostsFighters: boolean;
+  hostsTactical: boolean;
+  parked: DeckPlane[];
+  filled: number;
+}
+
+function airParkRank(unitType: string): number {
+  if (unitType === "fighter") {
+    return 0;
+  }
+  if (unitType === "tactical_bomber") {
+    return 1;
+  }
+  return 2;
+}
+
+function carrierSeat(state: GameState, entry: UnitStackEntry): CarrierSeat | null {
+  const unitType = String(entry.unit_type_id ?? "");
+  const factionId = String(entry.faction_id ?? "");
+  const count = stackCount(entry);
+  const special = state.unit_types[unitType]?.special ?? {};
+  const each = Math.trunc(Number(special.fighter_capacity ?? 0));
+  if (factionId === "" || count <= 0 || each <= 0) {
+    return null;
+  }
+  return {
+    unitType,
+    factionId,
+    capacity: each * count,
+    hostsFighters: special.can_host_fighters !== false,
+    hostsTactical: special.can_host_tactical_bombers === true,
+    parked: [],
+    filled: 0,
+  };
+}
+
+function planeFitsSeat(state: GameState, unitType: string, seat: CarrierSeat): boolean {
+  return fitsCarrier(state, unitType, {
+    capacity: seat.capacity,
+    hostsFighters: seat.hostsFighters,
+    hostsTactical: seat.hostsTactical,
+  });
+}
+
+/**
+ * Planes drawn on each carrier in a sea zone. Capacity is filled same-faction first, fighters before
+ * tactical bombers. A plane that does not fit, and any plane in a hostile zone, stays on the map.
+ */
+export function carrierDecks(state: GameState, regionId: string): CarrierDeck[] {
+  const region = state.regions[regionId];
+  if (region == null || !region.isSeaRegion()) {
+    return [];
+  }
+  const seats: CarrierSeat[] = [];
+  const piles = new Map<string, DeckPlane>();
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    const seat = carrierSeat(state, entry);
+    if (seat) {
+      seats.push(seat);
+      continue;
+    }
+    const unitType = String(entry.unit_type_id ?? "");
+    const factionId = String(entry.faction_id ?? "");
+    const count = stackCount(entry);
+    if (factionId === "" || count <= 0 || !isAirUnit(state, unitType)) {
+      continue;
+    }
+    if (state.isRegionHostileTo(regionId, factionId)) {
+      continue;
+    }
+    const key = `${factionId}|${unitType}`;
+    const pile = piles.get(key);
+    if (pile) {
+      pile.count += count;
+    } else {
+      piles.set(key, { unitType, factionId, count });
+    }
+  }
+  const planes = [...piles.values()].sort(
+    (a, b) => airParkRank(a.unitType) - airParkRank(b.unitType) || a.factionId.localeCompare(b.factionId) || a.unitType.localeCompare(b.unitType),
+  );
+  for (const plane of planes) {
+    let left = plane.count;
+    const open = seats
+      .filter((seat) => state.sameTeam(seat.factionId, plane.factionId) && planeFitsSeat(state, plane.unitType, seat))
+      .sort((a, b) => {
+        const own = (seat: CarrierSeat) => (seat.factionId === plane.factionId ? 0 : 1);
+        return own(a) - own(b) || a.factionId.localeCompare(b.factionId) || a.unitType.localeCompare(b.unitType);
+      });
+    for (const seat of open) {
+      if (left <= 0) {
+        break;
+      }
+      const room = seat.capacity - seat.filled;
+      if (room <= 0) {
+        continue;
+      }
+      const take = Math.min(room, left);
+      const held = seat.parked.find((parked) => parked.unitType === plane.unitType && parked.factionId === plane.factionId);
+      if (held) {
+        held.count += take;
+      } else {
+        seat.parked.push({ unitType: plane.unitType, factionId: plane.factionId, count: take });
+      }
+      seat.filled += take;
+      left -= take;
+    }
+  }
+  return seats
+    .filter((seat) => seat.parked.length > 0)
+    .map((seat) => ({
+      carrierUnitType: seat.unitType,
+      carrierFactionId: seat.factionId,
+      capacity: seat.capacity,
+      parked: seat.parked,
+    }))
+    .sort((a, b) => a.carrierFactionId.localeCompare(b.carrierFactionId) || a.carrierUnitType.localeCompare(b.carrierUnitType));
+}
+
+export interface FerryPassenger {
+  unitType: string;
+  count: number;
+}
+
+/**
+ * Same-faction planes already sitting on this carrier. They ride with the ship and do not spend fuel.
+ * Allied planes stay where they are. A plane that already has its own order is not taken.
+ * `reserved` is extra planes spoken for by an earlier line in the same command.
+ */
+export function ferryPassengers(
+  state: GameState,
+  factionId: string,
+  fromRegion: string,
+  carrierType: string,
+  carrierCount: number,
+  reserved: Readonly<Record<string, number>> = {},
+): FerryPassenger[] {
+  const each = Math.trunc(Number(state.unit_types[carrierType]?.special?.fighter_capacity ?? 0));
+  const moving = Math.trunc(carrierCount);
+  if (each <= 0 || moving <= 0) {
+    return [];
+  }
+  const deck = carrierDecks(state, fromRegion).find(
+    (item) => item.carrierFactionId === factionId && item.carrierUnitType === carrierType,
+  );
+  if (deck == null) {
+    return [];
+  }
+  let seats = each * moving;
+  const taken: FerryPassenger[] = [];
+  for (const plane of deck.parked) {
+    if (plane.factionId !== factionId || seats <= 0) {
+      continue;
+    }
+    const key = `${plane.factionId}|${plane.unitType}`;
+    const movable = state.movableStackCount(factionId, fromRegion, plane.unitType) - Math.trunc(reserved[key] ?? 0);
+    const count = Math.min(plane.count, movable, seats);
+    if (count <= 0) {
+      continue;
+    }
+    taken.push({ unitType: plane.unitType, count });
+    seats -= count;
+  }
+  return taken;
+}
+
+/** How many of this stack are drawn on a carrier instead of as their own token. */
+export function parkedAirCount(state: GameState, regionId: string, factionId: string, unitType: string): number {
+  let total = 0;
+  for (const deck of carrierDecks(state, regionId)) {
+    for (const plane of deck.parked) {
+      if (plane.factionId === factionId && plane.unitType === unitType) {
+        total += plane.count;
+      }
+    }
+  }
+  return total;
+}
+
+/** A copy of the zone's stacks with parked aircraft removed. Entries that are not parked are the same objects. */
+export function omitParkedAir<T extends { faction_id?: string; unit_type_id?: string; count?: number }>(
+  state: GameState,
+  regionId: string,
+  units: readonly T[],
+): T[] {
+  const hide = new Map<string, number>();
+  for (const deck of carrierDecks(state, regionId)) {
+    for (const plane of deck.parked) {
+      const key = `${plane.factionId}|${plane.unitType}`;
+      hide.set(key, (hide.get(key) ?? 0) + plane.count);
+    }
+  }
+  if (hide.size === 0) {
+    return [...units];
+  }
+  const out: T[] = [];
+  for (const entry of units) {
+    const key = `${String(entry.faction_id ?? "")}|${String(entry.unit_type_id ?? "")}`;
+    const parked = hide.get(key) ?? 0;
+    const count = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+    if (parked <= 0 || count <= 0) {
+      out.push(entry);
+      continue;
+    }
+    const take = Math.min(parked, count);
+    hide.set(key, parked - take);
+    const left = count - take;
+    if (left > 0) {
+      out.push({ ...entry, count: left });
+    }
+  }
+  return out;
+}
+
+/** Fuel the sortie spends: the flight to `to`, plus the hop from there to the nearest deck or airfield. */
+export function sortieCost(state: GameState, factionId: string, unitType: string, from: string, to: string): number | null {
+  const steps = airSteps(state, from, to);
+  const fuel = fuelRemaining(state, factionId, from, unitType);
+  if (!Number.isFinite(steps) || steps <= 0 || steps > fuel) {
+    return null;
+  }
+  if (canLandAt(state, factionId, unitType, to)) {
+    return steps;
+  }
+  const left = fuel - steps;
+  let back = Number.POSITIVE_INFINITY;
+  for (const spot of regionsWithin(state, to, left)) {
+    if (!canLandAt(state, factionId, unitType, spot)) {
+      continue;
+    }
+    const hop = airSteps(state, to, spot);
+    if (hop < back) {
+      back = hop;
+    }
+  }
+  if (!Number.isFinite(back)) {
+    return null;
+  }
+  return steps + back;
+}
+
+export interface LandingMark {
+  regionId: string;
+  tone: "safe" | "tight";
+}
+
+/**
+ * Landing spots to paint. In combat move they are the fields still in range after the hovered attack.
+ * In noncombat they are the fields the plane can reach from where it is. The hovered attack region is
+ * left out, so the attack wash stays on it.
+ */
+export function landingMarks(
+  state: GameState,
+  factionId: string,
+  unitType: string,
+  from: string,
+  hover: string,
+  phase: string,
+): LandingMark[] {
+  if (!isAirUnit(state, unitType)) {
+    return [];
+  }
+  let origin = from;
+  let budget = fuelRemaining(state, factionId, from, unitType);
+  if (phase === "combat_move") {
+    if (hover === "" || hover === from) {
+      return [];
+    }
+    const steps = airSteps(state, from, hover);
+    if (!Number.isFinite(steps) || steps <= 0 || steps > budget) {
+      return [];
+    }
+    origin = hover;
+    budget -= steps;
+  } else if (phase !== "noncombat_move") {
+    return [];
+  }
+  const marks: LandingMark[] = [];
+  for (const spot of regionsWithin(state, origin, budget)) {
+    if (!canLandAt(state, factionId, unitType, spot)) {
+      continue;
+    }
+    const used = airSteps(state, origin, spot);
+    const leftover = budget - used;
+    const land = state.regions[spot]?.isLandRegion() === true;
+    marks.push({ regionId: spot, tone: land && leftover >= 1 ? "safe" : "tight" });
+  }
+  marks.sort((a, b) => a.regionId.localeCompare(b.regionId));
+  return marks;
+}

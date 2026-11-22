@@ -17,6 +17,7 @@ import {
   TOKEN_WHITE,
   unitSilhouette,
 } from "./tokenStyle";
+import { holdCircleCenters, type HoldCircle } from "./shipHold";
 import { unitDomain } from "./unitStacks";
 
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
@@ -42,6 +43,8 @@ export interface TokenPaint {
   cargoCount?: number;
   /** Remaining movement for an aircraft. Omit it for land and sea. */
   fuel?: number | null;
+  /** Filled seats under a transport or carrier. Omit it for every other token. 0 draws two empty circles. */
+  holds?: number;
 }
 
 // ---------------------------------------------------------------
@@ -96,6 +99,25 @@ function drawCargoPill(ctx: CanvasRenderingContext2D, x: number, y: number, d: n
   ctx.fillStyle = GOLD_NUM;
   ctx.fillText(label, x, top + h / 2 + 0.5);
   ctx.restore();
+}
+
+/** Two seats under a hull. A filled seat is a disc; an open seat is a ring. */
+export function drawHoldCircles(
+  ctx: CanvasRenderingContext2D,
+  circles: readonly HoldCircle[],
+  filled: number,
+): void {
+  circles.forEach((circle, index) => {
+    ctx.beginPath();
+    ctx.arc(circle.x, circle.y, circle.r, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(1.75, circle.r * 0.28);
+    ctx.strokeStyle = MILITARY.cream;
+    if (index < filled) {
+      ctx.fillStyle = MILITARY.brass;
+      ctx.fill();
+    }
+    ctx.stroke();
+  });
 }
 
 function paintSea(
@@ -322,5 +344,8 @@ export function drawMapToken(
   drawCountPill(ctx, entry.count, x, y, face, isActiveFaction(entry.faction_id, paint.activeFactionId));
   if (paint.fuel != null) {
     drawFuelPill(ctx, paint.fuel, x, y, face);
+  }
+  if (paint.holds != null) {
+    drawHoldCircles(ctx, holdCircleCenters(x, y, d, false), paint.holds);
   }
 }
