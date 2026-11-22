@@ -18,7 +18,8 @@ describe("quick unit muzzle and exhaust", () => {
     expect(resolveQuickClip("US", "tank")?.fx.smoke).toEqual({ x: 6, y: 58 });
     expect(resolveQuickClip("JAP", "tank")?.fx.muzzle).toEqual({ x: 172, y: 28 });
     expect(resolveQuickClip("JAP", "tank")?.fx.smoke).toEqual({ x: 5, y: 55 });
-    expect(resolveQuickClip("GER", "infantry")).toBeNull();
+    expect(resolveQuickClip("GER", "infantry")?.unitId).toBe("jap_infantry_v2");
+    expect(resolveQuickClip("GER", "fighter")?.fx.muzzle).toEqual({ x: 133, y: 72 });
   });
 
   it("draws the muzzle flash in front of the barrel on the shot frame", () => {

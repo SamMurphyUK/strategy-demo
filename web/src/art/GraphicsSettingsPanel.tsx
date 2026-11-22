@@ -28,6 +28,11 @@ const ROWS: { key: keyof GraphicsSettings; label: string; hint: string }[] = [
     label: "Unit lighting",
     hint: "Tint units with the sky's light. Off draws them as painted.",
   },
+  {
+    key: "cinematicCamera",
+    label: "Cinematic camera",
+    hint: "Zoom in for few units, then on each firing row, track the hits, and return to the dice. Wheel zoom cancels it for that round.",
+  },
 ];
 
 /** The four picture switches. The battle map and a real battle read the same saved choices. */

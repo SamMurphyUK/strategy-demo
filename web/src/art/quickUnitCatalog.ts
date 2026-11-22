@@ -3,12 +3,13 @@
  * Pure: no DOM. Missing art is reported, never invented.
  */
 
-import type { QuickFxMarks } from "./quickUnitFx";
+import vectorManifest from "../../public/assets/units/vector/manifest.json";
+import { QUIET_QUICK_FX, type QuickFxMarks } from "./quickUnitFx";
 
 export const QUICK_FACTIONS = ["GER", "USSR", "UK", "US", "JAP"] as const;
 export type QuickFaction = (typeof QUICK_FACTIONS)[number];
 
-/** Roster / art folder names the boards ask for (infantry stays on its placeholder). */
+/** Roster / art folder names the boards ask for. */
 export const QUICK_UNIT_TYPES = [
   "tank",
   "mech_infantry",
@@ -24,6 +25,8 @@ export const QUICK_UNIT_TYPES = [
   "transport",
 ] as const;
 export type QuickUnitType = (typeof QUICK_UNIT_TYPES)[number];
+/** Types that can resolve a vector clip, including infantry v2 and the carrier still. */
+export type QuickResolvableType = QuickUnitType | "infantry" | "carrier";
 
 const FACTION_PREFIX: Record<QuickFaction, string> = {
   GER: "ger",
@@ -74,9 +77,9 @@ function tankMarks(smoke: { x: number; y: number }, muzzle: { x: number; y: numb
 }
 
 /**
- * Logical art size for every shipped `_QUICK` vector clip. Resolution 4 lives in the SVG viewBox.
- * Smoke, and the German muzzle, are the clip marks. The other muzzles are the top pixel of the
- * barrel's rightmost column on idle_0, which is where the German mark sits. No flame SVG is shipped.
+ * Logical art size for every shipped battle/campaign vector clip. Resolution 4 lives in the SVG viewBox.
+ * Smoke, and the German tank muzzle, are the clip marks. The other tank muzzles are the top pixel of the
+ * barrel's rightmost column on idle_0. No flame SVG is shipped.
  */
 const QUICK_CLIPS: Record<string, QuickClipMeta> = {
   ger_tank_seed1_QUICK: {
@@ -129,14 +132,48 @@ const QUICK_CLIPS: Record<string, QuickClipMeta> = {
     damaged: 0,
     fx: tankMarks({ x: 5, y: 55 }, { x: 172, y: 28 }),
   },
+  /** Japanese infantry walk / fire / damaged. Other factions fall back to this seed. */
+  jap_infantry_v2: {
+    width: 80,
+    height: 80,
+    feet: { x: 43, y: 71 },
+    idle: 5,
+    walk: 8,
+    fire: 4,
+    damaged: 4,
+    fx: {
+      smoke: null,
+      muzzle: { x: 62, y: 38 },
+      flashFrames: [1, 2],
+      puffFrames: { idle: [], fire: [] },
+    },
+  },
+  /** German fighter flat clip (25D layers stay in the field preview). */
+  ger_fighter_seed1_25D: {
+    width: 144,
+    height: 160,
+    feet: { x: 97, y: 159 },
+    idle: 4,
+    walk: 8,
+    fire: 2,
+    damaged: 2,
+    fx: {
+      smoke: null,
+      muzzle: { x: 133, y: 72 },
+      flashFrames: [0, 1],
+      puffFrames: { idle: [], fire: [] },
+    },
+  },
 };
 
 export interface QuickClipRef {
   unitId: string;
   factionId: QuickFaction;
-  unitTypeId: QuickUnitType;
-  /** Public URL folder, no trailing slash. */
+  unitTypeId: QuickResolvableType;
+  /** Public URL folder, no trailing slash. Empty when `file` is a single still. */
   dir: string;
+  /** One stamped or polished SVG from the sprite shelf. Set instead of a frame folder. */
+  file?: string;
   width: number;
   height: number;
   feet: { x: number; y: number };
@@ -154,7 +191,7 @@ export interface QuickClipRef {
 
 export interface QuickAuditRow {
   factionId: QuickFaction;
-  unitTypeId: QuickUnitType | "infantry" | "carrier";
+  unitTypeId: QuickResolvableType | "carrier";
   quick: "yes" | "fallback" | "missing";
   unitId: string | null;
   notes: string;
@@ -180,8 +217,11 @@ function asFaction(factionId: string): QuickFaction | null {
   return (QUICK_FACTIONS as readonly string[]).includes(upper) ? (upper as QuickFaction) : null;
 }
 
-function asUnitType(unitTypeId: string): QuickUnitType | null {
+function asUnitType(unitTypeId: string): QuickResolvableType | null {
   const id = unitTypeId.trim().toLowerCase();
+  if (id === "infantry" || id === "inf") {
+    return "infantry";
+  }
   if (id === "aa" || id === "aa_gun") {
     return "aaa";
   }
@@ -194,21 +234,57 @@ function asUnitType(unitTypeId: string): QuickUnitType | null {
   if (id === "bomber" || id === "strat_bomber") {
     return "strategic_bomber";
   }
+  if (id === "carrier") {
+    return "carrier";
+  }
   return (QUICK_UNIT_TYPES as readonly string[]).includes(id) ? (id as QuickUnitType) : null;
 }
 
-function clipId(faction: QuickFaction, unitType: QuickUnitType): string {
-  return `${FACTION_PREFIX[faction]}_${TYPE_FOLDER[unitType]}_seed1_QUICK`;
+/** Preferred clip folder ids for a faction × type, exact first then shared seeds. */
+function candidateClipIds(faction: QuickFaction, unitType: QuickResolvableType): string[] {
+  const prefix = FACTION_PREFIX[faction];
+  if (unitType === "infantry") {
+    return [`${prefix}_infantry_v2`, "jap_infantry_v2"];
+  }
+  if (unitType === "fighter") {
+    return [`${prefix}_fighter_seed1_25D`];
+  }
+  if (unitType === "carrier" || unitType === "tactical_bomber" || unitType === "strategic_bomber") {
+    return [];
+  }
+  const folder = TYPE_FOLDER[unitType];
+  const ids = [`${prefix}_${folder}_seed1_QUICK`];
+  for (const other of QUICK_FACTIONS) {
+    if (other === faction) {
+      continue;
+    }
+    ids.push(`${FACTION_PREFIX[other]}_${folder}_seed1_QUICK`);
+  }
+  return ids;
 }
 
-function refFor(unitId: string, factionId: QuickFaction, unitTypeId: QuickUnitType, fallback: boolean): QuickClipRef | null {
+function ownerFactionOf(unitId: string): QuickFaction | null {
+  for (const faction of QUICK_FACTIONS) {
+    if (unitId.startsWith(`${FACTION_PREFIX[faction]}_`)) {
+      return faction;
+    }
+  }
+  return null;
+}
+
+function refFor(
+  unitId: string,
+  askedFaction: QuickFaction,
+  unitTypeId: QuickResolvableType,
+): QuickClipRef | null {
   const meta = QUICK_CLIPS[unitId];
   if (!meta) {
     return null;
   }
+  const owner = ownerFactionOf(unitId) ?? askedFaction;
   return {
     unitId,
-    factionId,
+    factionId: owner,
     unitTypeId,
     dir: `/assets/units/vector/frames/${unitId}`,
     width: meta.width,
@@ -220,26 +296,29 @@ function refFor(unitId: string, factionId: QuickFaction, unitTypeId: QuickUnitTy
     fire: meta.fire,
     damaged: meta.damaged,
     fx: meta.fx,
-    fallback,
+    fallback: owner !== askedFaction,
   };
 }
 
-/** Exact faction match, else any other faction's `_QUICK` seed for that archetype. */
+/** Exact faction match, else that faction's stamped or polished still, else a shared animated seed. */
 export function resolveQuickClip(factionId: string, unitTypeId: string): QuickClipRef | null {
   const faction = asFaction(factionId);
   const unitType = asUnitType(unitTypeId);
   if (!faction || !unitType) {
     return null;
   }
-  const exact = refFor(clipId(faction, unitType), faction, unitType, false);
-  if (exact) {
-    return exact;
-  }
-  for (const other of QUICK_FACTIONS) {
-    if (other === faction) {
-      continue;
+  for (const unitId of candidateClipIds(faction, unitType)) {
+    const hit = refFor(unitId, faction, unitType);
+    if (hit && !hit.fallback) {
+      return hit;
     }
-    const hit = refFor(clipId(other, unitType), other, unitType, true);
+  }
+  const still = stillFor(faction, unitType);
+  if (still) {
+    return still;
+  }
+  for (const unitId of candidateClipIds(faction, unitType)) {
+    const hit = refFor(unitId, faction, unitType);
     if (hit) {
       return hit;
     }
@@ -247,7 +326,65 @@ export function resolveQuickClip(factionId: string, unitTypeId: string): QuickCl
   return null;
 }
 
+const MANIFEST_TYPE: Partial<Record<QuickResolvableType, string>> = {
+  tactical_bomber: "tac_bomber",
+  strategic_bomber: "bomber",
+};
+
+interface ManifestStill {
+  file: string;
+  factionId: string;
+  unitTypeId: string;
+  width: number;
+  height: number;
+  stamped?: boolean;
+  polished?: boolean;
+}
+
+const STILLS = new Map<string, ManifestStill>();
+for (const row of vectorManifest.units) {
+  if (row.polished !== true && row.stamped !== true) {
+    continue;
+  }
+  if (!row.file.endsWith(".svg")) {
+    continue;
+  }
+  const key = `${row.factionId}:${row.unitTypeId}`;
+  const prev = STILLS.get(key);
+  if (!prev || (row.stamped === true && prev.stamped !== true)) {
+    STILLS.set(key, row);
+  }
+}
+
+function stillFor(faction: QuickFaction, unitType: QuickResolvableType): QuickClipRef | null {
+  const row = STILLS.get(`${faction}:${MANIFEST_TYPE[unitType] ?? unitType}`);
+  if (!row || row.width < 1 || row.height < 1) {
+    return null;
+  }
+  const name = row.file.split("/").pop() ?? row.file;
+  return {
+    unitId: name.replace(/\.svg$/, ""),
+    factionId: faction,
+    unitTypeId: unitType,
+    dir: "",
+    file: `/${row.file}`,
+    width: row.width,
+    height: row.height,
+    feet: { x: Math.round(row.width / 2), y: row.height - 1 },
+    resolution: 4,
+    idle: 1,
+    walk: 0,
+    fire: 0,
+    damaged: 0,
+    fx: QUIET_QUICK_FX,
+    fallback: false,
+  };
+}
+
 export function quickFrameUrl(clip: QuickClipRef, mode: "idle" | "walk" | "fire" | "damaged", index: number): string | null {
+  if (clip.file) {
+    return clip.file;
+  }
   const count = clip[mode];
   if (count < 1) {
     return null;
@@ -256,59 +393,61 @@ export function quickFrameUrl(clip: QuickClipRef, mode: "idle" | "walk" | "fire"
   return `${clip.dir}/${mode}_${wrapped}.svg`;
 }
 
-/** Every faction × roster type the boards care about, with what `_QUICK` art is present. */
+function auditOne(factionId: QuickFaction, unitTypeId: QuickResolvableType): QuickAuditRow {
+  const hit = resolveQuickClip(factionId, unitTypeId);
+  if (!hit) {
+    return {
+      factionId,
+      unitTypeId,
+      quick: "missing",
+      unitId: null,
+      notes: "No vector clip folder for battle/campaign",
+    };
+  }
+  if (hit.file) {
+    return {
+      factionId,
+      unitTypeId,
+      quick: "yes",
+      unitId: hit.unitId,
+      notes: hit.file.includes(".stamped.") ? "stamped vector" : "polished vector",
+    };
+  }
+  const gaps: string[] = [];
+  if (hit.damaged < 1) {
+    gaps.push("no damaged clip");
+  }
+  if (hit.fallback) {
+    gaps.push(`using ${hit.factionId} seed`);
+  }
+  if (!hit.fx.smoke) {
+    gaps.push("no exhaust mark");
+  }
+  if (!hit.fx.muzzle) {
+    gaps.push("no muzzle mark");
+  }
+  const notes = [...gaps];
+  if (hit.fx.smoke && hit.fx.muzzle) {
+    notes.push("exhaust and muzzle");
+  }
+  return {
+    factionId,
+    unitTypeId,
+    quick: hit.fallback ? "fallback" : "yes",
+    unitId: hit.unitId,
+    notes: notes.length > 0 ? notes.join("; ") : "idle/walk/fire present",
+  };
+}
+
+/** Every faction × roster type the boards care about, with what vector art is present. */
 export function auditQuickCoverage(): QuickAuditRow[] {
   const rows: QuickAuditRow[] = [];
   for (const factionId of QUICK_FACTIONS) {
-    rows.push({
-      factionId,
-      unitTypeId: "infantry",
-      quick: "missing",
-      unitId: null,
-      notes: "Left on campaign/battle placeholder until _v2 is finalized",
-    });
+    rows.push(auditOne(factionId, "infantry"));
     for (const unitTypeId of QUICK_UNIT_TYPES) {
-      const hit = resolveQuickClip(factionId, unitTypeId);
-      if (!hit) {
-        const notes: string[] = ["No _QUICK vector clip folder"];
-        if (unitTypeId !== "tank") {
-          notes.push("missing idle/walk/fire vector layers");
-        }
-        rows.push({ factionId, unitTypeId, quick: "missing", unitId: null, notes: notes.join("; ") });
-        continue;
-      }
-      const gaps: string[] = [];
-      if (hit.damaged < 1) {
-        gaps.push("no damaged clip");
-      }
-      if (hit.fallback) {
-        gaps.push(`using ${hit.factionId} seed`);
-      }
-      if (!hit.fx.smoke) {
-        gaps.push("no exhaust mark");
-      }
-      if (!hit.fx.muzzle) {
-        gaps.push("no muzzle mark");
-      }
-      const notes = [...gaps];
-      if (hit.fx.smoke && hit.fx.muzzle) {
-        notes.push("exhaust and muzzle");
-      }
-      rows.push({
-        factionId,
-        unitTypeId,
-        quick: hit.fallback ? "fallback" : "yes",
-        unitId: hit.unitId,
-        notes: notes.length > 0 ? notes.join("; ") : "idle/walk/fire present",
-      });
+      rows.push(auditOne(factionId, unitTypeId));
     }
-    rows.push({
-      factionId,
-      unitTypeId: "carrier",
-      quick: "missing",
-      unitId: null,
-      notes: "No _QUICK carrier; battle still uses procedural hull",
-    });
+    rows.push(auditOne(factionId, "carrier"));
   }
   return rows;
 }

@@ -1,0 +1,17 @@
+---
+description: Do not freeze the page when checking it in the browser
+alwaysApply: true
+---
+
+# Browser page scripts
+
+Browser tools stay available. A visual check, such as a lighting toggle or a sprite load, still runs in the browser. Read-only DOM and state inspection is allowed, and so is a bounded loop.
+
+A script that never returns freezes the tab. Later browser calls wait on that same tab and abort, so the page cannot be used to check a fix.
+
+Any browser evaluation script must include an explicit iteration cap or timeout (e.g., maxIterations = 1000) and read-only DOM/state queries—never inject while loops or unthrottled requestAnimationFrame patches via CDP.
+
+The cap belongs in the loop test, or a timeout must wrap the script. A test that assigns (`x = 700`) is always true and never reaches a cap written in the body.
+
+- Do not leave a probe, a patched `drawImage`, or a `globalThis` store in the app to watch a frame.
+- If a browser call aborts, stop. Close that tab from outside the page. Do not send the same script again.

@@ -74,7 +74,7 @@ function rigFor(unitId: string): Promise<PartRig | null> {
 }
 
 async function fetchRig(unitId: string): Promise<PartRig | null> {
-  if (!/^[a-z0-9_]+$/.test(unitId)) {
+  if (!/^[a-zA-Z0-9_]+$/.test(unitId)) {
     return null;
   }
   const base = `/assets/units/rigs/${unitId}`;

@@ -17,6 +17,8 @@ import {
   LANE_SCALE_FRONT,
   SHORE_Y,
   VANISH,
+  BATTLE_UNIT_BOOST,
+  battleUnitScale,
   decalRadii,
   hazeBands,
   laneScale,
@@ -136,6 +138,9 @@ describe("one-point perspective", () => {
     expect(laneScale(700)).toBe(LANE_SCALE_FRONT);
     expect(laneScale(160)).toBeLessThan(laneScale(298));
     expect(laneScale(298)).toBeLessThan(laneScale(480));
+    expect(BATTLE_UNIT_BOOST).toBe(1.2);
+    expect(battleUnitScale(SHORE_Y)).toBeCloseTo(1.2 * LANE_SCALE_FRONT, 6);
+    expect(battleUnitScale(VANISH.y)).toBeLessThan(battleUnitScale(SHORE_Y));
   });
 
   it("draws a round decal as an ellipse 0.42 as tall as it is wide, larger toward the viewer", () => {

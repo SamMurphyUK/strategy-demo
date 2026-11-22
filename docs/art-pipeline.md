@@ -151,3 +151,11 @@ Hull lift, turret delay, and barrel kick are pixels in the clip, one tick at a t
 - `crispPictures` changes the raster size of a vector. It does not change the station, the feet, or which frame is showing. Pixel blits stay nearest-neighbour either way.
 - The pose does not feed the battle rules, and the rules do not pick the pose.
 - One skeleton at a time. The next skeleton stays as it is until this one's walk loops.
+
+## Field
+
+Add keeps the load for each shelf key. The first click still decodes the frames. A tank or a vector then splits layers. A painted `_QUICK` rig paints on that first click, and the 25D fighter is large enough that this takes about a second and a half. The next Add of the same key reuses that load. The open editor is not cached. A failed open is dropped, so the next click can try again.
+
+The field reads `unitLighting`. On, a canvas sprite is multiplied by the sky, and a crisp vector keeps its SVG and gets the same multiply. Off, the sprite stays as painted. At noon the ambient is nearly white (`255, 252, 244`) and the rim is about a tenth. `?sky=0.68` pins the night, where the change is easy to see.
+
+A rig id and a part id may include capitals. `ger_fighter_seed1_25D` and `legs_farWing`, `torso_fuselage`, `head_propeller`, `weapon_nearWing` pass `fetchRig` and `readPartFile`.

@@ -17,10 +17,10 @@ import { isActiveFaction } from "./tokenStyle";
 import {
   drawUprightStack,
   idlePhase,
-  nearestEnemyFacing,
+  nearestEnemyOctant,
   type FacingRegion,
   type FacingStacks,
-  type FaceSign,
+  type FaceOctant,
 } from "./uprightSprites";
 import {
   BADGE_FILL,
@@ -821,7 +821,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             cargoCount: game.cargoCount?.(entry) ?? 0,
             idleTime: game.idleTime,
             idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
-            face: facing(layout.region.id, entry.faction_id),
+            aim: facing(layout.region.id, entry.faction_id),
           });
         },
       });
@@ -853,8 +853,8 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
   }
 }
 
-/** One left/right answer per region and faction. The campaign map wraps, so the short way around wins. */
-function facingByStack(scene: TerrainScene, game: GameOverlay): (regionId: string, factionId: string) => FaceSign {
+/** One eight-way bearing per region and faction. The campaign map wraps, so the short way around wins. */
+function facingByStack(scene: TerrainScene, game: GameOverlay): (regionId: string, factionId: string) => FaceOctant {
   const factions = new Map<string, string[]>();
   for (const layout of game.layouts) {
     let list = factions.get(layout.region.id);
@@ -874,17 +874,17 @@ function facingByStack(scene: TerrainScene, game: GameOverlay): (regionId: strin
     factions: factions.get(region.id) ?? [],
     stacks: game.facingStacks?.[region.id],
   }));
-  const cache = new Map<string, FaceSign>();
+  const cache = new Map<string, FaceOctant>();
   return (regionId, factionId) => {
     const key = `${regionId}\0${factionId}`;
     const hit = cache.get(key);
     if (hit != null) return hit;
     const home = regions.find((region) => region.id === regionId);
-    const face = home
-      ? nearestEnemyFacing(regionId, home.anchor, factionId, regions, scene.bounds, true, game.sameTeam)
-      : 1;
-    cache.set(key, face);
-    return face;
+    const aim = home
+      ? nearestEnemyOctant(regionId, home.anchor, factionId, regions, scene.bounds, true, game.sameTeam)
+      : 0;
+    cache.set(key, aim);
+    return aim;
   };
 }
 

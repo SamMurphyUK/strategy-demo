@@ -53,7 +53,7 @@ import {
   paintWire,
   squashPaint,
 } from './scenery/groundPerspective';
-import { decalRadii } from './scenery/perspective';
+import { battleUnitScale, decalRadii } from './scenery/perspective';
 import {
   GROUND_BOTTOM,
   GROUND_TOP,
@@ -1928,6 +1928,7 @@ export function drawProceduralUnit(
   const cues = rosterCues(factionId);
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
+  ctx.scale(battleUnitScale(y), battleUnitScale(y));
 
   const isAttacker = unit.side === 'attacker';
   if (!isAttacker) {
@@ -1968,7 +1969,6 @@ export function drawProceduralUnit(
   // The QUICK draw paints the clip muzzle flash and exhaust before returning.
   if (
     !isCasualty &&
-    unit.type !== 'infantry' &&
     unit.type !== 'carrier' &&
     hasQuickUnit(rosterFaction, unit.type) &&
     drawBattleQuickUnit(ctx, unit, rosterFaction, time, scale, boardX)
@@ -4374,6 +4374,7 @@ export function drawPlaneSortie(
   time: number,
   factionColor: string,
   noPlaneShadow = false,
+  factionId?: string,
 ) {
   ctx.save();
 
@@ -4409,6 +4410,31 @@ export function drawPlaneSortie(
 
   if (sortie.side === 'defender') {
     ctx.scale(-1, 1);
+  }
+  ctx.scale(battleUnitScale(sortie.homeY), battleUnitScale(sortie.homeY));
+
+  const sortieClip = factionId ? resolveQuickClip(factionId, sortie.unitType) : null;
+  if (sortieClip && factionId) {
+    const pixelScale = Math.max(0.2, Math.min(0.45, 48 / sortieClip.width));
+    const flying = sortie.bulletBurstsFired > 0 || sortie.bombsDropped > 0;
+    const drew = drawQuickUnit(ctx, {
+      key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
+      factionId,
+      unitTypeId: sortie.unitType,
+      mode: flying ? 'firing' : 'moving',
+      face: 1,
+      time,
+      pixelScale,
+      feetX: (sortieClip.feet.x - sortieClip.width / 2) * pixelScale,
+      feetY: (sortieClip.feet.y - sortieClip.height / 2) * pixelScale,
+      recoil: flying ? 1 : 0,
+      light: graphicsSettings().unitLighting ? skyLight(time) : null,
+      boardX: sortie.currentX,
+    });
+    if (drew) {
+      ctx.restore();
+      return;
+    }
   }
 
   if (sortie.unitType === 'fighter') {

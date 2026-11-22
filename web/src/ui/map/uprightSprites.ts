@@ -1,6 +1,7 @@
 // Upright side-profile sprites for LoD 2. Same palette, standing poses and faction cues as the
 // battle screen, drawn at integer pixels with smoothing off, feet on the plinth centre. Guns point
-// right; a negative face mirrors the body so the stack looks toward the nearer hostile territory.
+// right. A stack turns on an eight-way bearing toward the nearer hostile territory, and mirrors
+// rather than rolling upside down when that bearing is to the left.
 import { factionPalette } from "../theme/factionPalette";
 import {
   rosterCues,
@@ -16,6 +17,8 @@ import {
 import { MILITARY } from "../theme/militaryPalette";
 import { drawQuickUnit, hasQuickUnit, prefetchQuickIdle } from "../../art/quickUnitDraw";
 import { resolveQuickClip } from "../../art/quickUnitCatalog";
+import { graphicsSettings } from "../battle/graphicsSettings";
+import { skyLight } from "../battle/unitRenderer";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -54,12 +57,18 @@ export interface UprightPaint {
   idleTime?: number;
   /** Per-stack offset so neighbours do not rise together. Radians. */
   idlePhase?: number;
-  /** +1 keeps the drawn pose (guns to the right). -1 mirrors the body. Badges stay put. */
-  face?: FaceSign;
+  /**
+   * Eight-way bearing toward the nearest enemy. 0 is east, then clockwise on the map
+   * (1 southeast … 4 west … 7 northeast). The plinth and badges stay put.
+   */
+  aim?: FaceOctant;
 }
 
 /** The guns are drawn toward +x, so +1 faces right and -1 faces left. */
 export type FaceSign = 1 | -1;
+
+/** 0 east, then clockwise: southeast, south, southwest, west, northwest, north, northeast. */
+export type FaceOctant = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export interface FacingStack {
   factionId: string;
@@ -131,6 +140,29 @@ export function facingSign(from: Vec2, to: Vec2, bounds: Rect, wrap: boolean): F
   return wrappedDx(from, to, bounds, wrap) < -1e-6 ? -1 : 1;
 }
 
+/** Eight-way bearing from `from` to `to`. A point on top of itself stays east. */
+export function facingOctant(from: Vec2, to: Vec2, bounds: Rect, wrap: boolean): FaceOctant {
+  const dx = wrappedDx(from, to, bounds, wrap);
+  const dy = to.y - from.y;
+  if (dx * dx + dy * dy < 1e-8) return 0;
+  const eighth = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+  return (((eighth % 8) + 8) % 8) as FaceOctant;
+}
+
+/**
+ * How to draw a right-facing picture on this bearing. Leftward bearings mirror first,
+ * then turn by at most a right angle, so the head stays above the feet.
+ */
+export function facingPose(octant: FaceOctant): { face: FaceSign; turn: number } {
+  let deg = octant * 45;
+  if (deg > 180) deg -= 360;
+  if (deg > 90 || deg < -90) {
+    const flipped = deg > 0 ? deg - 180 : deg + 180;
+    return { face: -1, turn: (flipped * Math.PI) / 180 };
+  }
+  return { face: 1, turn: (deg * Math.PI) / 180 };
+}
+
 /** Enemy pieces in the region. The heaviest of these wins when a territory sits between two forces. */
 function enemyPieceCount(
   region: FacingRegion,
@@ -147,13 +179,13 @@ function enemyPieceCount(
 }
 
 /**
- * Left or right toward the nearest region hostile to `factionId`.
- * The unit's own region is skipped: an enemy standing in it has no left or right.
- * No enemy anywhere leaves the sprite facing right.
- * A territory with an enemy force on both sides faces the heavier one instead.
- * Equal forces keep the nearer. Straight-up forces do not count as a side.
+ * The region a stack turns toward.
+ * The unit's own region is skipped: an enemy standing in it has no direction.
+ * No enemy anywhere returns null, and the sprite stays facing east.
+ * A territory with an enemy force on both sides turns toward the heavier one.
+ * Equal forces keep the nearer. A force straight up or down does not count as a side.
  */
-export function nearestEnemyFacing(
+function nearestEnemyAnchor(
   homeId: string,
   home: Vec2,
   factionId: string,
@@ -161,14 +193,14 @@ export function nearestEnemyFacing(
   bounds: Rect,
   wrap: boolean,
   sameTeam?: (a: string, b: string) => boolean,
-): FaceSign {
-  if (factionId === "") return 1;
+): Vec2 | null {
+  if (factionId === "") return null;
   const allied = sameTeam ?? campaignSameTeam;
   let nearestSpan = Infinity;
-  let nearestFace: FaceSign = 1;
+  let nearestAnchor: Vec2 | null = null;
   let heavyCount = -1;
   let heavySpan = Infinity;
-  let heavyFace: FaceSign = 1;
+  let heavyAnchor: Vec2 | null = null;
   let leftForce = false;
   let rightForce = false;
   for (const region of regions) {
@@ -177,7 +209,7 @@ export function nearestEnemyFacing(
     if (!(span > 0)) continue;
     if (regionIsHostile(region, factionId, allied) && span < nearestSpan) {
       nearestSpan = span;
-      nearestFace = facingSign(home, region.anchor, bounds, wrap);
+      nearestAnchor = region.anchor;
     }
     const count = enemyPieceCount(region, factionId, allied);
     if (count <= 0) continue;
@@ -188,11 +220,39 @@ export function nearestEnemyFacing(
     if (count > heavyCount || (count === heavyCount && span < heavySpan)) {
       heavyCount = count;
       heavySpan = span;
-      heavyFace = dx < 0 ? -1 : 1;
+      heavyAnchor = region.anchor;
     }
   }
-  if (leftForce && rightForce) return heavyFace;
-  return nearestFace;
+  if (leftForce && rightForce) return heavyAnchor;
+  return nearestAnchor;
+}
+
+/** Left or right toward the region `nearestEnemyOctant` uses. No enemy leaves the sprite facing right. */
+export function nearestEnemyFacing(
+  homeId: string,
+  home: Vec2,
+  factionId: string,
+  regions: readonly FacingRegion[],
+  bounds: Rect,
+  wrap: boolean,
+  sameTeam?: (a: string, b: string) => boolean,
+): FaceSign {
+  const anchor = nearestEnemyAnchor(homeId, home, factionId, regions, bounds, wrap, sameTeam);
+  return anchor ? facingSign(home, anchor, bounds, wrap) : 1;
+}
+
+/** Eight-way bearing toward the nearest enemy. No enemy stays east. */
+export function nearestEnemyOctant(
+  homeId: string,
+  home: Vec2,
+  factionId: string,
+  regions: readonly FacingRegion[],
+  bounds: Rect,
+  wrap: boolean,
+  sameTeam?: (a: string, b: string) => boolean,
+): FaceOctant {
+  const anchor = nearestEnemyAnchor(homeId, home, factionId, regions, bounds, wrap, sameTeam);
+  return anchor ? facingOctant(home, anchor, bounds, wrap) : 0;
 }
 
 function regionIsHostile(
@@ -208,7 +268,20 @@ function regionIsHostile(
 }
 
 const STILL_UNITS = new Set(["artillery", "aa", "aaa"]);
-const SEA_UNITS = new Set(["submarine", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+const SEA_UNITS = new Set(["submarine", "sub", "destroyer", "cruiser", "battleship", "carrier", "transport"]);
+/** Tanks and vehicles sit five pixels under the infantry line so the tracks meet the plinth. */
+const VEHICLE_SINK_PX = 5;
+const VEHICLE_SINK = new Set([
+  "tank",
+  "armor",
+  "mech_infantry",
+  "artillery",
+  "aa",
+  "aaa",
+  ...SEA_UNITS,
+]);
+/** Placeholder figures stand about this tall, in CSS pixels, and they do not grow with a closer zoom. */
+const UPRIGHT_FIGURE_PX = 24;
 
 /** Stable phase in `[0, 2π)` for one stack. */
 export function idlePhase(regionId: string, unitType: string): number {
@@ -639,14 +712,39 @@ function spriteSheet(unitType: string, factionId: string, face: FaceSign): Canva
   return baked;
 }
 
-/** How many CSS pixels one art pixel covers so a `_QUICK` tank sits on the plinth. */
-function quickPixelScale(unitType: string, factionId: string, tokenPx: number): number {
+/** How many CSS pixels one art pixel covers so a quick sprite matches the placeholder figures. */
+function quickPixelScale(unitType: string, factionId: string): number {
   const clip = resolveQuickClip(factionId, unitType);
-  if (!clip) {
-    return tokenPx / 48;
+  if (!clip || clip.height < 1) {
+    return 1;
   }
-  // Fit the hull into roughly the old 56px-tall bake, feet on the plinth.
-  return Math.max(0.18, Math.min(0.55, (tokenPx * 1.35) / clip.height));
+  return UPRIGHT_FIGURE_PX / clip.height;
+}
+
+/**
+ * Distance between squad copies, in CSS pixels. The baked offsets suit a rifleman.
+ * A tank or a plane is wider than that step, so the extra copies would sit inside the first.
+ */
+function squadStep(figureW: number): number {
+  return Math.max(10, figureW * 0.72);
+}
+
+function placedSquad(count: number, step: number): { x: number; y: number }[] {
+  const n = squadOffsets(count).length;
+  if (n >= 3) {
+    return [
+      { x: -step, y: -3 },
+      { x: 0, y: 0 },
+      { x: step, y: 3 },
+    ];
+  }
+  if (n === 2) {
+    return [
+      { x: -step / 2, y: -2 },
+      { x: step / 2, y: 2 },
+    ];
+  }
+  return [{ x: 0, y: 0 }];
 }
 
 /** Foreshortened baseplate, then the upright sprite standing on its centre. */
@@ -671,16 +769,22 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   ctx.stroke();
 
   const color = factionPalette(paint.factionId).primary;
-  const face = paint.face ?? 1;
-  const useQuick = paint.unitType !== "infantry" && hasQuickUnit(paint.factionId, paint.unitType);
+  const pose = facingPose(paint.aim ?? 0);
+  const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
   if (useQuick) {
     prefetchQuickIdle(paint.factionId, paint.unitType);
   }
-  const sheet = !useQuick && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, face) : null;
+  const sheet = !useQuick && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
+  const unitLight = graphicsSettings().unitLighting ? skyLight(paint.idleTime ?? 0) : null;
   const bob = useQuick || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
-  const pixelScale = useQuick ? quickPixelScale(paint.unitType, paint.factionId, paint.tokenPx) : 1;
+  const pixelScale = useQuick ? quickPixelScale(paint.unitType, paint.factionId) : 1;
+  const clipW = useQuick ? (resolveQuickClip(paint.factionId, paint.unitType)?.width ?? 0) : 0;
+  const figureW = clipW > 0 ? clipW * pixelScale : 16;
+  const sink = VEHICLE_SINK.has(paint.unitType) ? VEHICLE_SINK_PX : 0;
   withCrisp(ctx, paint.dpr, (at) => {
-    const figures = squadOffsets(paint.count).slice().sort((a, b) => a.y - b.y);
+    const figures = placedSquad(paint.count, squadStep(figureW))
+      .slice()
+      .sort((a, b) => a.y - b.y);
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
       ctx.save();
@@ -690,23 +794,28 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
           factionId: paint.factionId,
           unitTypeId: paint.unitType,
           mode: "idle",
-          face,
+          face: pose.face,
+          turn: pose.turn,
           time: paint.idleTime ?? 0,
           pixelScale,
           feetX: at(x + off.x),
-          feetY: at(y + off.y),
+          feetY: at(y + off.y + sink),
+          light: unitLight,
+          boardX: x + off.x,
         });
         if (!drawn) {
-          ctx.translate(at(x + off.x), at(y + off.y + bob));
-          if (face < 0) ctx.scale(-1, 1);
+          ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
+          if (pose.turn) ctx.rotate(pose.turn);
+          if (pose.face < 0) ctx.scale(-1, 1);
           drawUprightBody(ctx, paint.unitType, color, paint.factionId);
         }
       } else {
-        ctx.translate(at(x + off.x), at(y + off.y + bob));
+        ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
+        if (pose.turn) ctx.rotate(pose.turn);
+        if (pose.face < 0) ctx.scale(-1, 1);
         if (sheet) {
           ctx.drawImage(sheet, -SPRITE_BAKE.originX, -SPRITE_BAKE.originY);
         } else {
-          if (face < 0) ctx.scale(-1, 1);
           drawUprightBody(ctx, paint.unitType, color, paint.factionId);
         }
       }

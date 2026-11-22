@@ -108,6 +108,14 @@ export function laneScale(y: number): number {
   return LANE_SCALE_BACK + (LANE_SCALE_FRONT - LANE_SCALE_BACK) * t;
 }
 
+/** Every battle unit, on top of the lane size. */
+export const BATTLE_UNIT_BOOST = 1.2;
+
+/** Parked size on this row: a fifth larger than the old picture, and a little larger toward the bottom. */
+export function battleUnitScale(y: number): number {
+  return BATTLE_UNIT_BOOST * laneScale(y);
+}
+
 /** How big a crater or puddle of a given flat size is on this board row. */
 export function decalScale(y: number): number {
   return DECAL_SCALE_BACK + (DECAL_SCALE_FRONT - DECAL_SCALE_BACK) * fieldDepth(y);

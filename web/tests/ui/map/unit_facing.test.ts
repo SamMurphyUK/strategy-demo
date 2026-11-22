@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { Rect } from "../../../src/ui/map/geometry";
 import {
   campaignSameTeam,
+  facingOctant,
+  facingPose,
   facingSign,
   nearestEnemyFacing,
+  nearestEnemyOctant,
   nextFacingHold,
   type FacingRegion,
   type FacingStacks,
@@ -29,7 +32,14 @@ describe("upright facing", () => {
       { id: "far", anchor: { x: 760, y: 80 }, owner: "jap", factions: ["jap"] },
     ];
     expect(nearestEnemyFacing("home", home, "uk", regions, bounds, true, sameTeam)).toBe(1);
+    expect(nearestEnemyOctant("home", home, "uk", regions, bounds, true, sameTeam)).toBe(0);
     expect(facingSign(home, { x: 180, y: 80 }, bounds, true)).toBe(1);
+    expect(facingOctant(home, { x: 180, y: 0 }, bounds, true)).toBe(7);
+    expect(facingOctant(home, { x: 100, y: 160 }, bounds, true)).toBe(2);
+    expect(facingOctant(home, { x: 20, y: 160 }, bounds, true)).toBe(3);
+    expect(facingPose(0)).toEqual({ face: 1, turn: 0 });
+    expect(facingPose(4).face).toBe(-1);
+    expect(facingPose(4).turn).toBe(0);
 
     const across: FacingRegion[] = [
       { id: "home", anchor: { x: 20, y: 80 }, owner: "usa", factions: ["usa"] },

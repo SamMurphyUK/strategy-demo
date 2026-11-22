@@ -17,15 +17,31 @@ import {
   vehicleOffsets,
   type VehicleAnim,
   type VehicleMode,
+  type VehicleOffsets,
 } from "./vehicleMotion";
 
+const FLAT_OFFSETS: VehicleOffsets = {
+  root: { x: 0, y: 0 },
+  tracks: { x: 0, y: 0 },
+  torso: { x: 0, y: 0 },
+  head: { x: 0, y: 0 },
+  weapon: { x: 0, y: 0 },
+  hull: { x: 0, y: 0 },
+  turret: { x: 0, y: 0 },
+};
+
 const images = new Map<string, HTMLImageElement | null>();
+const failedImages = new Set<string>();
+const warmed = new Set<string>();
+const heldByKey = new Map<string, { url: string; image: HTMLImageElement }>();
 const anims = new Map<string, VehicleAnim>();
 const lastTicks = new Map<string, number>();
+const litSprites = new Map<string, HTMLCanvasElement>();
+const LIT_SPRITE_CAP = 64;
 let lastEase = 0;
 
 function loadImage(url: string): HTMLImageElement | null {
-  if (typeof Image === "undefined") {
+  if (typeof Image === "undefined" || failedImages.has(url)) {
     return null;
   }
   const hit = images.get(url);
@@ -35,13 +51,79 @@ function loadImage(url: string): HTMLImageElement | null {
   const image = new Image();
   images.set(url, null);
   image.onload = () => {
-    images.set(url, image);
+    const publish = () => {
+      if (image.naturalWidth > 0) images.set(url, image);
+      else {
+        images.delete(url);
+        failedImages.add(url);
+      }
+    };
+    if (typeof image.decode === "function") void image.decode().then(publish, publish);
+    else publish();
   };
   image.onerror = () => {
-    images.set(url, null);
+    images.delete(url);
+    failedImages.add(url);
   };
   image.src = url;
   return null;
+}
+
+/** Lit copy at the size on screen. The SVG's own pixels are much larger, and rebuilding them every frame stalls the battle. */
+function litAtSize(
+  url: string,
+  image: CanvasImageSource,
+  drawW: number,
+  drawH: number,
+  light: NonNullable<QuickDrawRequest["light"]>,
+  boardX: number,
+): CanvasImageSource {
+  const w = Math.max(1, Math.ceil(drawW));
+  const h = Math.max(1, Math.ceil(drawH));
+  let rimX = 0;
+  let rimK = -1;
+  for (const rim of light.rims) {
+    if (rim.k > rimK) {
+      rimK = rim.k;
+      rimX = rim.x;
+    }
+  }
+  const key = `${url}|${light.key}|${rimX < boardX ? "R" : "L"}|${w}x${h}`;
+  const hit = litSprites.get(key);
+  if (hit) {
+    return hit;
+  }
+  const lit = lightUnitSprite(image, w, h, light, boardX);
+  if (!lit) {
+    return image;
+  }
+  litSprites.set(key, lit);
+  if (litSprites.size > LIT_SPRITE_CAP) {
+    const oldest = litSprites.keys().next().value;
+    if (oldest !== undefined) {
+      litSprites.delete(oldest);
+    }
+  }
+  return lit;
+}
+
+/** Start every frame of a clip once, so a march or a takeoff does not wait on the next picture. */
+function warmClip(clip: QuickClipRef): void {
+  if (warmed.has(clip.unitId)) return;
+  warmed.add(clip.unitId);
+  const poses = ["idle", "walk", "fire", "damaged"] as const;
+  for (const pose of poses) {
+    const count = clip[pose];
+    for (let i = 0; i < count; i += 1) {
+      const url = quickFrameUrl(clip, pose, i);
+      if (url) loadImage(url);
+    }
+  }
+}
+
+function readyImage(url: string): HTMLImageElement | null {
+  const image = loadImage(url);
+  return image && image.naturalWidth > 0 ? image : null;
 }
 
 function animFor(key: string, mode: VehicleMode, damaged: boolean): VehicleAnim {
@@ -76,8 +158,10 @@ export interface QuickDrawRequest {
   unitTypeId: string;
   mode: QuickDrawMode;
   damaged?: boolean;
-  /** +1 guns right, -1 mirrored. */
+  /** +1 guns right, -1 mirrored. Applied before `turn`. */
   face: 1 | -1;
+  /** Radians, clockwise on the map, after the mirror. 0 keeps the picture upright. */
+  turn?: number;
   /** Seconds for the 8 Hz frame clock. */
   time: number;
   /** CSS pixels for one art pixel. Campaign tokens pass tokenPx / artHeight. */
@@ -165,7 +249,7 @@ function paintQuickFx(
 }
 
 /**
- * Draw one `_QUICK` vector if present. Returns false when this type still uses its placeholder.
+ * Draw one shipped vector clip if present. Returns false when this type still uses its placeholder.
  * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
  * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
  */
@@ -173,9 +257,6 @@ export function drawQuickUnit(
   ctx: CanvasRenderingContext2D,
   request: QuickDrawRequest,
 ): boolean {
-  if (request.unitTypeId === "infantry" || request.unitTypeId === "carrier") {
-    return false;
-  }
   const clip = resolveQuickClip(request.factionId, request.unitTypeId);
   if (!clip) {
     return false;
@@ -199,32 +280,54 @@ export function drawQuickUnit(
     lastTicks.set(request.key, tick);
   }
 
+  warmClip(clip);
   const pose = clipMode(request.mode, clip);
   const count = clip[pose];
-  const index = count > 0 ? anim.frame % count : 0;
-  const url = quickFrameUrl(clip, pose, index);
-  if (!url) {
-    return false;
-  }
-  const image = loadImage(url) ?? images.get(url);
+  // Damaged clips replace idle when the unit is hurt and a damaged strip exists.
+  const useDamaged = request.damaged === true && clip.damaged > 0 && pose === "idle";
+  const drawPose = useDamaged ? "damaged" : pose;
+  const drawCount = useDamaged ? clip.damaged : count;
+  const index = drawCount > 0 ? anim.frame % drawCount : 0;
+  const wantedUrl = quickFrameUrl(clip, drawPose, index);
+  let url = wantedUrl;
+  let image = url ? readyImage(url) : null;
   if (!image) {
-    loadImage(url);
-    return true;
+    const idleUrl = quickFrameUrl(clip, "idle", 0);
+    const idle = idleUrl ? readyImage(idleUrl) : null;
+    if (idle && idleUrl) {
+      url = idleUrl;
+      image = idle;
+    }
+  }
+  if (!image || !url) {
+    const held = heldByKey.get(request.key);
+    if (held) {
+      url = held.url;
+      image = held.image;
+    } else if (!wantedUrl || failedImages.has(wantedUrl)) {
+      return false;
+    } else {
+      return true;
+    }
+  } else {
+    heldByKey.set(request.key, { url, image });
   }
 
-  const offsets = vehicleOffsets(anim, profile);
+  // A still has no separate hull, turret, or legs. Infantry frames already carry their own walk.
+  const offsets =
+    clip.file || request.unitTypeId === "infantry" ? FLAT_OFFSETS : vehicleOffsets(anim, profile);
   const scale = request.pixelScale;
   const drawW = clip.width * scale;
   const drawH = clip.height * scale;
-  const lit =
+  const picture =
     graphicsSettings().unitLighting && request.light
-      ? lightUnitSprite(image, image.naturalWidth || clip.width * clip.resolution, image.naturalHeight || clip.height * clip.resolution, request.light, request.boardX ?? 0)
-      : null;
-  const picture = lit ?? image;
+      ? litAtSize(url, image, drawW, drawH, request.light, request.boardX ?? 0)
+      : image;
 
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.translate(request.feetX, request.feetY);
+  if (request.turn) ctx.rotate(request.turn);
   ctx.scale(request.face, 1);
   ctx.drawImage(
     picture,
@@ -233,7 +336,7 @@ export function drawQuickUnit(
     drawW,
     drawH,
   );
-  paintQuickFx(ctx, clip, pose, index, offsets.root, scale, request.recoil ?? 0, request.damaged === true);
+  paintQuickFx(ctx, clip, pose, useDamaged ? 0 : index, offsets.root, scale, request.recoil ?? 0, request.damaged === true);
   ctx.restore();
   return true;
 }

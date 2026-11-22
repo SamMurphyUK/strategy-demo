@@ -1,6 +1,10 @@
 /** Camera, then the unit's scale, then one sprite pixel, then the traced picture. */
 
+import type { UnitSkyLight } from "./unitLighting";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+let stageSerial = 0;
 
 export interface VehicleStageCamera {
   cssWidth: number;
@@ -47,7 +51,7 @@ interface UnitNode {
 }
 
 export interface VehicleStage {
-  sync(camera: VehicleStageCamera, units: readonly VehicleSvgUnit[]): void;
+  sync(camera: VehicleStageCamera, units: readonly VehicleSvgUnit[], light: UnitSkyLight | null): void;
   clear(): void;
 }
 
@@ -98,6 +102,39 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   const camera = element<SVGGElement>("g");
   svg.replaceChildren(defs, camera);
   const units = new Map<number, UnitNode>();
+  const filterId = `field-unit-light-${++stageSerial}`;
+  let lightKey = "";
+
+  const applyLight = (light: UnitSkyLight | null) => {
+    const next = light?.key ?? "";
+    const filter = defs.querySelector(`#${filterId}`);
+    if (next === lightKey && (next === "" || filter)) {
+      return;
+    }
+    lightKey = next;
+    if (!light) {
+      camera.removeAttribute("filter");
+      return;
+    }
+    let node = filter as SVGFilterElement | null;
+    if (!node) {
+      node = element<SVGFilterElement>("filter");
+      node.id = filterId;
+      node.setAttribute("color-interpolation-filters", "sRGB");
+      const matrix = element<SVGFEColorMatrixElement>("feColorMatrix");
+      matrix.setAttribute("type", "matrix");
+      node.append(matrix);
+      defs.append(node);
+    }
+    const [red, green, blue] = light.ambient;
+    node
+      .querySelector("feColorMatrix")
+      ?.setAttribute(
+        "values",
+        `${red / 255} 0 0 0 0  0 ${green / 255} 0 0 0  0 0 ${blue / 255} 0 0  0 0 0 1 0`,
+      );
+    camera.setAttribute("filter", `url(#${filterId})`);
+  };
 
   const dropMasks = (id: number) => {
     for (const mask of [...defs.querySelectorAll("mask")]) {
@@ -188,13 +225,14 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   };
 
   return {
-    sync(cameraState, list) {
+    sync(cameraState, list, light) {
       const width = Math.max(1, cameraState.cssWidth);
       const height = Math.max(1, cameraState.cssHeight);
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
       svg.setAttribute("width", String(width));
       svg.setAttribute("height", String(height));
       camera.setAttribute("transform", `translate(${cameraState.camX} ${cameraState.camY}) scale(${cameraState.viewScale})`);
+      applyLight(light);
       const live = new Set(list.map((unit) => unit.id));
       for (const [id, node] of units) {
         if (live.has(id)) {
@@ -218,6 +256,8 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
     },
     clear() {
       units.clear();
+      lightKey = "";
+      camera.removeAttribute("filter");
       camera.replaceChildren();
       defs.replaceChildren();
     },

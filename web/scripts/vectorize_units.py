@@ -217,6 +217,9 @@ def snap_indices(image: Image.Image, palette: list[tuple[int, int, int]]) -> tup
     rgba = np.asarray(image.convert("RGBA"))
     rgb = rgba[..., :3].astype(np.int16)
     opaque = rgba[..., 3] > ALPHA_CUT
+    # #FF00FF is the sheet key. It is not painted into a unit.
+    keyed = (rgb[..., 0] == 255) & (rgb[..., 1] == 0) & (rgb[..., 2] == 255)
+    opaque = opaque & ~keyed
     flat = rgb.reshape(-1, 3)
     colors = np.asarray(palette, dtype=np.int16)
     distance = np.sum((flat[:, None, :] - colors[None, :, :]) ** 2, axis=2)

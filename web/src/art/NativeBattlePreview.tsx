@@ -69,13 +69,63 @@ import {
 import type { UnitPaintDocument } from "./pixelPaint";
 import { preferStamped, unitTypeLabel } from "./unitShelf";
 import { GraphicsSettingsPanel } from "./GraphicsSettingsPanel";
+import { lightUnitSprite, type UnitSkyLight } from "./unitLighting";
 import { graphicsSettings } from "../ui/battle/graphicsSettings";
-import { drawSceneryEdge, drawWWIIBattlefield } from "../ui/battle/unitRenderer";
+import { drawSceneryEdge, drawWWIIBattlefield, skyLight } from "../ui/battle/unitRenderer";
 import { bakeScenery, sceneryBakeStats, sceneryForView, sceneryScaleFor } from "../ui/battle/scenery/sceneryBake";
 import { sceneForRegion, sceneRegionList } from "../ui/battle/scenery/sceneRegions";
 import { FACTION_PALETTE } from "../ui/theme/factionPalette";
 
 const pictureCache = new Map<string, HTMLCanvasElement>();
+const litFrameCache = new Map<string, { key: string; canvas: HTMLCanvasElement }>();
+/** One shared load per shelf key. Add reuses it. A failed open is dropped so the next click can try again. */
+const actorLoads = new Map<string, Promise<FieldActor>>();
+
+function litSide(light: UnitSkyLight, boardX: number): string {
+  let bestK = 0;
+  let bestX = 0;
+  for (const rim of light.rims) {
+    if (rim.k > bestK) {
+      bestK = rim.k;
+      bestX = rim.x;
+    }
+  }
+  if (bestK < 0.01) {
+    return light.key;
+  }
+  return `${light.key}|${bestX < boardX ? "L" : "R"}`;
+}
+
+function litFieldSprite(
+  source: CanvasImageSource,
+  cacheId: string,
+  width: number,
+  height: number,
+  light: UnitSkyLight | null,
+  boardX: number,
+): CanvasImageSource {
+  if (!light || width < 1 || height < 1) {
+    return source;
+  }
+  const key = litSide(light, boardX);
+  const hit = litFrameCache.get(cacheId);
+  if (hit && hit.key === key) {
+    litFrameCache.delete(cacheId);
+    litFrameCache.set(cacheId, hit);
+    return hit.canvas;
+  }
+  const lit = lightUnitSprite(source, width, height, light, boardX);
+  if (!lit) {
+    return source;
+  }
+  litFrameCache.set(cacheId, { key, canvas: lit });
+  while (litFrameCache.size > 48) {
+    const oldest = litFrameCache.keys().next().value;
+    if (oldest === undefined) break;
+    litFrameCache.delete(oldest);
+  }
+  return lit;
+}
 
 /** Rasterise a vector once for this frame and this pixel size, then reuse it while neither changes. */
 function cachedPicture(source: CanvasImageSource, key: string, width: number, height: number): HTMLCanvasElement | null {
@@ -1099,6 +1149,24 @@ export function NativeBattlePreview() {
 
   async function loadActor(key: string): Promise<FieldActor> {
     if (key === "editor") {
+      return loadActorFresh(key);
+    }
+    const cached = actorLoads.get(key);
+    if (cached) {
+      return cached;
+    }
+    const pending = loadActorFresh(key);
+    actorLoads.set(key, pending);
+    pending.catch(() => {
+      if (actorLoads.get(key) === pending) {
+        actorLoads.delete(key);
+      }
+    });
+    return pending;
+  }
+
+  async function loadActorFresh(key: string): Promise<FieldActor> {
+    if (key === "editor") {
       const doc = loadMotionDocument();
       if (!doc) {
         throw new Error("No sprite is open in the editor.");
@@ -1397,7 +1465,9 @@ export function NativeBattlePreview() {
       const frontSprites: (() => void)[] = [];
       const svgUnits: VehicleSvgUnit[] = [];
       let seenSvg = false;
-      const crisp = graphicsSettings().crispPictures;
+      const settings = graphicsSettings();
+      const crisp = settings.crispPictures;
+      const unitLight = settings.unitLighting ? skyLight(backdropTime) : null;
       // Back lane first, so a unit on a lower lane covers the one behind it.
       depthOrder(units).forEach((item) => {
         const index = units.indexOf(item);
@@ -1636,8 +1706,16 @@ export function NativeBattlePreview() {
             paintCtx.imageSmoothingEnabled = smooth;
             const drawLayer = (canvas: OffscreenCanvas, shift: { x: number; y: number }, name: string) => {
               const image = useHalf ? halfCanvas(`${cacheKey}:${name}`, canvas) : canvas;
-              paintCtx.drawImage(
+              const lit = litFieldSprite(
                 image,
+                `${cacheKey}:${name}:${useHalf ? "half" : "full"}:${blit.width}x${blit.height}`,
+                blit.width,
+                blit.height,
+                unitLight,
+                item.station.x,
+              );
+              paintCtx.drawImage(
+                lit,
                 blit.x + (offsets.root.x + shift.x) * pixelW,
                 blit.y + (offsets.root.y + shift.y) * pixelH,
                 blit.width,
@@ -1657,15 +1735,21 @@ export function NativeBattlePreview() {
             paintCtx.imageSmoothingEnabled = true;
             const originX = (blit.x + offsets.root.x * pixelW) * span + cam.x;
             const originY = (blit.y + offsets.root.y * pixelH) * span + cam.y;
-            if (cached) {
-              paintCtx.drawImage(cached, originX, originY, dw, dh);
-            } else {
-              paintCtx.drawImage(scalable, originX, originY, dw, dh);
-            }
+            const picture = cached ?? scalable;
+            const lit = litFieldSprite(picture, `${cacheKey}|crisp|${dw}x${dh}`, dw, dh, unitLight, item.station.x);
+            paintCtx.drawImage(lit, originX, originY, dw, dh);
             paintCtx.restore();
           } else {
             paintCtx.imageSmoothingEnabled = smooth;
-            paintCtx.drawImage(bitmap, blit.x + offsets.root.x * pixelW, blit.y + offsets.root.y * pixelH, blit.width, blit.height);
+            const lit = litFieldSprite(
+              bitmap,
+              `${cacheKey}|bitmap|${blit.width}x${blit.height}`,
+              blit.width,
+              blit.height,
+              unitLight,
+              item.station.x,
+            );
+            paintCtx.drawImage(lit, blit.x + offsets.root.x * pixelW, blit.y + offsets.root.y * pixelH, blit.width, blit.height);
           }
           paintChrome(paintCtx);
         });
@@ -1679,6 +1763,7 @@ export function NativeBattlePreview() {
       vehicleStage.sync(
         { cssWidth: cssW, cssHeight: cssH, camX: cam.x / dpr, camY: cam.y / dpr, viewScale },
         svgUnits,
+        unitLight,
       );
       for (const paint of frontShadows) {
         paint();

@@ -10,6 +10,7 @@ describe("graphical settings", () => {
       crispPictures: true,
       animatedSea: true,
       unitLighting: true,
+      cinematicCamera: false,
     });
     expect(graphicsFromJson(null)).toEqual(GRAPHICS_DEFAULTS);
   });

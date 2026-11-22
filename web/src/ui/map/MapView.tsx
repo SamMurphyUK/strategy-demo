@@ -733,7 +733,8 @@ export function MapView(props: MapViewProps) {
 
   const pickUnit = (ls: RegionLayout[], sp: Vec2) => {
     const { tokenHitPx: hit, uprightReach: reach } = live.current;
-    return reach > 0 ? pickFrontCounter(ls, sp, hit, reach) : pickCounter(ls, sp, hit);
+    // The upright picture is wider and taller than the token, and a squad stands out to either side.
+    return reach > 0 ? pickFrontCounter(ls, sp, Math.max(hit, 48), Math.max(reach, 52)) : pickCounter(ls, sp, hit);
   };
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -1276,6 +1277,26 @@ export function MapView(props: MapViewProps) {
     live.current.props.onDragCancel?.();
   };
 
+  let hoverChip: { x: number; y: number; label: string } | null = null;
+  if (mapLod === 2 && hoverStack) {
+    for (const layout of layouts) {
+      if (layout.region.id !== hoverStack.regionId || layout.copyDx !== hoverStack.copyDx) {
+        continue;
+      }
+      const counter = layout.counters.find((item) => item.slot.key === hoverStack.key);
+      if (!counter) {
+        continue;
+      }
+      const entry = counter.slot.entry;
+      hoverChip = {
+        x: counter.x,
+        y: counter.y - 46,
+        label: props.unitTitle?.(entry) ?? unitLabel(entry.unit_type_id),
+      };
+      break;
+    }
+  }
+
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas
@@ -1309,6 +1330,11 @@ export function MapView(props: MapViewProps) {
         </button>
       </div>
       {props.children}
+      {mapLod === 2 && hoverChip && (
+        <div className="unit-hover-label" style={{ left: hoverChip.x, top: hoverChip.y }}>
+          {hoverChip.label}
+        </div>
+      )}
       {gesture?.moved && (
         <div
           className="move-drag-badge"

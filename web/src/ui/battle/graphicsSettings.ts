@@ -11,6 +11,8 @@ export interface GraphicsSettings {
   animatedSea: boolean;
   /** Tint units with the sky's light (no heightmaps). Off draws them as painted. */
   unitLighting: boolean;
+  /** Auto zoom and pan with the dice, a firing row, and the hits. Wheel cancels it for that round. */
+  cinematicCamera: boolean;
 }
 
 export const GRAPHICS_DEFAULTS: GraphicsSettings = {
@@ -19,6 +21,7 @@ export const GRAPHICS_DEFAULTS: GraphicsSettings = {
   crispPictures: true,
   animatedSea: true,
   unitLighting: true,
+  cinematicCamera: false,
 };
 
 const STORAGE_KEY = "strategy-demo.graphics";
@@ -42,6 +45,7 @@ export function graphicsFromJson(raw: string | null): GraphicsSettings {
       crispPictures: on(parsed.crispPictures, GRAPHICS_DEFAULTS.crispPictures),
       animatedSea: on(parsed.animatedSea, GRAPHICS_DEFAULTS.animatedSea),
       unitLighting: on(parsed.unitLighting, GRAPHICS_DEFAULTS.unitLighting),
+      cinematicCamera: on(parsed.cinematicCamera, GRAPHICS_DEFAULTS.cinematicCamera),
     };
   } catch {
     return {...GRAPHICS_DEFAULTS};
@@ -62,7 +66,8 @@ export function setGraphicsSettings(patch: Partial<GraphicsSettings>): void {
     next.liveSky === current.liveSky &&
     next.crispPictures === current.crispPictures &&
     next.animatedSea === current.animatedSea &&
-    next.unitLighting === current.unitLighting
+    next.unitLighting === current.unitLighting &&
+    next.cinematicCamera === current.cinematicCamera
   ) {
     return;
   }

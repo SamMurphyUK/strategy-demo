@@ -1855,7 +1855,7 @@ export function readPartFile(value: unknown): PartFile {
   const { id, name, layer, width, height, drawings } = value;
   if (
     typeof id !== "string" ||
-    !/^[a-z0-9_]+$/.test(id) ||
+    !/^[a-zA-Z0-9_]+$/.test(id) ||
     typeof name !== "string" ||
     !isLayer(layer) ||
     typeof width !== "number" ||
@@ -1887,7 +1887,7 @@ function readBuilds(value: unknown): RigBuild[] {
     if (
       !isRecord(build) ||
       typeof build.id !== "string" ||
-      !/^[a-z0-9_]+$/.test(build.id) ||
+      !/^[a-zA-Z0-9_]+$/.test(build.id) ||
       typeof build.name !== "string" ||
       build.name.trim() === "" ||
       typeof build.colours !== "string" ||

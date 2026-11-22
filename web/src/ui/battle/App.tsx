@@ -105,6 +105,21 @@ import {
   drawPixelRankBadge,
   PALETTE,
 } from './unitRenderer';
+import {graphicsSettings, setGraphicsSettings, subscribeGraphics} from './graphicsSettings';
+import {FIELD_VIEW_SCALES, fieldZoomLabel} from '../../art/nativeBattleOverlay';
+import {horizonShiftX} from '../../art/horizonParallax';
+import {
+  applyCamTransform,
+  desiredCinematicView,
+  identityCam,
+  jumpCamScale,
+  lerpCam,
+  pruneCinematicHits,
+  screenToWorld,
+  zoomCamField,
+  type CamView,
+  type CinematicHitMark,
+} from './battleCinematic';
 
 export type RankStepState = 'READY_TO_FIRE' | 'FIRING' | 'RESOLVED';
 
@@ -474,6 +489,18 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   const activeDiceRef = useRef<DiceResult[]>([]);
   const floatingTextsRef = useRef<FloatingText[]>([]);
   const combatShellsRef = useRef<CombatShell[]>([]);
+  /** Uids of the units firing in the current rank volley (cinematic zoom target). */
+  const cinematicShooterUidsRef = useRef<string[]>([]);
+  const cinematicHitsRef = useRef<CinematicHitMark[]>([]);
+  const cinematicCamRef = useRef<CamView>(identityCam(canvasWidth, canvasHeight));
+  const [viewScale, setViewScale] = useState(1);
+  const cinematicOn = useSyncExternalStore(
+    subscribeGraphics,
+    () => graphicsSettings().cinematicCamera,
+    () => false,
+  );
+  /** Round number for which the user cancelled the auto camera (wheel zoom). */
+  const cinematicCancelledRoundRef = useRef(-1);
   const planeBulletsRef = useRef<PlaneBullet[]>([]);
   const droppingBombsRef = useRef<DroppingBomb[]>([]);
   const sparksRef = useRef<HitSparks[]>([]);
@@ -759,6 +786,10 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     activeDiceRef.current = [];
     floatingTextsRef.current = [];
     combatShellsRef.current = [];
+    cinematicShooterUidsRef.current = [];
+    cinematicHitsRef.current = [];
+    cinematicCamRef.current = identityCam(canvasWidth, canvasHeight);
+    cinematicCancelledRoundRef.current = -1;
     planeBulletsRef.current = [];
     droppingBombsRef.current = [];
     sparksRef.current = [];
@@ -1172,6 +1203,11 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       // 2. Spawn floating pixel text HIT directly above struck target unit
       const hitX = Math.round(x);
       const hitY = Math.round(y - 6);
+      cinematicHitsRef.current.push({
+        x: hitX,
+        y: hitY,
+        until: gameTimeRef.current + 1.35,
+      });
       floatingTextsRef.current.push({
         id: `hit_unit_${Math.random()}`,
         x: hitX,
@@ -2314,6 +2350,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
       setRankStepState('FIRING');
       setRankSubPhase('ROLLING');
+      cinematicShooterUidsRef.current = shooters.map((u) => u.uid);
 
       // If Attacker Carrier firing at Rank 1 from Rank III, glide forward to Rank 1
       if (side === 'attacker' && rankNumber === 1) {
@@ -2496,6 +2533,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     setRankSubPhase('ROLLING');
 
     const aaGuns = defenderUnitsRef.current.filter((u) => isCombatActive(u) && u.type === 'aaa');
+    cinematicShooterUidsRef.current = aaGuns.map((u) => u.uid);
     const airUnits = attackerUnitsRef.current.filter(
       (u) => isCombatActive(u) && UNIT_DEFINITIONS[u.type].category === 'air',
     );
@@ -3284,11 +3322,18 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvasWidth / rect.width;
     const scaleY = canvasHeight / rect.height;
-    const clickX = (e.clientX - rect.left) * scaleX;
-    const clickY = (e.clientY - rect.top) * scaleY;
+    const screenX = (e.clientX - rect.left) * scaleX;
+    const screenY = (e.clientY - rect.top) * scaleY;
+    const cam = cinematicCamRef.current;
+    const world = screenToWorld(screenX, screenY, cam, canvasWidth, canvasHeight);
+    // Dice tray / units live in board space under the camera. Victory UI stays screen-space.
+    const clickX = world.x;
+    const clickY = world.y;
 
     // Victory Sequence Screen: Check "RETURN TO COMBAT" button click
     if (victorySeqRef.current.active && victorySeqRef.current.stage === 'FLAG_SCREEN') {
+      const clickX = screenX;
+      const clickY = screenY;
       const bRect = returnButtonRectRef.current;
       const hitX = bRect ? clickX >= bRect.x && clickX <= bRect.x + bRect.w : clickX >= 505 && clickX <= 775;
       const hitY = bRect ? clickY >= bRect.y && clickY <= bRect.y + bRect.h : clickY >= 435 && clickY <= 495;
@@ -4187,6 +4232,55 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       sw.radius += (sw.maxRadius - sw.radius) * deltaTime * 5;
       if (sw.life <= 0) shockwavesRef.current.splice(i, 1);
     }
+
+    // Cinematic camera: ease toward the dice, the firing row, or the tracked hits.
+    cinematicHitsRef.current = pruneCinematicHits(cinematicHitsRef.current, gameTimeRef.current);
+    const gfx = graphicsSettings();
+    const camCancelled =
+      !gfx.cinematicCamera || cinematicCancelledRoundRef.current === roundNumberRef.current;
+    if (gfx.cinematicCamera && !camCancelled) {
+      const allUnits = [...attackerUnitsRef.current, ...defenderUnitsRef.current];
+      const liveCount = allUnits.filter(isCombatActive).length;
+      const shooterPoints = cinematicShooterUidsRef.current
+        .map((uid) => allUnits.find((u) => u.uid === uid))
+        .filter((u): u is CombatUnit => !!u && isCombatActive(u))
+        .map((u) => getUnitScreenPos(u));
+      const trackPoints: {x: number; y: number}[] = [];
+      for (const shell of combatShellsRef.current) {
+        const t = Math.min(1, Math.max(0, shell.progress));
+        const arc = Math.sin(t * Math.PI) * shell.arcHeight;
+        trackPoints.push({
+          x: shell.startX + (shell.endX - shell.startX) * t,
+          y: shell.startY + (shell.endY - shell.startY) * t - arc,
+        });
+      }
+      for (const b of droppingBombsRef.current) {
+        trackPoints.push({x: b.x, y: b.y});
+      }
+      for (const bullet of planeBulletsRef.current) {
+        trackPoints.push({x: bullet.x, y: bullet.y});
+      }
+      const phase = battlePhaseRef.current;
+      const target = desiredCinematicView({
+        canvasW: canvasWidth,
+        canvasH: canvasHeight,
+        liveCount,
+        subPhase: rankSubPhaseRef.current,
+        shooterPoints,
+        trackPoints,
+        hitPoints: cinematicHitsRef.current,
+        allocation: phase === 'ALLOCATION' || phase === 'AA_ALLOCATION',
+      });
+      cinematicCamRef.current = lerpCam(cinematicCamRef.current, target, deltaTime);
+    } else if (!gfx.cinematicCamera && cinematicCancelledRoundRef.current < 0) {
+      // Toggle off with no manual zoom: ease back to the full board.
+      cinematicCamRef.current = lerpCam(
+        cinematicCamRef.current,
+        identityCam(canvasWidth, canvasHeight),
+        deltaTime,
+        4.5,
+      );
+    }
   };
 
   // 🛑 Game Loop Draw Function 🛑
@@ -4258,7 +4352,17 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     const isAirStrikeTest = currentTheaterRef.current === 'air_strike_test';
     const isMaritime = isNavyTest || isAirStrikeTest;
 
+    const cam = cinematicCamRef.current;
+    const camActive = Math.abs(cam.scale - 1) > 0.004
+      || Math.abs(cam.focusX - canvasWidth / 2) > 0.5
+      || Math.abs(cam.focusY - canvasHeight / 2) > 0.5;
+    ctx.save();
+    if (camActive) {
+      applyCamTransform(ctx, cam, canvasWidth, canvasHeight);
+    }
+
     // 1. Draw WWII Top-Down Battlefield Terrain (Passing dynamic craters & blood puddles)
+    const skylineShift = horizonShiftX((canvasWidth / 2 - cam.focusX) * cam.scale, 0, cam.scale);
     drawWWIIBattlefield(
       ctx,
       canvasWidth,
@@ -4269,6 +4373,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       bloodPuddlesRef.current,
       casualtyRecordsRef.current,
       sceneryRef.current,
+      {horizonShiftX: skylineShift},
     );
 
     // 2. Draw Animated Sea at the edge of the troop lines (for land theaters), or an inland region's land
@@ -4402,7 +4507,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     // 7. Draw Active Plane Sorties (Swooping strafing / bombing flight loops with dynamic shadow fade)
     activeSortiesRef.current.forEach((sortie) => {
       const fColor = sortie.side === 'attacker' ? attackerCloth : defenderCloth;
-      drawPlaneSortie(ctx, sortie, time, fColor);
+      const sortieFaction = sortie.side === 'attacker' ? attackerRoster : defenderRoster;
+      drawPlaneSortie(ctx, sortie, time, fColor, false, sortieFaction);
     });
 
     // 7b. Draw Independent World-Space Plane Bullets & Tracers
@@ -4754,6 +4860,9 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       }
     }
 
+    // Screen-space HUD sits above the cinematic camera.
+    ctx.restore();
+
     // 12. Top HITS Banner Just Above the Treeline / Horizon in the Skybox
     if (!isVictoryCheer && (currentPhase !== 'IDLE' || attackerHitsRef.current > 0 || defenderHitsRef.current > 0)) {
       const isAtkTurn = currentPhase.startsWith('ATK_');
@@ -4861,6 +4970,33 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  // Wheel zoom matches the field test: the point under the cursor stays put, from a quarter to 8×.
+  // It holds the cinematic camera off until the next round.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      event.preventDefault();
+      cinematicCancelledRoundRef.current = roundNumberRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const sx = ((event.clientX - rect.left) * canvasWidth) / rect.width;
+      const sy = ((event.clientY - rect.top) * canvasHeight) / rect.height;
+      cinematicCamRef.current = zoomCamField(
+        cinematicCamRef.current,
+        sx,
+        sy,
+        canvasWidth,
+        canvasHeight,
+        event.deltaY,
+        event.deltaMode,
+      );
+      setViewScale(cinematicCamRef.current.scale);
+    };
+    canvas.addEventListener('wheel', onWheel, {passive: false});
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [canvasWidth, canvasHeight]);
+
   const seenPlaySignal = useRef(0);
   const fireRoundRef = useRef<() => void>(() => {});
   fireRoundRef.current = () => {
@@ -4897,6 +5033,44 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
       {/* TOP HUD: Dedicated Safe Zone Container (Fades out cleanly during Victory Sequence) */}
       <header className={`w-full bg-[#423840] border-b-2 border-[#5E4E54] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0 text-xs transition-opacity duration-700 ${isVictorySequenceActive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <label className="flex items-center gap-1.5 text-[#DFCE91] font-bold">
+          View
+          <select
+            aria-label="View scale"
+            className="bg-[#2b242a] border border-[#7D6652] text-[#CAA574] px-1 py-0.5"
+            value={FIELD_VIEW_SCALES.find((step) => Math.abs(step - viewScale) < 0.001) ?? 'live'}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (!Number.isFinite(next) || next <= 0) return;
+              cinematicCancelledRoundRef.current = roundNumberRef.current;
+              cinematicCamRef.current = jumpCamScale(cinematicCamRef.current, next);
+              setViewScale(cinematicCamRef.current.scale);
+            }}
+          >
+            {FIELD_VIEW_SCALES.every((step) => Math.abs(step - viewScale) >= 0.001) && (
+              <option value="live">{fieldZoomLabel(viewScale)}</option>
+            )}
+            {FIELD_VIEW_SCALES.map((scale) => (
+              <option key={scale} value={scale}>
+                {scale === 1 ? '1× native' : `${scale}×`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          className="flex items-center gap-1.5 text-[#DFCE91] font-bold cursor-pointer"
+          title="Follows the dice, a firing row, and the hits. The wheel still zooms, and that look holds until the next round."
+        >
+          <input
+            type="checkbox"
+            checked={cinematicOn}
+            onChange={(event) => {
+              setGraphicsSettings({cinematicCamera: event.target.checked});
+              if (event.target.checked) cinematicCancelledRoundRef.current = -1;
+            }}
+          />
+          Cinematic camera
+        </label>
         {match?.spectating && (
           <span data-testid="spectator-banner" className="w-full font-black tracking-wide text-[#DFCE91]">
             {match.spectatorLabel ?? 'SPECTATING BATTLE'}

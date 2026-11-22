@@ -62,10 +62,10 @@ export function terrainStampFadeAlpha(zoom: number): number {
 export const UPRIGHT_HIT_PX = 26;
 
 export function squadSpriteCount(count: number): number {
-  if (count >= 6) {
+  if (count >= 3) {
     return 3;
   }
-  if (count >= 3) {
+  if (count === 2) {
     return 2;
   }
   return 1;

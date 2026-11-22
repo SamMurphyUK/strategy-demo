@@ -47,8 +47,8 @@ describe("semantic zoom lod", () => {
     expect(terrainStampAlpha(1.16)).toBe(1);
     expect(terrainStampAlpha(2.2)).toBe(1);
     expect(squadSpriteCount(1)).toBe(1);
-    expect(squadSpriteCount(2)).toBe(1);
-    expect(squadSpriteCount(3)).toBe(2);
+    expect(squadSpriteCount(2)).toBe(2);
+    expect(squadSpriteCount(3)).toBe(3);
     expect(squadSpriteCount(6)).toBe(3);
   });
 
