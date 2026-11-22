@@ -42,5 +42,13 @@
     ]
   },
   "factionId": "JAP",
-  "unitTypeId": "infantry"
+  "unitTypeId": "infantry",
+  "muzzle": {
+    "x": 62,
+    "y": 38
+  },
+  "flashFrames": [
+    1,
+    2
+  ]
 }

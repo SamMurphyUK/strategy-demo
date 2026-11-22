@@ -15,8 +15,7 @@ describe("quick unit catalog", () => {
 
     expect(resolveQuickClip("JAP", "infantry")?.unitId).toBe("jap_infantry_v2");
     expect(resolveQuickClip("JAP", "infantry")?.fallback).toBe(false);
-    expect(resolveQuickClip("GER", "infantry")?.unitId).toBe("jap_infantry_v2");
-    expect(resolveQuickClip("GER", "infantry")?.fallback).toBe(true);
+    expect(resolveQuickClip("GER", "infantry")).toBeNull();
 
     expect(resolveQuickClip("GER", "fighter")?.unitId).toBe("ger_fighter_seed1_25D");
     expect(resolveQuickClip("GER", "fighter")?.fallback).toBe(false);
@@ -36,7 +35,7 @@ describe("quick unit catalog", () => {
     expect(rows.length).toBe(5 * (12 + 2));
     expect(rows.filter((row) => row.unitTypeId === "tank" && row.quick === "yes")).toHaveLength(5);
     expect(rows.filter((row) => row.unitTypeId === "infantry" && row.quick === "yes")).toHaveLength(1);
-    expect(rows.filter((row) => row.unitTypeId === "infantry" && row.quick === "fallback")).toHaveLength(4);
+    expect(rows.filter((row) => row.unitTypeId === "infantry" && row.quick === "missing")).toHaveLength(4);
     expect(rows.filter((row) => row.unitTypeId === "fighter" && row.quick === "yes")).toHaveLength(5);
     expect(rows.filter((row) => row.unitTypeId === "fighter" && row.quick === "fallback")).toHaveLength(0);
     expect(rows.filter((row) => row.unitTypeId === "artillery" && row.quick === "yes")).toHaveLength(5);

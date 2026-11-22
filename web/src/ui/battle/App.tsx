@@ -97,6 +97,7 @@ import {
   drawPlaneSortie,
   drawPlaneBullets,
   drawDroppingBombs,
+  skyLight,
   drawFloatingTexts,
   drawPixelString,
   drawProceduralWavingFlag,
@@ -108,6 +109,8 @@ import {
 import {graphicsSettings, setGraphicsSettings, subscribeGraphics} from './graphicsSettings';
 import {FIELD_VIEW_SCALES, fieldZoomLabel} from '../../art/nativeBattleOverlay';
 import {horizonShiftX} from '../../art/horizonParallax';
+import {createVehicleStage, type VehicleStage} from '../../art/fieldVehicleStage';
+import {beginQuickFigures, takeQuickFigures} from '../../art/quickSvgFigure';
 import {
   applyCamTransform,
   CINEMATIC_PAN_RATE,
@@ -261,6 +264,8 @@ function ipcLost(units: CombatUnit[]): number {
 /** Without `match` this is the standalone sandbox. With it, the engine decides the battle. */
 export default function App({ match, playSignal = 0 }: { match?: BattleMatch; playSignal?: number } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const battleVectorRef = useRef<SVGSVGElement>(null);
+  const battleVectorStage = useRef<VehicleStage | null>(null);
   const stepperRef = useRef<ReturnType<typeof createFixedStepper>>(undefined);
 
   // --- PLAYGROUND SDK INTEGRATION ---
@@ -4350,6 +4355,9 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     const isMaritime = isNavyTest || isAirStrikeTest;
 
     const cam = cinematicCamRef.current;
+    if (battleVectorStage.current) {
+      beginQuickFigures();
+    }
     const camActive = Math.abs(cam.scale - 1) > 0.004
       || Math.abs(cam.focusX - canvasWidth / 2) > 0.5
       || Math.abs(cam.focusY - canvasHeight / 2) > 0.5;
@@ -4858,6 +4866,21 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     }
 
     // Screen-space HUD sits above the cinematic camera.
+    const quickFigures = takeQuickFigures();
+    const quickStage = battleVectorStage.current;
+    if (quickStage) {
+      quickStage.sync(
+        {
+          cssWidth: canvasWidth,
+          cssHeight: canvasHeight,
+          camX: canvasWidth / 2 - cam.focusX * cam.scale,
+          camY: canvasHeight / 2 - cam.focusY * cam.scale,
+          viewScale: cam.scale,
+        },
+        quickFigures,
+        graphicsSettings().unitLighting ? skyLight(time) : null,
+      );
+    }
     ctx.restore();
 
     // 12. Top HITS Banner Just Above the Treeline / Horizon in the Skybox
@@ -4965,6 +4988,19 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    const svg = battleVectorRef.current;
+    if (!svg) {
+      return;
+    }
+    const stage = createVehicleStage(svg);
+    battleVectorStage.current = stage;
+    return () => {
+      stage.clear();
+      battleVectorStage.current = null;
+    };
   }, []);
 
   // Wheel zoom matches the field test: the point under the cursor stays put, from a quarter to 8×.
@@ -5252,17 +5288,22 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
       {/* MAIN GAMEPLAY VIEWPORT */}
       <div className="flex-1 w-full min-h-0 relative flex items-center justify-center bg-[#423840]">
-        <canvas
-          ref={canvasRef}
-          width={canvasWidth}
-          height={canvasHeight}
-          onClick={handleCanvasClick}
+        <div
+          className="relative h-auto max-w-full max-h-full"
           style={{
             aspectRatio: `${canvasWidth} / ${canvasHeight}`,
             width: `min(100%, calc(100vh * ${canvasWidth} / ${canvasHeight}))`,
           }}
-          className="h-auto max-w-full max-h-full cursor-crosshair drop-shadow-2xl"
-        />
+        >
+          <canvas
+            ref={canvasRef}
+            width={canvasWidth}
+            height={canvasHeight}
+            onClick={handleCanvasClick}
+            className="block h-full w-full cursor-crosshair drop-shadow-2xl"
+          />
+          <svg ref={battleVectorRef} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true" />
+        </div>
 
         {/* EARLY AA ATTACK CASUALTY ALLOCATION MODAL */}
         {battlePhase === 'AA_ALLOCATION' && !isVictorySequenceActive && (

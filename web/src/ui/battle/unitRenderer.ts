@@ -26,8 +26,9 @@ import {
   CasualtyRecord,
   WaterGeyser,
 } from './combatTypes';
-import { drawQuickUnit, hasQuickUnit } from '../../art/quickUnitDraw';
+import { drawQuickUnit, hasQuickUnit, paintQuickFx, stepQuickFrame } from '../../art/quickUnitDraw';
 import { resolveQuickClip } from '../../art/quickUnitCatalog';
+import { quickFiguresOpen, pushQuickFigure, quickSvgFigure } from '../../art/quickSvgFigure';
 import { lightDrawnUnitRect } from '../../art/unitLighting';
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { graphicsSettings } from './graphicsSettings';
@@ -1887,13 +1888,57 @@ function drawBattleQuickUnit(
   time: number,
   scale: number,
   boardX: number,
+  boardY: number,
+  face: 1 | -1,
+  turnDeg: number,
 ): boolean {
   const clip = resolveQuickClip(factionId, unit.type);
   if (!clip) {
     return false;
   }
-  // Procedural tanks sit near 40–50px wide; map the art width onto that footprint.
   const pixelScale = Math.max(0.2, Math.min(0.45, (48 * scale) / clip.width));
+  if (quickFiguresOpen()) {
+    const step = stepQuickFrame({
+      key: `battle:${unit.uid}`,
+      factionId,
+      unitTypeId: unit.type,
+      mode: battleQuickMode(unit),
+      damaged: quickBattleHurt(unit),
+      face: 1,
+      time,
+      pixelScale,
+      feetX: 0,
+      feetY: 0,
+    });
+    if (!step) {
+      return false;
+    }
+    pushQuickFigure(
+      quickSvgFigure({
+        id: `battle:${unit.uid}`,
+        clip,
+        href: step.href,
+        x: boardX,
+        y: boardY,
+        unitScale: pixelScale * battleUnitScale(boardY),
+        face,
+        turnDeg,
+        rootX: -clip.feet.x + step.offsets.root.x,
+        rootY: -clip.feet.y + step.offsets.root.y,
+      }),
+    );
+    paintQuickFx(
+      ctx,
+      clip,
+      step.pose === "damaged" ? "idle" : step.pose,
+      step.pose === "damaged" ? 0 : step.index,
+      step.offsets.root,
+      pixelScale,
+      unit.animRecoil,
+      quickBattleHurt(unit),
+    );
+    return true;
+  }
   return drawQuickUnit(ctx, {
     key: `battle:${unit.uid}`,
     factionId,
@@ -1969,9 +2014,18 @@ export function drawProceduralUnit(
   // The QUICK draw paints the clip muzzle flash and exhaust before returning.
   if (
     !isCasualty &&
-    unit.type !== 'carrier' &&
     hasQuickUnit(rosterFaction, unit.type) &&
-    drawBattleQuickUnit(ctx, unit, rosterFaction, time, scale, boardX)
+    drawBattleQuickUnit(
+      ctx,
+      unit,
+      rosterFaction,
+      time,
+      scale,
+      boardX,
+      Math.round(y),
+      isAttacker ? 1 : -1,
+      ((unit.listingAngle ?? 0) * 180) / Math.PI,
+    )
   ) {
     ctx.restore();
     return;
@@ -4417,6 +4471,48 @@ export function drawPlaneSortie(
   if (sortieClip && factionId) {
     const pixelScale = Math.max(0.2, Math.min(0.45, 48 / sortieClip.width));
     const flying = sortie.bulletBurstsFired > 0 || sortie.bombsDropped > 0;
+    if (quickFiguresOpen()) {
+      const step = stepQuickFrame({
+        key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
+        factionId,
+        unitTypeId: sortie.unitType,
+        mode: flying ? "firing" : "moving",
+        face: 1,
+        time,
+        pixelScale,
+        feetX: 0,
+        feetY: 0,
+        recoil: flying ? 1 : 0,
+      });
+      if (step) {
+        pushQuickFigure(
+          quickSvgFigure({
+            id: `sortie:${sortie.unitUid}`,
+            clip: sortieClip,
+            href: step.href,
+            x: sortie.currentX,
+            y: sortie.currentY,
+            unitScale: pixelScale * battleUnitScale(sortie.homeY),
+            face: sortie.side === "defender" ? -1 : 1,
+            turnDeg: (sortie.currentRot * 180) / Math.PI,
+            rootX: -sortieClip.width / 2 + step.offsets.root.x,
+            rootY: -sortieClip.height / 2 + step.offsets.root.y,
+          }),
+        );
+        paintQuickFx(
+          ctx,
+          sortieClip,
+          step.pose === "damaged" ? "idle" : step.pose,
+          step.index,
+          step.offsets.root,
+          pixelScale,
+          flying ? 1 : 0,
+          false,
+        );
+        ctx.restore();
+        return;
+      }
+    }
     const drew = drawQuickUnit(ctx, {
       key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
       factionId,

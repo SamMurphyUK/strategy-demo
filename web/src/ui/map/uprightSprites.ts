@@ -18,6 +18,7 @@ import { MILITARY } from "../theme/militaryPalette";
 import { hasQuickUnit } from "../../art/quickUnitDraw";
 import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
+import { quickSvgFigure } from "../../art/quickSvgFigure";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -810,28 +811,19 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
       if (asVector && clip && href) {
-        campaignFrame?.vectors.push({
-          id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
-          x: x + off.x,
-          y: y + off.y + sink,
-          unitScale: pixelScale,
-          rootX: -clip.feet.x,
-          rootY: -clip.feet.y,
-          // Side-view shelf art. Mirror it toward the enemy; a turn would tip the picture over.
-          face: pose.face,
-          turnDeg: 0,
-          parts: [
-            {
-              role: "torso",
-              href,
-              x: 0,
-              y: 0,
-              width: clip.width,
-              height: clip.height,
-              resolution: clip.resolution,
-            },
-          ],
-        });
+        campaignFrame?.vectors.push(
+          quickSvgFigure({
+            id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
+            clip,
+            href,
+            x: x + off.x,
+            y: y + off.y + sink,
+            unitScale: pixelScale,
+            face: pose.face,
+            rootX: -clip.feet.x,
+            rootY: -clip.feet.y,
+          }),
+        );
         continue;
       }
       ctx.save();

@@ -191,7 +191,7 @@ function clipMode(mode: QuickDrawMode, clip: QuickClipRef): QuickFxPose {
   return "idle";
 }
 
-function paintQuickFx(
+export function paintQuickFx(
   ctx: CanvasRenderingContext2D,
   clip: QuickClipRef,
   pose: QuickFxPose,
@@ -248,18 +248,19 @@ function paintQuickFx(
   }
 }
 
-/**
- * Draw one shipped vector clip if present. Returns false when this type still uses its placeholder.
- * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
- * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
- */
-export function drawQuickUnit(
-  ctx: CanvasRenderingContext2D,
-  request: QuickDrawRequest,
-): boolean {
+export interface QuickFrameStep {
+  clip: QuickClipRef;
+  href: string;
+  pose: "idle" | "walk" | "fire" | "damaged";
+  index: number;
+  offsets: VehicleOffsets;
+}
+
+/** Advance the clip clock and name the SVG frame. Does not rasterize. */
+export function stepQuickFrame(request: QuickDrawRequest): QuickFrameStep | null {
   const clip = resolveQuickClip(request.factionId, request.unitTypeId);
   if (!clip) {
-    return false;
+    return null;
   }
   const now = typeof performance !== "undefined" ? performance.now() : request.time * 1000;
   easeAll(now);
@@ -283,12 +284,33 @@ export function drawQuickUnit(
   warmClip(clip);
   const pose = clipMode(request.mode, clip);
   const count = clip[pose];
-  // Damaged clips replace idle when the unit is hurt and a damaged strip exists.
   const useDamaged = request.damaged === true && clip.damaged > 0 && pose === "idle";
   const drawPose = useDamaged ? "damaged" : pose;
   const drawCount = useDamaged ? clip.damaged : count;
   const index = drawCount > 0 ? anim.frame % drawCount : 0;
-  const wantedUrl = quickFrameUrl(clip, drawPose, index);
+  const href = quickFrameUrl(clip, drawPose, index);
+  if (!href) {
+    return null;
+  }
+  const offsets = clip.file || request.unitTypeId === "infantry" ? FLAT_OFFSETS : vehicleOffsets(anim, profile);
+  return { clip, href, pose: drawPose, index, offsets };
+}
+
+/**
+ * Draw one shipped vector clip if present. Returns false when this type still uses its placeholder.
+ * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
+ * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
+ */
+export function drawQuickUnit(
+  ctx: CanvasRenderingContext2D,
+  request: QuickDrawRequest,
+): boolean {
+  const step = stepQuickFrame(request);
+  if (!step) {
+    return false;
+  }
+  const { clip, pose: drawPose, index, offsets } = step;
+  const wantedUrl = step.href;
   let url = wantedUrl;
   let image = url ? readyImage(url) : null;
   if (!image) {
@@ -313,9 +335,6 @@ export function drawQuickUnit(
     heldByKey.set(request.key, { url, image });
   }
 
-  // A still has no separate hull, turret, or legs. Infantry frames already carry their own walk.
-  const offsets =
-    clip.file || request.unitTypeId === "infantry" ? FLAT_OFFSETS : vehicleOffsets(anim, profile);
   const scale = request.pixelScale;
   const drawW = clip.width * scale;
   const drawH = clip.height * scale;
@@ -336,7 +355,16 @@ export function drawQuickUnit(
     drawW,
     drawH,
   );
-  paintQuickFx(ctx, clip, pose, useDamaged ? 0 : index, offsets.root, scale, request.recoil ?? 0, request.damaged === true);
+  paintQuickFx(
+    ctx,
+    clip,
+    drawPose === "damaged" ? "idle" : drawPose,
+    drawPose === "damaged" ? 0 : index,
+    offsets.root,
+    scale,
+    request.recoil ?? 0,
+    request.damaged === true,
+  );
   ctx.restore();
   return true;
 }

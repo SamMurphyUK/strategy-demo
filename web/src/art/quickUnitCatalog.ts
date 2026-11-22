@@ -1,10 +1,17 @@
 /**
- * Which `_QUICK` vector clip folders exist for the campaign and battle boards.
- * Pure: no DOM. Missing art is reported, never invented.
+ * Shelf vectors for the campaign and battle boards.
+ * A clip folder's clips.json is the index. A still is used only when that faction and type
+ * has no folder yet. No shared-faction substitute, and no hand-written frame counts.
  */
 
 import vectorManifest from "../../public/assets/units/vector/manifest.json";
+import { readClipsFile } from "./frameClips";
 import { QUIET_QUICK_FX, type QuickFxMarks } from "./quickUnitFx";
+
+const CLIP_FILES = import.meta.glob("../../public/assets/units/vector/frames/*/clips.json", {
+  eager: true,
+  import: "default",
+}) as Record<string, unknown>;
 
 export const QUICK_FACTIONS = ["GER", "USSR", "UK", "US", "JAP"] as const;
 export type QuickFaction = (typeof QUICK_FACTIONS)[number];
@@ -36,135 +43,10 @@ const FACTION_PREFIX: Record<QuickFaction, string> = {
   JAP: "jap",
 };
 
-/** Folder fragment after the faction prefix. */
-const TYPE_FOLDER: Record<QuickUnitType, string> = {
-  tank: "tank",
-  mech_infantry: "mech_infantry",
-  artillery: "artillery",
-  aaa: "aaa",
-  fighter: "fighter",
-  tactical_bomber: "tac_bomber",
-  strategic_bomber: "bomber",
-  battleship: "battleship",
-  cruiser: "cruiser",
-  destroyer: "destroyer",
-  submarine: "submarine",
-  transport: "transport",
-};
-
-interface QuickClipMeta {
-  width: number;
-  height: number;
-  feet: { x: number; y: number };
-  idle: number;
-  walk: number;
-  fire: number;
-  damaged: number;
-  fx: QuickFxMarks;
+interface IndexedClip {
+  ref: QuickClipRef;
+  frames: number;
 }
-
-/** Fire index where the tank barrel is kicked back. That picture draws the flash. */
-const TANK_FLASH: readonly number[] = [1];
-const TANK_PUFF = { idle: [6, 7] as const, fire: [5, 6, 7] as const };
-
-function tankMarks(smoke: { x: number; y: number }, muzzle: { x: number; y: number }): QuickFxMarks {
-  return {
-    smoke,
-    muzzle,
-    flashFrames: TANK_FLASH,
-    puffFrames: { idle: TANK_PUFF.idle, fire: TANK_PUFF.fire },
-  };
-}
-
-/**
- * Logical art size for every shipped battle/campaign vector clip. Resolution 4 lives in the SVG viewBox.
- * Smoke, and the German tank muzzle, are the clip marks. The other tank muzzles are the top pixel of the
- * barrel's rightmost column on idle_0. No flame SVG is shipped.
- */
-const QUICK_CLIPS: Record<string, QuickClipMeta> = {
-  ger_tank_seed1_QUICK: {
-    width: 192,
-    height: 96,
-    feet: { x: 87, y: 95 },
-    idle: 8,
-    walk: 8,
-    fire: 8,
-    damaged: 0,
-    fx: tankMarks({ x: 16, y: 40 }, { x: 191, y: 26 }),
-  },
-  ussr_tank_seed1_QUICK: {
-    width: 192,
-    height: 96,
-    feet: { x: 87, y: 95 },
-    idle: 8,
-    walk: 8,
-    fire: 8,
-    damaged: 0,
-    fx: tankMarks({ x: 15, y: 48 }, { x: 187, y: 26 }),
-  },
-  uk_tank_seed1_QUICK: {
-    width: 176,
-    height: 96,
-    feet: { x: 80, y: 95 },
-    idle: 8,
-    walk: 8,
-    fire: 8,
-    damaged: 0,
-    fx: tankMarks({ x: 11, y: 56 }, { x: 168, y: 39 }),
-  },
-  us_tank_seed1_QUICK: {
-    width: 144,
-    height: 96,
-    feet: { x: 66, y: 95 },
-    idle: 8,
-    walk: 8,
-    fire: 8,
-    damaged: 0,
-    fx: tankMarks({ x: 6, y: 58 }, { x: 138, y: 40 }),
-  },
-  jap_tank_seed1_QUICK: {
-    width: 176,
-    height: 96,
-    feet: { x: 80, y: 95 },
-    idle: 8,
-    walk: 8,
-    fire: 8,
-    damaged: 0,
-    fx: tankMarks({ x: 5, y: 55 }, { x: 172, y: 28 }),
-  },
-  /** Japanese infantry walk / fire / damaged. Other factions fall back to this seed. */
-  jap_infantry_v2: {
-    width: 80,
-    height: 80,
-    feet: { x: 43, y: 71 },
-    idle: 5,
-    walk: 8,
-    fire: 4,
-    damaged: 4,
-    fx: {
-      smoke: null,
-      muzzle: { x: 62, y: 38 },
-      flashFrames: [1, 2],
-      puffFrames: { idle: [], fire: [] },
-    },
-  },
-  /** German fighter flat clip (25D layers stay in the field preview). */
-  ger_fighter_seed1_25D: {
-    width: 144,
-    height: 160,
-    feet: { x: 97, y: 159 },
-    idle: 4,
-    walk: 8,
-    fire: 2,
-    damaged: 2,
-    fx: {
-      smoke: null,
-      muzzle: { x: 133, y: 72 },
-      flashFrames: [0, 1],
-      puffFrames: { idle: [], fire: [] },
-    },
-  },
-};
 
 export interface QuickClipRef {
   unitId: string;
@@ -178,7 +60,7 @@ export interface QuickClipRef {
   height: number;
   feet: { x: number; y: number };
   /** SVG viewBox scale. 1 unit = 1 sprite pixel after scale(1/resolution). */
-  resolution: 4;
+  resolution: number;
   idle: number;
   walk: number;
   fire: number;
@@ -240,90 +122,90 @@ function asUnitType(unitTypeId: string): QuickResolvableType | null {
   return (QUICK_UNIT_TYPES as readonly string[]).includes(id) ? (id as QuickUnitType) : null;
 }
 
-/** Preferred clip folder ids for a faction × type, exact first then shared seeds. */
-function candidateClipIds(faction: QuickFaction, unitType: QuickResolvableType): string[] {
-  const prefix = FACTION_PREFIX[faction];
-  if (unitType === "infantry") {
-    return [`${prefix}_infantry_v2`, "jap_infantry_v2"];
-  }
-  if (unitType === "fighter") {
-    return [`${prefix}_fighter_seed1_25D`];
-  }
-  if (unitType === "carrier" || unitType === "tactical_bomber" || unitType === "strategic_bomber") {
-    return [];
-  }
-  const folder = TYPE_FOLDER[unitType];
-  const ids = [`${prefix}_${folder}_seed1_QUICK`];
-  for (const other of QUICK_FACTIONS) {
-    if (other === faction) {
-      continue;
-    }
-    ids.push(`${FACTION_PREFIX[other]}_${folder}_seed1_QUICK`);
-  }
-  return ids;
-}
-
-function ownerFactionOf(unitId: string): QuickFaction | null {
+function factionOfId(unitId: string): QuickFaction | null {
+  const id = unitId.toLowerCase();
   for (const faction of QUICK_FACTIONS) {
-    if (unitId.startsWith(`${FACTION_PREFIX[faction]}_`)) {
+    if (id.startsWith(`${FACTION_PREFIX[faction]}_`)) {
       return faction;
     }
   }
   return null;
 }
 
-function refFor(
-  unitId: string,
-  askedFaction: QuickFaction,
-  unitTypeId: QuickResolvableType,
-): QuickClipRef | null {
-  const meta = QUICK_CLIPS[unitId];
-  if (!meta) {
-    return null;
+function typeOfId(unitId: string): QuickResolvableType | null {
+  let text = unitId.toLowerCase();
+  for (const faction of QUICK_FACTIONS) {
+    const prefix = `${FACTION_PREFIX[faction]}_`;
+    if (text.startsWith(prefix)) {
+      text = text.slice(prefix.length);
+      break;
+    }
   }
-  const owner = ownerFactionOf(unitId) ?? askedFaction;
+  text = text.replace(/_seed\d+.*$/, "").replace(/_v\d+$/, "").replace(/_polished$/, "").replace(/_quick$/, "").replace(/_25d$/, "");
+  return asUnitType(text);
+}
+
+function marksOf(file: ReturnType<typeof readClipsFile>): QuickFxMarks {
   return {
-    unitId,
-    factionId: owner,
-    unitTypeId,
-    dir: `/assets/units/vector/frames/${unitId}`,
-    width: meta.width,
-    height: meta.height,
-    feet: meta.feet,
-    resolution: 4,
-    idle: meta.idle,
-    walk: meta.walk,
-    fire: meta.fire,
-    damaged: meta.damaged,
-    fx: meta.fx,
-    fallback: owner !== askedFaction,
+    smoke: file.smoke ?? null,
+    muzzle: file.muzzle ?? null,
+    flashFrames: file.flashFrames ?? [],
+    puffFrames: file.puffFrames ?? { idle: [], fire: [] },
   };
 }
 
-/** Exact faction match, else that faction's stamped or polished still, else a shared animated seed. */
+/** One folder per faction and type. When several folders match, the one with more frames wins. */
+const CLIP_INDEX = new Map<string, IndexedClip>();
+for (const [path, raw] of Object.entries(CLIP_FILES)) {
+  let parsed: ReturnType<typeof readClipsFile>;
+  try {
+    parsed = readClipsFile(raw);
+  } catch {
+    continue;
+  }
+  const record = raw as { factionId?: unknown; unitTypeId?: unknown; scale?: unknown };
+  const faction = asFaction(typeof record.factionId === "string" ? record.factionId : "") ?? factionOfId(parsed.unitId);
+  const unitType = asUnitType(typeof record.unitTypeId === "string" ? record.unitTypeId : "") ?? typeOfId(parsed.unitId);
+  if (!faction || !unitType || parsed.width < 1 || parsed.height < 1) {
+    continue;
+  }
+  const folder = path.split(/[/\\]/).filter((part) => part.length > 0).at(-2) ?? parsed.unitId;
+  const frames = parsed.clips.idle.length + parsed.clips.walk.length + parsed.clips.fire.length + parsed.clips.damaged.length;
+  const ref: QuickClipRef = {
+    unitId: parsed.unitId,
+    factionId: faction,
+    unitTypeId: unitType,
+    dir: `/assets/units/vector/frames/${folder}`,
+    width: parsed.width,
+    height: parsed.height,
+    feet: parsed.feet,
+    resolution: typeof record.scale === "number" && record.scale > 0 ? record.scale : 4,
+    idle: parsed.clips.idle.length,
+    walk: parsed.clips.walk.length,
+    fire: parsed.clips.fire.length,
+    damaged: parsed.clips.damaged.length,
+    fx: marksOf(parsed),
+    fallback: false,
+  };
+  const key = `${faction}:${unitType}`;
+  const prev = CLIP_INDEX.get(key);
+  if (!prev || frames > prev.frames) {
+    CLIP_INDEX.set(key, { ref, frames });
+  }
+}
+
+/** The faction's clip folder when one exists, otherwise that faction's still. */
 export function resolveQuickClip(factionId: string, unitTypeId: string): QuickClipRef | null {
   const faction = asFaction(factionId);
   const unitType = asUnitType(unitTypeId);
   if (!faction || !unitType) {
     return null;
   }
-  for (const unitId of candidateClipIds(faction, unitType)) {
-    const hit = refFor(unitId, faction, unitType);
-    if (hit && !hit.fallback) {
-      return hit;
-    }
+  const folder = CLIP_INDEX.get(`${faction}:${unitType}`);
+  if (folder) {
+    return folder.ref;
   }
-  const still = stillFor(faction, unitType);
-  if (still) {
-    return still;
-  }
-  for (const unitId of candidateClipIds(faction, unitType)) {
-    const hit = refFor(unitId, faction, unitType);
-    if (hit) {
-      return hit;
-    }
-  }
-  return null;
+  return stillFor(faction, unitType);
 }
 
 const MANIFEST_TYPE: Partial<Record<QuickResolvableType, string>> = {
