@@ -353,6 +353,8 @@
     position: relative;
     flex: 1;
     min-width: 0;
+    /* Unit pictures paint above the map and would spill onto the panels. */
+    overflow: hidden;
     background: #4e5463;
   }
 
@@ -401,6 +403,7 @@
     position: absolute;
     top: 12px;
     left: 12px;
+    z-index: 5;
   }
 
   /* ---------- side panels ---------- */

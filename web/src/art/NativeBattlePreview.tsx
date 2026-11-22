@@ -30,8 +30,8 @@ import {
   nativeStamp,
   footprintSpan,
   opaqueFeet,
+  paintContactShadow,
   pictureLabel,
-  shadowColor,
   snapDeviceOrigin,
   stampHolds,
   walkFrameAt,
@@ -261,18 +261,7 @@ function inkedOffsets(profile: UnitAnimProfile, offsets: VehicleOffsets): Vehicl
 }
 
 function paintContact(ctx: CanvasRenderingContext2D, spot: { x: number; y: number; rx: number; ry: number }): void {
-  ctx.save();
-  ctx.translate(spot.x, spot.y);
-  ctx.scale(1, spot.ry / spot.rx);
-  const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.rx);
-  pool.addColorStop(0, shadowColor(1));
-  pool.addColorStop(0.55, shadowColor(0.75));
-  pool.addColorStop(1, shadowColor(0));
-  ctx.fillStyle = pool;
-  ctx.beginPath();
-  ctx.arc(0, 0, spot.rx, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  paintContactShadow(ctx, spot);
 }
 
 async function tankFor(

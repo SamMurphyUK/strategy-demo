@@ -297,6 +297,22 @@ export function contactShadow(
   };
 }
 
+/** The soft oval under a unit. The same paint the field uses. */
+export function paintContactShadow(ctx: CanvasRenderingContext2D, spot: ContactShadow): void {
+  ctx.save();
+  ctx.translate(spot.x, spot.y);
+  ctx.scale(1, spot.ry / spot.rx);
+  const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.rx);
+  pool.addColorStop(0, shadowColor(1));
+  pool.addColorStop(0.55, shadowColor(0.75));
+  pool.addColorStop(1, shadowColor(0));
+  ctx.fillStyle = pool;
+  ctx.beginPath();
+  ctx.arc(0, 0, spot.rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** The shadow colour at a share of full strength. Full strength is 0.32. */
 export function shadowColor(strength: number): string {
   const share = Math.min(1, Math.max(0, strength));

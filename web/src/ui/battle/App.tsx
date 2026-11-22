@@ -107,6 +107,8 @@ import {
   PALETTE,
 } from './unitRenderer';
 import {graphicsSettings, setGraphicsSettings, subscribeGraphics} from './graphicsSettings';
+import {UnitSizeMenu} from './UnitSizeMenu';
+import {victoryClearsVectors, victoryVectorOpacity} from './victoryPresent';
 import {FIELD_VIEW_SCALES, fieldZoomLabel} from '../../art/nativeBattleOverlay';
 import {horizonShiftX} from '../../art/horizonParallax';
 import {createVehicleStage, type VehicleStage} from '../../art/fieldVehicleStage';
@@ -118,6 +120,7 @@ import {
   desiredCinematicView,
   identityCam,
   jumpCamScale,
+  panCam,
   lerpCam,
   screenToWorld,
   zoomCamField,
@@ -501,8 +504,19 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     () => graphicsSettings().cinematicCamera,
     () => false,
   );
-  /** Round number for which the user cancelled the auto camera (wheel zoom). */
+  /** Round number for which the user cancelled the auto camera (wheel zoom or a drag). */
   const cinematicCancelledRoundRef = useRef(-1);
+  /** A drag that moved the board. The click that follows it must not roll the dice. */
+  const suppressClickRef = useRef(false);
+  const panDragRef = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    focusX: number;
+    focusY: number;
+    scale: number;
+    moved: boolean;
+  } | null>(null);
   const planeBulletsRef = useRef<PlaneBullet[]>([]);
   const droppingBombsRef = useRef<DroppingBomb[]>([]);
   const sparksRef = useRef<HitSparks[]>([]);
@@ -3309,6 +3323,10 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
 
   // Canvas Click Detection
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -4288,11 +4306,23 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   // 🛑 Game Loop Draw Function 🛑
   const draw = (ctx: CanvasRenderingContext2D) => {
     prepareCanvas(ctx, canvasWidth, canvasHeight);
+    // The board is the only picture. Anything the camera leaves outside it is charcoal, not the previous frame.
+    ctx.fillStyle = PALETTE.bunkerCharcoal;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    const victory = victorySeqRef.current;
+    const vector = battleVectorRef.current;
+    if (vector) {
+      vector.style.opacity = victoryVectorOpacity(victory.active, victory.stage, victory.blackFadeAlpha);
+    }
+    if (victoryClearsVectors(victory.active, victory.stage)) {
+      battleVectorStage.current?.clear();
+    }
 
     // =========================================================================
     // VICTORY SEQUENCE: FULL-SCREEN WAVING FLAG & VICTORY MODAL STAGE
     // =========================================================================
-    if (victorySeqRef.current.active && victorySeqRef.current.stage === 'FLAG_SCREEN') {
+    if (victory.active && victory.stage === 'FLAG_SCREEN') {
       const time = gameTimeRef.current;
 
       // 1. Dynamic procedural waving flag in an infinite loop fills the entire screen
@@ -5003,7 +5033,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
     };
   }, []);
 
-  // Wheel zoom matches the field test: the point under the cursor stays put, from a quarter to 8×.
+  // Wheel zoom matches the field test's curve. The point under the cursor stays put, from the starting frame out to 8×.
   // It holds the cinematic camera off until the next round.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -5026,8 +5056,63 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       );
       setViewScale(cinematicCamRef.current.scale);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      if (victorySeqRef.current.active && victorySeqRef.current.stage === 'FLAG_SCREEN') return;
+      panDragRef.current = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        focusX: cinematicCamRef.current.focusX,
+        focusY: cinematicCamRef.current.focusY,
+        scale: cinematicCamRef.current.scale,
+        moved: false,
+      };
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {
+        // The drag still follows the pointer when the browser will not capture it.
+      }
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const pan = panDragRef.current;
+      if (!pan || pan.pointerId !== event.pointerId || pan.scale <= 1.001) return;
+      const dx = event.clientX - pan.x;
+      const dy = event.clientY - pan.y;
+      if (!pan.moved && Math.hypot(dx, dy) < 6) return;
+      pan.moved = true;
+      cinematicCancelledRoundRef.current = roundNumberRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const boardDx = rect.width > 0 ? (dx * canvasWidth) / rect.width : dx;
+      const boardDy = rect.height > 0 ? (dy * canvasHeight) / rect.height : dy;
+      cinematicCamRef.current = panCam(
+        {scale: pan.scale, focusX: pan.focusX, focusY: pan.focusY},
+        boardDx,
+        boardDy,
+        canvasWidth,
+        canvasHeight,
+      );
+      canvas.style.cursor = 'grabbing';
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      const pan = panDragRef.current;
+      if (!pan || pan.pointerId !== event.pointerId) return;
+      if (pan.moved) suppressClickRef.current = true;
+      panDragRef.current = null;
+      canvas.style.cursor = '';
+    };
     canvas.addEventListener('wheel', onWheel, {passive: false});
-    return () => canvas.removeEventListener('wheel', onWheel);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
+    };
   }, [canvasWidth, canvasHeight]);
 
   const seenPlaySignal = useRef(0);
@@ -5076,7 +5161,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
               const next = Number(event.target.value);
               if (!Number.isFinite(next) || next <= 0) return;
               cinematicCancelledRoundRef.current = roundNumberRef.current;
-              cinematicCamRef.current = jumpCamScale(cinematicCamRef.current, next);
+              cinematicCamRef.current = jumpCamScale(cinematicCamRef.current, next, canvasWidth, canvasHeight);
               setViewScale(cinematicCamRef.current.scale);
             }}
           >
@@ -5836,7 +5921,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       {/* MANDATORY GAME MENU OVERLAY */}
       {isGameMenuOpen && (
         <MenuOverlay tone="neutral" zIndex={1000}>
-          <div className="w-full max-w-md bg-[#423840] border-2 border-[#A1A258] rounded-xl p-6 m-4 shadow-2xl flex flex-col items-center">
+          <div className="w-full max-w-lg bg-[#423840] border-2 border-[#A1A258] rounded-xl p-6 m-4 shadow-2xl flex flex-col items-center">
             <h2 className="text-2xl font-black text-[#DFCE91] tracking-wider mb-6 flex items-center gap-2">
               <Menu size={24} /> GAME MENU
             </h2>
@@ -5848,6 +5933,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                 className="w-full min-h-[48px] bg-[#DFCE91] hover:bg-[#CAA574] text-[#423840] py-2.5 rounded-lg font-black text-base transition-colors flex items-center justify-center gap-2">
                 <Play size={18} /> RESUME BATTLE
               </button>
+
+              <UnitSizeMenu />
 
               <div className="grid grid-cols-2 gap-2">
                 <button

@@ -126,6 +126,9 @@ export function MainMenu({
           <button type="button" onClick={onOpenEditor}>
             Map Editor
           </button>
+          <button type="button" onClick={() => window.location.assign("/?bake=1")}>
+            Sprite editor
+          </button>
           <button type="button" onClick={() => setPage("settings")}>
             Settings
           </button>

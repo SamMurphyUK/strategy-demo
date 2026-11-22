@@ -131,7 +131,10 @@ export function App() {
   const [coast, setCoast] = useState<MasterLand | "file" | "none">("file");
   const [coastForPlay, setCoastForPlay] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(true);
+  const artQuery = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+  const spriteEditor = artQuery.get("bake") === "1";
+  const fieldTest = artQuery.get("field") === "1";
+  const [menuOpen, setMenuOpen] = useState(!(spriteEditor || fieldTest));
   const [boardGate, setBoardGate] = useState(false);
   const [look, setLook] = useState<"field" | "dusk">(() => {
     try {
@@ -986,9 +989,9 @@ export function App() {
       />
     )}
     <Soundboard />
-    {import.meta.env.DEV && new URLSearchParams(window.location.search).get("bake") === "1" && <UnitBakeReviewPanel />}
+    {spriteEditor && <UnitBakeReviewPanel />}
     {import.meta.env.DEV && new URLSearchParams(window.location.search).get("anim") === "1" && <MotionTestLevel />}
-    {import.meta.env.DEV && new URLSearchParams(window.location.search).get("field") === "1" && <NativeBattlePreview />}
+    {fieldTest && <NativeBattlePreview />}
     {battleOnScreen && (
       <div className="combat-cover">
         <BattleScreen

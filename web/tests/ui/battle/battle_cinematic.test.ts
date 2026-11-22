@@ -7,6 +7,7 @@ import {
   lerpCam,
   pruneCinematicHits,
   screenToWorld,
+  panCam,
   zoomCamAt,
   zoomCamField,
 } from "../../../src/ui/battle/battleCinematic";
@@ -61,6 +62,30 @@ describe("battle cinematic camera", () => {
     const after = screenToWorld(400, 200, next, 1280, 720);
     expect(after.x).toBeCloseTo(before.x, 5);
     expect(after.y).toBeCloseTo(before.y, 5);
+  });
+
+  it("will not zoom out past the starting frame", () => {
+    const cam = identityCam(1280, 720);
+    const held = zoomCamField(cam, 400, 200, 1280, 720, 800, 0);
+    expect(held.scale).toBe(1);
+    expect(held.focusX).toBeCloseTo(cam.focusX, 4);
+    expect(held.focusY).toBeCloseTo(cam.focusY, 4);
+    const closer = zoomCamField({ scale: 3, focusX: 640, focusY: 360 }, 200, 100, 1280, 720, 900, 0);
+    expect(closer.scale).toBeGreaterThanOrEqual(1);
+    expect(closer.scale).toBeLessThan(3);
+  });
+
+  it("drags the zoomed board and stops at its edge", () => {
+    const cam = { scale: 2, focusX: 640, focusY: 360 };
+    const shifted = panCam(cam, -200, 0, 1280, 720);
+    expect(shifted.focusX).toBeCloseTo(740, 4);
+    expect(shifted.focusY).toBeCloseTo(360, 4);
+    const past = panCam(cam, 2000, 2000, 1280, 720);
+    expect(past.focusX).toBeCloseTo(1280 / 4, 4);
+    expect(past.focusY).toBeCloseTo(720 / 4, 4);
+    const held = panCam(identityCam(1280, 720), 400, 80, 1280, 720);
+    expect(held.focusX).toBeCloseTo(640, 4);
+    expect(held.focusY).toBeCloseTo(360, 4);
   });
 
   it("zooms past the cinematic framing, the way the field test does, and keeps the point", () => {

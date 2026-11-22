@@ -93,8 +93,41 @@ export function screenToWorld(
 }
 
 /**
- * Wheel zoom with the field test's range and curve. The board point under the cursor stays put.
- * Positive `deltaY` zooms out. The cinematic camera's own framing stays inside a tighter range.
+ * Keeps the visible frame inside the original board. At the starting scale the frame is the
+ * whole board, so the focus stays in the middle.
+ */
+export function clampCamToBoard(cam: CamView, canvasW: number, canvasH: number): CamView {
+  return {
+    scale: cam.scale,
+    focusX: clampFocusToBoard(cam.focusX, canvasW, cam.scale),
+    focusY: clampFocusToBoard(cam.focusY, canvasH, cam.scale),
+  };
+}
+
+function clampFocusToBoard(focus: number, size: number, scale: number): number {
+  if (!(scale > 0) || !(size > 0)) return focus;
+  const half = size / (2 * scale);
+  if (half * 2 >= size - 0.001) return size / 2;
+  return Math.min(size - half, Math.max(half, focus));
+}
+
+/**
+ * Drag the zoomed board. `dx` and `dy` are board pixels the pointer moved.
+ * The picture follows the pointer, and the frame stops at the board's edge.
+ */
+export function panCam(cam: CamView, dx: number, dy: number, canvasW: number, canvasH: number): CamView {
+  const scale = cam.scale > 0 ? cam.scale : 1;
+  return clampCamToBoard(
+    {scale: cam.scale, focusX: cam.focusX - dx / scale, focusY: cam.focusY - dy / scale},
+    canvasW,
+    canvasH,
+  );
+}
+
+/**
+ * Wheel zoom with the field test's curve. The board point under the cursor stays put.
+ * Positive `deltaY` zooms out, and the view cannot shrink past the starting frame.
+ * The frame also stays inside the original board.
  */
 export function zoomCamField(
   cam: CamView,
@@ -106,17 +139,21 @@ export function zoomCamField(
   deltaMode = 0,
 ): CamView {
   const world = screenToWorld(screenX, screenY, cam, canvasW, canvasH);
-  const scale = fieldWheelZoom(cam.scale, deltaY, deltaMode);
-  return {
-    scale,
-    focusX: world.x - (screenX - canvasW / 2) / scale,
-    focusY: world.y - (screenY - canvasH / 2) / scale,
-  };
+  const scale = Math.max(1, fieldWheelZoom(cam.scale, deltaY, deltaMode));
+  return clampCamToBoard(
+    {
+      scale,
+      focusX: world.x - (screenX - canvasW / 2) / scale,
+      focusY: world.y - (screenY - canvasH / 2) / scale,
+    },
+    canvasW,
+    canvasH,
+  );
 }
 
-/** Jump to a whole view step, keeping the point the camera is looking at. */
-export function jumpCamScale(cam: CamView, scale: number): CamView {
-  return {...cam, scale: fieldViewScale(scale)};
+/** Jump to a whole view step, keeping the point the camera is looking at. Never smaller than the starting frame. */
+export function jumpCamScale(cam: CamView, scale: number, canvasW: number, canvasH: number): CamView {
+  return clampCamToBoard({...cam, scale: Math.max(1, fieldViewScale(scale))}, canvasW, canvasH);
 }
 
 /** Wheel zoom that keeps the board point under the cursor fixed. */

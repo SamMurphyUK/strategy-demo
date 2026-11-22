@@ -68,6 +68,7 @@ export function UnitBakeReviewPanel() {
     <section className="unit-bake-review" aria-label="Unit shelf">
       <style>{PANEL_CSS}</style>
       <div className="bake-field-bar">
+        <a href="/">Main menu</a>
         <button
           type="button"
           onClick={() => {
@@ -215,6 +216,7 @@ const PANEL_CSS = `
   padding: 4px 0 8px;
   background: #1c1917;
 }
+.bake-field-bar a,
 .bake-field-bar button {
   font: 600 13px/1.3 "Segoe UI", sans-serif;
   letter-spacing: 0;
@@ -223,6 +225,11 @@ const PANEL_CSS = `
   background: #ddcf99;
   color: #1c1917;
   border: 1px solid #ddcf99;
+  text-decoration: none;
+}
+.bake-field-bar a {
+  background: transparent;
+  color: #ddcf99;
 }
 .bake-field-bar p {
   margin: 0;

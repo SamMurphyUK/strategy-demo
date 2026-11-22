@@ -169,6 +169,10 @@ for (const [path, raw] of Object.entries(CLIP_FILES)) {
   if (!faction || !unitType || parsed.width < 1 || parsed.height < 1) {
     continue;
   }
+  // The 2.5D fighter is an editor experiment. Boards use the QUICK picture.
+  if (/_25D$/i.test(parsed.unitId)) {
+    continue;
+  }
   const folder = path.split(/[/\\]/).filter((part) => part.length > 0).at(-2) ?? parsed.unitId;
   const frames = parsed.clips.idle.length + parsed.clips.walk.length + parsed.clips.fire.length + parsed.clips.damaged.length;
   const ref: QuickClipRef = {

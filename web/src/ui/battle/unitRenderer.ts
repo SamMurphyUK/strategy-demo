@@ -12,6 +12,7 @@ import {
 } from "./figureGait";
 import {
   CombatUnit,
+  type UnitType,
   TheaterId,
   GroundCrater,
   GroundFire,
@@ -26,12 +27,15 @@ import {
   CasualtyRecord,
   WaterGeyser,
 } from './combatTypes';
-import { drawQuickUnit, hasQuickUnit, paintQuickFx, stepQuickFrame } from '../../art/quickUnitDraw';
+import { fieldContactLocal, fieldPicture } from '../../art/fieldUnitPicture';
+import { paintContactShadow } from '../../art/nativeBattleOverlay';
+import { hasQuickUnit, paintQuickFx, paintQuickStep, stepQuickFrame } from '../../art/quickUnitDraw';
 import { resolveQuickClip } from '../../art/quickUnitCatalog';
-import { quickFiguresOpen, pushQuickFigure, quickSvgFigure } from '../../art/quickSvgFigure';
+import { quickFiguresOpen, pushQuickFigure } from '../../art/quickSvgFigure';
 import { lightDrawnUnitRect } from '../../art/unitLighting';
 import { drawAnimatedUnitSprite } from './default_unit_matrices';
 import { graphicsSettings } from './graphicsSettings';
+import { unitClassFactor } from './unitScaleSettings';
 import { drawCoastalWaveRows, drawOceanWaveRows } from './seaTile';
 import { type FlagMotif, ipcLostCaption } from './flagMotif';
 import { MILITARY } from '../theme/militaryPalette';
@@ -1875,6 +1879,16 @@ function battleQuickMode(unit: CombatUnit): 'idle' | 'moving' | 'firing' {
   return 'idle';
 }
 
+function withClassScale<T extends { unitScale: number; figure: { unitScale: number } | null }>(
+  type: UnitType,
+  picture: T,
+): T {
+  const unitScale = picture.unitScale * unitClassFactor(type);
+  picture.unitScale = unitScale;
+  if (picture.figure) picture.figure.unitScale = unitScale;
+  return picture;
+}
+
 function quickBattleHurt(unit: CombatUnit): boolean {
   const ratio = unit.maxHp > 0 ? unit.currentHp / unit.maxHp : 1;
   const listing = unit.listingAngle != null && unit.listingAngle !== 0;
@@ -1886,7 +1900,6 @@ function drawBattleQuickUnit(
   unit: CombatUnit,
   factionId: string,
   time: number,
-  scale: number,
   boardX: number,
   boardY: number,
   face: 1 | -1,
@@ -1896,64 +1909,85 @@ function drawBattleQuickUnit(
   if (!clip) {
     return false;
   }
-  const pixelScale = Math.max(0.2, Math.min(0.45, (48 * scale) / clip.width));
-  if (quickFiguresOpen()) {
-    const step = stepQuickFrame({
-      key: `battle:${unit.uid}`,
-      factionId,
-      unitTypeId: unit.type,
-      mode: battleQuickMode(unit),
-      damaged: quickBattleHurt(unit),
-      face: 1,
-      time,
-      pixelScale,
-      feetX: 0,
-      feetY: 0,
-    });
-    if (!step) {
-      return false;
+  const mode = battleQuickMode(unit);
+  const damaged = quickBattleHurt(unit);
+  const step = stepQuickFrame({
+    key: `battle:${unit.uid}`,
+    factionId,
+    unitTypeId: unit.type,
+    mode,
+    damaged,
+    face: 1,
+    time,
+    pixelScale: 1,
+    feetX: 0,
+    feetY: 0,
+  });
+  if (!step) {
+    return false;
+  }
+  const crisp = graphicsSettings().crispPictures && quickFiguresOpen();
+  const picture = withClassScale(unit.type, fieldPicture({
+    id: `battle:${unit.uid}`,
+    clip,
+    href: step.href,
+    offsets: step.offsets,
+    mode,
+    frame: step.index,
+    x: boardX,
+    y: boardY,
+    laneY: boardY,
+    face,
+    turnDeg,
+    crisp,
+    time,
+  }));
+  if (unit.isDestroyed && picture.figure) {
+    for (const part of picture.figure.parts) {
+      part.opacity = (part.opacity ?? 1) * 0.25;
     }
-    pushQuickFigure(
-      quickSvgFigure({
-        id: `battle:${unit.uid}`,
-        clip,
-        href: step.href,
-        x: boardX,
-        y: boardY,
-        unitScale: pixelScale * battleUnitScale(boardY),
-        face,
-        turnDeg,
-        rootX: -clip.feet.x + step.offsets.root.x,
-        rootY: -clip.feet.y + step.offsets.root.y,
-      }),
-    );
+  }
+  paintContactShadow(ctx, fieldContactLocal(clip, picture.unitScale, face, step.offsets.root));
+  ctx.save();
+  if (face < 0) {
+    ctx.scale(-1, 1);
+  }
+  if (turnDeg !== 0) {
+    ctx.rotate((turnDeg * Math.PI) / 180);
+  }
+  ctx.scale(picture.unitScale, picture.unitScale);
+  if (picture.figure) {
+    pushQuickFigure(picture.figure);
     paintQuickFx(
       ctx,
       clip,
       step.pose === "damaged" ? "idle" : step.pose,
       step.pose === "damaged" ? 0 : step.index,
       step.offsets.root,
-      pixelScale,
+      1,
       unit.animRecoil,
-      quickBattleHurt(unit),
+      damaged,
     );
+    ctx.restore();
     return true;
   }
-  return drawQuickUnit(ctx, {
+  const drew = paintQuickStep(ctx, step, {
     key: `battle:${unit.uid}`,
     factionId,
     unitTypeId: unit.type,
-    mode: battleQuickMode(unit),
-    damaged: quickBattleHurt(unit),
+    mode,
+    damaged,
     face: 1,
     time,
-    pixelScale,
+    pixelScale: 1,
     feetX: 0,
     feetY: 0,
     recoil: unit.animRecoil,
     light: graphicsSettings().unitLighting ? skyLight(time) : null,
     boardX,
   });
+  ctx.restore();
+  return drew;
 }
 
 export function drawProceduralUnit(
@@ -1973,13 +2007,8 @@ export function drawProceduralUnit(
   const cues = rosterCues(factionId);
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
-  ctx.scale(battleUnitScale(y), battleUnitScale(y));
 
   const isAttacker = unit.side === 'attacker';
-  if (!isAttacker) {
-    ctx.scale(-1, 1);
-  }
-
   const noPlaneShadow = theater === 'air_strike_test';
   const noFire = theater === 'air_strike_test';
 
@@ -1992,26 +2021,15 @@ export function drawProceduralUnit(
   // 1. FREEZE CASUALTY MOVEMENT: ZERO BOBBING, ZERO SHUDDER, ZERO IDLE DRIFT
   // Static Cannons & Flak Guns (No Bobbing): Wheels, carriage, and mounts firmly anchored to ground
   const isCasualty = unit.status === 'downed' || unit.status === 'dead' || unit.isPendingCasualty;
-
-  // Apply hull listing angle (e.g. 10 deg listing if injured, 45 deg if sinking)
-  if (unit.listingAngle) {
-    ctx.rotate(unit.listingAngle);
-  }
-
-  if (unit.status === 'downed') {
-    drawDownedUnit(ctx, unit, factionColor, time, smokeAlpha, noFire);
-    ctx.restore();
-    return;
-  }
+  const rosterFaction = factionId ?? (unit.side === 'attacker' ? 'US' : 'GER');
+  const boardX = Math.round(x);
+  const boardY = Math.round(y);
 
   if (unit.isDestroyed) {
     ctx.globalAlpha = 0.25;
   }
 
-  const rosterFaction = factionId ?? (unit.side === 'attacker' ? 'US' : 'GER');
-  // Board x before local translate — rim side for unit lighting.
-  const boardX = Math.round(x);
-  // The QUICK draw paints the clip muzzle flash and exhaust before returning.
+  // Shelf pictures use the field's native size. The placeholder keeps the 1.2 lane boost.
   if (
     !isCasualty &&
     hasQuickUnit(rosterFaction, unit.type) &&
@@ -2020,13 +2038,27 @@ export function drawProceduralUnit(
       unit,
       rosterFaction,
       time,
-      scale,
       boardX,
-      Math.round(y),
+      boardY,
       isAttacker ? 1 : -1,
       ((unit.listingAngle ?? 0) * 180) / Math.PI,
     )
   ) {
+    ctx.restore();
+    return;
+  }
+
+  const fit = battleUnitScale(y) * unitClassFactor(unit.type);
+  ctx.scale(fit, fit);
+  if (!isAttacker) {
+    ctx.scale(-1, 1);
+  }
+  if (unit.listingAngle) {
+    ctx.rotate(unit.listingAngle);
+  }
+
+  if (unit.status === 'downed') {
+    drawDownedUnit(ctx, unit, factionColor, time, smokeAlpha, noFire);
     ctx.restore();
     return;
   }
@@ -4465,73 +4497,86 @@ export function drawPlaneSortie(
   if (sortie.side === 'defender') {
     ctx.scale(-1, 1);
   }
-  ctx.scale(battleUnitScale(sortie.homeY), battleUnitScale(sortie.homeY));
 
   const sortieClip = factionId ? resolveQuickClip(factionId, sortie.unitType) : null;
   if (sortieClip && factionId) {
-    const pixelScale = Math.max(0.2, Math.min(0.45, 48 / sortieClip.width));
     const flying = sortie.bulletBurstsFired > 0 || sortie.bombsDropped > 0;
-    if (quickFiguresOpen()) {
-      const step = stepQuickFrame({
-        key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
-        factionId,
-        unitTypeId: sortie.unitType,
-        mode: flying ? "firing" : "moving",
-        face: 1,
+    const mode = flying ? "firing" : "moving";
+    const step = stepQuickFrame({
+      key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
+      factionId,
+      unitTypeId: sortie.unitType,
+      mode,
+      face: 1,
+      time,
+      pixelScale: 1,
+      feetX: 0,
+      feetY: 0,
+      recoil: flying ? 1 : 0,
+    });
+    if (step) {
+      const picture = withClassScale(sortie.unitType, fieldPicture({
+        id: `sortie:${sortie.unitUid}`,
+        clip: sortieClip,
+        href: step.href,
+        offsets: step.offsets,
+        mode,
+        frame: step.index,
+        x: sortie.currentX,
+        y: sortie.currentY,
+        laneY: sortie.homeY,
+        face: sortie.side === "defender" ? -1 : 1,
+        turnDeg: (sortie.currentRot * 180) / Math.PI,
+        rootX: -sortieClip.width / 2 + step.offsets.root.x,
+        rootY: -sortieClip.height / 2 + step.offsets.root.y,
+        crisp: graphicsSettings().crispPictures && quickFiguresOpen(),
         time,
-        pixelScale,
-        feetX: 0,
-        feetY: 0,
-        recoil: flying ? 1 : 0,
-      });
-      if (step) {
-        pushQuickFigure(
-          quickSvgFigure({
-            id: `sortie:${sortie.unitUid}`,
-            clip: sortieClip,
-            href: step.href,
-            x: sortie.currentX,
-            y: sortie.currentY,
-            unitScale: pixelScale * battleUnitScale(sortie.homeY),
-            face: sortie.side === "defender" ? -1 : 1,
-            turnDeg: (sortie.currentRot * 180) / Math.PI,
-            rootX: -sortieClip.width / 2 + step.offsets.root.x,
-            rootY: -sortieClip.height / 2 + step.offsets.root.y,
-          }),
-        );
+      }));
+      ctx.save();
+      ctx.scale(picture.unitScale, picture.unitScale);
+      if (picture.figure) {
+        pushQuickFigure(picture.figure);
         paintQuickFx(
           ctx,
           sortieClip,
           step.pose === "damaged" ? "idle" : step.pose,
           step.index,
-          step.offsets.root,
-          pixelScale,
+          {
+            x: -sortieClip.width / 2 + step.offsets.root.x + sortieClip.feet.x,
+            y: -sortieClip.height / 2 + step.offsets.root.y + sortieClip.feet.y,
+          },
+          1,
           flying ? 1 : 0,
           false,
         );
         ctx.restore();
+        ctx.restore();
+        return;
+      }
+      const drew = paintQuickStep(ctx, step, {
+        key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
+        factionId,
+        unitTypeId: sortie.unitType,
+        mode,
+        face: 1,
+        time,
+        pixelScale: 1,
+        feetX: sortieClip.feet.x - sortieClip.width / 2,
+        feetY: sortieClip.feet.y - sortieClip.height / 2,
+        recoil: flying ? 1 : 0,
+        light: graphicsSettings().unitLighting ? skyLight(time) : null,
+        boardX: sortie.currentX,
+      });
+      ctx.restore();
+      if (drew) {
+        ctx.restore();
         return;
       }
     }
-    const drew = drawQuickUnit(ctx, {
-      key: `sortie:${sortie.unitUid}:${sortie.unitType}`,
-      factionId,
-      unitTypeId: sortie.unitType,
-      mode: flying ? 'firing' : 'moving',
-      face: 1,
-      time,
-      pixelScale,
-      feetX: (sortieClip.feet.x - sortieClip.width / 2) * pixelScale,
-      feetY: (sortieClip.feet.y - sortieClip.height / 2) * pixelScale,
-      recoil: flying ? 1 : 0,
-      light: graphicsSettings().unitLighting ? skyLight(time) : null,
-      boardX: sortie.currentX,
-    });
-    if (drew) {
-      ctx.restore();
-      return;
-    }
   }
+
+  const sortieFit = battleUnitScale(sortie.homeY) * unitClassFactor(sortie.unitType);
+  ctx.scale(sortieFit, sortieFit);
 
   if (sortie.unitType === 'fighter') {
     ctx.fillStyle = factionColor;

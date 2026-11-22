@@ -17,7 +17,8 @@ describe("quick unit catalog", () => {
     expect(resolveQuickClip("JAP", "infantry")?.fallback).toBe(false);
     expect(resolveQuickClip("GER", "infantry")).toBeNull();
 
-    expect(resolveQuickClip("GER", "fighter")?.unitId).toBe("ger_fighter_seed1_25D");
+    expect(resolveQuickClip("GER", "fighter")?.unitId).toBe("ger_fighter_seed1.stamped");
+    expect(resolveQuickClip("GER", "fighter")?.file).toContain("ger_fighter_seed1.stamped.svg");
     expect(resolveQuickClip("GER", "fighter")?.fallback).toBe(false);
     expect(resolveQuickClip("US", "fighter")?.unitId).toBe("us_fighter_seed1.stamped");
     expect(resolveQuickClip("US", "fighter")?.fallback).toBe(false);

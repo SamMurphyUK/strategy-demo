@@ -296,19 +296,8 @@ export function stepQuickFrame(request: QuickDrawRequest): QuickFrameStep | null
   return { clip, href, pose: drawPose, index, offsets };
 }
 
-/**
- * Draw one shipped vector clip if present. Returns false when this type still uses its placeholder.
- * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
- * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
- */
-export function drawQuickUnit(
-  ctx: CanvasRenderingContext2D,
-  request: QuickDrawRequest,
-): boolean {
-  const step = stepQuickFrame(request);
-  if (!step) {
-    return false;
-  }
+/** Paint a frame the clock already chose. Does not advance that clock. */
+export function paintQuickStep(ctx: CanvasRenderingContext2D, step: QuickFrameStep, request: QuickDrawRequest): boolean {
   const { clip, pose: drawPose, index, offsets } = step;
   const wantedUrl = step.href;
   let url = wantedUrl;
@@ -367,6 +356,22 @@ export function drawQuickUnit(
   );
   ctx.restore();
   return true;
+}
+
+/**
+ * Draw one shipped vector clip if present. Returns false when this type still uses its placeholder.
+ * Callers keep facing and stack offsets in their own transforms; this places feet on (feetX, feetY).
+ * Flash and exhaust are painted in the same transform, so an early caller return still shows them.
+ */
+export function drawQuickUnit(
+  ctx: CanvasRenderingContext2D,
+  request: QuickDrawRequest,
+): boolean {
+  const step = stepQuickFrame(request);
+  if (!step) {
+    return false;
+  }
+  return paintQuickStep(ctx, step, request);
 }
 
 /** Prefetch idle frames so the first LoD-2 paint is less empty. */
