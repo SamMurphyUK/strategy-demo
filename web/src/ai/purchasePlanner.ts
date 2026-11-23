@@ -1,5 +1,7 @@
 import type { GameState } from "../engine/model/game_state";
 import { planPurchaseRepairs } from "../engine/rules/optional/bombingResolver";
+import { RESEARCH_TECHS } from "../engine/rules/optional/techTree";
+import { classifyUnit } from "../engine/types/ruleset";
 import type { TileThreat } from "./threatMap";
 import type { CommanderWeights } from "./types/aiTypes";
 
@@ -8,96 +10,285 @@ export interface PurchaseLine {
   count: number;
 }
 
+export interface ResearchBuy {
+  tech: string;
+  count: number;
+}
+
+export interface PlacementLine {
+  region_id: string;
+  units: PurchaseLine[];
+}
+
 export interface PurchasePlan {
   purchases: PurchaseLine[];
   repairs: { region_id: string; tokens: number }[];
+  research: ResearchBuy[];
+  placements: PlacementLine[];
   spent: number;
 }
 
-function catalog(state: GameState): { id: string; cost: number; attack: number; defense: number }[] {
-  const rows = [];
+interface Priced {
+  id: string;
+  cost: number;
+  kind: string;
+}
+
+const MARITIME = new Set(["uk", "united_kingdom", "usa", "united_states", "japan", "jap", "anzac"]);
+const RESEARCH_TOKEN = 5;
+
+function catalog(state: GameState): Priced[] {
+  const rows: Priced[] = [];
   for (const id of Object.keys(state.unit_types)) {
     const unit = state.unit_types[id];
-    if (unit == null || unit.cost <= 0 || unit.category === "sea") {
+    if (unit == null || unit.cost <= 0) {
       continue;
     }
-    rows.push({ id, cost: unit.cost, attack: unit.attack, defense: unit.defense });
+    rows.push({ id, cost: unit.cost, kind: classifyUnit(id) ?? unit.category });
   }
   return rows.sort((a, b) => a.cost - b.cost);
 }
 
-function factoryCapacity(state: GameState, factionId: string): { regionId: string; room: number } | null {
-  let best: { regionId: string; room: number } | null = null;
-  for (const region of Object.values(state.regions)) {
-    if (!region.has_factory || region.owner_faction_id !== factionId || !region.isLandRegion()) {
-      continue;
-    }
-    const room = Math.max(0, region.ipc_value);
-    if (best == null || room > best.room) {
-      best = { regionId: region.id, room };
-    }
-  }
-  return best;
+function findKind(units: readonly Priced[], kinds: readonly string[]): Priced | undefined {
+  return units.find((unit) => kinds.includes(unit.kind) || kinds.includes(unit.id));
 }
 
-function capitalThreatened(state: GameState, factionId: string, tiles: readonly TileThreat[]): boolean {
+function capitalOf(state: GameState, factionId: string): { regionId: string; room: number } | null {
+  for (const region of Object.values(state.regions)) {
+    if (region.is_capital && region.has_factory && region.owner_faction_id === factionId && region.isLandRegion()) {
+      return { regionId: region.id, room: Math.max(0, region.ipc_value) };
+    }
+  }
+  return null;
+}
+
+function factoryRoom(state: GameState, factionId: string): { regionId: string; room: number } | null {
+  return (
+    capitalOf(state, factionId) ??
+    Object.values(state.regions)
+      .filter((region) => region.has_factory && region.owner_faction_id === factionId && region.isLandRegion())
+      .map((region) => ({ regionId: region.id, room: Math.max(0, region.ipc_value) }))
+      .sort((a, b) => b.room - a.room)[0] ??
+    null
+  );
+}
+
+function garrison(state: GameState, factionId: string, regionId: string): number {
+  let total = 0;
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    if (!state.sameTeam(String(entry.faction_id ?? ""), factionId)) {
+      continue;
+    }
+    const unit = state.unit_types[String(entry.unit_type_id ?? "")];
+    total += Math.max(0, Math.trunc(Number(entry.count ?? 0))) * Math.max(0, unit?.defense ?? 0);
+  }
+  return total;
+}
+
+/** Enemy attack on the capital divided by attack plus the defense that can stand there. */
+export function capitalThreatRatio(state: GameState, factionId: string, tiles: readonly TileThreat[]): number {
+  let worst = 0;
   for (const region of Object.values(state.regions)) {
     if (!region.is_capital || region.owner_faction_id !== factionId) {
       continue;
     }
     const threat = tiles.find((tile) => tile.regionId === region.id);
-    if (threat != null && threat.enemyThreat1Turn > 0) {
-      return true;
+    const enemy = threat?.enemyThreat1Turn ?? 0;
+    if (enemy <= 0) {
+      continue;
+    }
+    const ours = garrison(state, factionId, region.id) + (threat?.friendlyReach1Turn ?? 0);
+    worst = Math.max(worst, enemy / (enemy + ours));
+  }
+  return worst;
+}
+
+function addLine(lines: Map<string, number>, id: string, count: number): void {
+  lines.set(id, (lines.get(id) ?? 0) + count);
+}
+
+function toLines(lines: Map<string, number>): PurchaseLine[] {
+  return [...lines.entries()].filter(([, count]) => count > 0).map(([unit_type_id, count]) => ({ unit_type_id, count }));
+}
+
+function coastalGround(state: GameState, factionId: string): number {
+  let total = 0;
+  for (const region of Object.values(state.regions)) {
+    if (!region.isLandRegion() || region.owner_faction_id !== factionId) {
+      continue;
+    }
+    const coast = state.getAdjacentRegions(region.id).some((id) => state.regions[id]?.isSeaRegion() === true);
+    if (!coast) {
+      continue;
+    }
+    for (const entry of state.getUnitsInRegion(region.id)) {
+      if (String(entry.faction_id ?? "") !== factionId) {
+        continue;
+      }
+      const kind = classifyUnit(String(entry.unit_type_id ?? ""));
+      if (kind === "INFANTRY" || kind === "ARTILLERY" || kind === "ARMOR" || kind === "CHINESE_GUERRILLA") {
+        total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      }
     }
   }
-  return false;
+  return total;
+}
+
+function ownedCount(state: GameState, factionId: string, kinds: readonly string[]): number {
+  let total = 0;
+  for (const entries of Object.values(state.region_units)) {
+    for (const entry of entries ?? []) {
+      if (String(entry.faction_id ?? "") !== factionId) {
+        continue;
+      }
+      const kind = classifyUnit(String(entry.unit_type_id ?? ""));
+      if (kind != null && kinds.includes(kind)) {
+        total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      }
+    }
+  }
+  return total;
 }
 
 /**
  * Buys after the combat package is chosen. Spends only the faction's own treasury.
- * A threatened capital buys infantry. Otherwise the persona picks tank, fighter, or infantry.
+ * A capital under heavy threat is filled with infantry, artillery, and anti-aircraft first.
  */
 export function planPurchase(
   state: GameState,
   factionId: string,
-  weights: CommanderWeights,
+  _weights: CommanderWeights,
   tiles: readonly TileThreat[],
 ): PurchasePlan {
   const treasury = Math.max(0, Math.trunc(state.ipc[factionId] ?? 0));
+  let left = treasury;
   const repairs: { region_id: string; tokens: number }[] = [];
-  let reserved = 0;
+  const bought = new Map<string, number>();
+  const units = catalog(state);
+  const infantry = findKind(units, ["INFANTRY", "CHINESE_GUERRILLA", "infantry"]);
+  const artillery = findKind(units, ["ARTILLERY", "artillery"]);
+  const armor = findKind(units, ["ARMOR", "FIGHTER", "tank", "fighter"]);
+  const aa = findKind(units, ["aa_gun", "anti_aircraft", "aaa"]);
+  const transport = findKind(units, ["TRANSPORT", "transport"]);
+  const escort = findKind(units, ["DESTROYER", "CARRIER", "destroyer", "carrier"]);
+  const fighter = findKind(units, ["FIGHTER", "fighter"]);
+  const factory = factoryRoom(state, factionId);
+  let room = factory?.room ?? 0;
+  const capital = capitalOf(state, factionId);
+  const locked = capitalThreatRatio(state, factionId, tiles) > 0.85 && capital != null;
+  if (locked && capital != null) {
+    const fillers = [infantry, artillery, aa].filter((unit): unit is Priced => unit != null);
+    let guard = 0;
+    while (left > 0 && room > 0 && fillers.length > 0 && guard < 40) {
+      guard += 1;
+      const next = fillers.find((unit) => unit.cost <= left);
+      if (next == null) {
+        break;
+      }
+      addLine(bought, next.id, 1);
+      left -= next.cost;
+      room -= 1;
+    }
+  }
+
   if (state.rulesetConfig.facilitiesAndPatrols) {
-    for (const regionId of Object.keys(state.repairTokens)) {
-      const planned = planPurchaseRepairs(state, factionId, [{ regionId, tokens: 1 }]);
-      if ("error" in planned) {
+    const fronts = tiles
+      .filter((tile) => {
+        const region = state.regions[tile.regionId];
+        return region?.major_factory === true && region.owner_faction_id === factionId && tile.enemyThreat1Turn > 0 && (state.repairTokens[tile.regionId] ?? 0) > 0;
+      })
+      .sort((a, b) => b.enemyThreat1Turn - a.enemyThreat1Turn);
+    for (const tile of fronts) {
+      const tokens = Math.min(Math.trunc(state.repairTokens[tile.regionId] ?? 0), left);
+      if (tokens <= 0) {
         continue;
       }
-      repairs.push({ region_id: regionId, tokens: planned.spend });
-      reserved += planned.spend;
+      const planned = planPurchaseRepairs(state, factionId, [{ regionId: tile.regionId, tokens }]);
+      if ("error" in planned || planned.spend > left) {
+        continue;
+      }
+      repairs.push({ region_id: tile.regionId, tokens: planned.spend });
+      left -= planned.spend;
+    }
+  }
+
+  const research: ResearchBuy[] = [];
+  const beforeTheater = left;
+  if (state.rulesetConfig.techTree === true && beforeTheater >= 25) {
+    const unlocked = new Set(state.researchUnlocked[factionId] ?? []);
+    const next = RESEARCH_TECHS.find((tech) => !unlocked.has(tech.id));
+    if (next != null && left >= RESEARCH_TOKEN) {
+      left -= RESEARCH_TOKEN;
+      research.push({ tech: next.id, count: 1 });
+    }
+  }
+
+  if (!locked && room > 0 && left > 0) {
+    const maritime = MARITIME.has(factionId.trim().toLowerCase());
+    let inf = 0;
+    let art = 0;
+    let heavy = 0;
+    let guard = 0;
+    while (left > 0 && room > 0 && guard < 40) {
+      guard += 1;
+      const total = Math.max(1, inf + art + heavy);
+      if (infantry != null && inf / total < 0.55 && infantry.cost <= left) {
+        addLine(bought, infantry.id, 1);
+        inf += 1;
+        left -= infantry.cost;
+        room -= 1;
+        continue;
+      }
+      if (artillery != null && art < inf && art / total < 0.25 && artillery.cost <= left) {
+        addLine(bought, artillery.id, 1);
+        art += 1;
+        left -= artillery.cost;
+        room -= 1;
+        continue;
+      }
+      if (armor != null && heavy / total < 0.2 && armor.cost <= left) {
+        addLine(bought, armor.id, 1);
+        heavy += 1;
+        left -= armor.cost;
+        room -= 1;
+        continue;
+      }
+      if (infantry != null && infantry.cost <= left) {
+        addLine(bought, infantry.id, 1);
+        inf += 1;
+        left -= infantry.cost;
+        room -= 1;
+        continue;
+      }
       break;
     }
-  }
-  let left = treasury - reserved;
-  const factory = factoryCapacity(state, factionId);
-  const room = factory?.room ?? 0;
-  const units = catalog(state);
-  const infantry = units.find((unit) => unit.id === "infantry") ?? units.find((unit) => unit.defense > 0 && unit.cost <= 4);
-  const tank = units.find((unit) => unit.id === "tank" || unit.id === "armor");
-  const fighter = units.find((unit) => unit.id === "fighter");
-  const purchases: PurchaseLine[] = [];
-  const threatened = capitalThreatened(state, factionId, tiles);
-  const prefer =
-    threatened || weights.personaId === "ATTRITIONAL"
-      ? infantry
-      : weights.personaId === "MARITIME"
-        ? fighter ?? infantry
-        : tank ?? infantry;
-  if (prefer != null && room > 0 && left >= prefer.cost) {
-    const count = Math.min(room, Math.floor(left / prefer.cost));
-    if (count > 0) {
-      purchases.push({ unit_type_id: prefer.id, count });
-      left -= prefer.cost * count;
+    if (maritime) {
+      const ground = coastalGround(state, factionId) + inf + art + heavy;
+      const pairs = Math.floor(ground / 8);
+      const needTransport = Math.max(0, pairs - ownedCount(state, factionId, ["TRANSPORT"]));
+      const needEscort = Math.max(0, pairs - ownedCount(state, factionId, ["DESTROYER", "CARRIER"]));
+      if (transport != null && needTransport > 0 && room > 0 && left >= transport.cost) {
+        addLine(bought, transport.id, 1);
+        left -= transport.cost;
+        room -= 1;
+      }
+      if (escort != null && needEscort > 0 && room > 0 && left >= escort.cost) {
+        addLine(bought, escort.id, 1);
+        left -= escort.cost;
+        room -= 1;
+      }
+      if (fighter != null && room > 0 && left >= fighter.cost && heavy === 0) {
+        addLine(bought, fighter.id, 1);
+        left -= fighter.cost;
+        room -= 1;
+      }
     }
   }
-  return { purchases, repairs, spent: treasury - left };
+
+  const purchases = toLines(bought);
+  const placements: PlacementLine[] = [];
+  if (factory != null && purchases.length > 0) {
+    placements.push({ region_id: factory.regionId, units: purchases });
+  }
+  return { purchases, repairs, research, placements, spent: treasury - left };
 }

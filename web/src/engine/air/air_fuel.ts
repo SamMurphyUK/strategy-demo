@@ -189,13 +189,11 @@ function fitsCarrier(state: GameState, unitType: string, stats: CarrierStats): b
   return false;
 }
 
+/** Every plane already on the deck takes a slot, whichever faction owns it. */
 function carrierAirCount(state: GameState, factionId: string, seaId: string): number {
   const stats = carrierStats(state, factionId, seaId);
   let total = 0;
   for (const entry of state.getUnitsInRegion(seaId)) {
-    if (!state.sameTeam(String(entry.faction_id ?? ""), factionId)) {
-      continue;
-    }
     const unitType = String(entry.unit_type_id ?? "");
     if (!isAirUnit(state, unitType) || !fitsCarrier(state, unitType, stats)) {
       continue;
@@ -292,7 +290,7 @@ export function airSteps(state: GameState, from: string, to: string): number {
   return Number.POSITIVE_INFINITY;
 }
 
-export function canLandAt(state: GameState, factionId: string, unitType: string, regionId: string): boolean {
+export function canLandAt(state: GameState, factionId: string, unitType: string, regionId: string, count = 1): boolean {
   if (friendlyLand(state, factionId, regionId)) {
     return true;
   }
@@ -304,7 +302,8 @@ export function canLandAt(state: GameState, factionId: string, unitType: string,
   if (!fitsCarrier(state, unitType, stats)) {
     return false;
   }
-  return stats.capacity - carrierAirCount(state, factionId, regionId) >= 1;
+  const need = Math.max(1, Math.trunc(count));
+  return stats.capacity - carrierAirCount(state, factionId, regionId) >= need;
 }
 
 function flag(state: GameState, unitType: string, name: string): boolean {
@@ -368,19 +367,26 @@ export function airCannotStrike(state: GameState, factionId: string, regionId: s
 }
 
 /** After flying to `to`, fuel remains to reach a friendly landing spot. */
-export function canReturnAfter(state: GameState, factionId: string, unitType: string, from: string, to: string): boolean {
+export function canReturnAfter(
+  state: GameState,
+  factionId: string,
+  unitType: string,
+  from: string,
+  to: string,
+  count = 1,
+): boolean {
   const steps = airTransitCost(state, factionId, from, to) ?? airSteps(state, from, to);
   const fuel = fuelRemaining(state, factionId, from, unitType);
   if (!Number.isFinite(steps) || steps > fuel) {
     return false;
   }
-  if (canLandAt(state, factionId, unitType, to)) {
+  if (canLandAt(state, factionId, unitType, to, count)) {
     return true;
   }
   const left = fuel - steps;
   const spots = hasActivePatrols(state) ? patrolAirReach(state, factionId, to, left) : regionsWithin(state, to, left);
   for (const spot of spots) {
-    if (canLandAt(state, factionId, unitType, spot)) {
+    if (canLandAt(state, factionId, unitType, spot, count)) {
       return true;
     }
   }

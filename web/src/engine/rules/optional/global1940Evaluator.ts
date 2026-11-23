@@ -323,11 +323,68 @@ export function chinaPlacement(state: GameState, factionId: string, regionId: st
   return null;
 }
 
-function addPower(state: GameState, id: string, name: string, color: string, team: string, treasury: number, order: number): void {
-  const faction = Faction.fromDict({ id, name, color, starting_ipc: treasury, turn_order: order, team });
-  state.factions[id] = faction;
-  state.ipc[id] = treasury;
+const GLOBAL_POWERS: [string, string, string, string, number][] = [
+  [GERMANY, "Germany", "#4B4B4B", "axis", 0],
+  [SOVIET_UNION, "Soviet Union", "#C0392B", "allies", 28],
+  [JAPAN, "Japan", "#E6B325", "axis", 0],
+  [UNITED_KINGDOM, "United Kingdom", "#1A3A8A", "allies", 0],
+  [ITALY, "Italy", "#2E7D32", "axis", 0],
+  [CHINA, "China", "#8A6A2F", "allies", 0],
+  [UNITED_STATES, "United States", "#2F5D3A", "allies", 26],
+  [ANZAC, "ANZAC", "#8B1E3F", "allies", 0],
+  [FREE_FRANCE, "Free France", "#6C8EBF", "allies", 0],
+];
+
+function addPower(
+  state: GameState,
+  id: string,
+  name: string,
+  color: string,
+  team: string,
+  treasury: number,
+  order: number,
+  keepPurse: boolean,
+): void {
+  state.factions[id] = Faction.fromDict({ id, name, color, starting_ipc: treasury, turn_order: order, team });
+  if (!keepPurse || !Object.prototype.hasOwnProperty.call(state.ipc, id)) {
+    state.ipc[id] = treasury;
+  }
   state.pending_purchases[id] = state.pending_purchases[id] ?? [];
+}
+
+function installRoster(state: GameState, keepPurse: boolean): void {
+  GLOBAL_POWERS.forEach(([id, name, color, team, treasury], index) => {
+    addPower(state, id, name, color, team, treasury, index + 1, keepPurse);
+  });
+  state.turn_order = [...TURN_ORDER];
+  state.playedBy[CHINA] = UNITED_STATES;
+  state.playedBy[ANZAC] = UNITED_KINGDOM;
+  state.neutralBlocs = GLOBAL_BLOCS.map((bloc) => ({ ...bloc, members: [...bloc.members] }));
+}
+
+/**
+ * A resumed 1940 game keeps the saved clock and treasury.
+ * The roster, teams, and neutral blocs are not in the snapshot, so they are put back here.
+ */
+export function resumeGlobal1940(state: GameState): void {
+  if (!isGlobal(state)) {
+    return;
+  }
+  const round = state.game_round;
+  const factionId = state.current_faction_id;
+  const phase = state.current_phase;
+  const turn = state.turn_number;
+  installRoster(state, true);
+  state.current_faction_id = factionId;
+  state.current_phase = phase;
+  state.game_round = round;
+  state.turn_number = turn;
+  for (const id of [SOVIET_UNION, UNITED_STATES]) {
+    if (state.warStatus[id] !== "PEACETIME" && state.warStatus[id] !== "WARTIME") {
+      state.warStatus[id] = round >= 3 ? "WARTIME" : "PEACETIME";
+      state.wartimeBonusRound[id] = 3;
+    }
+  }
 }
 
 /** Seven powers, peacetime purses, and the four neutral blocs. */
@@ -335,21 +392,7 @@ export function installGlobal1940(state: GameState): void {
   if (!isGlobal(state)) {
     return;
   }
-  const powers: [string, string, string, string, number][] = [
-    [GERMANY, "Germany", "#4B4B4B", "axis", 0],
-    [SOVIET_UNION, "Soviet Union", "#C0392B", "allies", 28],
-    [JAPAN, "Japan", "#E6B325", "axis", 0],
-    [UNITED_KINGDOM, "United Kingdom", "#1A3A8A", "allies", 0],
-    [ITALY, "Italy", "#2E7D32", "axis", 0],
-    [CHINA, "China", "#8A6A2F", "allies", 0],
-    [UNITED_STATES, "United States", "#2F5D3A", "allies", 26],
-    [ANZAC, "ANZAC", "#8B1E3F", "allies", 0],
-    [FREE_FRANCE, "Free France", "#6C8EBF", "allies", 0],
-  ];
-  powers.forEach(([id, name, color, team, treasury], index) => {
-    addPower(state, id, name, color, team, treasury, index + 1);
-  });
-  state.turn_order = [...TURN_ORDER];
+  installRoster(state, false);
   state.current_faction_id = GERMANY;
   state.current_phase = "purchase";
   state.game_round = 1;
@@ -358,8 +401,5 @@ export function installGlobal1940(state: GameState): void {
   state.warStatus[UNITED_STATES] = "PEACETIME";
   state.wartimeBonusRound[SOVIET_UNION] = 3;
   state.wartimeBonusRound[UNITED_STATES] = 3;
-  state.playedBy[CHINA] = UNITED_STATES;
-  state.playedBy[ANZAC] = UNITED_KINGDOM;
   state.freeFranceAbsorbed = false;
-  state.neutralBlocs = GLOBAL_BLOCS.map((bloc) => ({ ...bloc, members: [...bloc.members] }));
 }

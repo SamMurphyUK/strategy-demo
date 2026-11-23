@@ -1,13 +1,41 @@
 import type { GameState } from "../engine/model/game_state";
+import type { OptionalRulesetConfig } from "../engine/types/ruleset";
 import { estimateBattle } from "../engine/rules/optional/montecarlo";
 
 export interface BattleOdds {
   win: number;
   survival: number;
+  survivingAttackers: number;
   trials: number;
 }
 
-/** One rank per unit. Attackers use attack. Defenders use defense. */
+/**
+ * Fast deterministic odds. An empty defender is a walk-in, so no dice are rolled.
+ * Trials are capped at 1500 by the shared estimator.
+ */
+export function simulateBattleOdds(
+  attackerRanks: readonly number[],
+  defenderRanks: readonly number[],
+  trials: number,
+  seed: number,
+  ruleset?: OptionalRulesetConfig,
+): BattleOdds {
+  if (attackerRanks.length === 0) {
+    return { win: 0, survival: 0, survivingAttackers: 0, trials: 0 };
+  }
+  if (defenderRanks.length === 0) {
+    return { win: 1, survival: 1, survivingAttackers: attackerRanks.length, trials: 0 };
+  }
+  const odds = estimateBattle([...attackerRanks], [...defenderRanks], trials, seed, ruleset);
+  const decided = Math.max(1, odds.attackerWins + odds.defenderWins + odds.draws);
+  return {
+    win: odds.attackerWins / decided,
+    survival: (odds.attackerWins + odds.draws) / decided,
+    survivingAttackers: odds.meanAttackersLeft,
+    trials: odds.trials,
+  };
+}
+
 function ranks(state: GameState, regionId: string, factionId: string, friendly: boolean, attack: boolean): number[] {
   const out: number[] = [];
   for (const entry of state.getUnitsInRegion(regionId)) {
@@ -31,10 +59,7 @@ function ranks(state: GameState, regionId: string, factionId: string, friendly: 
   return out;
 }
 
-/**
- * Fast deterministic odds. An empty defender is a walk-in, so no dice are rolled.
- * Trials are capped at 1500 by the shared estimator.
- */
+/** Odds for every friendly attacker on `fromRegion` against the defenders on `targetRegion`. */
 export function battleOdds(
   state: GameState,
   factionId: string,
@@ -43,19 +68,11 @@ export function battleOdds(
   trials: number,
   seed: number,
 ): BattleOdds {
-  const attackers = ranks(state, fromRegion, factionId, true, true);
-  const defenders = ranks(state, targetRegion, factionId, false, false);
-  if (attackers.length === 0) {
-    return { win: 0, survival: 0, trials: 0 };
-  }
-  if (defenders.length === 0) {
-    return { win: 1, survival: 1, trials: 0 };
-  }
-  const odds = estimateBattle(attackers, defenders, trials, seed, state.rulesetConfig);
-  const decided = Math.max(1, odds.attackerWins + odds.defenderWins + odds.draws);
-  return {
-    win: odds.attackerWins / decided,
-    survival: (odds.attackerWins + odds.draws) / decided,
-    trials: odds.trials,
-  };
+  return simulateBattleOdds(
+    ranks(state, fromRegion, factionId, true, true),
+    ranks(state, targetRegion, factionId, false, false),
+    trials,
+    seed,
+    state.rulesetConfig,
+  );
 }

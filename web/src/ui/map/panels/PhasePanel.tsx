@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { describeStranded, fuelRemaining, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
 import { endCombatMoveGate } from "../../../engine/movement/combat_move_gate";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
@@ -7,7 +7,7 @@ import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
 import { playCampaignCue } from "../campaignAudio";
-import { canStageAnother, purchasePhaseAdvance, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
+import { canStageAnother, purchasePhaseAdvance, stageStep, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -163,8 +163,10 @@ function PurchaseBody({
   const faction = state.current_faction_id;
   const costs = session.getCostTable();
   const [staged, setStaged] = useState<Record<string, number>>({});
+  const stagedRef = useRef(staged);
 
   useEffect(() => {
+    stagedRef.current = {};
     setStaged({});
   }, [faction, game.seed]);
 
@@ -174,10 +176,15 @@ function PurchaseBody({
     onStagedTotal(total);
   }, [total, onStagedTotal]);
   const bump = (id: string, d: number) => {
-    const cost = costs[id] ?? 0;
-    if (d > 0 && !canStageAnother(cost, ipc, total)) return;
-    if (d > 0) playCampaignCue("pickup");
-    setStaged((s) => ({ ...s, [id]: Math.max(0, (s[id] ?? 0) + d) }));
+    const next = stageStep(stagedRef.current, id, d, costs, ipc);
+    if (next === stagedRef.current) {
+      return;
+    }
+    stagedRef.current = next;
+    if (d > 0) {
+      playCampaignCue("pickup");
+    }
+    setStaged(next);
   };
 
   const confirm = () => {

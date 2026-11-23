@@ -222,7 +222,7 @@ export class MovementValidator {
     } else if (
       isAirUnit(state, unitTypeId) &&
       state.current_phase === "combat_move" &&
-      !canReturnAfter(state, factionId, unitTypeId, fromRegion, toRegion)
+      !canReturnAfter(state, factionId, unitTypeId, fromRegion, toRegion, count)
     ) {
       result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Not enough fuel to return"));
     } else if (isAirUnit(state, unitTypeId) && state.current_phase === "combat_move" && airCannotStrike(state, factionId, toRegion)) {
@@ -232,7 +232,7 @@ export class MovementValidator {
     } else if (
       isAirUnit(state, unitTypeId) &&
       state.current_phase === "noncombat_move" &&
-      !canLandAt(state, factionId, unitTypeId, toRegion)
+      !canLandAt(state, factionId, unitTypeId, toRegion, count)
     ) {
       result.errors.push(
         MoveError.of(

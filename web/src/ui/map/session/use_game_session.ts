@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
-import { endCombatMoveGate } from "../../../engine/movement/combat_move_gate";
+import { endCombatMoveGate, retractUnlandableFlights } from "../../../engine/movement/combat_move_gate";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import {
@@ -105,6 +105,7 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
         }
       }
       if (type === "end_phase" && session.state.current_phase === "combat_move") {
+        retractUnlandableFlights(session.state);
         const gate = endCombatMoveGate(session.state);
         if (!gate.advance) {
           append([{ kind: "error", text: gate.warning }]);

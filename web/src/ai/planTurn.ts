@@ -1,9 +1,8 @@
 import { Command, CommandType } from "../engine/model/command";
 import type { GameState } from "../engine/model/game_state";
 import { Ruleset } from "../engine/rules/ruleset";
-import { battleOdds } from "./battleOddsSim";
 import { beamSearch } from "./beamSearchPlanner";
-import { combatCandidates } from "./combatMoveGen";
+import { combatCandidates, type AttackPackage } from "./combatMoveGen";
 import { planNonCombat } from "./nonCombatPlanner";
 import { planPurchase } from "./purchasePlanner";
 import { threatMap } from "./threatMap";
@@ -69,39 +68,45 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
     const candidates = combatCandidates(state, factionId, ruleset, profile, weights, tiles, seed);
     searched = beamSearch(state, factionId, candidates, tiles, profile, weights, seed);
     state.current_phase = "noncombat_move";
-    quiet = planNonCombat(state, factionId, ruleset, searched.best.attacks, profile.enableStrategicStaging);
+    quiet = planNonCombat(state, factionId, ruleset, searched.best.attacks, profile.enableStrategicStaging, tiles);
   } finally {
     state.current_phase = phase;
   }
 
   const shop = planPurchase(state, factionId, weights, tiles);
-  if (shop.purchases.length > 0 || shop.repairs.length > 0) {
-    push(
-      issue(state, "purchase", CommandType.PURCHASE_UNITS, { purchases: shop.purchases, repairs: shop.repairs }, serial),
-    );
+  const purchasePayload: Record<string, unknown> = {};
+  if (shop.purchases.length > 0) {
+    purchasePayload.purchases = shop.purchases;
   }
-  push(issue(state, "purchase", CommandType.END_PHASE, {}, serial));
+  if (shop.repairs.length > 0) {
+    purchasePayload.repairs = shop.repairs;
+  }
+  if (shop.research.length > 0) {
+    purchasePayload.research = shop.research;
+  }
+  const send = (phase: string, type: string, payload: Record<string, unknown>) => {
+    push(issue(state, phase, type, payload, serial));
+  };
+  if (Object.keys(purchasePayload).length > 0) {
+    send("purchase", CommandType.PURCHASE_UNITS, purchasePayload);
+  }
+  send("purchase", CommandType.END_PHASE, {});
   for (const attack of searched.best.attacks) {
-    push(
-      issue(
-        state,
-        "combat_move",
-        CommandType.MOVE_UNITS,
-        {
-          moves: [
-            {
-              from_region_id: attack.from,
-              to_region_id: attack.to,
-              units: [{ unit_type_id: attack.unitType, count: attack.count }],
-            },
-          ],
-        },
-        serial,
-      ),
-    );
+    emitAttack(attack, send);
   }
-  push(issue(state, "combat_move", CommandType.END_PHASE, {}, serial));
-  push(issue(state, "combat", CommandType.END_PHASE, {}, serial));
+  send("combat_move", CommandType.END_PHASE, {});
+  for (const attack of searched.best.attacks) {
+    if (attack.kind !== "strategic_bomb") {
+      continue;
+    }
+    const escorts = attack.stacks.filter((line) => line.isEscort).reduce((sum, line) => sum + line.count, 0);
+    const stationed = attack.stacks.some((line) => line.from === attack.to && !line.isEscort);
+    if (!stationed) {
+      continue;
+    }
+    send("combat", CommandType.STRATEGIC_BOMB, { region_id: attack.to, escorts, facility: "factory" });
+  }
+  send("combat", CommandType.END_PHASE, {});
   for (const move of quiet.moves) {
     push(
       issue(
@@ -113,7 +118,13 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
             {
               from_region_id: move.from,
               to_region_id: move.to,
-              units: [{ unit_type_id: move.unitType, count: move.count }],
+              units: [
+                {
+                  unit_type_id: move.unitType,
+                  count: move.count,
+                  ...(move.instanceId != null && move.instanceId !== "" ? { instance_id: move.instanceId } : {}),
+                },
+              ],
             },
           ],
         },
@@ -136,39 +147,45 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
       ),
     );
   }
-  push(issue(state, "noncombat_move", CommandType.END_PHASE, {}, serial));
-  const factory = Object.values(state.regions).find((region) => region.has_factory && region.owner_faction_id === factionId);
-  if (factory != null && shop.purchases.length > 0) {
-    push(
-      issue(
-        state,
-        "mobilize",
-        CommandType.PLACE_UNITS,
-        {
-          placements: [
-            {
-              region_id: factory.id,
-              units: shop.purchases.map((line) => ({ unit_type_id: line.unit_type_id, count: line.count })),
-            },
-          ],
-        },
-        serial,
-      ),
-    );
+  send("noncombat_move", CommandType.END_PHASE, quiet.patrols.length > 0 ? { patrols: quiet.patrols } : {});
+  if (shop.placements.length > 0) {
+    send("mobilize", CommandType.PLACE_UNITS, { placements: shop.placements });
   }
-  push(issue(state, "mobilize", CommandType.END_PHASE, {}, serial));
-  push(issue(state, "collect_income", CommandType.END_TURN, {}, serial));
+  send("mobilize", CommandType.END_PHASE, {});
+  send("collect_income", CommandType.END_TURN, {});
 
-  let expected = searched.best.score;
-  if (searched.best.attacks.length > 0) {
-    const first = searched.best.attacks[0];
-    const deep = battleOdds(state, factionId, first.from, first.to, profile.deepOddsIterations, seed + 50);
-    expected = deep.win * Math.max(1, first.value) * weights.objectiveWeight;
-  }
   return {
     commands,
     evaluatedPlans: searched.evaluated,
-    expectedScoreDelta: expected,
+    expectedScoreDelta: searched.best.score,
     elapsedMs: Date.now() - started,
   };
+}
+
+function emitAttack(attack: AttackPackage, send: (phase: string, type: string, payload: Record<string, unknown>) => void): void {
+  if (attack.kind === "naval_raid") {
+    return;
+  }
+  if (attack.kind === "amphibious" && attack.transportId != null && attack.originSea != null) {
+    send("combat_move", CommandType.DESIGNATE_AMPHIBIOUS, {
+      transport_instance_id: attack.transportId,
+      origin_sea_zone_id: attack.originSea,
+      target_region_id: attack.to,
+    });
+    return;
+  }
+  const grouped = new Map<string, { unit_type_id: string; count: number }[]>();
+  for (const line of attack.stacks) {
+    if (line.from === attack.to) {
+      continue;
+    }
+    const rows = grouped.get(line.from) ?? [];
+    rows.push({ unit_type_id: line.unitType, count: line.count });
+    grouped.set(line.from, rows);
+  }
+  for (const [from, units] of grouped) {
+    send("combat_move", CommandType.MOVE_UNITS, {
+      moves: [{ from_region_id: from, to_region_id: attack.to, units }],
+    });
+  }
 }

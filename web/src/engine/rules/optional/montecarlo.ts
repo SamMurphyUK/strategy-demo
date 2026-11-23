@@ -7,6 +7,8 @@ export interface VolleyOdds {
   defenderWins: number;
   draws: number;
   requestId: number;
+  /** Mean attackers still standing at the end of a trial. */
+  meanAttackersLeft: number;
 }
 
 export interface MonteCarloRequest {
@@ -122,7 +124,8 @@ export function estimateBattle(
   const vetLeftD = new Int16Array(RANKS);
   pack(attacker, attackerXp, baseA, baseAV);
   pack(defender, defenderXp, baseD, baseDV);
-  const odds: VolleyOdds = { trials: count, attackerWins: 0, defenderWins: 0, draws: 0, requestId };
+  const odds: VolleyOdds = { trials: count, attackerWins: 0, defenderWins: 0, draws: 0, requestId, meanAttackersLeft: 0 };
+  let attackersLeft = 0;
   for (let trial = 0; trial < count; trial += 1) {
     workA.set(baseA);
     workD.set(baseD);
@@ -138,10 +141,12 @@ export function estimateBattle(
     }
     const atkLeft = living(workA);
     const defLeft = living(workD);
+    attackersLeft += atkLeft;
     if (atkLeft > 0 && defLeft === 0) odds.attackerWins += 1;
     else if (defLeft > 0 && atkLeft === 0) odds.defenderWins += 1;
     else odds.draws += 1;
   }
+  odds.meanAttackersLeft = attackersLeft / count;
   return odds;
 }
 

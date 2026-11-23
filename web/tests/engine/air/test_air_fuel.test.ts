@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  canLandAt,
   fuelRemaining,
   isLanded,
   offeredMoveDestinations,
   planesMustLandMessage,
   strandedPlanes,
 } from "../../../src/engine/air/air_fuel";
+import { Faction } from "../../../src/engine";
 import { CombatEngine } from "../../../src/engine/combat/combat";
 import { Command, CommandType } from "../../../src/engine/model/command";
 import { applyRecordedMove, beginMovementPhase, commitCombatAttacks } from "../../../src/engine/movement/phase_orders";
@@ -275,6 +277,39 @@ describe("air fuel and combat-move targets", () => {
 
     const homeward = validator.validateStackMove("taken", "home", "fighter", "red", 1, state, ruleset);
     expect(homeward.ok).toBe(true);
+  });
+
+  it("keeps guest planes on a friendly carrier and refuses a full deck", () => {
+    const builder = new TestStateBuilder();
+    builder.withRegion("home", true, "uk").withRegion("deck", false, "").withAdjacent("home", "deck");
+    builder.withUnitType("fighter", "air", 4);
+    builder.withUnitType("carrier", "sea", 2);
+    builder.withStackUnit("carrier", "deck", "uk");
+    builder.withStackUnit("fighter", "home", "ussr", 2);
+    const state = builder.buildState();
+    state.factions.uk = Faction.fromDict({ id: "uk", name: "UK", color: "#00f", starting_ipc: 0, team: "allies" });
+    state.factions.ussr = Faction.fromDict({ id: "ussr", name: "Russia", color: "#f00", starting_ipc: 0, team: "allies" });
+    state.unit_types.fighter.special = { can_land_on_carrier: true };
+    state.unit_types.carrier.special = { fighter_capacity: 2, can_host_fighters: true };
+    state.current_faction_id = "ussr";
+    state.current_phase = "noncombat_move";
+    const ruleset = new TestStateBuilder().buildRuleset();
+    const validator = new MovementValidator();
+    expect(validator.validateStackMove("home", "deck", "fighter", "ussr", 2, state, ruleset).ok).toBe(true);
+    state.region_units.deck = [
+      ...(state.region_units.deck ?? []),
+      { faction_id: "ussr", unit_type_id: "fighter", count: 2 },
+    ];
+    state.region_units.home = [];
+    expect(isLanded(state, "ussr", "fighter", "deck")).toBe(true);
+    expect(canLandAt(state, "uk", "fighter", "deck", 1)).toBe(false);
+    state.region_units.deck = [
+      { faction_id: "uk", unit_type_id: "carrier", count: 1 },
+      { faction_id: "ussr", unit_type_id: "fighter", count: 1 },
+    ];
+    state.region_units.home = [{ faction_id: "uk", unit_type_id: "fighter", count: 2 }];
+    expect(canLandAt(state, "uk", "fighter", "deck", 1)).toBe(true);
+    expect(validator.validateStackMove("home", "deck", "fighter", "uk", 2, state, ruleset).ok).toBe(false);
   });
 });
 

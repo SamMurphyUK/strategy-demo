@@ -16,7 +16,8 @@ import { GameState, type StateSnapshot } from "../model/game_state";
 import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
-import { endCombatMoveGate } from "../movement/combat_move_gate";
+import { endCombatMoveGate, retractUnlandableFlights } from "../movement/combat_move_gate";
+import { applyPatrolOrders } from "../rules/optional/airAndNavalRaiding";
 import { assaultError, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
@@ -399,6 +400,7 @@ export class GameSessionStub {
 
       case CommandType.END_PHASE: {
         if (this.state.current_phase === "combat_move") {
+          retractUnlandableFlights(this.state);
           const gate = endCombatMoveGate(this.state);
           if (!gate.advance) {
             return { result_type: "error", error: { code: gate.code, message: gate.warning }, events: [] };
@@ -410,6 +412,9 @@ export class GameSessionStub {
         }
         if (this.state.current_phase === "purchase") {
           rollResearchPhase(this.state, cmd.player_id, () => this.d6());
+        }
+        if (this.state.current_phase === "noncombat_move") {
+          applyPatrolOrders(this.state, cmd.player_id, cmd.payload);
         }
         const endEvents = processEndPhase(
           this.state.current_phase,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Faction, GameState, Region, Unit } from "../../../src/engine";
 import { fuelRemaining } from "../../../src/engine/air/air_fuel";
-import { endCombatMoveGate } from "../../../src/engine/movement/combat_move_gate";
+import { endCombatMoveGate, retractUnlandableFlights } from "../../../src/engine/movement/combat_move_gate";
 import { beginMovementPhase } from "../../../src/engine/movement/phase_orders";
 import { convoyDrain } from "../../../src/engine/rules/optional/airAndNavalRaiding";
 import { runIndustrialBombing } from "../../../src/engine/rules/optional/bombingResolver";
@@ -19,7 +19,7 @@ import {
   launchForScenario,
   type OptionalRulesetConfig,
 } from "../../../src/engine/types/ruleset";
-import { canStageAnother, purchasePhaseAdvance } from "../../../src/ui/map/purchaseBasket";
+import { canStageAnother, purchasePhaseAdvance, stageStep, stagedSpend } from "../../../src/ui/map/purchaseBasket";
 import { draftLaunch, type CampaignDraft } from "../../../src/ui/map/menu/NewCampaignModal";
 import { parseCampaignSave } from "../../../src/ui/map/menu/campaignSave";
 
@@ -92,29 +92,50 @@ function coastBoard(): GameState {
 }
 
 describe("end of combat move", () => {
-  it("blocks a plane with no landing zone, and counts an airbase start and Long-Range Aircraft", () => {
+  it("cancels a flight with no landing and does not stall combat move", () => {
     const state = airBoard();
     expect(fuelRemaining(state, "red", "enemy", "fighter")).toBe(0);
-    const blocked = endCombatMoveGate(state);
-    expect(blocked.advance).toBe(false);
-    expect(blocked.regionId).toBe("enemy");
-    expect(blocked.code).toBe("PLANES_NO_LANDING");
-    expect(blocked.warning).toContain("Fighter");
-
-    state.rulesetConfig = rules({ techTree: true });
-    state.researchUnlocked.red = ["long_range_aircraft"];
-    expect(fuelRemaining(state, "red", "enemy", "fighter")).toBe(1);
     expect(endCombatMoveGate(state).advance).toBe(true);
 
-    state.researchUnlocked.red = [];
-    state.rulesetConfig = rules({ facilitiesAndPatrols: true });
-    state.airbase_launch["red|enemy|fighter"] = true;
-    expect(airRangeBonus(state, "red", "enemy", "fighter")).toBe(1);
+    state.region_units.home = [{ faction_id: "red", unit_type_id: "fighter", count: 1 }];
+    state.region_units.enemy = [];
+    delete state.air_movement_spent["red|enemy|fighter"];
+    beginMovementPhase(state);
+    state.region_units.home = [];
+    state.region_units.enemy = [{ faction_id: "red", unit_type_id: "fighter", count: 1 }];
+    state.air_movement_spent["red|enemy|fighter"] = 1;
+    state.phase_orders.push({
+      id: "fly",
+      faction: "red",
+      unitType: "fighter",
+      count: 1,
+      fromRegionId: "home",
+      toRegionId: "enemy",
+      path: [],
+      stepsUsed: 1,
+    });
+    retractUnlandableFlights(state);
+    expect(state.region_units.home).toEqual([{ faction_id: "red", unit_type_id: "fighter", count: 1 }]);
+    expect(state.region_units.enemy ?? []).toEqual([]);
     expect(endCombatMoveGate(state).advance).toBe(true);
+
+    const ranged = airBoard();
+    ranged.rulesetConfig = rules({ techTree: true });
+    ranged.researchUnlocked.red = ["long_range_aircraft"];
+    expect(fuelRemaining(ranged, "red", "enemy", "fighter")).toBe(1);
+    expect(endCombatMoveGate(ranged).advance).toBe(true);
+
+    const based = airBoard();
+    based.rulesetConfig = rules({ facilitiesAndPatrols: true });
+    based.airbase_launch["red|enemy|fighter"] = true;
+    expect(airRangeBonus(based, "red", "enemy", "fighter")).toBe(1);
+    expect(endCombatMoveGate(based).advance).toBe(true);
   });
 
-  it("blocks a loaded transport beside a hostile coast unless it unloads or raids", () => {
+  it("blocks a loaded transport beside a hostile coast only when a raid is available", () => {
     const state = coastBoard();
+    expect(endCombatMoveGate(state).advance).toBe(true);
+    state.rulesetConfig.facilitiesAndPatrols = true;
     const blocked = endCombatMoveGate(state);
     expect(blocked.advance).toBe(false);
     expect(blocked.regionId).toBe("sea");
@@ -207,6 +228,12 @@ describe("campaign presets and save hydration", () => {
     expect(state.unitExperience).toEqual({});
     expect(canStageAnother(4, 10, 8)).toBe(false);
     expect(canStageAnother(4, 10, 6)).toBe(true);
+    let basket: Record<string, number> = {};
+    for (let click = 0; click < 6; click += 1) {
+      basket = stageStep(basket, "infantry", 1, { infantry: 3 }, 15);
+    }
+    expect(stagedSpend(basket, { infantry: 3 })).toBe(15);
+    expect(basket.infantry).toBe(5);
     expect(purchasePhaseAdvance(4).advance).toBe(false);
     expect(purchasePhaseAdvance(0).advance).toBe(true);
   });

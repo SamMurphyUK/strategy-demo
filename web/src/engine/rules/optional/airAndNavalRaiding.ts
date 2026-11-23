@@ -189,6 +189,21 @@ export function togglePatrol(state: GameState, factionId: string, regionId: stri
   return null;
 }
 
+/** Noncombat end may carry `{ patrols: [{ region_id, count }] }`. A bad line is skipped. */
+export function applyPatrolOrders(state: GameState, factionId: string, payload: Record<string, unknown>): void {
+  if (state.current_phase !== "noncombat_move") {
+    return;
+  }
+  const lines: unknown[] = Array.isArray(payload.patrols) ? payload.patrols : [];
+  for (const line of lines) {
+    if (line == null || typeof line !== "object") {
+      continue;
+    }
+    const row = line as Record<string, unknown>;
+    togglePatrol(state, factionId, String(row.region_id ?? ""), Math.trunc(Number(row.count ?? 0)));
+  }
+}
+
 /** Purchase stand-down. The fighters can move again on this turn. */
 export function standDownPatrols(state: GameState, factionId: string): string | null {
   if (!facilitiesActive(state)) {

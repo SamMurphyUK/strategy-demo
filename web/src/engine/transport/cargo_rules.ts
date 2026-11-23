@@ -168,7 +168,7 @@ function besideHostileCoast(state: GameState, seaZoneId: string, factionId: stri
 
 /** Sea zone of a loaded transport that is still beside a hostile coast, or "". */
 export function hostileCoastTransport(state: GameState): string {
-  if (state.current_phase !== "combat_move") {
+  if (state.current_phase !== "combat_move" || !state.rulesetConfig.facilitiesAndPatrols) {
     return "";
   }
   const factionId = state.current_faction_id;

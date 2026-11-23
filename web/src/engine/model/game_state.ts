@@ -1,6 +1,6 @@
 import type { MoveOrder, PhaseStartSnapshot } from "../movement/phase_orders";
 import type { NeutralBloc, NationalObjective } from "../rules/optional/objectives";
-import { installGlobal1940, commandedFactions } from "../rules/optional/global1940Evaluator";
+import { commandedFactions, installGlobal1940, resumeGlobal1940 } from "../rules/optional/global1940Evaluator";
 import type { UnitExperience } from "../rules/optional/veterancy";
 import { DEFAULT_LEGACY_RULESET, normalizeLaunch, type OptionalRulesetConfig, type ScenarioId } from "../types/ruleset";
 import type { ActiveBattle } from "./battle";
@@ -145,11 +145,14 @@ export class GameState {
     }
   }
 
-  /** Rules only. A missing save is 1942 Quick with every toggle off. Does not rebuild the board. */
+  /** Rules only. A missing save is 1942 Quick with every toggle off. A 1940 save also gets its roster back. */
   hydrateCampaignLaunch(raw: unknown): void {
     const launch = normalizeLaunch(raw);
     this.scenarioId = launch.scenarioId;
     this.rulesetConfig = launch.ruleset;
+    if (launch.scenarioId === "SCENARIO_GLOBAL_1940") {
+      resumeGlobal1940(this);
+    }
   }
 
   getAdjacentRegions(regionId: string): string[] {

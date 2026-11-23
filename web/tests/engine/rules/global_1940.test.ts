@@ -241,4 +241,37 @@ describe("1940 campaign", () => {
     expect(rollResearchPhase(state, "germany", () => 1)).toEqual([]);
     expect(state.researchPity.germany).toBe(1);
   });
+
+  it("puts the seven powers back on a resumed game without moving the clock", () => {
+    const live = campaign();
+    live.game_round = 4;
+    live.turn_number = 11;
+    live.current_faction_id = "japan";
+    live.current_phase = "combat_move";
+    live.ipc.soviet_union = 40;
+    const saved = live.toSnapshot();
+    const resumed = new GameState();
+    resumed.turn_order = ["ussr", "ger", "uk", "jap", "usa"];
+    resumed.current_faction_id = "ussr";
+    resumed.game_round = saved.game_round;
+    resumed.current_phase = saved.turn_info.current_phase;
+    resumed.current_faction_id = saved.turn_info.current_faction_id;
+    resumed.turn_number = saved.turn_info.turn_number;
+    resumed.ipc = { ...saved.ipc };
+    resumed.hydrateCampaignLaunch({
+      scenarioId: "SCENARIO_GLOBAL_1940",
+      ruleset: live.rulesetConfig,
+    });
+    expect(resumed.turn_order).toContain("china");
+    expect(resumed.turn_order).toContain("italy");
+    expect(resumed.current_faction_id).toBe("japan");
+    expect(resumed.current_phase).toBe("combat_move");
+    expect(resumed.game_round).toBe(4);
+    expect(resumed.turn_number).toBe(11);
+    expect(resumed.ipc.soviet_union).toBe(40);
+    expect(resumed.factions.germany.team).toBe("axis");
+    expect(resumed.factions.united_kingdom.team).toBe("allies");
+    expect(resumed.neutralBlocs.length).toBeGreaterThan(0);
+    expect(resumed.warStatus.soviet_union).toBe("WARTIME");
+  });
 });

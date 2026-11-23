@@ -7,7 +7,8 @@ import { GameState, type StateSnapshot } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
-import { endCombatMoveGate } from "../movement/combat_move_gate";
+import { endCombatMoveGate, retractUnlandableFlights } from "../movement/combat_move_gate";
+import { applyPatrolOrders } from "../rules/optional/airAndNavalRaiding";
 import { assaultError, unloadError } from "../transport/cargo_rules";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { PlacementEngine } from "../placement/placement";
@@ -182,6 +183,7 @@ export class GameSession {
 
       case CommandType.END_PHASE: {
         if (this.state.current_phase === "combat_move") {
+          retractUnlandableFlights(this.state);
           const gate = endCombatMoveGate(this.state);
           if (!gate.advance) {
             return {
@@ -191,6 +193,9 @@ export class GameSession {
               new_state: this.state.toSnapshot(),
             };
           }
+        }
+        if (this.state.current_phase === "noncombat_move") {
+          applyPatrolOrders(this.state, cmd.player_id, cmd.payload);
         }
         events = processEndPhase(
           this.state.current_phase,
