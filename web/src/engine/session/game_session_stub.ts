@@ -22,6 +22,8 @@ import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { Ruleset } from "../rules/ruleset";
+import { purchaseRepair, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
+import { classifyUnit } from "../types/ruleset";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { processEndPhase, purchaseResult, startTurn } from "../turn/phase_controllers";
 import { TurnEngine } from "../turn/turn_engine";
@@ -195,6 +197,10 @@ export class GameSessionStub {
 
     switch (cmd.type) {
       case CommandType.PURCHASE_UNITS: {
+        const repairError = this.applyPurchaseRepairs(cmd);
+        if (repairError) {
+          return repairError;
+        }
         const affordError = this.validatePurchaseAffordability(cmd);
         if (affordError) {
           return affordError;
@@ -830,6 +836,9 @@ export class GameSessionStub {
     if (regionId === "") {
       return this.bombError("Missing target region");
     }
+    if (this.state.rulesetConfig.facilitiesAndPatrols) {
+      return this.validateFacilityRaid(cmd, regionId);
+    }
     if (this.ruleset == null) {
       this.ruleset = new Ruleset();
       this.ruleset.syncFromState(this.state);
@@ -843,11 +852,59 @@ export class GameSessionStub {
     return null;
   }
 
+  private validateFacilityRaid(cmd: Command, regionId: string): StubResult | null {
+    const region = this.state.regions[regionId];
+    const owner = region?.owner_faction_id ?? "";
+    if (region == null || owner === "" || this.state.sameTeam(owner, cmd.player_id)) {
+      return this.bombError("Region is not a valid bombing target");
+    }
+    const facility = String(cmd.payload.facility ?? "");
+    if (facility === "airbase" || facility === "harbor" || facility === "depot") {
+      if (facility === "airbase" && !region.airbase) {
+        return this.bombError("No airbase");
+      }
+      if (facility === "harbor" && !region.harbor) {
+        return this.bombError("No harbor");
+      }
+      if (facility === "depot" && !region.forward_depot) {
+        return this.bombError("No depot");
+      }
+      if (this.raidCount(regionId, cmd.player_id, "TACTICAL_BOMBER") <= 0) {
+        return this.bombError("No tactical bombers");
+      }
+      return null;
+    }
+    if (!region.major_factory) {
+      return this.bombError("Region is not a major factory");
+    }
+    if (this.raidCount(regionId, cmd.player_id, "HEAVY_BOMBER") <= 0) {
+      return this.bombError("No heavy bombers");
+    }
+    return null;
+  }
+
+  private raidCount(regionId: string, factionId: string, kind: "HEAVY_BOMBER" | "TACTICAL_BOMBER"): number {
+    let total = 0;
+    for (const entry of this.state.region_units[regionId] ?? []) {
+      if (String(entry.faction_id ?? "") !== factionId || entry.instance_id) {
+        continue;
+      }
+      if (classifyUnit(String(entry.unit_type_id ?? "")) !== kind) {
+        continue;
+      }
+      total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+    }
+    return total;
+  }
+
   /** Damage uses `(nextInt() % 6) + 1` like CombatEngine, and is reported as negative income. */
   private processStrategicBomb(cmd: Command): GameEvent[] {
     const regionId = String(cmd.payload.region_id ?? "");
+    if (this.state.rulesetConfig.facilitiesAndPatrols) {
+      return this.processFacilityRaid(cmd, regionId);
+    }
     const owner = this.state.getRegionOwner(regionId);
-    const damage = this.rng ? (this.rng.nextInt() % 6) + 1 : 1;
+    const damage = this.d6();
     if (owner !== "") {
       this.state.modifyIpc(owner, -damage);
     }
@@ -860,6 +917,63 @@ export class GameSessionStub {
         this._seq,
       ),
     ];
+  }
+
+  private processFacilityRaid(cmd: Command, regionId: string): GameEvent[] {
+    const facility = String(cmd.payload.facility ?? "");
+    const roll = () => this.d6();
+    if (facility === "airbase" || facility === "harbor" || facility === "depot") {
+      const raid = runInterdiction(this.state, cmd.player_id, regionId, facility as FacilityTarget, roll);
+      if ("error" in raid) {
+        return [];
+      }
+      this._seq += 1;
+      return [
+        GameEvent.create(
+          GameEventType.INCOME_COLLECTED,
+          { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "tactical_interdiction", region_id: regionId },
+          this._seq,
+        ),
+      ];
+    }
+    const raid = runIndustrialBombing(this.state, cmd.player_id, regionId, Math.trunc(Number(cmd.payload.escorts ?? 0)), roll);
+    if ("error" in raid) {
+      return [];
+    }
+    this._seq += 1;
+    return [
+      GameEvent.create(
+        GameEventType.INCOME_COLLECTED,
+        { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "strategic_bomb", region_id: regionId },
+        this._seq,
+      ),
+    ];
+  }
+
+  private applyPurchaseRepairs(cmd: Command): StubResult | null {
+    const repairs: unknown[] = Array.isArray(cmd.payload.repairs) ? cmd.payload.repairs : [];
+    if (repairs.length === 0) {
+      return null;
+    }
+    for (const entry of repairs) {
+      if (!isDict(entry)) {
+        return { result_type: "error", error: { code: "PURCHASE_FAILED", message: "Nothing to repair." }, events: [] };
+      }
+      const problem = purchaseRepair(
+        this.state,
+        cmd.player_id,
+        String(entry.region_id ?? ""),
+        Math.trunc(Number(entry.tokens ?? 0)),
+      );
+      if (problem !== "") {
+        return { result_type: "error", error: { code: "PURCHASE_FAILED", message: problem }, events: [] };
+      }
+    }
+    return null;
+  }
+
+  private d6(): number {
+    return this.rng ? (this.rng.nextInt() % 6) + 1 : 1;
   }
 
   private removeOneStrategicBomber(regionId: string, factionId: string): void {

@@ -1,10 +1,11 @@
 import type { BattleSide, BattleUnitState } from "../../model/battle";
 import type { GameState } from "../../model/game_state";
-import { isArtilleryClass, isBomberClass } from "../../types/ruleset";
+import { classifyUnit } from "../../types/ruleset";
 import {
   adjustCombatRank as terrainRank,
   blitzBlocked,
   coverOf,
+  coverSuppressed,
   landCover,
   movementEnterCost,
   terrainActive,
@@ -27,8 +28,12 @@ export function adjustCombatRank(
 ): number {
   const rules = state.rulesetConfig;
   let next = rank;
-  if (rules.preparatoryBombardment && rules.terrainModifiers && round === 1 && side === "attacker" && state.forfeitOpening[unit.id]) {
-    if (isArtilleryClass(unit.unit_type_id) || isBomberClass(unit.unit_type_id)) {
+  if (rules.preparatoryBombardment && rules.terrainModifiers && round === 1 && side === "attacker") {
+    const kind = classifyUnit(unit.unit_type_id);
+    if (state.forfeitOpening[unit.id] && (kind === "ARTILLERY" || kind === "HEAVY_BOMBER" || kind === "TACTICAL_BOMBER")) {
+      next = 0;
+    }
+    if (state.escortDuty[unit.id] && kind === "FIGHTER") {
       next = 0;
     }
   }
@@ -47,9 +52,11 @@ export function declarePreparatoryBombardment(state: GameState, regionId: string
   if (cover !== "URBAN" && cover !== "FOREST") {
     return "Only a city or a wood can be suppressed.";
   }
+  if (coverSuppressed(state, regionId)) {
+    return "That ground is already suppressed.";
+  }
   for (const id of unitIds) {
     state.forfeitOpening[id] = true;
   }
-  state.terrainSuppressed[regionId] = state.game_round;
   return "";
 }

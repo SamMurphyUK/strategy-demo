@@ -20,6 +20,12 @@ export class Region {
   airbase_disabled_until = 0;
   /** Game round through which the harbor stays closed. Zero means it is open. */
   harbor_disabled_until = 0;
+  /** A major industrial complex. Omitted from saves while false. */
+  major_factory = false;
+  /** A forward depot. Omitted from saves while false. */
+  forward_depot = false;
+  /** Printed build output. Zero uses the territory value. */
+  base_output = 0;
 
   static fromDict(data: Dict): Region {
     const region = new Region();
@@ -37,6 +43,9 @@ export class Region {
     region.harbor = data.harbor === true;
     region.airbase_disabled_until = toInt(data.airbase_disabled_until ?? 0);
     region.harbor_disabled_until = toInt(data.harbor_disabled_until ?? 0);
+    region.major_factory = data.major_factory === true;
+    region.forward_depot = data.forward_depot === true;
+    region.base_output = toInt(data.base_output ?? 0);
     return region;
   }
 
@@ -63,6 +72,9 @@ export class Region {
       ...(this.harbor ? { harbor: true } : {}),
       ...(this.airbase_disabled_until > 0 ? { airbase_disabled_until: this.airbase_disabled_until } : {}),
       ...(this.harbor_disabled_until > 0 ? { harbor_disabled_until: this.harbor_disabled_until } : {}),
+      ...(this.major_factory ? { major_factory: true } : {}),
+      ...(this.forward_depot ? { forward_depot: true } : {}),
+      ...(this.base_output > 0 ? { base_output: this.base_output } : {}),
     };
   }
 }

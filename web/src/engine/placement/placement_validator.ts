@@ -1,6 +1,7 @@
 import type { GameState } from "../model/game_state";
 import type { Region } from "../model/region";
 import type { Dict } from "../model/types";
+import { depotBuildsBlocked, factoryBuildCap } from "../rules/optional/bombingResolver";
 import type { Ruleset } from "../rules/ruleset";
 import { MoveError, ValidationResult } from "../validation/validation_types";
 
@@ -34,6 +35,11 @@ export class PlacementValidator {
     if (region.owner_faction_id !== factionId) {
       result.valid = false;
       result.errors.push(`Region not owned by faction: ${regionId}`);
+      return result;
+    }
+    if (depotBuildsBlocked(state, regionId)) {
+      result.valid = false;
+      result.errors.push(`Depot is disabled: ${regionId}`);
       return result;
     }
     const u = state.unit_types[unitTypeId];
@@ -87,6 +93,9 @@ export class PlacementValidator {
     const rules = this.state!.rules;
     if (region.is_capital && (rules.capital_production_bonus ?? false)) {
       capacity += rules.capital_bonus_amount ?? 2;
+    }
+    if (this.state != null && this.state.rulesetConfig.facilitiesAndPatrols && region.major_factory) {
+      return factoryBuildCap(this.state, region);
     }
     return capacity;
   }

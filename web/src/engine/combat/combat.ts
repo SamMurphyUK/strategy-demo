@@ -10,6 +10,13 @@ import { neutralDomino } from "../rules/optional/objectives";
 import { optionalCombatRanks } from "../rules/optional/combat_ranks";
 import { guerrillaSlipAway, guerrillaSurpriseActive } from "../rules/optional/terrainResolver";
 import { capitalHullDamage, facilitiesActive, planScramble, type ScrambleLift } from "../rules/optional/facilitiesResolver";
+import {
+  assignedSuppression,
+  planPreparatorySuppression,
+  preparatoryActive,
+  suppressionBomber,
+  type BombDie,
+} from "../rules/optional/bombingResolver";
 import { grantVictoryExperience, veteranMayReroll } from "../rules/optional/veterancy";
 import { classifyUnit } from "../types/ruleset";
 import {
@@ -646,6 +653,42 @@ export class CombatEngine {
     return this.finish(b, outcome);
   }
 
+  /** Assigned guns and bombers try to suppress a city or a wood before round 1. */
+  private preparatorySuppression(b: ActiveBattle): { dice: BattleDie[]; casualties: BattleCasualty[] } | null {
+    if (!preparatoryActive(this.state, b.region_id)) {
+      return null;
+    }
+    if (!b.attackers.some((unit) => assignedSuppression(this.state, unit))) {
+      return null;
+    }
+    const planned = planPreparatorySuppression(this.state, b.region_id, b.attackers, b.defenders, () => this.rng.rollD6());
+    const casualties: BattleCasualty[] = planned.casualties.map((loss) => ({
+      unit_id: loss.unitId,
+      side: loss.side,
+      result: "destroyed" as const,
+    }));
+    this.applyCasualties(b, casualties);
+    if (planned.suppressed) {
+      this.state.terrainSuppressed[b.region_id] = this.state.game_round;
+    }
+    return {
+      dice: planned.dice.map((entry) => this.prepDie(entry)),
+      casualties,
+    };
+  }
+
+  private prepDie(entry: BombDie): BattleDie {
+    return {
+      unit_id: entry.unitId,
+      side: entry.side,
+      rank: entry.rank,
+      roll: entry.roll,
+      hit: entry.hit,
+      surprise: false,
+      ...(entry.kind === "aa" ? { aa: true as const } : {}),
+    };
+  }
+
   /** Every living unit fires once. AA guns fire at aircraft before round 1, then sit out. */
   private roll(b: ActiveBattle): GameEvent[] {
     this.releaseSubmarines(b);
@@ -663,8 +706,20 @@ export class CombatEngine {
     const fired = new Set<string>();
 
     if (openingRound && b.battle_type === "land") {
+      const prep = this.preparatorySuppression(b);
+      if (prep != null) {
+        dice.push(...prep.dice);
+        casualties.push(...prep.casualties);
+        const prepped = this.finishIfClear(b);
+        if (prepped) {
+          return [...this.diceRolled(b, dice, casualties), ...prepped];
+        }
+      }
       const guns = defendingAaGuns(b.defenders, types);
-      const planes = attackingAircraft(b.attackers);
+      let planes = attackingAircraft(b.attackers);
+      if (prep != null) {
+        planes = planes.filter((unit) => !suppressionBomber(this.state, unit) && !this.state.escortDuty[unit.id]);
+      }
       const shots = openingAaShots(guns.length, planes.length);
       let aaHits = 0;
       for (let i = 0; i < shots; i++) {

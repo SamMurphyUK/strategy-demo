@@ -97,6 +97,14 @@ export class GameState {
   terrainSuppressed: Record<string, number> = {};
   /** Battle-piece id → that piece gives up its first attack to a preparatory bombardment. */
   forfeitOpening: Record<string, boolean> = {};
+  /** Battle-piece id → fighter flying escort for a suppression run. Absent from snapshots. */
+  escortDuty: Record<string, boolean> = {};
+  /** Region id → repair tokens on a major factory. Absent from snapshots. */
+  repairTokens: Record<string, number> = {};
+  /** Region id → game round through which a forward depot stays closed. Absent from snapshots. */
+  depotDisabledUntil: Record<string, number> = {};
+  /** Faction id → unlocked research names. Absent from snapshots. */
+  researchUnlocked: Record<string, string[]> = {};
   unitExperience: Record<string, UnitExperience> = {};
   nationalObjectives: NationalObjective[] = [];
   neutralBlocs: NeutralBloc[] = [];
