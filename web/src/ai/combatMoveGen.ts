@@ -10,7 +10,7 @@ import { simulateBattleOdds } from "./battleOddsSim";
 import { threatAt, type TileThreat } from "./threatMap";
 import type { AIDifficultyProfile, CommanderWeights } from "./types/aiTypes";
 
-export type PackageKind = "trade" | "hold" | "suppression" | "amphibious" | "naval_raid" | "strategic_bomb";
+export type PackageKind = "trade" | "hold" | "suppression" | "amphibious" | "naval_raid" | "naval" | "strategic_bomb";
 
 export interface PackageStack {
   from: string;
@@ -49,8 +49,17 @@ interface Reachable {
   destinations: string[];
 }
 
-const PACKAGE_CAP = 12;
+const PACKAGE_CAP = 16;
 const TRADE_INFANTRY = 2;
+const LOW_ODDS = 0.42;
+
+/** A fight under 42% stays only when the defender's expected losses are at least 1.25 times the attacker's risk. */
+export function keepLowOddsTrade(win: number, expectedDestroyed: number, risked: number): boolean {
+  if (win >= LOW_ODDS) {
+    return true;
+  }
+  return risked <= 0 || expectedDestroyed >= risked * 1.25;
+}
 
 function isCheapKind(kind: RulesetUnitType | null): boolean {
   return kind === "INFANTRY" || kind === "ARTILLERY" || kind === "CHINESE_GUERRILLA";
@@ -93,6 +102,21 @@ function defenseRanks(state: GameState, regionId: string, factionId: string): nu
     }
   }
   return out;
+}
+
+/** An idle transport still counts. Cargo is not required. */
+function enemyHulls(state: GameState, regionId: string, factionId: string): boolean {
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    const owner = String(entry.faction_id ?? "");
+    if (owner === "" || state.sameTeam(owner, factionId)) {
+      continue;
+    }
+    const unit = state.unit_types[String(entry.unit_type_id ?? "")];
+    if (unit?.category === "sea" && Math.max(0, Math.trunc(Number(entry.count ?? 0))) > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function defenderTuv(state: GameState, regionId: string, factionId: string): number {
@@ -184,14 +208,19 @@ function accept(
     }
   }
   const odds = simulateBattleOdds(ranks, defenders, profile.fastOddsIterations, seed, state.rulesetConfig);
-  const bar = cheap ? weights.tradeWinThreshold : weights.holdWinThreshold;
-  if (odds.win < bar) {
-    return null;
-  }
-  if (!cheap && odds.survival < weights.holdSurvivalThreshold) {
-    return null;
-  }
   const prize = defenderTuv(state, to, factionId);
+  const expectedDestroyed = odds.win * prize;
+  if (!keepLowOddsTrade(odds.win, expectedDestroyed, committed)) {
+    return null;
+  }
+  const smartTrade = odds.win < LOW_ODDS;
+  const bar = cheap ? weights.tradeWinThreshold : weights.holdWinThreshold;
+  if (!smartTrade && odds.win < bar) {
+    return null;
+  }
+  if (!smartTrade && !cheap && odds.survival < weights.holdSurvivalThreshold) {
+    return null;
+  }
   return {
     kind,
     to,
@@ -456,6 +485,34 @@ export function combatCandidates(
           found.push(raid);
         }
       }
+    }
+  }
+
+  const seas = new Set<string>();
+  for (const unit of reachable) {
+    if (unit.category !== "sea" && unit.category !== "air") {
+      continue;
+    }
+    for (const dest of unit.destinations) {
+      if (state.regions[dest]?.isSeaRegion() === true && enemyHulls(state, dest, factionId)) {
+        seas.add(dest);
+      }
+    }
+  }
+  for (const to of seas) {
+    const here = reachable.filter(
+      (unit) => (unit.category === "sea" || unit.category === "air") && unit.attack > 0 && unit.destinations.includes(to),
+    );
+    const sent: PackageStack[] = [];
+    for (const kind of ["DESTROYER", "CRUISER", "BATTLESHIP", "SUBMARINE", "FIGHTER", "TACTICAL_BOMBER", "HEAVY_BOMBER"] as const) {
+      sent.push(...take(here, kind, kind === "FIGHTER" || kind === "DESTROYER" ? 2 : 1));
+    }
+    const escorted = sent.some((line) => line.unitType === "destroyer" || classifyUnit(line.unitType) === "DESTROYER");
+    const strike = defendingCount(state, to, factionId, "SUBMARINE") > 0 && !escorted ? sent.filter((line) => classifyUnit(line.unitType) !== "FIGHTER" && classifyUnit(line.unitType) !== "TACTICAL_BOMBER" && classifyUnit(line.unitType) !== "HEAVY_BOMBER") : sent;
+    const naval = accept(state, factionId, "naval", to, strike, defenseRanks(state, to, factionId), profile, weights, threatAt(tiles, to).strategicValue, serial, true);
+    serial += 1;
+    if (naval != null) {
+      found.push(naval);
     }
   }
 

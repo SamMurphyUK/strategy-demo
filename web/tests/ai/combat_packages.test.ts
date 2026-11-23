@@ -4,6 +4,7 @@ import { evaluateBoardState, snapshotBoard } from "../../src/ai/beamSearchPlanne
 import { combatCandidates } from "../../src/ai/combatMoveGen";
 import { beamSearch } from "../../src/ai/beamSearchPlanner";
 import { capitalCaptureOdds, planPurchase } from "../../src/ai/purchasePlanner";
+import { keepLowOddsTrade } from "../../src/ai/combatMoveGen";
 import { threatMap } from "../../src/ai/threatMap";
 import { AI_DIFFICULTY_PROFILES, personaFor } from "../../src/ai/types/aiTypes";
 import { Ruleset } from "../../src/engine/rules/ruleset";
@@ -127,5 +128,48 @@ describe("combat packages and purchase", () => {
     const board = snapshotBoard(state);
     const score = evaluateBoardState(state, board, "red", personaFor("red"));
     expect(score).toBeGreaterThan(0);
+  });
+
+  it("drops a low-odds attack unless the exchange pays 1.25 times the risk", () => {
+    expect(keepLowOddsTrade(0.3, 10, 10)).toBe(false);
+    expect(keepLowOddsTrade(0.3, 13, 10)).toBe(true);
+    expect(keepLowOddsTrade(0.5, 1, 10)).toBe(true);
+  });
+
+  it("sends a ship after an idle enemy transport", () => {
+    const state = duel();
+    state.unit_types.destroyer = unit("destroyer", 2, 2, 2, 8, "sea");
+    state.unit_types.transport = unit("transport", 0, 0, 2, 7, "sea");
+    state.regions.homeSea = Region.fromDict({ id: "homeSea", name: "Home Sea", type: "sea", owner_faction_id: "" });
+    state.regions.awaySea = Region.fromDict({ id: "awaySea", name: "Away Sea", type: "sea", owner_faction_id: "" });
+    state.adjacency.home = ["homeSea"];
+    state.adjacency.homeSea = ["home", "awaySea"];
+    state.adjacency.awaySea = ["homeSea", "away"];
+    state.adjacency.away = ["awaySea"];
+    state.region_units.homeSea = [{ faction_id: "red", unit_type_id: "destroyer", count: 1 }];
+    state.region_units.awaySea = [{ faction_id: "blue", unit_type_id: "transport", count: 1, instance_id: "t1" }];
+    state.transport_instances.t1 = { instance_id: "t1", unit_type_id: "transport", region_id: "awaySea", cargo: [] };
+    const ruleset = new Ruleset();
+    ruleset.syncFromState(state);
+    const packages = combatCandidates(state, "red", ruleset, AI_DIFFICULTY_PROFILES.EASY, personaFor("red"), threatMap(state, "red", false), 3);
+    expect(packages.some((pack) => pack.kind === "naval" && pack.to === "awaySea")).toBe(true);
+  });
+
+  it("buys cargo with a British transport and places the ship at sea", () => {
+    const state = duel();
+    state.factions.uk = Faction.fromDict({ id: "uk", name: "Britain", color: "#124", starting_ipc: 40, team: "allies" });
+    state.ipc.uk = 40;
+    state.current_faction_id = "uk";
+    state.unit_types.transport = unit("transport", 0, 0, 2, 7, "sea");
+    state.unit_types.destroyer = unit("destroyer", 2, 2, 2, 8, "sea");
+    state.regions.london = land("london", "uk", 8, { has_factory: true, is_capital: true });
+    state.regions.channel = Region.fromDict({ id: "channel", name: "Channel", type: "sea", owner_faction_id: "" });
+    state.adjacency.london = ["channel"];
+    state.adjacency.channel = ["london"];
+    const bought = planPurchase(state, "uk", personaFor("uk"), threatMap(state, "uk", false));
+    const count = (id: string) => bought.purchases.find((line) => line.unit_type_id === id)?.count ?? 0;
+    expect(count("transport")).toBeGreaterThan(0);
+    expect(count("infantry") + count("artillery")).toBeGreaterThanOrEqual(2);
+    expect(bought.placements.some((row) => row.region_id === "channel" && row.units.some((line) => line.unit_type_id === "transport"))).toBe(true);
   });
 });

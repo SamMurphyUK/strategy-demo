@@ -81,6 +81,7 @@ export function playArenaGame(seed: number, v2: AIDifficulty = "NORMAL", v1: AID
   const botV2 = session.state.turn_order[0] ?? "red";
   const botV1 = session.state.turn_order[1] ?? "blue";
   let turns = 0;
+  let issued = 0;
   let capitalCaptures = 0;
   let ioSpent = 0;
   const owned = new Map<string, string>();
@@ -93,7 +94,7 @@ export function playArenaGame(seed: number, v2: AIDifficulty = "NORMAL", v1: AID
     const faction = session.state.current_faction_id;
     if (session.state.current_phase !== "purchase" && session.state.current_phase !== "collect_income") {
       const skip = session.applyCommand({
-        command_id: `skip_${turns}`,
+        command_id: `skip_${turns}_${++issued}`,
         player_id: faction,
         type: "end_phase",
         payload: {},
@@ -108,7 +109,7 @@ export function playArenaGame(seed: number, v2: AIDifficulty = "NORMAL", v1: AID
     const plan = planTurn(session.state, { difficulty, seed: seed + turns * 17 });
     for (const command of plan.commands) {
       const result = session.applyCommand({
-        command_id: command.command_id,
+        command_id: `arena_${turns}_${++issued}`,
         player_id: command.player_id,
         type: command.type,
         payload: command.payload,

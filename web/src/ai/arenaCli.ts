@@ -1,6 +1,7 @@
 import type { ScenarioId } from "../engine/types/ruleset";
 import type { AIDifficulty } from "./types/aiTypes";
 import type { ScenarioReport } from "./scenarioArena";
+import { formatDiagnostics } from "./simDiagnostics";
 
 export interface ArenaArgs {
   games: number;
@@ -10,6 +11,10 @@ export interface ArenaArgs {
 }
 
 function flag(argv: readonly string[], name: string): string {
+  const inline = argv.find((arg) => arg.startsWith(`${name}=`));
+  if (inline != null) {
+    return inline.slice(name.length + 1);
+  }
   const index = argv.indexOf(name);
   return index >= 0 ? String(argv[index + 1] ?? "") : "";
 }
@@ -34,15 +39,47 @@ export function parseArenaArgs(argv: readonly string[]): ArenaArgs {
   };
 }
 
-export function formatArenaReport(report: ScenarioReport): string {
-  const efficiency = Object.entries(report.ioEfficiency)
-    .map(([factionId, value]) => `${factionId} ${value.toFixed(2)}`)
+function fightLine(label: string, row: { fought: number; won: number; lost: number; draws: number }): string {
+  return `${label} ${row.fought} fought, ${row.won} won / ${row.lost} lost / ${row.draws} draw`;
+}
+
+function countLine(rows: Record<string, number>): string {
+  const text = Object.entries(rows)
+    .filter(([, count]) => count > 0)
+    .map(([factionId, count]) => `${factionId} ${count}`)
     .join(", ");
+  return text || "none";
+}
+
+export function formatArenaReport(report: ScenarioReport): string {
+  const efficiency = Object.entries(report.ioLedger)
+    .map(([factionId, row]) => `${factionId} spent ${row.spent} destroyed ${row.destroyed} (${report.ioEfficiency[factionId].toFixed(2)})`)
+    .join(", ");
+  const attacks = [
+    fightLine("Axis", report.battles.axis.offense),
+    fightLine("Allies", report.battles.allies.offense),
+  ].join(". ");
+  const defense = [
+    fightLine("Axis", report.battles.axis.defense),
+    fightLine("Allies", report.battles.allies.defense),
+  ].join(". ");
+  const factions = Object.entries(report.battles.byFaction)
+    .map(([factionId, row]) => `${factionId} attacked ${row.offense.fought} (${row.offense.won}-${row.offense.lost}-${row.offense.draws}), defended ${row.defense.fought} (${row.defense.won}-${row.defense.lost}-${row.defense.draws})`)
+    .join("; ");
+  const rejections = report.rejectionReasons
+    .map((note) => `${note.faction} round ${note.round} ${note.phase} ${note.type} ${note.code} ${note.message} x${note.count}`)
+    .join("; ");
   return [
     `Axis ${report.axisWinPercent.toFixed(1)}%  Allies ${report.alliesWinPercent.toFixed(1)}%  Draws ${report.draws}`,
     `Victory city wins ${report.wins.victoryCities}  Capital capture wins ${report.wins.capitalCaptures}`,
-    `Average rounds ${report.averageRounds.toFixed(2)}  Average turn ${report.averageTurnMs.toFixed(1)} ms`,
-    `IO efficiency ${efficiency || "none"}`,
+    `Rounds played ${report.averageRoundsPlayed.toFixed(2)}  Clock ${report.averageRounds.toFixed(2)}  Average turn ${report.averageTurnMs.toFixed(1)} ms`,
+    `IO ${efficiency || "none"}`,
+    `Attacks ${attacks}`,
+    `Defense ${defense}`,
+    `Factions ${factions || "none"}`,
+    `Combat moves ${countLine(report.combatMoves)}  Raids ${countLine(report.raids)}`,
+    `Illegal rejections ${report.illegalRejections}  Stalled games ${report.stalledGames}${rejections ? `  ${rejections}` : ""}`,
     `National objective completion ${(report.nationalObjectiveCompletionRate * 100).toFixed(1)}%  Neutral bloc invasions ${report.neutralBlocInvasionFrequency.toFixed(2)} per game`,
+    ...formatDiagnostics(report.diagnostics, report.scenario1940),
   ].join("\n");
 }

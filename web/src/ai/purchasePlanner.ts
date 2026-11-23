@@ -247,8 +247,28 @@ export function planPurchase(
 
   if (!locked && room > 0 && left > 0) {
     const maritime = MARITIME.has(factionId.trim().toLowerCase());
-    let inf = 0;
-    let art = 0;
+    if (maritime && factory != null && transport != null) {
+      const ownedTransports = ownedCount(state, factionId, ["TRANSPORT"]);
+      const needTransport = ownedTransports === 0 ? 1 : 0;
+      const cargoBill = (infantry?.cost ?? 3) + (artillery?.cost ?? infantry?.cost ?? 3);
+      if (needTransport > 0 && factorySea(state, factionId, factory.regionId) != null && room > 2 && left >= transport.cost + Math.min(7, cargoBill)) {
+        const funded = fundCargo(bought, infantry, artillery, left, room);
+        left = funded.left;
+        room = funded.room;
+        if (funded.ready && room > 0 && left >= transport.cost) {
+          addLine(bought, transport.id, 1);
+          left -= transport.cost;
+          room -= 1;
+        }
+        if (escort != null && ownedCount(state, factionId, ["DESTROYER", "CARRIER"]) === 0 && room > 0 && left >= escort.cost) {
+          addLine(bought, escort.id, 1);
+          left -= escort.cost;
+          room -= 1;
+        }
+      }
+    }
+    let inf = bought.get(infantry?.id ?? "") ?? 0;
+    let art = bought.get(artillery?.id ?? "") ?? 0;
     let heavy = 0;
     let guard = 0;
     while (left > 0 && room > 0 && guard < 40) {
@@ -286,18 +306,17 @@ export function planPurchase(
     }
     if (maritime) {
       const ground = coastalGround(state, factionId) + inf + art + heavy;
-      const pairs = Math.floor(ground / 8);
-      const needTransport = Math.max(0, pairs - ownedCount(state, factionId, ["TRANSPORT"]));
-      const needEscort = Math.max(0, pairs - ownedCount(state, factionId, ["DESTROYER", "CARRIER"]));
-      if (transport != null && needTransport > 0 && room > 0 && left >= transport.cost) {
-        addLine(bought, transport.id, 1);
-        left -= transport.cost;
-        room -= 1;
-      }
-      if (escort != null && needEscort > 0 && room > 0 && left >= escort.cost) {
-        addLine(bought, escort.id, 1);
-        left -= escort.cost;
-        room -= 1;
+      const ownedTransports = ownedCount(state, factionId, ["TRANSPORT"]) + (bought.get(transport?.id ?? "") ?? 0);
+      const needTransport = Math.max(0, Math.floor(ground / 8) - ownedTransports);
+      if (transport != null && needTransport > 0 && room > 2 && left >= transport.cost + 6) {
+        const funded = fundCargo(bought, infantry, artillery, left, room);
+        left = funded.left;
+        room = funded.room;
+        if (funded.ready && left >= transport.cost && room > 0) {
+          addLine(bought, transport.id, 1);
+          left -= transport.cost;
+          room -= 1;
+        }
       }
       if (fighter != null && room > 0 && left >= fighter.cost && heavy === 0) {
         addLine(bought, fighter.id, 1);
@@ -310,7 +329,60 @@ export function planPurchase(
   const purchases = toLines(bought);
   const placements: PlacementLine[] = [];
   if (factory != null && purchases.length > 0) {
-    placements.push({ region_id: factory.regionId, units: purchases });
+    const ground = purchases.filter((line) => state.unit_types[line.unit_type_id]?.category !== "sea");
+    const ships = purchases.filter((line) => state.unit_types[line.unit_type_id]?.category === "sea");
+    if (ground.length > 0) {
+      placements.push({ region_id: factory.regionId, units: ground });
+    }
+    const sea = factorySea(state, factionId, factory.regionId);
+    if (ships.length > 0) {
+      placements.push({ region_id: sea ?? factory.regionId, units: ships });
+    }
   }
   return { purchases, repairs, research, placements, spent: treasury - left };
+}
+
+/** 1 infantry and 1 artillery, or 2 infantry, bought beside the transport. */
+function fundCargo(
+  bought: Map<string, number>,
+  infantry: Priced | undefined,
+  artillery: Priced | undefined,
+  left: number,
+  room: number,
+): { left: number; room: number; ready: boolean } {
+  const haveInf = bought.get(infantry?.id ?? "") ?? 0;
+  const haveArt = bought.get(artillery?.id ?? "") ?? 0;
+  if ((haveInf >= 1 && haveArt >= 1) || haveInf >= 2) {
+    return { left, room, ready: true };
+  }
+  if (infantry != null && artillery != null && haveInf < 1 && room > 1 && left >= infantry.cost + artillery.cost) {
+    addLine(bought, infantry.id, 1);
+    addLine(bought, artillery.id, 1);
+    return { left: left - infantry.cost - artillery.cost, room: room - 2, ready: true };
+  }
+  if (infantry != null && haveInf < 2 && room > 1 && left >= infantry.cost * 2) {
+    const need = 2 - haveInf;
+    addLine(bought, infantry.id, need);
+    return { left: left - infantry.cost * need, room: room - need, ready: true };
+  }
+  if (infantry != null && haveInf === 1 && artillery != null && room > 0 && left >= artillery.cost) {
+    addLine(bought, artillery.id, 1);
+    return { left: left - artillery.cost, room: room - 1, ready: true };
+  }
+  return { left, room, ready: (haveInf >= 1 && haveArt >= 1) || haveInf >= 2 };
+}
+
+function factorySea(state: GameState, factionId: string, factoryId: string): string | null {
+  for (const seaId of state.getAdjacentRegions(factoryId)) {
+    const sea = state.regions[seaId];
+    if (sea?.isSeaRegion() === true && !state.isRegionHostileTo(seaId, factionId)) {
+      return seaId;
+    }
+  }
+  for (const seaId of state.getAdjacentRegions(factoryId)) {
+    if (state.regions[seaId]?.isSeaRegion() === true) {
+      return seaId;
+    }
+  }
+  return null;
 }

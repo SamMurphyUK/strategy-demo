@@ -1,4 +1,7 @@
 import { canLandAt, isAirUnit, isLanded } from "../engine/air/air_fuel";
+import { planStagingFerry } from "./ferryPlanner";
+import { coverOf } from "../engine/rules/optional/terrainResolver";
+import { threatAt } from "./threatMap";
 import type { GameState } from "../engine/model/game_state";
 import { MovementValidator } from "../engine/movement/movement_validator";
 import { operationalAirbase, operationalHarbor } from "../engine/rules/optional/facilitiesResolver";
@@ -148,6 +151,7 @@ export function planNonCombat(
   attacks: readonly AttackPackage[],
   stage: boolean,
   tiles: readonly TileThreat[] = [],
+  busy: ReadonlySet<string> = new Set(),
 ): { moves: QuietMove[]; loads: StagedLoad[]; patrols: PatrolOrder[] } {
   const used = new Map<string, number>();
   for (const attack of attacks) {
@@ -312,6 +316,36 @@ export function planNonCombat(
     }
   }
 
+  const ferry = planStagingFerry(state, factionId, ruleset, tiles, busy, used);
+  const loader = new TransportLoadValidator();
+  for (const load of ferry.loads) {
+    if (loads.some((line) => line.transportId === load.transportId && line.unitType === load.unitType)) {
+      continue;
+    }
+    const sailing = ferry.sails.find((sail) => sail.instanceId === load.transportId);
+    const ship = state.transport_instances[load.transportId];
+    const parked = ship?.region_id;
+    if (sailing != null && ship != null) {
+      ship.region_id = sailing.to;
+    }
+    const legal = loader.canLoadUnits(load.transportId, load.from, [{ unit_type_id: load.unitType, count: load.count }], factionId, state);
+    if (ship != null && parked != null) {
+      ship.region_id = parked;
+    }
+    if (!legal) {
+      continue;
+    }
+    loads.push(load);
+    reserve(load.from, load.unitType, load.count);
+  }
+  for (const sail of ferry.sails) {
+    if (moves.some((move) => move.instanceId === sail.instanceId)) {
+      continue;
+    }
+    moves.push(sail);
+  }
+  consolidateSoviets(state, factionId, ruleset, tiles, used, reserved, moves);
+
   const patrols: PatrolOrder[] = [];
   if (stage && state.rulesetConfig.facilitiesAndPatrols) {
     for (const station of stations) {
@@ -330,4 +364,136 @@ export function planNonCombat(
   }
 
   return { moves, loads, patrols };
+}
+
+const SOVIET_HUBS = ["moscow", "leningrad", "stalingrad"];
+
+function sovietFaction(factionId: string): boolean {
+  const id = factionId.trim().toLowerCase();
+  return id === "ussr" || id === "soviet_union";
+}
+
+function vitalHub(state: GameState, regionId: string, factionId: string): boolean {
+  const region = state.regions[regionId];
+  if (region == null) {
+    return false;
+  }
+  const text = `${region.id} ${region.name}`.toLowerCase();
+  if (SOVIET_HUBS.some((name) => text.includes(name))) {
+    return true;
+  }
+  return region.is_capital === true && region.owner_faction_id === factionId;
+}
+
+function defensePower(state: GameState, factionId: string, regionId: string): number {
+  let total = 0;
+  for (const entry of state.getUnitsInRegion(regionId)) {
+    if (!state.sameTeam(String(entry.faction_id ?? ""), factionId)) {
+      continue;
+    }
+    const unit = state.unit_types[String(entry.unit_type_id ?? "")];
+    total += Math.max(0, Math.trunc(Number(entry.count ?? 0))) * Math.max(0, unit?.defense ?? 0);
+  }
+  return total;
+}
+
+function nearestHub(state: GameState, factionId: string, from: string, hubs: readonly string[]): string {
+  if (hubs.length === 0) {
+    return "";
+  }
+  const seen = new Set<string>([from]);
+  let ring = [from];
+  for (let guard = 0; guard < 40 && ring.length > 0; guard += 1) {
+    const next: string[] = [];
+    for (const current of ring) {
+      for (const neighbor of state.getAdjacentRegions(current)) {
+        if (seen.has(neighbor)) {
+          continue;
+        }
+        const region = state.regions[neighbor];
+        if (region?.isLandRegion() !== true || region.owner_faction_id !== factionId) {
+          continue;
+        }
+        if (hubs.includes(neighbor)) {
+          return neighbor;
+        }
+        seen.add(neighbor);
+        next.push(neighbor);
+      }
+    }
+    ring = next;
+  }
+  return hubs[0] ?? "";
+}
+
+function consolidateSoviets(
+  state: GameState,
+  factionId: string,
+  ruleset: Ruleset,
+  tiles: readonly TileThreat[],
+  used: Map<string, number>,
+  reserved: Map<string, number>,
+  moves: QuietMove[],
+): void {
+  if (!sovietFaction(factionId)) {
+    return;
+  }
+  const validator = new MovementValidator();
+  const hubs = Object.keys(state.regions).filter((regionId) => {
+    const region = state.regions[regionId];
+    if (region?.isLandRegion() !== true || region.owner_faction_id !== factionId) {
+      return false;
+    }
+    const cover = coverOf(state, regionId);
+    return vitalHub(state, regionId, factionId) || cover === "FOREST" || cover === "URBAN";
+  });
+  const stepGround = (regionId: string, goal: string) => {
+    if (goal === "" || goal === regionId) {
+      return;
+    }
+    const step = firstStep(state, factionId, regionId, goal);
+    if (step === "") {
+      return;
+    }
+    for (const entry of state.getFactionUnitsInRegion(regionId, factionId)) {
+      const unitType = String(entry.unit_type_id ?? "");
+      const kind = classifyUnit(unitType);
+      if (kind == null || !GROUND.has(kind) || entry.instance_id != null) {
+        continue;
+      }
+      const have = Math.max(
+        0,
+        state.movableStackCount(factionId, regionId, unitType) - spent(used, regionId, unitType) - (reserved.get(`${regionId}|${unitType}`) ?? 0),
+      );
+      if (have <= 0 || !validator.getLegalDestinationsForStack(regionId, unitType, factionId, state, ruleset).includes(step)) {
+        continue;
+      }
+      moves.push({ from: regionId, to: step, unitType, count: have });
+      const key = `${regionId}|${unitType}`;
+      reserved.set(key, (reserved.get(key) ?? 0) + have);
+    }
+  };
+  for (const regionId of Object.keys(state.regions)) {
+    const region = state.regions[regionId];
+    if (region?.isLandRegion() !== true || region.owner_faction_id !== factionId || vitalHub(state, regionId, factionId)) {
+      continue;
+    }
+    const power = threatAt(tiles, regionId).enemyReachableAttackPower;
+    const ours = defensePower(state, factionId, regionId);
+    if (power <= 0 || ours / (ours + power) >= 0.45) {
+      continue;
+    }
+    stepGround(regionId, nearestHub(state, factionId, regionId, hubs));
+  }
+  for (const hub of hubs) {
+    if (!vitalHub(state, hub, factionId) || threatAt(tiles, hub).enemyReachableAttackPower <= 0) {
+      continue;
+    }
+    for (const regionId of Object.keys(state.regions)) {
+      if (regionId === hub || state.regions[regionId]?.owner_faction_id !== factionId) {
+        continue;
+      }
+      stepGround(regionId, hub);
+    }
+  }
 }

@@ -2,6 +2,7 @@ import { Command, CommandType } from "../engine/model/command";
 import type { GameState } from "../engine/model/game_state";
 import { Ruleset } from "../engine/rules/ruleset";
 import { beamSearch } from "./beamSearchPlanner";
+import { commitLoadedCoasts, planImmediateFerry } from "./ferryPlanner";
 import { combatCandidates, type AttackPackage } from "./combatMoveGen";
 import { planNonCombat } from "./nonCombatPlanner";
 import { planPurchase } from "./purchasePlanner";
@@ -63,12 +64,23 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
   const tiles = threatMap(state, factionId, profile.enableStrategicStaging);
   let searched: ReturnType<typeof beamSearch>;
   let quiet: ReturnType<typeof planNonCombat>;
+  let ferry: ReturnType<typeof planImmediateFerry> = { loads: [], assaults: [] };
   try {
     state.current_phase = "combat_move";
+    ferry = planImmediateFerry(state, factionId, tiles);
+    ferry.assaults.push(...commitLoadedCoasts(state, factionId, new Set(ferry.assaults.map((assault) => assault.transportId))));
     const candidates = combatCandidates(state, factionId, ruleset, profile, weights, tiles, seed);
     searched = beamSearch(state, factionId, candidates, tiles, profile, weights, seed);
     state.current_phase = "noncombat_move";
-    quiet = planNonCombat(state, factionId, ruleset, searched.best.attacks, profile.enableStrategicStaging, tiles);
+    quiet = planNonCombat(
+      state,
+      factionId,
+      ruleset,
+      searched.best.attacks,
+      profile.enableStrategicStaging,
+      tiles,
+      new Set(ferry.assaults.map((assault) => assault.transportId)),
+    );
   } finally {
     state.current_phase = phase;
   }
@@ -93,6 +105,20 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
   send("purchase", CommandType.END_PHASE, {});
   for (const attack of searched.best.attacks) {
     emitAttack(attack, send);
+  }
+  for (const load of ferry.loads) {
+    send("combat_move", CommandType.LOAD_TRANSPORT, {
+      transport_instance_id: load.transportId,
+      from_region_id: load.from,
+      units: [{ unit_type_id: load.unitType, count: load.count }],
+    });
+  }
+  for (const assault of ferry.assaults) {
+    send("combat_move", CommandType.DESIGNATE_AMPHIBIOUS, {
+      transport_instance_id: assault.transportId,
+      origin_sea_zone_id: assault.originSea,
+      target_region_id: assault.target,
+    });
   }
   send("combat_move", CommandType.END_PHASE, {});
   for (const attack of searched.best.attacks) {

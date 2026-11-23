@@ -120,4 +120,51 @@ describe("noncombat stager", () => {
     applyPatrolOrders(state, "red", { patrols: [{ region_id: "base", count: 3 }] });
     expect(state.patrolCounts["red|base"]).toBe(3);
   });
+
+  it("loads a British transport beside a factory when staging is off", () => {
+    const state = board();
+    state.rulesetConfig.facilitiesAndPatrols = false;
+    state.factions.uk = Faction.fromDict({ id: "uk", name: "Britain", color: "#124", starting_ipc: 20, team: "allies" });
+    state.regions.london = Region.fromDict({ id: "london", name: "London", type: "land", owner_faction_id: "uk", has_factory: true });
+    state.regions.channel = Region.fromDict({ id: "channel", name: "Channel", type: "sea", owner_faction_id: "" });
+    state.adjacency.london = ["channel"];
+    state.adjacency.channel = ["london"];
+    state.region_units.london = [
+      { faction_id: "uk", unit_type_id: "infantry", count: 2 },
+      { faction_id: "uk", unit_type_id: "artillery", count: 1 },
+    ];
+    state.unit_types.transport.container = { allowed_cargo_categories: ["land"], capacity: 2, max_per_type: { infantry: 2, artillery: 1 } };
+    state.region_units.channel = [{ faction_id: "uk", unit_type_id: "transport", count: 1, instance_id: "t1" }];
+    state.transport_instances.t1 = { instance_id: "t1", unit_type_id: "transport", region_id: "channel", cargo: [] };
+    const ruleset = new Ruleset();
+    ruleset.syncFromState(state);
+    const plan = planNonCombat(state, "uk", ruleset, [], false, []);
+    expect(plan.loads).toEqual([
+      { transportId: "t1", from: "london", unitType: "infantry", count: 1 },
+      { transportId: "t1", from: "london", unitType: "artillery", count: 1 },
+    ]);
+  });
+
+  it("pulls a thin Soviet border stack back toward a city", () => {
+    const state = board();
+    state.rulesetConfig.facilitiesAndPatrols = false;
+    state.factions.ussr = Faction.fromDict({ id: "ussr", name: "Soviet Union", color: "#900", starting_ipc: 20, team: "allies" });
+    state.factions.ger = Faction.fromDict({ id: "ger", name: "Germany", color: "#444", starting_ipc: 20, team: "axis" });
+    state.unit_types.tank = Unit.fromDict({ id: "tank", name: "Tank", category: "land", attack: 3, defense: 3, movement: 2, cost: 6 });
+    state.regions.moscow = Region.fromDict({ id: "moscow", name: "Moscow", type: "land", owner_faction_id: "ussr", is_capital: true, land_cover: "URBAN" });
+    state.regions.border = Region.fromDict({ id: "border", name: "Border", type: "land", owner_faction_id: "ussr" });
+    state.regions.prussia = Region.fromDict({ id: "prussia", name: "Prussia", type: "land", owner_faction_id: "ger" });
+    state.adjacency.moscow = ["border"];
+    state.adjacency.border = ["moscow", "prussia"];
+    state.adjacency.prussia = ["border"];
+    state.current_faction_id = "ussr";
+    state.region_units.border = [{ faction_id: "ussr", unit_type_id: "infantry", count: 1 }];
+    state.region_units.prussia = [{ faction_id: "ger", unit_type_id: "tank", count: 4 }];
+    const ruleset = new Ruleset();
+    ruleset.syncFromState(state);
+    const tiles = threatMap(state, "ussr", false);
+    expect(tiles.find((tile) => tile.regionId === "border")?.enemyReachableAttackPower).toBeGreaterThan(0);
+    const plan = planNonCombat(state, "ussr", ruleset, [], false, tiles);
+    expect(plan.moves).toContainEqual({ from: "border", to: "moscow", unitType: "infantry", count: 1 });
+  });
 });

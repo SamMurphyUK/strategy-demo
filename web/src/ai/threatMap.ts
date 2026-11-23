@@ -15,6 +15,8 @@ export interface TileThreat {
   strategicValue: number;
   /** Enemy attack power that can enter this tile on the enemy's next turn. */
   enemyThreat1Turn: number;
+  /** Enemy attack power that can reach this tile in two movement points. */
+  enemyReachableAttackPower: number;
   /** Friendly defense power that can reinforce this tile, excluding the garrison already there. */
   friendlyReach1Turn: number;
   zoneClassification: ZoneClassification;
@@ -256,9 +258,48 @@ function classify(enemy: number, garrison: number, reinforcements: number, thres
  * Visible board only. Enemy pending purchases and research are not read.
  * `huntObjectives` adds the national-objective bonus when that rule is on.
  */
+function projectWithin(state: GameState, factionId: string, steps: number): Map<string, number> {
+  const power = new Map<string, number>();
+  const validator = new MovementValidator();
+  for (const regionId of Object.keys(state.region_units)) {
+    for (const entry of state.getUnitsInRegion(regionId)) {
+      const owner = String(entry.faction_id ?? "");
+      if (owner === "" || state.sameTeam(owner, factionId)) {
+        continue;
+      }
+      const unitType = String(entry.unit_type_id ?? "");
+      const unit = state.unit_types[unitType];
+      if (unit == null || unit.attack <= 0) {
+        continue;
+      }
+      const count = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      const body = count * unit.attack;
+      if (body <= 0) {
+        continue;
+      }
+      if (state.regions[regionId]?.isLandRegion() === true) {
+        add(power, regionId, body);
+      }
+      const range = Math.min(steps, movementRange(state, owner, regionId, unitType, Math.max(0, Math.trunc(unit.movement))));
+      if (range <= 0) {
+        continue;
+      }
+      const air = unit.category === "air";
+      const sea = unit.category === "sea";
+      for (const dest of validator.floodFill(regionId, range, state, sea, owner, air, unitType)) {
+        if (state.regions[dest]?.isLandRegion() === true) {
+          add(power, dest, body);
+        }
+      }
+    }
+  }
+  return power;
+}
+
 export function threatMap(state: GameState, factionId: string, huntObjectives: boolean): TileThreat[] {
   const enemy = project(state, factionId, false);
   const friendly = project(state, factionId, true);
+  const close = projectWithin(state, factionId, 2);
   const threshold = personaFor(factionId).holdSurvivalThreshold;
   const tiles: TileThreat[] = [];
   for (const region of Object.values(state.regions)) {
@@ -271,6 +312,7 @@ export function threatMap(state: GameState, factionId: string, huntObjectives: b
       regionId: region.id,
       strategicValue: strategicValue(state, factionId, region, huntObjectives),
       enemyThreat1Turn,
+      enemyReachableAttackPower: close.get(region.id) ?? 0,
       friendlyReach1Turn,
       zoneClassification: classify(enemyThreat1Turn, garrisonDefense(state, factionId, region.id), friendlyReach1Turn, threshold),
     });
@@ -284,6 +326,7 @@ export function threatAt(tiles: readonly TileThreat[], regionId: string): TileTh
       regionId,
       strategicValue: 0,
       enemyThreat1Turn: 0,
+      enemyReachableAttackPower: 0,
       friendlyReach1Turn: 0,
       zoneClassification: "SAFE_REAR",
     }
