@@ -1,0 +1,18 @@
+---
+description: Targeted Vitest during development, one full run at the end, and a three-try cap
+alwaysApply: true
+---
+
+# Vitest and debug loop
+
+Work from `web/`. Tests are `web/tests/**/*.test.ts`.
+
+During a module, run the file you are changing:
+
+`npx vitest run tests/<file>.test.ts`
+
+Finish with one full `npx vitest run`.
+
+Retry cap: at most 3 automated fix attempts for one failing test. If it still fails, stop editing that file. Write the exact blocker and the failing assertion in `CURSOR_STATUS.md` at the repo root, then move on or stop.
+
+Remove temporary `console.log` probes before finishing.

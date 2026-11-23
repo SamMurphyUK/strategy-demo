@@ -25,7 +25,7 @@ export class PurchaseValidator {
     const factionId = state.current_faction_id;
     const availableIpc = state.ipc[factionId] ?? 0;
     if (totalCost > availableIpc) {
-      result.errors.push(MoveError.of("INSUFFICIENT_IPC", "Purchase exceeds available IPC."));
+      result.errors.push(MoveError.of("INSUFFICIENT_IPC", "Purchase exceeds available Industrial Output."));
     }
 
     result.ok = result.errors.length === 0;

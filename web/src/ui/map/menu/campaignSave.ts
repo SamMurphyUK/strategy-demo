@@ -2,6 +2,8 @@
 import type { Dict } from "../../../engine/model/types";
 import { isDict } from "../../../engine/model/types";
 import type { StubStateSnapshot } from "../../../engine/session/game_session_stub";
+import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
+import { normalizeLaunch } from "../../../engine/types/ruleset";
 
 export const CAMPAIGN_SAVES_KEY = "strategy-demo.campaign-saves.v1";
 const SAVE_LIMIT = 12;
@@ -16,6 +18,8 @@ export interface CampaignSave {
   /** World-space map. Null means the built-in demo file. */
   map: Dict | null;
   snapshot: StubStateSnapshot;
+  /** Absent on saves from before the campaign gate. Those stay on 1942 Quick. */
+  launch?: CampaignLaunchConfig;
 }
 
 function isSnapshot(value: unknown): value is StubStateSnapshot {
@@ -48,6 +52,7 @@ export function parseCampaignSave(raw: unknown): CampaignSave | null {
     seed: Math.trunc(seed),
     map,
     snapshot: raw.snapshot,
+    ...(raw.launch != null ? { launch: normalizeLaunch(raw.launch) } : {}),
   };
 }
 

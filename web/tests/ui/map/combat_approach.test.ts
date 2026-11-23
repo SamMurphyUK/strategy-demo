@@ -50,7 +50,7 @@ describe("combat approach", () => {
     expect(end.k).toBeCloseTo(4);
   });
 
-  it("flies the attacker's flag and names the IPC as lost", () => {
+  it("flies the attacker's flag and names the Industrial Output as lost", () => {
     expect(flagMotifForFaction("ger").emblem).toBe("cross");
     expect(flagMotifForFaction("axis").canton).toBe(flagMotifForFaction("germany").canton);
     expect(flagMotifForFaction("ussr").emblem).toBe("star");
@@ -58,7 +58,7 @@ describe("combat approach", () => {
     expect(flagMotifForFaction("usa").emblem).toBe("stars");
     expect(flagMotifForFaction("uk").emblem).toBe("cross");
     expect(flagMotifForFaction("uk").canton).not.toBe(flagMotifForFaction("ger").canton);
-    expect(ipcLostCaption(12)).toBe("12 IPC LOST");
-    expect(ipcLostCaption(0)).toBe("0 IPC LOST");
+    expect(ipcLostCaption(12)).toBe("12 IO LOST");
+    expect(ipcLostCaption(0)).toBe("0 IO LOST");
   });
 });

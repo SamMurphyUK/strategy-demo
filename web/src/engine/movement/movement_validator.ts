@@ -2,6 +2,8 @@ import { airCannotStrike, airSteps, canLandAt, canReturnAfter, fuelRemaining, is
 import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
+import { adjustedMoveRange } from "../rules/optional/facilities";
+import { movementEnterCost } from "../rules/optional/terrain";
 import type { Ruleset } from "../rules/ruleset";
 import {
   MoveError,
@@ -24,11 +26,11 @@ export class MovementValidator {
     if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       return preview;
     }
-    const moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
+    const moveRange = adjustedMoveRange(state, unitTypeId, start, ruleset.getUnitMoveRange(unitTypeId, state));
 
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
     const air = isAirUnit(state, unitTypeId);
-    const reachable = this.floodFill(start, moveRange, state, seaOnly, String(unit.faction_id ?? ""), air);
+    const reachable = this.floodFill(start, moveRange, state, seaOnly, String(unit.faction_id ?? ""), air, unitTypeId);
 
     for (const region of reachable) {
       if (ruleset.canUnitEnterRegion(unitTypeId, region, state, state.current_phase)) {
@@ -59,6 +61,7 @@ export class MovementValidator {
     }
     const air = isAirUnit(state, unitTypeId);
     let moveRange = air ? fuelRemaining(state, factionId, fromRegion, unitTypeId) : ruleset.getUnitMoveRange(unitTypeId, state);
+    moveRange = adjustedMoveRange(state, unitTypeId, fromRegion, moveRange);
     if (air) {
       if (moveRange <= 0) {
         return legal;
@@ -67,7 +70,7 @@ export class MovementValidator {
       moveRange = 1;
     }
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
-    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, air)) {
+    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, air, unitTypeId)) {
       if (ruleset.canUnitEnterRegion(unitTypeId, dest, state, state.current_phase)) {
         legal.push(dest);
       }
@@ -96,12 +99,12 @@ export class MovementValidator {
     if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       return legal;
     }
-    let moveRange = ruleset.getUnitMoveRange(unitTypeId, state);
+    let moveRange = adjustedMoveRange(state, unitTypeId, fromRegion, ruleset.getUnitMoveRange(unitTypeId, state));
     if (moveRange <= 0) {
       moveRange = 1;
     }
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
-    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId)) {
+    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, false, unitTypeId)) {
       if (ruleset.canUnitEnterRegion(unitTypeId, dest, state, state.current_phase)) {
         legal.push(dest);
       }
@@ -274,7 +277,7 @@ export class MovementValidator {
     return false;
   }
 
-  floodFill(start: string, range: number, state: GameState, seaOnly = false, factionId = "", air = false): string[] {
+  floodFill(start: string, range: number, state: GameState, seaOnly = false, factionId = "", air = false, unitTypeId = ""): string[] {
     const visited: Record<string, boolean> = {};
     const frontier: { region: string; dist: number }[] = [{ region: start, dist: 0 }];
     const result: string[] = [];
@@ -315,7 +318,8 @@ export class MovementValidator {
         } else if (!air && neighbor != null && neighbor.isSeaRegion()) {
           continue;
         }
-        frontier.push({ region: n, dist: dist + 1 });
+        const cost = movementEnterCost(state, unitTypeId, region, n, range, dist);
+        frontier.push({ region: n, dist: dist + cost });
       }
     }
     return result;

@@ -1,5 +1,7 @@
 import { useState } from "react";
+import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
 import { factionName } from "../session/event_text";
+import { RuleBadges } from "../menu/NewCampaignModal";
 import type { RoomControls } from "../session/use_campaign_session";
 
 const FACTION_ORDER = ["ussr", "ger", "uk", "jap", "usa"];
@@ -29,7 +31,7 @@ function holder(faction: string, room: RoomControls): string {
   return "Open";
 }
 
-export function RoomPill({ room }: { room: RoomControls }) {
+export function RoomPill({ room, launch }: { room: RoomControls; launch?: CampaignLaunchConfig }) {
   const [open, setOpen] = useState(false);
   const [roomId, setRoomId] = useState(room.roomId || "table");
   const inRoom = room.status === "open" || room.status === "reconnecting";
@@ -58,7 +60,7 @@ export function RoomPill({ room }: { room: RoomControls }) {
             />
           </label>
           <div className="room-actions">
-            <button type="button" onClick={() => room.connect(roomId)}>
+            <button type="button" onClick={() => room.connect(roomId, launch)}>
               Connect
             </button>
             {inRoom && (
@@ -67,6 +69,7 @@ export function RoomPill({ room }: { room: RoomControls }) {
               </button>
             )}
           </div>
+          {launch && <RuleBadges launch={room.launch ?? launch} />}
           <ul className="room-seats">
             {FACTION_ORDER.map((faction) => (
               <li key={faction}>

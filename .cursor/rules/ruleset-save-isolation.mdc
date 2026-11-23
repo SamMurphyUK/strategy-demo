@@ -1,0 +1,12 @@
+---
+description: Gate new tactical rules behind OptionalRulesetConfig and keep legacy saves on the all-false set
+alwaysApply: true
+---
+
+# Baseline and save-state isolation
+
+Gate every new tactical rule behind `OptionalRulesetConfig` in `web/src/engine/types/ruleset.ts`. When every flag is `false`, the existing Vitest baseline (the 550-test suite) must pass with zero state-hash changes.
+
+Hydrate a legacy save that has no `rulesetConfig` with `DEFAULT_LEGACY_RULESET` (all flags `false`).
+
+Player-facing copy says `"IO"` or `"Industrial Output"`. Never show `"IPC"` in the UI.

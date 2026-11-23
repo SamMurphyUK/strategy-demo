@@ -50,6 +50,8 @@ import { UnitBakeReviewPanel } from "../../art/UnitBakeReviewPanel";
 import { MainMenu } from "./menu/MainMenu";
 import { readCampaignSaves, writeCampaignSave, type CampaignSave } from "./menu/campaignSave";
 import { type PlayChoice } from "./session/play_map";
+import { launchForScenario, type CampaignLaunchConfig } from "../../engine/types/ruleset";
+import { NewCampaignModal, draftLaunch, type CampaignDraft } from "./menu/NewCampaignModal";
 import { useCampaignSession } from "./session/use_campaign_session";
 
 export type Selection =
@@ -159,6 +161,13 @@ export function App() {
   const spriteEditor = artQuery.get("bake") === "1";
   const fieldTest = artQuery.get("field") === "1";
   const [menuOpen, setMenuOpen] = useState(!(spriteEditor || fieldTest));
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  const [draft, setDraft] = useState<CampaignDraft>({
+    scenarioId: "SCENARIO_1942_QUICK",
+    ruleset: launchForScenario("SCENARIO_1942_QUICK").ruleset,
+    mapId: "demo",
+    seed: "12345",
+  });
   const [boardGate, setBoardGate] = useState(false);
   const [look, setLook] = useState<"field" | "dusk">(() => {
     try {
@@ -195,6 +204,7 @@ export function App() {
       seed: game.seed,
       map: game.map,
       snapshot: game.capture(),
+      launch: { scenarioId: session.state.scenarioId, ruleset: { ...session.state.rulesetConfig } },
     };
   }, [game, session]);
 
@@ -223,8 +233,8 @@ export function App() {
   }, [stashSave]);
 
   const beginCampaign = useCallback(
-    (choice: PlayChoice, seed: number) => {
-      game.newGame(seed, choice);
+    (choice: PlayChoice, seed: number, launch?: CampaignLaunchConfig) => {
+      game.newGame(seed, choice, launch);
       setEditing(false);
       setBoardGate(false);
       setCoastForPlay(false);
@@ -238,6 +248,9 @@ export function App() {
       const choice: PlayChoice = { id: save.mapId, name: save.mapName, map: save.map };
       game.newGame(save.seed, choice);
       game.restore(save.snapshot);
+      if (save.launch) {
+        game.applyLaunch(save.launch);
+      }
       setEditing(false);
       setBoardGate(false);
       setCoastForPlay(false);
@@ -848,6 +861,8 @@ export function App() {
         onMenu={openMenu}
         playerFaction={playerFaction}
         room={room}
+        launch={draftLaunch(draft)}
+        onNewCampaign={() => setCampaignOpen(true)}
       />
       <div className="main">
         <MapView
@@ -988,7 +1003,8 @@ export function App() {
           room={room}
           volume={volume}
           look={look}
-          playerFaction={playerFaction}
+          draft={draft}
+          onOpenCampaign={() => setCampaignOpen(true)}
           onVolume={(value) => {
             setVolume(value);
             setCampaignVolume(value);
@@ -1006,7 +1022,6 @@ export function App() {
               // The look still changes for this visit.
             }
           }}
-          onPlayerFaction={setPlayerFaction}
           onNewCampaign={beginCampaign}
           onResume={resumeSave}
           onSaveNow={() => {
@@ -1018,7 +1033,6 @@ export function App() {
             setEditing(true);
             setBoardGate(true);
           }}
-          onImportMap={(name, map) => editor.archiveMap(name, projectMapJson(prepareSavedMap(map))).error}
         />
       )}
       {editing && boardGate && (
@@ -1050,6 +1064,21 @@ export function App() {
         />
       )}
     </div>
+    {campaignOpen && (
+      <NewCampaignModal
+        draft={draft}
+        versions={editor.versions}
+        playerFaction={playerFaction}
+        onDraft={setDraft}
+        onPlayerFaction={setPlayerFaction}
+        onImportMap={(name, map) => editor.archiveMap(name, projectMapJson(prepareSavedMap(map))).error}
+        onStart={(choice, seed, launch) => {
+          beginCampaign(choice, seed, launch);
+          setCampaignOpen(false);
+        }}
+        onClose={() => setCampaignOpen(false)}
+      />
+    )}
     {approach?.stage === "darken" && <CombatDarken onDone={showBriefing} />}
     {approach?.stage === "briefing" && (
       <CombatIntro

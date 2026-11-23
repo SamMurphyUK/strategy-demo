@@ -1,4 +1,5 @@
 import type { Dict } from "../engine/model/types";
+import type { CampaignLaunchConfig } from "../engine/types/ruleset";
 import type { SeatAssignment, ServerMessage, SyncBody } from "./protocol";
 
 type SyncMessage = Extract<ServerMessage, { type: "sync" }>;
@@ -65,6 +66,7 @@ export class MultiplayerClient {
   snapshot: SyncBody["snapshot"] | null = null;
   seatAssignments: SeatAssignment[] = [];
   yourFactions: string[] = [];
+  launch: CampaignLaunchConfig | null = null;
   readonly frames: SyncMessage[] = [];
 
   private readonly inbox: ServerMessage[] = [];
@@ -88,17 +90,28 @@ export class MultiplayerClient {
     });
   }
 
-  static async connect(url: string, roomId: string, playerToken: string): Promise<MultiplayerClient> {
+  static async connect(
+    url: string,
+    roomId: string,
+    playerToken: string,
+    launch?: CampaignLaunchConfig,
+  ): Promise<MultiplayerClient> {
     const ws = new (webSocketCtor())(url);
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener("open", () => resolve(), { once: true });
       ws.addEventListener("error", () => reject(new Error(`websocket failed for ${url}`)), { once: true });
     });
     const client = new MultiplayerClient(ws, playerToken);
-    ws.send(JSON.stringify({ type: "join", roomId, playerToken }));
+    ws.send(JSON.stringify({ type: "join", roomId, playerToken, ...(launch ? { launch } : {}) }));
     const welcome = await client.next();
     if (welcome.type !== "welcome") {
       throw new Error(`expected welcome, got ${welcome.type}`);
+    }
+    if (welcome.launch) {
+      const init = await client.next();
+      if (init.type !== "SESSION_INIT" || init.phase !== "START_CAMPAIGN") {
+        throw new Error(`expected SESSION_INIT, got ${init.type}`);
+      }
     }
     return client;
   }
@@ -108,6 +121,9 @@ export class MultiplayerClient {
     this.ws.send(JSON.stringify({ type: "command", playerToken: this.playerToken, command }));
     for (;;) {
       const message = await this.next();
+      if (message.type === "SESSION_INIT") {
+        continue;
+      }
       if (message.type === "rejected") {
         return message;
       }
@@ -152,6 +168,15 @@ export class MultiplayerClient {
       this.snapshot = message.snapshot;
       this.seatAssignments = message.seatAssignments;
       this.yourFactions = message.yourFactions;
+      if (message.launch) {
+        this.launch = message.launch;
+      }
+      return;
+    }
+    if (message.type === "SESSION_INIT") {
+      this.seq = message.seq;
+      this.snapshot = message.snapshot;
+      this.launch = message.launch;
       return;
     }
     if (message.type === "sync") {

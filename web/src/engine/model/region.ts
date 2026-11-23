@@ -12,6 +12,10 @@ export class Region {
   is_capital = false;
   has_factory = false;
   adjacent: string[] = [];
+  /** Optional land cover for the 1940 terrain rules. Empty stays open and is not saved. */
+  land_cover = "";
+  airbase = false;
+  harbor = false;
 
   static fromDict(data: Dict): Region {
     const region = new Region();
@@ -24,6 +28,9 @@ export class Region {
     region.has_factory = Boolean(data.has_factory ?? false);
     const adj: unknown[] = Array.isArray(data.adjacent) ? data.adjacent : [];
     region.adjacent = adj.map((a) => String(a));
+    region.land_cover = String(data.land_cover ?? "");
+    region.airbase = data.airbase === true;
+    region.harbor = data.harbor === true;
     return region;
   }
 
@@ -45,6 +52,9 @@ export class Region {
       is_capital: this.is_capital,
       has_factory: this.has_factory,
       adjacent: this.adjacent,
+      ...(this.land_cover !== "" ? { land_cover: this.land_cover } : {}),
+      ...(this.airbase ? { airbase: true } : {}),
+      ...(this.harbor ? { harbor: true } : {}),
     };
   }
 }

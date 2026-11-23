@@ -86,7 +86,7 @@ export function PhasePanel({
 
       {phase === "collect_income" && (
         <p>
-          Income this turn: <strong>{session.economy.calculateIncome(faction)} IPC</strong> from owned land.
+          Income this turn: <strong>{session.economy.calculateIncome(faction)} IO</strong> from owned land.
         </p>
       )}
 
@@ -196,7 +196,7 @@ function PurchaseBody({
 
   return (
     <>
-      <p className="muted catalog-legend">Cost in IPC · attack / defense / movement</p>
+      <p className="muted catalog-legend">Cost in Industrial Output · attack / defense / movement</p>
       <ul className="catalog">
         {Object.keys(costs).map((id) => {
           const ut = state.unit_types[id];
@@ -207,7 +207,7 @@ function PurchaseBody({
               <div className="unit-card-info">
                 <span className="unit-name">{unitName(id, state.unit_types)}</span>
                 <span className="unit-stats mono">
-                  {costs[id]} IPC · {ut.attack}/{ut.defense}/{ut.movement}
+                  {costs[id]} IO · {ut.attack}/{ut.defense}/{ut.movement}
                 </span>
               </div>
               <div className="stepper">
@@ -229,7 +229,7 @@ function PurchaseBody({
         })}
       </ul>
       <p className={total > ipc ? "warn" : "budget"}>
-        Total <b className="mono">{total}</b> IPC of <b className="mono">{ipc}</b> available
+        Total <b className="mono">{total}</b> IO of <b className="mono">{ipc}</b> available
       </p>
       <div className="row">
         <button type="button" onClick={confirm} disabled={!commandsEnabled || total === 0 || total > ipc}>

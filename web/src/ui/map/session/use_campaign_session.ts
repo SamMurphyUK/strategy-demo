@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { factionName } from "./event_text";
 import { MultiplayerSession, roomIdFromSearch, type ClientStatus } from "../../../multiplayer/multiplayer_client";
+import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
 import type { CanonicalEvent } from "../../../engine/session/game_session_stub";
 import type { Dict } from "../../../engine/model/types";
 import type { StubResult } from "../../../engine/session/game_session_stub";
@@ -13,7 +14,9 @@ export interface RoomControls {
   roomId: string;
   yourFactions: string[];
   takenFactions: string[];
-  connect(roomId: string): void;
+  /** The host's campaign, once SESSION_INIT has arrived. */
+  launch: CampaignLaunchConfig | null;
+  connect(roomId: string, launch?: CampaignLaunchConfig): void;
   claim(seat: "axis" | "allies"): void;
   disconnect(): void;
 }
@@ -38,6 +41,7 @@ function viewOf(client: MultiplayerSession): Omit<RoomControls, "connect" | "cla
     roomId: client.roomId,
     yourFactions: [...client.yourFactions],
     takenFactions: [...client.takenFactions],
+    launch: client.launch,
   };
 }
 
@@ -63,9 +67,15 @@ export function useCampaignSession(): CampaignPlay {
       const game = localRef.current;
       if (client.lastNotice === "rejected" && client.rejection) {
         game.noteError(`${client.rejection.code}: ${client.rejection.message}`);
-      } else if (client.snapshot && (client.lastNotice === "welcome" || client.lastNotice === "seats" || client.lastNotice === "sync")) {
+      } else if (
+        client.snapshot &&
+        (client.lastNotice === "welcome" || client.lastNotice === "seats" || client.lastNotice === "sync" || client.lastNotice === "session")
+      ) {
         const events = client.lastNotice === "sync" ? client.takeNewEvents() : [];
         game.applyRemote(client.snapshot, events);
+        if (client.launch) {
+          game.applyLaunch(client.launch);
+        }
         if (client.lastNotice === "sync") {
           const frame = client.frames[client.frames.length - 1];
           const commandType = String(frame?.command.type ?? "");
@@ -88,12 +98,12 @@ export function useCampaignSession(): CampaignPlay {
   }, [client]);
 
   const connect = useCallback(
-    (roomId: string) => {
+    (roomId: string, launch?: CampaignLaunchConfig) => {
       const id = roomId.trim();
       if (id === "") {
         return;
       }
-      void client.connect(id).catch((error: unknown) => {
+      void client.connect(id, launch).catch((error: unknown) => {
         localRef.current.noteError(error instanceof Error ? error.message : String(error));
       });
     },

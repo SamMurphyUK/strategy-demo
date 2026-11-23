@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket as HostSocket } from "ws";
 import { GameSessionStub } from "../engine/session/game_session_stub";
 import { type Dict, isDict } from "../engine/model/types";
+import { normalizeLaunch, type CampaignLaunchConfig } from "../engine/types/ruleset";
 import {
   ALLIES_FACTIONS,
   AXIS_FACTIONS,
@@ -9,6 +10,7 @@ import {
   type SeatAssignment,
   type SeatSpec,
   type ServerMessage,
+  type SessionInitBody,
   type SyncBody,
 } from "./protocol";
 
@@ -48,6 +50,7 @@ export class Room {
   seq = 0;
   private readonly seats: Seat[];
   private readonly accepted = new Map<string, SyncBody>();
+  launch: CampaignLaunchConfig | null = null;
 
   constructor(
     readonly id: string,
@@ -132,6 +135,7 @@ export class Room {
       seq: this.seq,
       seatAssignments: this.seatAssignments(),
       snapshot: this.session.clientSnapshot(),
+      ...(this.launch ? { launch: this.launch } : {}),
     };
   }
 
@@ -346,6 +350,10 @@ export class MultiplayerHost {
       this.send(socket, { type: "rejected", code: "ROOM_NOT_FOUND", message: "No such room" });
       return;
     }
+    if (message.launch && typeof message.launch === "object" && room.launch == null) {
+      room.launch = normalizeLaunch(message.launch);
+      room.session.state.applyCampaignLaunch(room.launch);
+    }
     if (message.spectate === true) {
       this.joined.set(socket, { room, playerToken: "", spectator: true });
       this.welcome(socket, room, []);
@@ -396,6 +404,27 @@ export class MultiplayerHost {
       yourFactions,
       takenFactions: room.takenFactions(),
     });
+    this.publishLaunch(room);
+  }
+
+  /** Same launch and snapshot for every open seat. No-op until a campaign is named. */
+  private publishLaunch(room: Room): void {
+    if (room.launch == null) {
+      return;
+    }
+    const packet: SessionInitBody = {
+      type: "SESSION_INIT",
+      phase: "START_CAMPAIGN",
+      launch: room.launch,
+      seq: room.seq,
+      snapshot: room.session.clientSnapshot(),
+    };
+    for (const [socket, joined] of this.joined) {
+      if (joined.room !== room || socket.readyState !== HostSocket.OPEN) {
+        continue;
+      }
+      this.send(socket, packet);
+    }
   }
 
   private announceSeats(room: Room): void {

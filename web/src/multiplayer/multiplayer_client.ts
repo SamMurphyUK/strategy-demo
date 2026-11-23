@@ -2,6 +2,8 @@ import type { GameState } from "../engine/model/game_state";
 import type { MoveOrder } from "../engine/movement/phase_orders";
 import type { CanonicalEvent, GameSessionStub, StubStateSnapshot } from "../engine/session/game_session_stub";
 import type { Dict } from "../engine/model/types";
+import type { CampaignLaunchConfig } from "../engine/types/ruleset";
+import { normalizeLaunch } from "../engine/types/ruleset";
 import { ALLIES_FACTIONS, AXIS_FACTIONS, type SeatAssignment, type ServerMessage, type SyncBody } from "./protocol";
 
 export const DEFAULT_MULTIPLAYER_URL = "ws://localhost:8787";
@@ -44,7 +46,7 @@ interface Waiter {
 }
 
 export type ClientStatus = "local" | "connecting" | "open" | "reconnecting" | "closed";
-export type ClientNotice = "welcome" | "seats" | "sync" | "rejected" | "status";
+export type ClientNotice = "welcome" | "seats" | "sync" | "session" | "rejected" | "status";
 
 function webSocketCtor(): WebSocketCtor {
   const ctor = (globalThis as { WebSocket?: WebSocketCtor }).WebSocket;
@@ -215,6 +217,7 @@ export class MultiplayerSession {
   yourFactions: string[] = [];
   takenFactions: string[] = [];
   rejection: { code: string; message: string } | null = null;
+  launch: CampaignLaunchConfig | null = null;
   readonly frames: SyncMessage[] = [];
 
   private socket: GameSocket | null = null;
@@ -223,6 +226,7 @@ export class MultiplayerSession {
   private reconnectTimer: unknown = null;
   private commandSerial = 0;
   private eventCursor = 0;
+  private pendingLaunch: CampaignLaunchConfig | null = null;
   private readonly waiters: Waiter[] = [];
   private readonly listeners = new Set<() => void>();
 
@@ -282,7 +286,8 @@ export class MultiplayerSession {
     return null;
   }
 
-  async connect(roomId: string): Promise<void> {
+  async connect(roomId: string, launch?: CampaignLaunchConfig): Promise<void> {
+    this.pendingLaunch = launch ? normalizeLaunch(launch) : this.pendingLaunch;
     const generation = ++this.generation;
     this.clearReconnect();
     const previous = this.socket;
@@ -418,7 +423,13 @@ export class MultiplayerSession {
       return;
     }
     const welcome = this.waitFor((message) => message.type === "welcome" || message.type === "rejected");
-    this.socketSend({ type: "join", roomId: this.roomId, playerToken: this.playerToken, create: true });
+    this.socketSend({
+      type: "join",
+      roomId: this.roomId,
+      playerToken: this.playerToken,
+      create: true,
+      ...(this.pendingLaunch ? { launch: this.pendingLaunch } : {}),
+    });
     const message = await welcome;
     if (message.type === "rejected") {
       this.status = "closed";
@@ -477,9 +488,22 @@ export class MultiplayerSession {
       this.seatAssignments = message.seatAssignments;
       this.yourFactions = [...message.yourFactions];
       this.takenFactions = [...message.takenFactions];
+      if (message.launch) {
+        this.launch = normalizeLaunch(message.launch);
+      }
       this.status = "open";
       this.rejection = null;
       this.lastNotice = message.type;
+      this.revision += 1;
+      return;
+    }
+    if (message.type === "SESSION_INIT") {
+      this.seq = message.seq;
+      this.snapshot = message.snapshot;
+      this.launch = normalizeLaunch(message.launch);
+      this.status = "open";
+      this.rejection = null;
+      this.lastNotice = "session";
       this.revision += 1;
       return;
     }

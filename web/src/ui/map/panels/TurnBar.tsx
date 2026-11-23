@@ -8,6 +8,7 @@ import type { RoomControls } from "../session/use_campaign_session";
 import { RoomPill } from "./RoomPill";
 import { DEMO_MAP_ID, demoPlayChoice, playChoiceFromVersion } from "../session/play_map";
 import type { GameSessionHandle } from "../session/use_game_session";
+import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
 
 function factionStyle(factionId: string): CSSProperties {
   const palette = factionPalette(factionId);
@@ -22,9 +23,11 @@ interface Props {
   onMenu?(): void;
   playerFaction?: string;
   room?: RoomControls;
+  launch?: CampaignLaunchConfig;
+  onNewCampaign?(): void;
 }
 
-export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, playerFaction, room }: Props) {
+export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, playerFaction, room, launch, onNewCampaign }: Props) {
   const state = game.session.state;
   const [seedInput, setSeedInput] = useState(String(game.seed));
   const [mapId, setMapId] = useState(game.mapId);
@@ -65,11 +68,16 @@ export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, play
       <div className="ipc">
         {state.turn_order.map((f) => (
           <span key={f} className={f === faction ? "ipc-active" : ""} style={factionStyle(f)}>
-            {factionName(f)} <b className="mono">{state.getFactionIpc(f)}</b> IPC
+            {factionName(f)} <b className="mono">{state.getFactionIpc(f)}</b> IO
           </span>
         ))}
       </div>
-      {room && <RoomPill room={room} />}
+      {room && <RoomPill room={room} launch={room.launch ?? launch} />}
+      {onNewCampaign && (
+        <button type="button" onClick={onNewCampaign}>
+          New Campaign
+        </button>
+      )}
       <button
         type="button"
         className="sfx-toggle"

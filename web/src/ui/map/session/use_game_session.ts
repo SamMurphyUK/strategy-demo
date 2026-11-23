@@ -12,6 +12,10 @@ import {
 import { applyAuthoritativeSnapshot } from "../../../multiplayer/multiplayer_client";
 import { describeEvent, unitName } from "./event_text";
 import { type PlayChoice, demoPlayChoice, initialPlayChoice, rememberPlayId } from "./play_map";
+import {
+  launchForScenario,
+  type CampaignLaunchConfig,
+} from "../../../engine/types/ruleset";
 
 export interface LogEntry {
   id: number;
@@ -33,11 +37,11 @@ export interface GameSessionHandle {
   /** Record a host rejection without touching the rules. */
   noteError(message: string): void;
   /** Starts a new game on `choice`. Omit it to restart the map already being played. */
-  newGame(seed: number, choice?: PlayChoice): void;
+  newGame(seed: number, choice?: PlayChoice, launch?: CampaignLaunchConfig): void;
   /** The board as a snapshot the host would broadcast. */
   capture(): StubStateSnapshot;
   /** Puts a saved snapshot back on the live session. */
-  restore(snapshot: StubStateSnapshot): void;
+  applyLaunch(launch: CampaignLaunchConfig): void;
   /** `demo`, or the id of the saved version this game was started from. */
   mapId: string;
   mapName: string;
@@ -192,9 +196,10 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
     [append],
   );
 
-  const newGame = useCallback((nextSeed: number, nextChoice?: PlayChoice) => {
+  const newGame = useCallback((nextSeed: number, nextChoice?: PlayChoice, launch?: CampaignLaunchConfig) => {
     const picked = nextChoice ?? choiceRef.current ?? demoPlayChoice();
     sessionRef.current = createSession(nextSeed, picked.map);
+    sessionRef.current.state.applyCampaignLaunch(launch ?? launchForScenario("SCENARIO_1942_QUICK"));
     rememberPlayId(picked.id);
     choiceRef.current = picked;
     counter.current = 0;
@@ -212,6 +217,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       cost_table: {},
       applied_event_ids: [],
     };
+  }, []);
+
+  const applyLaunch = useCallback((launch: CampaignLaunchConfig) => {
+    sessionRef.current?.state.applyCampaignLaunch(launch);
+    setVersion((v) => v + 1);
   }, []);
 
   const restore = useCallback((snapshot: StubStateSnapshot) => {
@@ -237,10 +247,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       newGame,
       capture,
       restore,
+      applyLaunch,
       mapId: choice.id,
       mapName: choice.name,
       map: choice.map,
     }),
-    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, capture, restore, choice],
+    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, capture, restore, applyLaunch, choice],
   );
 }

@@ -38,6 +38,17 @@ function tickSecondsFor(unitTypeId: string, mode: VehicleMode): number {
   return unitTypeId === "infantry" && mode === "idle" ? INFANTRY_IDLE_TICK_SECONDS : QUICK_TICK_SECONDS;
 }
 
+/** Stable point in an idle loop, so a group of soldiers is not on the same breath. */
+export function infantryIdlePhase(key: string, frameCount: number): number {
+  if (frameCount <= 1) return 0;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % frameCount;
+}
+
 const images = new Map<string, HTMLImageElement | null>();
 const failedImages = new Set<string>();
 const warmed = new Set<string>();
@@ -297,7 +308,12 @@ export function stepQuickFrame(request: QuickDrawRequest): QuickFrameStep | null
   const useDamaged = request.damaged === true && clip.damaged > 0 && pose === "idle";
   const drawPose = useDamaged ? "damaged" : pose;
   const drawCount = useDamaged ? clip.damaged : count;
-  const index = drawCount > 0 ? anim.frame % drawCount : 0;
+  const base = drawCount > 0 ? anim.frame % drawCount : 0;
+  // Walk and fire stay locked. Idle is shifted per soldier.
+  const index =
+    request.unitTypeId === "infantry" && drawPose === "idle"
+      ? (base + infantryIdlePhase(request.key, drawCount)) % Math.max(1, drawCount)
+      : base;
   const href = quickFrameUrl(clip, drawPose, index);
   if (!href) {
     return null;

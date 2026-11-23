@@ -99,7 +99,7 @@ export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlayt
               </select>
             </label>
             <label>
-              IPC value
+              IO value
               <CommitInput
                 type="number"
                 value={selected.ipc_value}

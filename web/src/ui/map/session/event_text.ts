@@ -101,7 +101,7 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
     case "phasechanged":
       return `${who}: ${phaseName(String(p.new_phase ?? ""))}`;
     case "unitspurchased":
-      return `${who} bought ${unitList(p.units, unitTypes)} for ${p.cost} IPC`;
+      return `${who} bought ${unitList(p.units, unitTypes)} for ${p.cost} IO`;
     case "purchasefailed":
       return `${who} purchase failed: ${String(p.reason ?? "unknown")}`;
     case "phaseordercancelled":
@@ -140,9 +140,9 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
       return `${who} placed ${parts.join("; ")}`;
     }
     case "placementforfeited":
-      return `${who} forfeited unplaced units (${p.ipc_lost ?? 0} IPC lost)`;
+      return `${who} forfeited unplaced units (${p.ipc_lost ?? 0} IO lost)`;
     case "incomecollected":
-      return `${who} collected ${p.amount} IPC (now ${p.new_total})`;
+      return `${who} collected ${p.amount} IO (now ${p.new_total})`;
     case "turnended":
       return `${who} ended turn. ${factionName(String(p.next_faction_id ?? ""))} to play`;
     case "gamefinished":

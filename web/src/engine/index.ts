@@ -50,6 +50,20 @@ export { type DisplayEntry, RegionUnitDisplay } from "./presentation/region_unit
 export { PCG, type PcgSeed, type PcgState } from "./rng/pcg";
 export { Ruleset } from "./rules/ruleset";
 export { RulesetClassic } from "./rules/ruleset_classic";
+export {
+  DEFAULT_LEGACY_RULESET,
+  SCENARIO_PRESETS,
+  launchForScenario,
+  legacyLaunch,
+  normalizeLaunch,
+  normalizeRuleset,
+  treasuryOf,
+  classifyUnit,
+  type CampaignLaunchConfig,
+  type OptionalRulesetConfig,
+  type ScenarioId,
+  type TerrainType,
+} from "./types/ruleset";
 export { type CommandResult, GameSession } from "./session/game_session";
 export { GameSessionAdapter, type SessionLike } from "./session/game_session_adapter";
 export { createSessionFromNewmap, GameSessionFactory, SessionMode } from "./session/game_session_factory";

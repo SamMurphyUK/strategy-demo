@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Dict } from "../../src/engine/model/types";
+import { launchForScenario } from "../../src/engine/types/ruleset";
 import { MultiplayerClient } from "../../src/multiplayer/client";
-import { MultiplayerHost, type Room } from "../../src/multiplayer/host";
-import type { SyncBody } from "../../src/multiplayer/protocol";
+import { MultiplayerHost } from "../../src/multiplayer/host";
+import { MULTIPLAYER_PORT, type SyncBody } from "../../src/multiplayer/protocol";
 
 const HIDDEN_RNG_KEYS = new Set(["rng", "rng_state", "pcg", "prng"]);
 
@@ -459,5 +460,31 @@ describe("multiplayer host", () => {
     const infantry = stacks.filter((unit) => unit.unit_type_id === "infantry");
     expect(infantry.every((unit) => unit.instance_id == null)).toBe(true);
     expect(stacks.some((unit) => unit.unit_type_id === "transport" && unit.instance_id === transportId)).toBe(true);
+  });
+
+  it("shares one SESSION_INIT launch and one snapshot with every seat", async () => {
+    expect(MULTIPLAYER_PORT).toBe(8787);
+    host = new MultiplayerHost();
+    const room = host.createRoom({
+      map: powersMap(),
+      seed: 99,
+      seats: [
+        { playerToken: "axis-token", factions: ["ger", "jap"], seatId: "axis" },
+        { playerToken: "allies-token", factions: ["ussr", "uk", "usa"], seatId: "allies" },
+      ],
+    });
+    const port = await host.listen(0);
+    const url = `ws://127.0.0.1:${port}`;
+    const launch = launchForScenario("SCENARIO_GLOBAL_1940");
+    const axis = await MultiplayerClient.connect(url, room.id, "axis-token", launch);
+    const allies = await MultiplayerClient.connect(url, room.id, "allies-token");
+    clients.push(axis, allies);
+
+    expect(axis.launch).toEqual(launch);
+    expect(allies.launch).toEqual(launch);
+    expect(JSON.stringify(axis.snapshot)).toBe(JSON.stringify(allies.snapshot));
+    expect(room.launch).toEqual(launch);
+    expect(room.session.state.scenarioId).toBe("SCENARIO_GLOBAL_1940");
+    expect(room.session.state.rulesetConfig).toEqual(launch.ruleset);
   });
 });

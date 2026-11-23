@@ -16,7 +16,7 @@ import {
 } from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
 import { drawHoldCircles } from "./shipHold";
-import { hasQuickUnit, INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
+import { hasQuickUnit, infantryIdlePhase, INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { quickSvgFigure } from "../../art/quickSvgFigure";
@@ -811,15 +811,19 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const poseCount = clip ? clip[poseName] : 0;
   const idleTick =
     paint.unitType === "infantry" && poseName === "idle" ? INFANTRY_IDLE_TICK_SECONDS : QUICK_TICK_SECONDS;
-  const frameIndex = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / idleTick) % poseCount : 0;
-  const href = clip && poseCount > 0 ? quickFrameUrl(clip, poseName, frameIndex) : null;
-  const asVector = campaignFrame != null && clip != null && href != null;
+  const frameBase = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / idleTick) % poseCount : 0;
+  const staggerIdle = paint.unitType === "infantry" && poseName === "idle" && poseCount > 1;
+  const asVector = campaignFrame != null && clip != null && poseCount > 0;
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = placedSquad(paint.count, squadStep(figureW))
       .slice()
       .sort((a, b) => a.y - b.y);
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
+      const frameIndex = staggerIdle
+        ? (frameBase + infantryIdlePhase(`${paint.vectorKey ?? paint.factionId}:${i}`, poseCount)) % poseCount
+        : frameBase;
+      const href = clip && poseCount > 0 ? quickFrameUrl(clip, poseName, frameIndex) : null;
       if (asVector && clip && href) {
         const figure = quickSvgFigure({
           id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,

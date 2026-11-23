@@ -1,0 +1,19 @@
+---
+description: Leave render, sprite, and asset files alone when adding gameplay, rules, or AI
+alwaysApply: true
+---
+
+# Protected render and asset files
+
+Do not edit, refactor, or rename these while adding gameplay, ruleset, or AI behavior:
+
+- `web/public/assets/`
+- `web/src/ui/battle/unitRenderer.ts`
+- `web/src/ui/map/uprightSprites.ts`
+- `web/src/art/unitAnimationProfiles.ts`
+- Clip tables in `web/src/art/quickUnitCatalog.ts` (the `QUICK_CLIPS` / quick-clip catalog)
+- There is no `src/renderer/` tree. Battle and map drawing live under `web/src/ui/battle/`, `web/src/ui/map/`, and `web/src/art/`. Leave those drawers alone for rules work.
+
+New gameplay, ruleset, and AI features live in `web/src/engine/`, `web/src/ai/`, `web/scripts/`, or an opt-in UI modal or badge.
+
+A direct sprite or clip request still follows the sprite-motion and sprite-editor rules.

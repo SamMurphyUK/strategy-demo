@@ -5684,12 +5684,12 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
             {/* Dynamic IPC Configuration */}
             <div className="bg-[#2b242a] p-2.5 rounded border border-[#5E4E54]">
               <div className="font-bold text-[#DFCE91] mb-1.5 text-[11px] flex items-center justify-between">
-                <span>IPC LOST IN THE BATTLE</span>
+                <span>IO LOST IN THE BATTLE</span>
                 <span className="text-[9px] text-[#A69C90]">OUTRO PREVIEW</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-[#8DA082] font-bold">ATTACKER IPC LOST:</label>
+                  <label className="text-[10px] text-[#8DA082] font-bold">ATTACKER IO LOST:</label>
                   <input
                     type="number"
                     value={attackerIpc}
@@ -5698,7 +5698,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[10px] text-[#B77958] font-bold">DEFENDER IPC LOST:</label>
+                  <label className="text-[10px] text-[#B77958] font-bold">DEFENDER IO LOST:</label>
                   <input
                     type="number"
                     value={defenderIpc}

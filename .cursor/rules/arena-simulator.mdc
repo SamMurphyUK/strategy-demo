@@ -1,0 +1,14 @@
+---
+description: Cap unattended arena sims at 4 games and require seeded, validated AI commands
+alwaysApply: true
+---
+
+# Arena simulator
+
+`npm run sim` is not in `web/package.json` yet. When it exists, automated checks and smoke tests stay at `--games 4` or fewer:
+
+`npm run sim -- --games 4`
+
+Do not run a 100-game (or larger) benchmark unattended.
+
+AI planners and Monte Carlo workers use a deterministic Mulberry32 PRNG. Every command they emit goes through `validateCommand` before it is returned.

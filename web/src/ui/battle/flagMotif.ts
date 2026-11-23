@@ -43,5 +43,5 @@ export function flagMotifForFaction(factionId: string): FlagMotif {
 
 /** The number on the battle outro: IPC of pieces destroyed in that battle. */
 export function ipcLostCaption(amount: number): string {
-  return `${Math.max(0, Math.trunc(amount))} IPC LOST`;
+  return `${Math.max(0, Math.trunc(amount))} IO LOST`;
 }

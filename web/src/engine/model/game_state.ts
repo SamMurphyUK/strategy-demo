@@ -1,4 +1,7 @@
 import type { MoveOrder, PhaseStartSnapshot } from "../movement/phase_orders";
+import type { NeutralBloc, NationalObjective } from "../rules/optional/objectives";
+import type { UnitExperience } from "../rules/optional/veterancy";
+import { DEFAULT_LEGACY_RULESET, normalizeLaunch, type OptionalRulesetConfig, type ScenarioId } from "../types/ruleset";
 import type { ActiveBattle } from "./battle";
 import { Faction } from "./faction";
 import { Region } from "./region";
@@ -85,10 +88,26 @@ export class GameState {
   phase_order_seq = 0;
   /** Deep clone of this state at the start of `combat_move` or `noncombat_move`. */
   phase_start_snapshot: PhaseStartSnapshot | null = null;
+  /** Absent from snapshots. An old save therefore stays on the 1942 rules. */
+  scenarioId: ScenarioId = "SCENARIO_1942_QUICK";
+  rulesetConfig: OptionalRulesetConfig = { ...DEFAULT_LEGACY_RULESET };
+  /** Region id → the game round through which urban or forest cover is suppressed. */
+  terrainSuppressed: Record<string, number> = {};
+  /** Battle-piece id → that piece gives up its first attack to a preparatory bombardment. */
+  forfeitOpening: Record<string, boolean> = {};
+  unitExperience: Record<string, UnitExperience> = {};
+  nationalObjectives: NationalObjective[] = [];
+  neutralBlocs: NeutralBloc[] = [];
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS
   // ---------------------------------------------------------
+
+  applyCampaignLaunch(raw: unknown): void {
+    const launch = normalizeLaunch(raw);
+    this.scenarioId = launch.scenarioId;
+    this.rulesetConfig = launch.ruleset;
+  }
 
   getAdjacentRegions(regionId: string): string[] {
     return this.adjacency[regionId] ?? [];

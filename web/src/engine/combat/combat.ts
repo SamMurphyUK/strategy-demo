@@ -6,6 +6,9 @@ import { type Dict, deepCopy, type UnitStackEntry } from "../model/types";
 import type { PCG } from "../rng/pcg";
 import { forgetDepartedAir } from "../air/air_fuel";
 import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
+import { neutralDomino } from "../rules/optional/objectives";
+import { optionalCombatRanks } from "../rules/optional/combat_ranks";
+import { grantVictoryExperience, veteranMayReroll } from "../rules/optional/veterancy";
 import {
   assignAaHits,
   assignBombardHits,
@@ -14,7 +17,6 @@ import {
   casualtyFitsBudget,
   defendingAaGuns,
   escapingSubmarines,
-  firingRanks,
   hasCombatantsAfterEscape,
   type HitBudget,
   hitsOn,
@@ -209,7 +211,7 @@ export class CombatEngine {
         },
         "attacker",
         this.state.unit_types,
-        firingRanks(b.attackers, "attacker", this.state.unit_types),
+        this.combatRanks(b.attackers, "attacker"),
       ).plan;
     } else {
       const built = this.planChosenHits(b, unitIds);
@@ -369,6 +371,7 @@ export class CombatEngine {
   }
 
   private openBattle(battle: Battle): GameEvent[] {
+    neutralDomino(this.state, battle.region_id, battle.attacker_faction_id);
     const active: ActiveBattle = {
       region_id: battle.region_id,
       attacker_faction_id: battle.attacker_faction_id,
@@ -405,9 +408,19 @@ export class CombatEngine {
     return cleared ? [started, ...cleared] : [started];
   }
 
+  private combatRanks(units: BattleUnitState[], side: BattleSide): Map<string, number> {
+    const battle = this.state.active_battle;
+    return optionalCombatRanks(this.state, battle?.region_id ?? "", battle?.round ?? 1, units, side);
+  }
+
   private rollDie(unit: BattleUnitState, side: BattleSide, rank: number, surprise: boolean): BattleDie {
     const roll = this.rng.rollD6();
-    return { unit_id: unit.id, side, rank, roll, hit: hitsOn(roll, rank), surprise };
+    const hit = hitsOn(roll, rank);
+    if (!hit && veteranMayReroll(this.state, unit.id)) {
+      const again = this.rng.rollD6();
+      return { unit_id: unit.id, side, rank, roll: again, hit: hitsOn(again, rank), surprise };
+    }
+    return { unit_id: unit.id, side, rank, roll, hit, surprise };
   }
 
   private hasFlag(unit: BattleUnitState, flag: string): boolean {
@@ -522,6 +535,27 @@ export class CombatEngine {
     return [...drop(b.attackers, attackingLeave), ...drop(b.defenders, defendingLeave)];
   }
 
+  /** Close-fought wins mark experience. The 1942 rules leave the record empty. */
+  private noteVeterancy(b: ActiveBattle, result: string): void {
+    if (!this.state.rulesetConfig.unitVeterancy) {
+      return;
+    }
+    if (result !== "attacker_won" && result !== "defender_won") {
+      return;
+    }
+    const attackerLost = b.attackers.filter((unit) => !isAlive(unit)).length;
+    const defenderLost = b.defenders.filter((unit) => !isAlive(unit)).length;
+    grantVictoryExperience(this.state, {
+      attacker: b.attackers.length,
+      defender: b.defenders.length,
+      attackerLost,
+      defenderLost,
+      attackerSurvivors: b.attackers.filter(isAlive),
+      defenderSurvivors: b.defenders.filter(isAlive),
+      winner: result === "attacker_won" ? "attacker" : "defender",
+    });
+  }
+
   /** Ends the battle when a side has nobody left in it. */
   private finishIfClear(b: ActiveBattle): GameEvent[] | null {
     const outcome = battleOutcome(b.attackers.filter(isAlive).length, b.defenders.filter(isAlive).length);
@@ -588,7 +622,7 @@ export class CombatEngine {
       if (subs.length === 0) {
         return;
       }
-      const ranks = firingRanks(own, side, types);
+      const ranks = this.combatRanks(own, side);
       let hits = 0;
       for (const sub of subs) {
         const die = this.rollDie(sub, side, ranks.get(sub.id) ?? 0, true);
@@ -597,7 +631,7 @@ export class CombatEngine {
         if (die.hit) hits += 1;
       }
       const enemySide: BattleSide = side === "attacker" ? "defender" : "attacker";
-      const spent = restrictedCasualties(enemy, { any: 0, skipAir: hits, skipSub: 0 }, enemySide, types, firingRanks(enemy, enemySide, types));
+      const spent = restrictedCasualties(enemy, { any: 0, skipAir: hits, skipSub: 0 }, enemySide, types, this.combatRanks(enemy, enemySide));
       this.applyCasualties(b, spent.plan);
       casualties.push(...spent.plan.map((c) => ({ ...c, surprise: true })));
     };
@@ -606,7 +640,7 @@ export class CombatEngine {
 
     const fire = (side: BattleSide, destroyer: boolean): HitBudget => {
       const own = side === "attacker" ? b.attackers : b.defenders;
-      const ranks = firingRanks(own, side, types);
+      const ranks = this.combatRanks(own, side);
       const budget: HitBudget = { any: 0, skipAir: 0, skipSub: 0 };
       for (const unit of own) {
         if (!isAlive(unit) || fired.has(unit.id) || this.hasFlag(unit, "is_aa")) {
@@ -636,7 +670,7 @@ export class CombatEngine {
       attackerBudget,
       "defender",
       types,
-      firingRanks(b.defenders, "defender", types),
+      this.combatRanks(b.defenders, "defender"),
     );
     this.applyCasualties(b, defenderPlan.plan);
     casualties.push(...defenderPlan.plan);
@@ -646,7 +680,7 @@ export class CombatEngine {
       defenderBudget,
       "attacker",
       types,
-      firingRanks(b.attackers, "attacker", types),
+      this.combatRanks(b.attackers, "attacker"),
     ).used;
     b.attacker_hits_to_take = taken.any + taken.skipAir + taken.skipSub;
     b.attacker_hits_skip_air = taken.skipAir;
@@ -785,6 +819,7 @@ export class CombatEngine {
       this.nextSeq(),
     );
     state.noteTerritoryFought(regionId);
+    this.noteVeterancy(b, result);
     forgetDepartedAir(state, b.attacker_faction_id);
     forgetDepartedAir(state, b.defender_faction_id);
     state.active_battle = null;
