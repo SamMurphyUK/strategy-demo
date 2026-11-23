@@ -469,7 +469,7 @@ export function App() {
         kind: "move",
         from: squad.regionId,
         legal: legalTargets,
-        hover: hoverRegionId,
+        hover: "",
         tone: phase === "noncombat_move" ? "move" : "attack",
       };
     }
@@ -479,16 +479,16 @@ export function App() {
         kind: "move",
         from: selection.regionId,
         legal: legalTargets,
-        hover: hoverRegionId,
+        hover: "",
         tone: phase === "noncombat_move" ? "move" : "attack",
         hostile: naval ? legalTargets.filter((id) => state.holdsEnemyNavalUnit(id, faction)) : undefined,
       };
     }
     if (selection?.kind === "place") {
-      return { kind: "mobilize", legal: legalTargets, hover: hoverRegionId };
+      return { kind: "mobilize", legal: legalTargets, hover: "" };
     }
     return { kind: "none" };
-  }, [squad, selectedRegionId, selection, legalTargets, hoverRegionId, phase]);
+  }, [squad, selectedRegionId, selection, legalTargets, phase]);
 
   const combatMarkers: CombatMarker[] = useMemo(() => {
     if (phase !== "combat_move" || faction === "") {
@@ -1034,7 +1034,16 @@ export function App() {
             setSelection(null);
             setSelectedRegionId("");
           }}
-          onRegionHover={setHoverRegionId}
+          onRegionHover={(id) => {
+            const label = id === "" ? "" : seaZoneCargoLabel(state, id);
+            setHoverRegionId((prev) => {
+              const prevLabel = prev === "" ? "" : seaZoneCargoLabel(state, prev);
+              if (label === prevLabel && (label === "" || prev === id)) {
+                return prev;
+              }
+              return label === "" ? "" : id;
+            });
+          }}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
           onOpenInspector={(regionId) => {
             setSelectedRegionId(regionId);

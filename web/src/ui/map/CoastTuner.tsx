@@ -12,6 +12,7 @@ import { FIGURE_CLASSES, FIGURE_CLASS_LABEL, type FigureClass } from "./figureSc
 import { getFigureScales, setFigureClassScale, subscribeFigureScale } from "./figureScaleStore";
 import type { RegionShape, Vec2 } from "./geometry";
 import type { MasterLand } from "./svgLandLoader";
+import { getDrawFlags, getDrawSample, setDrawFlag, subscribeDrawFlags, subscribeDrawSample, type DrawFlags } from "./renderDebug";
 
 interface Props {
   regions: readonly RegionShape[];
@@ -59,6 +60,44 @@ function TuneSlider(props: {
       />
       <span className="mono">{formatNum(props.value)}</span>
     </label>
+  );
+}
+
+const LOD_NAME = ["far", "stamps", "figures"] as const;
+
+function DrawReadout() {
+  const sample = useSyncExternalStore(subscribeDrawSample, getDrawSample, getDrawSample);
+  const flags = useSyncExternalStore(subscribeDrawFlags, getDrawFlags, getDrawFlags);
+  const row = (key: keyof DrawFlags, label: string, title: string) => (
+    <label title={title}>
+      <input type="checkbox" checked={flags[key]} onChange={(event) => setDrawFlag(key, event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+  const ready = sample.px !== "";
+  const fps = ready ? sample.fps.toFixed(0) : "–";
+  const frame = ready ? sample.frameMs.toFixed(1) : "–";
+  return (
+    <>
+      <h2>Draw</h2>
+      <p className="draw-readout">
+        {fps} fps · {frame} ms
+      </p>
+      <p className="muted">
+        paint {sample.paintMs.toFixed(1)} · shore {sample.shoreMs.toFixed(1)} · figures {sample.figureMs.toFixed(1)} · arrows{" "}
+        {sample.arrowMs.toFixed(1)} · idle {sample.idleMs.toFixed(1)}
+      </p>
+      <p className="muted">
+        {LOD_NAME[sample.lod] ?? sample.lod} · zoom {sample.zoom.toFixed(2)}
+        {sample.px !== "" ? ` · ${sample.px}` : ""}
+      </p>
+      <div className="draw-flags">
+        {row("anims", "Anims", "Idle figure frames. The picture stays on the last frame.")}
+        {row("shore", "Shore", "The blurred shoreline. The land stays.")}
+        {row("figures", "Figures", "Tokens, upright sprites, and the vector stage.")}
+        {row("arrows", "Arrows", "Move arrows, battle marks, and the hover stroke.")}
+      </div>
+    </>
   );
 }
 
@@ -149,6 +188,7 @@ export function CoastTuner({ regions, land, viewCenter }: Props) {
 
   return (
     <aside className="panel coast-tune" aria-label="Coast tuner" onPointerDown={(event) => event.stopPropagation()}>
+      <DrawReadout />
       <h2>Coast</h2>
       <h3>Figures</h3>
       <label className="coast-slider">

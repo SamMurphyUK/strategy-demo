@@ -891,6 +891,29 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
   drawBattleScars(ctx, s.scars ?? [], px, (s.unitFade ?? 0) <= 0);
 }
 
+/** Hover wash on the arrow layer, so a pointer move does not repaint the coast. */
+export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene, regionId: string): void {
+  if (regionId === "") {
+    return;
+  }
+  const path = scene.paths.get(regionId);
+  if (!path) {
+    return;
+  }
+  const px = 1 / scene.view.k;
+  ctx.save();
+  for (const dx of scene.copies) {
+    setWorldTransform(ctx, scene.view, scene.dpr);
+    ctx.translate(dx, 0);
+    ctx.fillStyle = HOVER_TINT;
+    ctx.fill(path, "evenodd");
+    ctx.lineWidth = 2 * px;
+    ctx.strokeStyle = HOVER_COLOR;
+    ctx.stroke(path);
+  }
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------
 // Layer 4: game overlay
 // ---------------------------------------------------------------

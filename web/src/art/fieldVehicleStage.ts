@@ -380,7 +380,9 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
           units.set(unit.id, node);
         }
         paint(node, unit);
-        camera.appendChild(node.veil);
+        if (node.veil.parentNode !== camera) {
+          camera.appendChild(node.veil);
+        }
       }
     },
     setShoreVeil(next) {

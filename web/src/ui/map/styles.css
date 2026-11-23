@@ -474,6 +474,33 @@
     pointer-events: auto;
   }
 
+  & .draw-readout {
+    margin: 0 0 4px;
+    color: var(--gold-text);
+    font: 700 13px/1.2 var(--mono);
+  }
+
+  & .draw-flags {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    margin: 8px 0 4px;
+  }
+
+  & .draw-flags label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--parchment);
+    font: 11px/1.2 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  & .draw-flags input {
+    accent-color: var(--gold);
+  }
+
   & .coast-tune h3 {
     margin: 12px 0 6px;
     color: var(--gold-text);

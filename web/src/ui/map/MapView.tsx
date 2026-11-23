@@ -14,6 +14,7 @@ import {
   drawEditorUnits,
   drawCoastSurf,
   drawGameOverlay,
+  drawHoverMark,
   drawMoveGuide,
   drawOperationalArrows,
   drawTerrain,
@@ -33,10 +34,12 @@ import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
+import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
+import { getDrawFlags, noteIdle, notePaint, publishDrawSample, subscribeDrawFlags } from "./renderDebug";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
   battleScarDescriptors,
@@ -258,8 +261,6 @@ const WHEEL_STEP = 40;
 const ZOOM_EPSILON = 0.0005;
 /** After the glide stops, wait this long before upgrading the coast bitmap. */
 const BAKE_SETTLE_MS = 120;
-/** Upright figures breathe at this rate. The motion is half a hertz, so twelve frames cover it. */
-const IDLE_BOB_MS = 84;
 
 /** Text fields keep their keys. A range slider is not one of them, so Z still closes the tuner. */
 function isTextField(target: EventTarget | null): boolean {
@@ -311,16 +312,9 @@ export function MapView(props: MapViewProps) {
   const chromeRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
-  const [hoverId, setHoverId] = useState("");
   const [hoverStack, setHoverStack] = useState<{ regionId: string; key: string; copyDx: number } | null>(null);
-  const [warningPulse, setWarningPulse] = useState(0);
-  useEffect(() => {
-    if (!props.warningRegionId) {
-      return;
-    }
-    const id = window.setInterval(() => setWarningPulse((n) => n + 1), 90);
-    return () => window.clearInterval(id);
-  }, [props.warningRegionId]);
+  const refreshArrowsRef = useRef<() => void>(() => {});
+  const hoverRef = useRef("");
   const [gesture, setGesture] = useState<UnitGesture | null>(null);
   const [split, setSplit] = useState<SplitPrompt | null>(null);
   const [bombard, setBombard] = useState<{
@@ -366,7 +360,7 @@ export function MapView(props: MapViewProps) {
     }
     live.current.props.onDropMove?.(regionId, entry, target, count, onto ?? undefined);
   };
-  useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
+  const tokenArtRev = useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
 
   const bounds: Rect = props.frame ?? land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
   const fitK = size.w > 0 ? fitView(bounds, size.w, size.h).k : 1;
@@ -376,8 +370,9 @@ export function MapView(props: MapViewProps) {
   const spriteFade = useRef<{ toSprites: boolean; start: number } | null>(null);
   const [spriteClock, setSpriteClock] = useState(0);
   const [tuneOpen, setTuneOpen] = useState(false);
-  useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
-  useSyncExternalStore(subscribeFigureScale, getFigureScaleRev);
+  const coastRev = useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
+  const figureRev = useSyncExternalStore(subscribeFigureScale, getFigureScaleRev);
+  const drawFlags = useSyncExternalStore(subscribeDrawFlags, getDrawFlags);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const wheelZoom = useRef({
@@ -462,30 +457,17 @@ export function MapView(props: MapViewProps) {
   if (bakeRef.current?.rev !== BAKE_PAINT) {
     bakeRef.current = { rev: BAKE_PAINT, bake: new TerrainBake() };
   }
-  // Terrain without units, kept so the idle tick can redraw the figures and leave the coast alone.
+  // Coast and terrain, kept so the idle tick can redraw the figures without blurring the shore again.
   const terrainHold = useRef<HTMLCanvasElement | null>(null);
   const spritesSettled = useRef(false);
   const spriteFrame = useRef<{
     scene: TerrainScene;
     overlay: GameOverlay;
     warningRegionId: string;
-    warningPulse: number;
   } | null>(null);
-  const scarCount = props.relief?.scars.length ?? 0;
-  const [scarNow, setScarNow] = useState(0);
   useEffect(() => {
     soundManager.updateAmbience(tiltFactor(view.k), props.inBattle === true);
   }, [view.k, props.inBattle]);
-
-  useEffect(() => {
-    if (scarCount === 0 || props.suspended) {
-      return;
-    }
-    const tick = () => setScarNow(performance.now());
-    tick();
-    const id = window.setInterval(tick, 220);
-    return () => window.clearInterval(id);
-  }, [scarCount > 0, props.suspended]);
 
   useEffect(() => {
     if (editor || spriteFade.current === null) return;
@@ -529,27 +511,6 @@ export function MapView(props: MapViewProps) {
     if (size.w > 0 && !userMoved.current) {
       setView(fitView(bounds, size.w, size.h));
     }
-  }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
-
-  // The menu keeps the live map moving: a slow figure-eight in world space, from wherever the camera sat.
-  useEffect(() => {
-    if (!props.menuBackdrop || size.w === 0) {
-      return;
-    }
-    const origin = fitView(bounds, size.w, size.h);
-    const t0 = performance.now();
-    let raf = 0;
-    const tick = (now: number) => {
-      const t = (now - t0) / 1000;
-      setView({
-        k: origin.k,
-        x: origin.x + Math.sin(t * 0.07) * 36,
-        y: origin.y + Math.sin(t * 0.05) * 18,
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
   }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
 
   useEffect(() => {
@@ -681,6 +642,43 @@ export function MapView(props: MapViewProps) {
     cctx.globalAlpha = 1;
   };
 
+  const movementKey = props.movement
+    ? `${props.movement.phase}:${props.movement.orders.map((order) => `${order.id}:${order.count}:${order.toRegionId}`).join(";")}`
+    : "";
+  const frameKey = props.frame ? `${props.frame.x}:${props.frame.y}:${props.frame.w}:${props.frame.h}` : "";
+
+  useEffect(() => {
+    if (!tuneOpen) {
+      return;
+    }
+    let frames = 0;
+    let windowStart = performance.now();
+    let raf = 0;
+    const step = () => {
+      frames += 1;
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    const id = window.setInterval(() => {
+      const now = performance.now();
+      const span = now - windowStart;
+      const canvas = canvasRef.current;
+      publishDrawSample({
+        fps: span > 0 ? (frames * 1000) / span : 0,
+        frameMs: frames > 0 ? span / frames : 0,
+        lod: lodHold.current,
+        zoom: live.current.view.k,
+        px: canvas ? `${live.current.size.w}×${live.current.size.h} · ${canvas.width}×${canvas.height}` : "",
+      });
+      windowStart = now;
+      frames = 0;
+    }, 250);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearInterval(id);
+    };
+  }, [tuneOpen]);
+
   useEffect(() => {
     if (props.suspended) {
       spritesSettled.current = false;
@@ -698,8 +696,12 @@ export function MapView(props: MapViewProps) {
       canvas.width = pixelW;
       canvas.height = pixelH;
     }
+    const paintStarted = performance.now();
+    let shoreMs = 0;
+    let figureMs = 0;
+    let arrowMs = 0;
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
+    ctx.imageSmoothingQuality = "low";
     // The cached base map. A wheel glide keeps the current sheet; geometry and ownership still rebuild.
     const glide = wheelZoom.current;
     const holdResolution = glide.active || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
@@ -710,7 +712,7 @@ export function MapView(props: MapViewProps) {
     );
     const moveTone = props.movement?.phase === "noncombat_move" ? "move" : "attack";
     const dragHighlight: HighlightMode | null = gesture?.moved
-      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: hoverId, tone: moveTone }
+      ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: waypointRegion.current, tone: moveTone }
       : split
         ? { kind: "move", from: split.regionId, legal: split.legal, hover: split.target, tone: moveTone }
         : null;
@@ -730,7 +732,7 @@ export function MapView(props: MapViewProps) {
       owners: props.owners,
       highlight: dragHighlight ?? props.highlight,
       selectedRegionId: props.selectedRegionId,
-      hoverRegionId: hoverId,
+      hoverRegionId: gesture?.moved ? waypointRegion.current : "",
       dim: only === null ? null : only === "land" ? "sea" : "land",
       frontlines: editor ? [] : (props.relief?.frontlines ?? []),
       lod: mapLod,
@@ -750,7 +752,7 @@ export function MapView(props: MapViewProps) {
             if (!region || region.type !== "land") {
               return [];
             }
-            const frame = smokeFrame(scarNow);
+            const frame = smokeFrame(performance.now());
             return [
               battleScarDescriptors(region.id, region.anchor, [region.anchor, ...slotsFor(region)], scar.ember)[frame],
             ];
@@ -794,6 +796,18 @@ export function MapView(props: MapViewProps) {
       facingStacks: props.facingStacks,
     };
     if (!editor) {
+      spriteFrame.current = {
+        scene,
+        overlay,
+        warningRegionId: props.warningRegionId ?? "",
+      };
+    }
+    if (drawFlags.shore) {
+      const shoreStarted = performance.now();
+      drawCoastSurf(ctx, scene, surfTime);
+      shoreMs = performance.now() - shoreStarted;
+    }
+    if (!editor) {
       let hold = terrainHold.current;
       if (!hold) {
         hold = document.createElement("canvas");
@@ -808,26 +822,25 @@ export function MapView(props: MapViewProps) {
         holdCtx.setTransform(1, 0, 0, 1, 0, 0);
         holdCtx.drawImage(canvas, 0, 0);
       }
-      spriteFrame.current = {
-        scene,
-        overlay,
-        warningRegionId: props.warningRegionId ?? "",
-        warningPulse,
-      };
     }
-    drawCoastSurf(ctx, scene, surfTime);
-    if (editor) {
-      beginCampaignFigures();
-      drawEditorUnits(ctx, scene, overlay);
-      drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
-      paintCampaignVectors(dpr, size.w, size.h, 0, scene);
+    if (drawFlags.figures) {
+      const figuresStarted = performance.now();
+      if (editor) {
+        beginCampaignFigures();
+        drawEditorUnits(ctx, scene, overlay);
+        drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
+        paintCampaignVectors(dpr, size.w, size.h, 0, scene);
+      } else {
+        beginCampaignFigures();
+        drawGameOverlay(ctx, scene, overlay);
+        paintCampaignVectors(dpr, size.w, size.h, unitFade, scene);
+      }
+      figureMs = performance.now() - figuresStarted;
     } else {
       beginCampaignFigures();
-      drawGameOverlay(ctx, scene, overlay);
-      paintCampaignVectors(dpr, size.w, size.h, unitFade, scene);
-      if (props.warningRegionId) {
-        const pulse = 0.5 + 0.5 * Math.sin(warningPulse / 2);
-        strokeWarningRing(ctx, dpr, layouts, props.warningRegionId, pulse);
+      paintCampaignVectors(dpr, size.w, size.h, 0, null);
+      if (editor) {
+        drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
       }
     }
     const arrows = arrowRef.current;
@@ -839,7 +852,8 @@ export function MapView(props: MapViewProps) {
       }
       arrowCtx.setTransform(1, 0, 0, 1, 0, 0);
       arrowCtx.clearRect(0, 0, arrows.width, arrows.height);
-      if (!editor) {
+      const arrowsStarted = performance.now();
+      if (!editor && drawFlags.arrows) {
         const movement = props.movement;
         const planned =
           movement && movement.orders.length > 0
@@ -858,19 +872,77 @@ export function MapView(props: MapViewProps) {
         if (props.battleIcons && props.battleIcons.length > 0) {
           drawStandingBattleIcons(arrowCtx, scene, props.battleIcons);
         }
+        drawHoverMark(arrowCtx, scene, hoverRef.current);
+        if (props.warningRegionId) {
+          const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+          strokeWarningRing(arrowCtx, dpr, layouts, props.warningRegionId, pulse);
+        }
       }
+      arrowMs = performance.now() - arrowsStarted;
     }
-  });
+    notePaint({ paintMs: performance.now() - paintStarted, shoreMs, figureMs, arrowMs });
+  }, [
+    size.w,
+    size.h,
+    view.x,
+    view.y,
+    view.k,
+    mapLod,
+    spriteClock,
+    tokenArtRev,
+    coastRev,
+    figureRev,
+    unitFade,
+    geometry,
+    land,
+    props.stacks,
+    props.owners,
+    props.highlight,
+    movementKey,
+    props.combatMarkers,
+    props.relief,
+    props.selectedRegionId,
+    props.selectedStack?.regionId,
+    props.selectedStack?.key,
+    props.warningRegionId,
+    props.battleIcons,
+    frameKey,
+    props.activeFactionId,
+    gesture,
+    split,
+    hoverStack,
+    props.suspended,
+    drawFlags,
+  ]);
 
-  // While the camera is still, blit the held coast, move the surf, and redraw the sprites.
+  // At the token zoom the picture is still. At the tactical zoom, redraw figures only when an idle frame changes.
   useEffect(() => {
+    let lastQuick = -1;
+    let lastInfantry = -1;
     const tick = () => {
       if (document.hidden || cameraLock.current || drag.current || wheelZoom.current.active) {
         return;
       }
+      const frame = spriteFrame.current;
+      const warningId = frame?.warningRegionId ?? "";
+      const settled = spritesSettled.current;
+      const now = performance.now() / 1000;
+      const quick = Math.floor(now / QUICK_TICK_SECONDS);
+      const infantry = Math.floor(now / INFANTRY_IDLE_TICK_SECONDS);
+      const flags = getDrawFlags();
+      const frameChanged = flags.anims && flags.figures && settled && (quick !== lastQuick || infantry !== lastInfantry);
+      if (frameChanged) {
+        lastQuick = quick;
+        lastInfantry = infantry;
+      }
+      if (warningId !== "") {
+        refreshArrowsRef.current();
+      }
+      if (!frameChanged) {
+        return;
+      }
       const canvas = canvasRef.current;
       const hold = terrainHold.current;
-      const frame = spriteFrame.current;
       const ctx = canvas?.getContext("2d");
       if (!canvas || !ctx || !hold || !frame) {
         return;
@@ -878,28 +950,34 @@ export function MapView(props: MapViewProps) {
       if (hold.width !== canvas.width || hold.height !== canvas.height) {
         return;
       }
-      const now = performance.now() / 1000;
+      const idleStarted = performance.now();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(hold, 0, 0);
-      drawCoastSurf(ctx, frame.scene, now);
-      beginCampaignFigures();
-      drawGameOverlay(ctx, frame.scene, {
-        ...frame.overlay,
-        idleTime: spritesSettled.current ? now : frame.overlay.idleTime,
-      });
-      paintCampaignVectors(
-        frame.scene.dpr,
-        frame.scene.width,
-        frame.scene.height,
-        frame.scene.unitFade ?? 1,
-        frame.scene,
-      );
-      if (frame.warningRegionId) {
-        const pulse = 0.5 + 0.5 * Math.sin(frame.warningPulse / 2);
-        strokeWarningRing(ctx, frame.scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);
+      if (settled && frameChanged) {
+        const scars = (live.current.props.relief?.scars ?? []).flatMap((scar) => {
+          const region = frame.scene.regions.find((item) => item.id === scar.regionId);
+          if (!region || region.type !== "land") {
+            return [];
+          }
+          const slots = effectiveUnitSlots(region, frame.scene.shapes?.get(region.id) ?? roughShape(region));
+          return battleScarDescriptors(region.id, region.anchor, [region.anchor, ...slots], scar.ember)[smokeFrame(now * 1000)];
+        });
+        beginCampaignFigures();
+        drawGameOverlay(ctx, { ...frame.scene, scars }, {
+          ...frame.overlay,
+          idleTime: now,
+        });
+        paintCampaignVectors(
+          frame.scene.dpr,
+          frame.scene.width,
+          frame.scene.height,
+          frame.scene.unitFade ?? 1,
+          frame.scene,
+        );
+        noteIdle(performance.now() - idleStarted);
       }
     };
-    const id = window.setInterval(tick, IDLE_BOB_MS);
+    const id = window.setInterval(tick, 125);
     return () => window.clearInterval(id);
   }, [mapLod]);
 
@@ -1255,6 +1333,54 @@ export function MapView(props: MapViewProps) {
     capturePointer(e.pointerId);
   };
 
+  const refreshArrows = () => {
+    const frame = spriteFrame.current;
+    const arrows = arrowRef.current;
+    const ctx = arrows?.getContext("2d");
+    if (!frame || !arrows || !ctx) {
+      return;
+    }
+    const { scene } = frame;
+    const pixelW = Math.round(scene.width * scene.dpr);
+    const pixelH = Math.round(scene.height * scene.dpr);
+    if (arrows.width !== pixelW || arrows.height !== pixelH) {
+      arrows.width = pixelW;
+      arrows.height = pixelH;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, arrows.width, arrows.height);
+    if (!getDrawFlags().arrows) {
+      return;
+    }
+    const movement = live.current.props.movement;
+    const layouts = frame.overlay.layouts;
+    const planned =
+      movement && movement.orders.length > 0
+        ? drawOperationalArrows(ctx, scene, movement.phase, movement.orders, movement.regionIds, layouts)
+        : [];
+    const pulled = unitRef.current;
+    if (pulled?.moved) {
+      const from = guideOriginScreen(pulled.originWorld, pulled.pointer, scene.view, live.current.bounds, true);
+      drawMoveGuide(ctx, scene.dpr, from, pulled.pointer, factionPalette(pulled.entry.faction_id).ring);
+    }
+    if (movement && planned.some((arrow) => arrow.battle)) {
+      drawBattleIcons(ctx, scene, planned, movement.orders);
+    }
+    if (movement && planned.some((arrow) => !arrow.battle)) {
+      drawFootIcons(ctx, scene, planned, movement.orders);
+    }
+    const icons = live.current.props.battleIcons;
+    if (icons && icons.length > 0) {
+      drawStandingBattleIcons(ctx, scene, icons);
+    }
+    drawHoverMark(ctx, scene, hoverRef.current);
+    if (frame.warningRegionId !== "") {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+      strokeWarningRing(ctx, scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);
+    }
+  };
+  refreshArrowsRef.current = refreshArrows;
+
   const onPointerMove = (e: React.PointerEvent) => {
     const sp = pointer(e);
     const { view: v, layouts: ls, paths: ps, props: p, exact: ex, only: layer } = live.current;
@@ -1309,7 +1435,8 @@ export function MapView(props: MapViewProps) {
           soundManager.play("waypoint_tick", { step: dragPitchStep(distance), stepPitchOffset: DRAG_PITCH_OFFSET });
         }
       }
-      setHoverId((prev) => (prev === id ? prev : id));
+      waypointRegion.current = id;
+      hoverRef.current = "";
       p.onRegionHover(id);
       if (g.moved) {
         publishGesture(g);
@@ -1333,7 +1460,10 @@ export function MapView(props: MapViewProps) {
       p.editor.onHover(world, SNAP_PX / v.k);
     }
     const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex, layer);
-    setHoverId((prev) => (prev === id ? prev : id));
+    if (hoverRef.current !== id) {
+      hoverRef.current = id;
+      refreshArrows();
+    }
     if (!p.editor) {
       p.onRegionHover(id);
     }
@@ -1560,7 +1690,11 @@ export function MapView(props: MapViewProps) {
           live.current.wrap ? { x: wrapWorldX(world.x, live.current.bounds), y: world.y } : world,
           exact,
         );
-        setHoverId((prev) => (prev === id ? prev : id));
+        waypointRegion.current = id;
+        if (hoverRef.current !== id) {
+          hoverRef.current = id;
+          refreshArrows();
+        }
         p.onRegionHover(id);
         publishGesture(g);
       },
@@ -1594,7 +1728,8 @@ export function MapView(props: MapViewProps) {
     if (unitRef.current) {
       return;
     }
-    setHoverId("");
+    hoverRef.current = "";
+    refreshArrows();
     setHoverStack(null);
     live.current.props.onRegionHover("");
     live.current.props.editor?.onHover(null, 0);
