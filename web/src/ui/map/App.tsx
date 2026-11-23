@@ -28,6 +28,7 @@ import { editorToMapJson, startingStacks } from "./editor/editorModel";
 import { useMapEditor } from "./editor/useMapEditor";
 import { duskChrome, factionChrome } from "./factionChrome";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
+import { committedMoves, peelHeld, type HeldMove } from "./combatRedirect";
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
 import { concealNeutralGarrison } from "./neutralGarrison";
@@ -291,6 +292,22 @@ export function App() {
   const registerDropResolver = useCallback((fn: (clientX: number, clientY: number) => string) => {
     resolveDrop.current = fn;
   }, []);
+  const moveDrag = useRef<{
+    start(spec: {
+      regionId: string;
+      entry: StackEntry;
+      count: number;
+      group?: { entry: StackEntry; count: number }[];
+      clientX: number;
+      clientY: number;
+    }): void;
+    move(clientX: number, clientY: number): void;
+    end(clientX: number, clientY: number): void;
+  } | null>(null);
+  const registerMoveDrag = useCallback((api: typeof moveDrag.current) => {
+    moveDrag.current = api;
+  }, []);
+  const redirectHold = useRef<{ regionId: string; entry: StackEntry; orders: HeldMove[]; take: number }[] | null>(null);
   const [hoverRegionId, setHoverRegionId] = useState("");
   const [warningSea, setWarningSea] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
@@ -611,11 +628,13 @@ export function App() {
     }
     const max = movableCount(regionId, entry);
     if (max <= 0) {
+      settleRedirect(regionId, entry, false);
       setSelection(null);
       return;
     }
     const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "");
     if (!legal.includes(target)) {
+      settleRedirect(regionId, entry, false);
       setSelection(null);
       return;
     }
@@ -637,16 +656,20 @@ export function App() {
             units,
           });
       if (result.result_type === "ok") {
+        settleRedirect(regionId, entry, true);
         setSelection(null);
         setSelectedRegionId(target);
         soundManager.play(hostile ? "battle_arrow_lock" : "token_drop");
+        return;
       }
+      settleRedirect(regionId, entry, false);
       return;
     }
     const category = state.unit_types[entry.unit_type_id]?.category;
     if (category === "land" && state.regions[target]?.isSeaRegion()) {
       const ontoCarrier = Math.trunc(Number(state.unit_types[onto?.unit_type_id ?? ""]?.special?.fighter_capacity ?? 0)) > 0;
       if (ontoCarrier) {
+        settleRedirect(regionId, entry, false);
         setSelection(null);
         return;
       }
@@ -655,6 +678,7 @@ export function App() {
           ? onto.instance_id
           : session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
       if (transportId === "") {
+        settleRedirect(regionId, entry, false);
         setSelection(null);
         return;
       }
@@ -664,10 +688,13 @@ export function App() {
         units: [{ unit_type_id: entry.unit_type_id, count: Math.min(max, Math.max(1, count)) }],
       });
       if (loaded.result_type === "ok") {
+        settleRedirect(regionId, entry, true);
         setSelection(null);
         setSelectedRegionId(target);
         soundManager.play("token_drop");
+        return;
       }
+      settleRedirect(regionId, entry, false);
       return;
     }
     if (entry.instance_id && entry.unit_type_id === "transport" && state.regions[target]?.isLandRegion()) {
@@ -688,10 +715,13 @@ export function App() {
             ),
           });
       if (result.result_type === "ok") {
+        settleRedirect(regionId, entry, true);
         setSelection(null);
         setSelectedRegionId(target);
         soundManager.play(hostile ? "battle_arrow_lock" : "token_drop");
+        return;
       }
+      settleRedirect(regionId, entry, false);
       return;
     }
     const result = game.send(
@@ -699,6 +729,7 @@ export function App() {
       moveUnitsPayload(regionId, entry, target, Math.min(max, Math.max(1, count))),
     );
     if (result.result_type === "ok") {
+      settleRedirect(regionId, entry, true);
       setSelection(null);
       setSelectedRegionId(target);
       soundManager.play(
@@ -706,7 +737,76 @@ export function App() {
       );
       return;
     }
+    settleRedirect(regionId, entry, false);
     setSelection(null);
+  };
+
+  const stackOrders = (regionId: string, entry: StackEntry): HeldMove[] => {
+    if (phase !== "combat_move" || entry.cargoOf) {
+      return [];
+    }
+    return committedMoves(state.phase_orders, faction, regionId, entry.unit_type_id, entry.instance_id ?? "");
+  };
+
+  const reissueOrders = (regionId: string, entry: StackEntry, orders: readonly HeldMove[]) => {
+    for (const order of orders) {
+      if (order.count <= 0) {
+        continue;
+      }
+      const unit: Record<string, unknown> = { unit_type_id: entry.unit_type_id, count: order.count };
+      if (order.instanceId !== "") {
+        unit.instance_id = order.instanceId;
+      }
+      game.send("move_units", { moves: [{ from_region_id: regionId, to_region_id: order.toRegionId, units: [unit] }] });
+    }
+  };
+
+  const restoreRedirect = () => {
+    const held = redirectHold.current;
+    redirectHold.current = null;
+    if (!held) {
+      return;
+    }
+    for (const piece of held) {
+      reissueOrders(piece.regionId, piece.entry, piece.orders);
+    }
+  };
+
+  const openCommitted = (regionId: string, entry: StackEntry, count: number) => {
+    const orders = stackOrders(regionId, entry);
+    const ordered = orders.reduce((sum, order) => sum + order.count, 0);
+    const take = Math.min(ordered, Math.max(0, count - movableCount(regionId, entry)));
+    if (take <= 0) {
+      return;
+    }
+    const list = redirectHold.current ?? [];
+    list.push({ regionId, entry, orders, take });
+    redirectHold.current = list;
+    let guard = 0;
+    while (stackOrders(regionId, entry).length > 0 && guard < 12) {
+      const next = stackOrders(regionId, entry)[0];
+      if (!next) {
+        break;
+      }
+      game.cancelPhaseOrder(next.id);
+      guard += 1;
+    }
+  };
+
+  const settleRedirect = (regionId: string, entry: StackEntry, moved: boolean) => {
+    const list = redirectHold.current;
+    if (!list) {
+      return;
+    }
+    const index = list.findIndex((item) => item.regionId === regionId && stackKey(item.entry) === stackKey(entry));
+    if (index < 0) {
+      return;
+    }
+    const [piece] = list.splice(index, 1);
+    if (list.length === 0) {
+      redirectHold.current = null;
+    }
+    reissueOrders(piece.regionId, piece.entry, moved ? peelHeld(piece.orders, piece.take) : piece.orders);
   };
 
   /** A stack dragged out of the inspector and dropped on `target`: the whole movable stack. */
@@ -718,6 +818,7 @@ export function App() {
     if (!isMyTurn) {
       return;
     }
+    openCommitted(regionId, entry, count);
     const max = movableCount(regionId, entry);
     if (max > 0) soundManager.play("token_pickup");
     setSelectedRegionId(regionId);
@@ -902,13 +1003,29 @@ export function App() {
             setSelectedRegionId(regionId);
           }}
           registerDropResolver={registerDropResolver}
-          movableMax={(regionId, entry) => (isMyTurn ? movableCount(regionId, entry) : 0)}
+          registerMoveDrag={registerMoveDrag}
+          movableMax={(regionId, entry) => {
+            if (!isMyTurn) {
+              return 0;
+            }
+            const ordered =
+              phase === "combat_move"
+                ? committedMoves(state.phase_orders, faction, regionId, entry.unit_type_id, entry.instance_id ?? "").reduce(
+                    (sum, order) => sum + order.count,
+                    0,
+                  )
+                : 0;
+            return movableCount(regionId, entry) + ordered;
+          }}
           legalMovesFor={(regionId, entry) =>
             destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "")
           }
           onArmDrag={armDrag}
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
-          onDragCancel={() => setSelection(null)}
+          onDragCancel={() => {
+            restoreRedirect();
+            setSelection(null);
+          }}
           onDropMove={commitMove}
           unitTitle={(entry) => {
             const name = unitName(entry.unit_type_id, session.state.unit_types);
@@ -990,19 +1107,20 @@ export function App() {
                 game={game}
                 regionId={selectedRegionId}
                 selectedKey={selection?.kind === "stack" ? selection.key : ""}
-                movableCount={movableCount}
+                movableCount={(regionId, entry) => {
+                  const ordered =
+                    phase === "combat_move"
+                      ? committedMoves(state.phase_orders, faction, regionId, entry.unit_type_id, entry.cargoOf ? "skip" : (entry.instance_id ?? "")).reduce(
+                          (sum, order) => sum + order.count,
+                          0,
+                        )
+                      : 0;
+                  return movableCount(regionId, entry) + (entry.cargoOf ? 0 : ordered);
+                }}
+                moveDrag={moveDrag}
                 onClose={() => {
                   setSelection(null);
                   setSelectedRegionId("");
-                }}
-                onDragStart={(entry, count) => armDrag(selectedRegionId, entry, count)}
-                onDragEnd={(entry, clientX, clientY, count) => {
-                  const target = resolveDrop.current(clientX, clientY);
-                  if (target !== "" && target !== selectedRegionId) {
-                    commitMove(selectedRegionId, entry, target, count);
-                    return;
-                  }
-                  setSelection(null);
                 }}
               />
               <PhaseChip

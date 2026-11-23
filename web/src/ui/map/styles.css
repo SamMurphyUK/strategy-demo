@@ -1885,6 +1885,21 @@
   border: 0;
 }
 
+.hud-select-all {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  color: #f4f1ea;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  font: 11px/1.2 var(--mono, "Courier New", monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: grab;
+}
+
 .hud-emblem {
   display: flex;
   flex-direction: column;

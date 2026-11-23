@@ -138,6 +138,21 @@ export interface MapViewProps {
   onDragCancel?(): void;
   /** Drop committed: move `count` of the stack onto `target`. `onto` is the ship under the pointer. */
   onDropMove?(regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null): void;
+  /** The inspector starts, moves, and ends a drag with the same guide as a token on the map. */
+  registerMoveDrag?(
+    api: {
+      start(spec: {
+        regionId: string;
+        entry: StackEntry;
+        count: number;
+        group?: { entry: StackEntry; count: number }[];
+        clientX: number;
+        clientY: number;
+      }): void;
+      move(clientX: number, clientY: number): void;
+      end(clientX: number, clientY: number): void;
+    } | null,
+  ): void;
   /** Display name for a stack in the split popover. Falls back to the type id. */
   unitTitle?(entry: StackEntry): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
@@ -199,6 +214,8 @@ interface UnitGesture {
   startX: number;
   startY: number;
   wheel: number;
+  /** Every stack in a select-all drag. Absent when one stack is pulled. */
+  group?: { entry: StackEntry; count: number }[];
 }
 
 /** A drop that still needs a count. `x` and `y` are canvas pixels. */
@@ -877,6 +894,8 @@ export function MapView(props: MapViewProps) {
     }
     return null;
   };
+  const shipUnderRef = useRef(shipUnder);
+  shipUnderRef.current = shipUnder;
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -1012,7 +1031,26 @@ export function MapView(props: MapViewProps) {
     }
     g.armed = true;
     g.moved = true;
-    live.current.props.onArmDrag?.(g.regionId, g.entry, g.count);
+    const propsNow = live.current.props;
+    if (g.group && g.group.length > 0) {
+      for (const item of g.group) {
+        propsNow.onArmDrag?.(g.regionId, item.entry, item.count);
+      }
+      let shared: string[] | null = null;
+      for (const item of g.group) {
+        const next = propsNow.legalMovesFor?.(g.regionId, item.entry) ?? [];
+        shared = shared == null ? [...next] : shared.filter((id) => next.includes(id));
+      }
+      g.legal = shared ?? [];
+      return;
+    }
+    propsNow.onArmDrag?.(g.regionId, g.entry, g.count);
+    g.legal = propsNow.legalMovesFor?.(g.regionId, g.entry) ?? g.legal;
+    const max = propsNow.movableMax?.(g.regionId, g.entry);
+    if (max != null && max > 0) {
+      g.max = max;
+      g.count = Math.min(g.count, max);
+    }
   };
 
   /** A press that did not travel: the same as a click before dragging existed. */
@@ -1297,6 +1335,12 @@ export function MapView(props: MapViewProps) {
         return;
       }
       if (result.type === "commit") {
+        if (g.group && g.group.length > 0) {
+          for (const item of g.group) {
+            p.onDropMove?.(g.regionId, item.entry, result.target, item.count, shipUnder(ls, sp, result.target));
+          }
+          return;
+        }
         p.onDropMove?.(g.regionId, g.entry, result.target, result.count, shipUnder(ls, sp, result.target));
         return;
       }
@@ -1338,6 +1382,121 @@ export function MapView(props: MapViewProps) {
       return pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
     });
   }, [props.registerDropResolver]);
+
+  useEffect(() => {
+    const canvasPoint = (clientX: number, clientY: number): Vec2 | null => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return null;
+      }
+      const rect = canvas.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+    const originFor = (regionId: string, key: string): Vec2 => {
+      const { layouts, view, props: p } = live.current;
+      const layout = layouts.find((item) => item.region.id === regionId && item.copyDx === 0);
+      const counter = key === "" ? undefined : layout?.counters.find((item) => item.slot.key === key);
+      if (counter) {
+        return screenToWorld(view, { x: counter.x, y: counter.y });
+      }
+      return p.geometry.regions.find((region) => region.id === regionId)?.anchor ?? { x: 0, y: 0 };
+    };
+    const release = (clientX: number, clientY: number) => {
+      const g = unitRef.current;
+      const point = canvasPoint(clientX, clientY);
+      clearGesture();
+      const p = live.current.props;
+      if (!g || !point || !g.moved) {
+        if (g?.armed) {
+          p.onDragCancel?.();
+        }
+        return;
+      }
+      const { view: v, paths: ps, exact: ex, layouts: ls } = live.current;
+      const world = screenToWorld(v, point);
+      const id = pickRegion(p.geometry.regions, ps, p.land, live.current.wrap ? { x: wrapWorldX(world.x, live.current.bounds), y: world.y } : world, ex);
+      const result = finishUnitDrag(
+        { regionId: g.regionId, max: g.max, count: g.count, adjusted: g.adjusted, legal: g.legal },
+        id,
+      );
+      if (result.type === "cancel") {
+        soundManager.play("order_cancel");
+        p.onDragCancel?.();
+        return;
+      }
+      if (result.type === "commit") {
+        if (g.group && g.group.length > 0) {
+          for (const item of g.group) {
+            p.onDropMove?.(g.regionId, item.entry, result.target, item.count, shipUnderRef.current(ls, point, result.target));
+          }
+          return;
+        }
+        p.onDropMove?.(g.regionId, g.entry, result.target, result.count, shipUnderRef.current(ls, point, result.target));
+      }
+    };
+    props.registerMoveDrag?.({
+      start(spec) {
+        const point = canvasPoint(spec.clientX, spec.clientY);
+        if (!point || spec.count <= 0) {
+          return;
+        }
+        const originWorld = originFor(spec.regionId, spec.group ? "" : stackKey(spec.entry));
+        const next: UnitGesture = {
+          regionId: spec.regionId,
+          key: stackKey(spec.entry),
+          entry: spec.entry,
+          originWorld: {
+            x: live.current.wrap ? wrapWorldX(originWorld.x, live.current.bounds) : originWorld.x,
+            y: originWorld.y,
+          },
+          max: spec.count,
+          count: spec.count,
+          adjusted: true,
+          moved: false,
+          armed: false,
+          pointer: point,
+          legal: [],
+          startX: spec.clientX,
+          startY: spec.clientY,
+          wheel: 0,
+          group: spec.group,
+        };
+        unitRef.current = next;
+        drag.current = { kind: "unit" };
+        armGesture(next);
+        if (next.group && next.legal.length === 0) {
+          clearGesture();
+          live.current.props.onDragCancel?.();
+          return;
+        }
+        publishGesture(next);
+      },
+      move(clientX, clientY) {
+        const g = unitRef.current;
+        const point = canvasPoint(clientX, clientY);
+        if (!g || !point) {
+          return;
+        }
+        g.pointer = point;
+        const { view, paths, props: p, exact } = live.current;
+        const world = screenToWorld(view, point);
+        const id = pickRegion(
+          p.geometry.regions,
+          paths,
+          p.land,
+          live.current.wrap ? { x: wrapWorldX(world.x, live.current.bounds), y: world.y } : world,
+          exact,
+        );
+        setHoverId((prev) => (prev === id ? prev : id));
+        p.onRegionHover(id);
+        publishGesture(g);
+      },
+      end(clientX, clientY) {
+        release(clientX, clientY);
+      },
+    });
+    return () => props.registerMoveDrag?.(null);
+  }, [props.registerMoveDrag]);
 
   const onDoubleClick = (e: React.MouseEvent) => {
     const { view: v, props: p } = live.current;

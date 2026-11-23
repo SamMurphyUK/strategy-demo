@@ -1,5 +1,4 @@
-import { type CSSProperties, type PointerEvent, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { fuelRemaining } from "../../engine/air/air_fuel";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
 import { factionPalette } from "../theme/factionPalette";
@@ -11,14 +10,26 @@ import type { GameSessionHandle } from "../map/session/use_game_session";
 import { cargoStacks } from "../map/shipHold";
 import { sortMedallions, territoryStatus } from "./medallionOrder";
 
+interface MoveDragApi {
+  start(spec: {
+    regionId: string;
+    entry: StackEntry;
+    count: number;
+    group?: { entry: StackEntry; count: number }[];
+    clientX: number;
+    clientY: number;
+  }): void;
+  move(clientX: number, clientY: number): void;
+  end(clientX: number, clientY: number): void;
+}
+
 interface Props {
   game: GameSessionHandle;
   regionId: string;
   selectedKey: string;
   movableCount(regionId: string, entry: StackEntry): number;
+  moveDrag: RefObject<MoveDragApi | null>;
   onClose(): void;
-  onDragStart(entry: StackEntry, count: number): void;
-  onDragEnd(entry: StackEntry, clientX: number, clientY: number, count: number): void;
 }
 
 const DRAG_PX = 6;
@@ -57,14 +68,13 @@ function cargoOfShip(game: GameSessionHandle, entry: StackEntry): StackEntry[] {
   }));
 }
 
-export function RegionInspector({ game, regionId, selectedKey, movableCount, onClose, onDragStart, onDragEnd }: Props) {
+export function RegionInspector({ game, regionId, selectedKey, movableCount, moveDrag, onClose }: Props) {
   const state = game.session.state;
   const faction = state.current_faction_id;
   const phase = state.current_phase;
   const [shown, setShown] = useState(regionId);
   const [dragging, setDragging] = useState(false);
-  const press = useRef<{ key: string; entry: StackEntry; count: number; x: number; y: number; dragging: boolean } | null>(null);
-  const [ghost, setGhost] = useState<{ entry: StackEntry; x: number; y: number } | null>(null);
+  const press = useRef<{ key: string; entry: StackEntry; count: number; x: number; y: number; dragging: boolean; group?: { entry: StackEntry; count: number }[] } | null>(null);
 
   useEffect(() => {
     if (regionId !== "") {
@@ -86,40 +96,50 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, onC
   const occupied = entries.length > 0;
   const status = region ? territoryStatus(state, faction, region.owner_faction_id, entries) : "FRIENDLY";
   const cover = region?.land_cover ? region.land_cover.toLowerCase() : region?.type === "sea" ? "sea" : "open";
+  const squad = entries
+    .filter((entry) => entry.faction_id === faction && movableCount(shown, entry) > 0 && (phase === "combat_move" || phase === "noncombat_move"))
+    .map((entry) => ({ entry, count: movableCount(shown, entry) }));
+  const squadTotal = squad.reduce((sum, item) => sum + item.count, 0);
 
-  const begin = (event: PointerEvent<HTMLElement>, entry: StackEntry, count: number) => {
-    if (event.button !== 0) {
+  const begin = (event: PointerEvent<HTMLElement>, entry: StackEntry, count: number, group?: { entry: StackEntry; count: number }[]) => {
+    if (event.button !== 0 || count <= 0) {
       return;
     }
     event.stopPropagation();
-    press.current = { key: stackKey(entry), entry, count, x: event.clientX, y: event.clientY, dragging: false };
+    press.current = { key: group ? "all" : stackKey(entry), entry, count, x: event.clientX, y: event.clientY, dragging: false, group };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const move = (event: PointerEvent<HTMLElement>, entry: StackEntry) => {
     const held = press.current;
-    if (!held || held.key !== stackKey(entry)) {
+    if (!held || held.key !== (held.group ? "all" : stackKey(entry))) {
       return;
     }
     if (!held.dragging && Math.hypot(event.clientX - held.x, event.clientY - held.y) >= DRAG_PX) {
       held.dragging = true;
       setDragging(true);
-      onDragStart(entry, held.count);
+      moveDrag.current?.start({
+        regionId: shown,
+        entry: held.entry,
+        count: held.count,
+        group: held.group,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
     }
     if (held.dragging) {
-      setGhost({ entry, x: event.clientX, y: event.clientY });
+      moveDrag.current?.move(event.clientX, event.clientY);
     }
   };
 
   const end = (event: PointerEvent<HTMLElement>, entry: StackEntry) => {
     const held = press.current;
     press.current = null;
-    setGhost(null);
     setDragging(false);
-    if (!held || held.key !== stackKey(entry) || !held.dragging) {
+    if (!held || held.key !== (held.group ? "all" : stackKey(entry)) || !held.dragging) {
       return;
     }
-    onDragEnd(entry, event.clientX, event.clientY, held.count);
+    moveDrag.current?.end(event.clientX, event.clientY);
   };
 
   return (
@@ -134,6 +154,17 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, onC
             <button type="button" className="hud-close" aria-label="Close region" onClick={onClose}>
               ×
             </button>
+            {squadTotal > 0 && (
+              <button
+                type="button"
+                className="hud-select-all"
+                onPointerDown={(event) => begin(event, squad[0]!.entry, squadTotal, squad)}
+                onPointerMove={(event) => move(event, squad[0]!.entry)}
+                onPointerUp={(event) => end(event, squad[0]!.entry)}
+              >
+                Select all
+              </button>
+            )}
             <div className="hud-emblem" style={{ borderColor: factionPalette(region.owner_faction_id).ring }}>
               <b>{region.type === "sea" ? (region.name.match(/\d+/)?.[0] ?? region.name) : region.name}</b>
               <span>{status}</span>
@@ -202,13 +233,6 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, onC
           </div>
         )}
       </section>
-      {ghost &&
-        createPortal(
-          <div className="unit-drag-ghost" style={{ left: ghost.x, top: ghost.y }}>
-            <UnitToken unit={ghost.entry.unit_type_id} faction={ghost.entry.faction_id} size={48} />
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }
