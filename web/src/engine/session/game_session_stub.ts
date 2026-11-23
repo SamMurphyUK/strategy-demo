@@ -128,6 +128,32 @@ export class GameSessionStub {
     this.initializeFromMap(loadJson(NEWMAP_PATH), seed);
   }
 
+  /**
+   * Arena boot. The board is already built. Wires the engines and starts on purchase
+   * for the first faction in `turn_order`.
+   */
+  bindArena(state: GameState, seed = 1): void {
+    this._demoSeed = seed;
+    this._fixedTimestamp = 1680000000;
+    this._events = [];
+    this._appliedEventIds = {};
+    this._commandResults = {};
+    this.state = state;
+    this.rng = PCG.fromSeed({ state: seed, sequence: 1 });
+    this._seq = 0;
+    this.ruleset = new Ruleset();
+    this.ruleset.syncFromState(state);
+    this.validator = new CommandValidator(state);
+    this.turnEngine = new TurnEngine(state);
+    this.economy = new EconomyEngine(state);
+    this.movement = new MovementEngine(state);
+    this.combat = new CombatEngine(state, this.rng);
+    this.placement = new PlacementEngine(state);
+    this.victory = new VictoryEngine(state);
+    this.amphibious = new AmphibiousEngine(state);
+    this.recordEvents(this.syncSeq(startTurn(this.turnEngine)), "");
+  }
+
   /** Same boot as initializeDemo, against a map JSON other than the live demomap01.json. */
   initializeFromMap(mapJson: Dict, seed = 12345): void {
     this._demoSeed = seed;
