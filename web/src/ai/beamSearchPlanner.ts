@@ -434,6 +434,10 @@ export function beamSearch(
     return deep.win >= bar && (attack.cheap || deep.survival >= weights.holdSurvivalThreshold);
   });
   if (verified.length === 0) {
+    const trade = ranked.find((attack) => attack.cheap && attack.deadZone);
+    if (trade != null) {
+      return { best: { attacks: [trade], score: trade.expectedTuvSwing + trade.value }, evaluated };
+    }
     return { best: { attacks: [], score: 0 }, evaluated };
   }
   const board = cloneBoard(baseline);
@@ -445,7 +449,11 @@ export function beamSearch(
   }
   const score = evaluateBoardState(state, board, factionId, weights) - baseScore;
   if (score < 0) {
-    return { best: { attacks: [], score: 0 }, evaluated };
+    const trades = verified.filter((attack) => attack.cheap && attack.deadZone);
+    if (trades.length === 0) {
+      return { best: { attacks: [], score: 0 }, evaluated };
+    }
+    return { best: { attacks: trades, score: 0 }, evaluated };
   }
   return { best: { attacks: verified, score }, evaluated };
 }

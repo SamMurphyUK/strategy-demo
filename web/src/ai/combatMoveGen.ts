@@ -32,6 +32,7 @@ export interface AttackPackage {
   expectedTuvSwing: number;
   expectedProductionSwing: number;
   survivingAttackers: number;
+  deadZone?: boolean;
   transportId?: string;
   originSea?: string;
 }
@@ -290,11 +291,30 @@ export function combatCandidates(
     }
     const traded = accept(state, factionId, "trade", to, trade, defenders, profile, weights, value, serial, true);
     serial += 1;
-    if (traded != null) {
-      found.push(traded);
+    const suppress =
+      state.rulesetConfig.preparatoryBombardment === true &&
+      state.rulesetConfig.terrainModifiers === true &&
+      (cover === "URBAN" || cover === "FOREST") &&
+      !coverSuppressed(state, to) &&
+      defendingInfantry(state, to, factionId) >= 2;
+    let fired: AttackPackage | null = null;
+    if (suppress) {
+      const guns = [...take(here, "ARTILLERY", 2, { assignedToSuppression: true }), ...take(here, "HEAVY_BOMBER", 2, { assignedToSuppression: true })];
+      const quiet = guns.slice(0, 2);
+      const withInfantry = [...take(here, "INFANTRY", 99), ...quiet];
+      if (enemyFighters(state, to, factionId) > 0) {
+        withInfantry.push(...take(here, "FIGHTER", 1, { isEscort: true }));
+      }
+      fired = accept(state, factionId, "suppression", to, withInfantry, defenders, profile, weights, value, serial, true);
+      serial += 1;
     }
-
-    if (!dead) {
+    if (fired != null) {
+      fired.deadZone = dead;
+      found.push(fired);
+    } else if (traded != null) {
+      traded.deadZone = dead;
+      found.push(traded);
+    } else if (!dead) {
       const infantry = take(here, "INFANTRY", 99);
       const infantryCount = infantry.reduce((sum, line) => sum + line.count, 0);
       const hold = [
@@ -307,27 +327,8 @@ export function combatCandidates(
       const held = accept(state, factionId, "hold", to, hold, defenders, profile, weights, value, serial, false);
       serial += 1;
       if (held != null) {
+        held.deadZone = dead;
         found.push(held);
-      }
-    }
-
-    const suppress =
-      state.rulesetConfig.preparatoryBombardment === true &&
-      state.rulesetConfig.terrainModifiers === true &&
-      (cover === "URBAN" || cover === "FOREST") &&
-      !coverSuppressed(state, to) &&
-      defendingInfantry(state, to, factionId) >= 2;
-    if (suppress) {
-      const guns = [...take(here, "ARTILLERY", 2, { assignedToSuppression: true }), ...take(here, "HEAVY_BOMBER", 2, { assignedToSuppression: true })];
-      const quiet = guns.slice(0, 2);
-      const withInfantry = [...take(here, "INFANTRY", 99), ...quiet];
-      if (enemyFighters(state, to, factionId) > 0) {
-        withInfantry.push(...take(here, "FIGHTER", 1, { isEscort: true }));
-      }
-      const fired = accept(state, factionId, "suppression", to, withInfantry, defenders, profile, weights, value, serial, true);
-      serial += 1;
-      if (fired != null) {
-        found.push(fired);
       }
     }
 

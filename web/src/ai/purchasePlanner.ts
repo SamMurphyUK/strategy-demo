@@ -2,6 +2,7 @@ import type { GameState } from "../engine/model/game_state";
 import { planPurchaseRepairs } from "../engine/rules/optional/bombingResolver";
 import { RESEARCH_TECHS } from "../engine/rules/optional/techTree";
 import { classifyUnit } from "../engine/types/ruleset";
+import { simulateBattleOdds } from "./battleOddsSim";
 import type { TileThreat } from "./threatMap";
 import type { CommanderWeights } from "./types/aiTypes";
 
@@ -73,32 +74,50 @@ function factoryRoom(state: GameState, factionId: string): { regionId: string; r
   );
 }
 
-function garrison(state: GameState, factionId: string, regionId: string): number {
-  let total = 0;
-  for (const entry of state.getUnitsInRegion(regionId)) {
-    if (!state.sameTeam(String(entry.faction_id ?? ""), factionId)) {
-      continue;
-    }
-    const unit = state.unit_types[String(entry.unit_type_id ?? "")];
-    total += Math.max(0, Math.trunc(Number(entry.count ?? 0))) * Math.max(0, unit?.defense ?? 0);
-  }
-  return total;
-}
-
-/** Enemy attack on the capital divided by attack plus the defense that can stand there. */
-export function capitalThreatRatio(state: GameState, factionId: string, tiles: readonly TileThreat[]): number {
+/** Chance the adjacent enemy takes the capital on its next attack. */
+export function capitalCaptureOdds(state: GameState, factionId: string): number {
   let worst = 0;
   for (const region of Object.values(state.regions)) {
     if (!region.is_capital || region.owner_faction_id !== factionId) {
       continue;
     }
-    const threat = tiles.find((tile) => tile.regionId === region.id);
-    const enemy = threat?.enemyThreat1Turn ?? 0;
-    if (enemy <= 0) {
+    const defenders: number[] = [];
+    for (const entry of state.getUnitsInRegion(region.id)) {
+      const owner = String(entry.faction_id ?? "");
+      if (owner === "" || !state.sameTeam(owner, factionId)) {
+        continue;
+      }
+      const unit = state.unit_types[String(entry.unit_type_id ?? "")];
+      if (unit == null || unit.defense <= 0) {
+        continue;
+      }
+      const count = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      for (let i = 0; i < count; i += 1) {
+        defenders.push(unit.defense);
+      }
+    }
+    const attackers: number[] = [];
+    for (const near of state.getAdjacentRegions(region.id)) {
+      for (const entry of state.getUnitsInRegion(near)) {
+        const owner = String(entry.faction_id ?? "");
+        if (owner === "" || state.sameTeam(owner, factionId)) {
+          continue;
+        }
+        const unit = state.unit_types[String(entry.unit_type_id ?? "")];
+        if (unit == null || unit.attack <= 0) {
+          continue;
+        }
+        const count = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+        for (let i = 0; i < count; i += 1) {
+          attackers.push(unit.attack);
+        }
+      }
+    }
+    if (attackers.length === 0) {
       continue;
     }
-    const ours = garrison(state, factionId, region.id) + (threat?.friendlyReach1Turn ?? 0);
-    worst = Math.max(worst, enemy / (enemy + ours));
+    const odds = defenders.length === 0 ? 1 : simulateBattleOdds(attackers, defenders, 80, 11, state.rulesetConfig).win;
+    worst = Math.max(worst, odds);
   }
   return worst;
 }
@@ -175,11 +194,13 @@ export function planPurchase(
   const factory = factoryRoom(state, factionId);
   let room = factory?.room ?? 0;
   const capital = capitalOf(state, factionId);
-  const locked = capitalThreatRatio(state, factionId, tiles) > 0.85 && capital != null;
+  const locked = capital != null && capitalCaptureOdds(state, factionId) > 0.5;
   if (locked && capital != null) {
     const fillers = [infantry, artillery, aa].filter((unit): unit is Priced => unit != null);
+    const defenseGoal = treasury * 0.8;
+    let defenseSpent = 0;
     let guard = 0;
-    while (left > 0 && room > 0 && fillers.length > 0 && guard < 40) {
+    while (defenseSpent < defenseGoal && left > 0 && room > 0 && fillers.length > 0 && guard < 40) {
       guard += 1;
       const next = fillers.find((unit) => unit.cost <= left);
       if (next == null) {
@@ -187,6 +208,7 @@ export function planPurchase(
       }
       addLine(bought, next.id, 1);
       left -= next.cost;
+      defenseSpent += next.cost;
       room -= 1;
     }
   }

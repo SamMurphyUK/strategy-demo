@@ -3,7 +3,7 @@ import { Faction, GameState, Region, Unit } from "../../src/engine";
 import { evaluateBoardState, snapshotBoard } from "../../src/ai/beamSearchPlanner";
 import { combatCandidates } from "../../src/ai/combatMoveGen";
 import { beamSearch } from "../../src/ai/beamSearchPlanner";
-import { capitalThreatRatio, planPurchase } from "../../src/ai/purchasePlanner";
+import { capitalCaptureOdds, planPurchase } from "../../src/ai/purchasePlanner";
 import { threatMap } from "../../src/ai/threatMap";
 import { AI_DIFFICULTY_PROFILES, personaFor } from "../../src/ai/types/aiTypes";
 import { Ruleset } from "../../src/engine/rules/ruleset";
@@ -112,7 +112,7 @@ describe("combat packages and purchase", () => {
     state.adjacency.home = ["away"];
     state.adjacency.away = ["home"];
     const tiles = threatMap(state, "red", false);
-    expect(capitalThreatRatio(state, "red", tiles)).toBeGreaterThan(0.85);
+    expect(capitalCaptureOdds(state, "red")).toBeGreaterThan(0.5);
     const locked = planPurchase(state, "red", personaFor("red"), tiles);
     expect(locked.purchases.every((line) => line.unit_type_id === "infantry")).toBe(true);
     expect(locked.purchases.reduce((sum, line) => sum + line.count, 0)).toBeGreaterThan(0);
