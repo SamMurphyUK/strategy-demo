@@ -9,7 +9,7 @@ import { UnitToken } from "../../theme/tokens/UnitToken";
 import { playCampaignCue } from "../campaignAudio";
 import { purchasePhaseAdvance, stagedUnits, stageStep, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
 import { factoryBlockReason, factoryLabel, factoryPrice, factoryRoom, FACTORY_KINDS, isFactoryKind } from "../../../engine/placement/factoryRules";
-import { maxAffordable, purchaseUnitCap } from "../../../engine/placement/productionCap";
+import { buildCapacityOf, maxAffordable } from "../../../engine/placement/productionCap";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -194,6 +194,13 @@ function PurchaseBody({
   for (const kind of FACTORY_KINDS) {
     costs[kind] = factoryPrice(state, kind);
   }
+  if (state.rulesetConfig.facilitiesAndPatrols) {
+    for (const [regionId, tokens] of Object.entries(state.repairTokens)) {
+      if (tokens > 0 && state.regions[regionId]?.owner_faction_id === faction) {
+        costs[`repair:${regionId}`] = 1;
+      }
+    }
+  }
   const [staged, setStaged] = useState<Record<string, number>>({});
   const stagedRef = useRef(staged);
 
@@ -209,11 +216,24 @@ function PurchaseBody({
     (sum, line) => sum + (isFactoryKind(line.unit_type_id) ? 0 : Math.max(0, Math.trunc(line.count))),
     0,
   );
-  const slots = Math.max(0, purchaseUnitCap(state, faction) - bought);
+  const cap = buildCapacityOf(state, faction);
+  const unitStaged = Object.entries(staged).reduce(
+    (sum, [id, count]) => sum + (isFactoryKind(id) || id.startsWith("repair:") ? 0 : Math.max(0, count)),
+    0,
+  );
+  const queued = unitStaged + bought;
+  const slots = Math.max(0, cap.maxUnits - bought);
+  const slotsLeft = Math.max(0, cap.maxUnits - queued);
   useEffect(() => {
     onStagedTotal(total);
   }, [total, onStagedTotal]);
   const bump = (id: string, d: number) => {
+    if (d > 0 && id.startsWith("repair:")) {
+      const damage = Math.max(0, Math.trunc(state.repairTokens[id.slice("repair:".length)] ?? 0));
+      if ((stagedRef.current[id] ?? 0) + 1 > damage) {
+        return;
+      }
+    }
     if (d > 0 && isFactoryKind(id)) {
       const taken = { ...stagedRef.current };
       for (const line of pending ?? []) {
@@ -225,7 +245,7 @@ function PurchaseBody({
         return;
       }
     }
-    const next = stageStep(stagedRef.current, id, d, costs, ipc, isFactoryKind(id) ? Number.POSITIVE_INFINITY : slots);
+    const next = stageStep(stagedRef.current, id, d, costs, ipc, isFactoryKind(id) || id.startsWith("repair:") ? Number.POSITIVE_INFINITY : slots);
     if (next === stagedRef.current) {
       return;
     }
@@ -238,12 +258,15 @@ function PurchaseBody({
 
   const confirm = () => {
     const purchases = Object.entries(staged)
-      .filter(([, n]) => n > 0)
+      .filter(([id, n]) => n > 0 && !id.startsWith("repair:"))
       .map(([unit_type_id, count]) => ({ unit_type_id, count }));
-    if (purchases.length === 0 || total > ipc) {
+    const repairs = Object.entries(staged)
+      .filter(([id, n]) => id.startsWith("repair:") && n > 0)
+      .map(([id, tokens]) => ({ region_id: id.slice("repair:".length), tokens }));
+    if ((purchases.length === 0 && repairs.length === 0) || total > ipc) {
       return;
     }
-    const result = game.send("purchase_units", { purchases });
+    const result = game.send("purchase_units", { purchases, ...(repairs.length > 0 ? { repairs } : {}) });
     if (result.result_type === "ok") {
       setStaged({});
       playCampaignCue("snap");
@@ -252,8 +275,11 @@ function PurchaseBody({
 
   return (
     <>
-      <p className="muted catalog-legend">
-        Build up to <b className="mono">{slots}</b> units · <b className="mono">{ipc - total}</b> IO left
+      <p className={slotsLeft === 1 ? "shop-readout is-tight" : "shop-readout"}>
+        Treasury <b className="mono">{ipc}</b> IO
+        <span>
+          Build slots <b className="mono">{queued}/{cap.maxUnits}</b>
+        </span>
       </p>
       <div className="shop-tabs" role="tablist" aria-label="Purchase categories">
         {SHOP_TABS.map((id) => (
@@ -263,7 +289,10 @@ function PurchaseBody({
         ))}
       </div>
       <ul className="catalog">
-        {(tab === "industrial" ? [...FACTORY_KINDS] : Object.keys(costs).filter((id) => !isFactoryKind(id) && shopTabOf(id, state.unit_types[id]) === tab)).map((id) => {
+        {(tab === "industrial"
+          ? [...FACTORY_KINDS, ...Object.keys(costs).filter((id) => id.startsWith("repair:"))]
+          : Object.keys(costs).filter((id) => !isFactoryKind(id) && !id.startsWith("repair:") && shopTabOf(id, state.unit_types[id]) === tab)
+        ).map((id) => {
             const ut = state.unit_types[id];
             const count = staged[id] ?? 0;
             const taken = { ...staged };
@@ -272,16 +301,27 @@ function PurchaseBody({
                 taken[line.unit_type_id] = (taken[line.unit_type_id] ?? 0) + line.count;
               }
             }
+            const repairId = id.startsWith("repair:") ? id.slice("repair:".length) : "";
             const blocked = isFactoryKind(id) ? factoryBlockReason(state, faction, id) : null;
-            const room = isFactoryKind(id) ? factoryRoom(state, faction, id, taken) : slots - stagedUnits(staged);
+            const room = repairId !== ""
+              ? Math.max(0, Math.trunc(state.repairTokens[repairId] ?? 0) - count)
+              : isFactoryKind(id)
+                ? factoryRoom(state, faction, id, taken)
+                : slots - stagedUnits(Object.fromEntries(Object.entries(staged).filter(([key]) => !isFactoryKind(key) && !key.startsWith("repair:"))));
             const max = blocked ? 0 : count + maxAffordable(costs[id] ?? 0, ipc - total, Math.max(0, room));
             return (
               <li key={id} className={`${count > 0 ? "unit-card staged" : "unit-card"}${blocked ? " is-blocked" : ""}`} title={blocked ?? undefined}>
                 <UnitToken unit={id} faction={faction} size={48} />
                 <div className="unit-card-info">
-                  <span className="unit-name">{isFactoryKind(id) ? factoryLabel(id) : unitName(id, state.unit_types)}</span>
+                  <span className="unit-name">
+                    {repairId !== ""
+                      ? `Repair ${state.regions[repairId]?.name || repairId}`
+                      : isFactoryKind(id)
+                        ? factoryLabel(id)
+                        : unitName(id, state.unit_types)}
+                  </span>
                   <span className="unit-stats mono">
-                    {isFactoryKind(id)
+                    {repairId !== "" || isFactoryKind(id)
                       ? `${costs[id]} IO`
                       : `${costs[id]} IO · ${ut.attack}/${ut.defense}/${ut.movement}`}
                   </span>

@@ -311,6 +311,7 @@ export function App() {
   const [hoverRegionId, setHoverRegionId] = useState("");
   const [warningSea, setWarningSea] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
+  const [squad, setSquad] = useState<{ regionId: string; entries: { entry: StackEntry; count: number }[] } | null>(null);
   // The engine's open battle, kept on screen after it finishes until the player leaves the board.
   const [battleOnScreen, setBattleOnScreen] = useState<ActiveBattle | null>(null);
   const activeBattle = state.active_battle;
@@ -444,6 +445,15 @@ export function App() {
   };
 
   const legalTargets = useMemo(() => {
+    if (squad && squad.regionId === selectedRegionId && squad.entries.length > 0) {
+      const shared = new Set<string>();
+      for (const item of squad.entries) {
+        for (const id of destinationsFor(squad.regionId, item.entry.unit_type_id, item.entry.instance_id ?? "", item.entry.cargoOf ?? "")) {
+          shared.add(id);
+        }
+      }
+      return [...shared];
+    }
     if (selection?.kind === "stack") {
       return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId, selection.cargoOf);
     }
@@ -451,9 +461,18 @@ export function App() {
       return session.getLegalMobilizeRegions(faction, selection.unitTypeId);
     }
     return [];
-  }, [selection, session, faction, phase, version]);
+  }, [squad, selectedRegionId, selection, session, faction, phase, version]);
 
   const highlight: HighlightMode = useMemo(() => {
+    if (squad && squad.regionId === selectedRegionId && legalTargets.length > 0) {
+      return {
+        kind: "move",
+        from: squad.regionId,
+        legal: legalTargets,
+        hover: hoverRegionId,
+        tone: phase === "noncombat_move" ? "move" : "attack",
+      };
+    }
     if (selection?.kind === "stack") {
       const naval = state.unit_types[selection.unitTypeId]?.category === "sea";
       return {
@@ -469,7 +488,7 @@ export function App() {
       return { kind: "mobilize", legal: legalTargets, hover: hoverRegionId };
     }
     return { kind: "none" };
-  }, [selection, legalTargets, hoverRegionId, phase]);
+  }, [squad, selectedRegionId, selection, legalTargets, hoverRegionId, phase]);
 
   const combatMarkers: CombatMarker[] = useMemo(() => {
     if (phase !== "combat_move" || faction === "") {
@@ -507,6 +526,20 @@ export function App() {
   const pendingForFaction = state.pending_purchases[faction] ?? [];
 
   const onRegionClick = (regionId: string) => {
+    if (squad && squad.regionId === selectedRegionId && regionId !== squad.regionId) {
+      const going = squad.entries.filter((item) =>
+        destinationsFor(squad.regionId, item.entry.unit_type_id, item.entry.instance_id ?? "", item.entry.cargoOf ?? "").includes(regionId),
+      );
+      if (going.length > 0) {
+        for (const item of going) {
+          commitMove(squad.regionId, item.entry, regionId, item.count);
+        }
+        setSquad(null);
+        setSelection(null);
+        setSelectedRegionId(regionId);
+        return;
+      }
+    }
     if (selection?.kind === "stack" && selection.cargoOf !== "") {
       if (!isMyTurn) {
         setSelectedRegionId(regionId);
@@ -565,9 +598,11 @@ export function App() {
     }
     if (regionId === selectedRegionId) {
       setSelection(null);
+      setSquad(null);
       return;
     }
     setSelection(null);
+    setSquad(null);
     setSelectedRegionId(regionId);
   };
 
@@ -1118,7 +1153,18 @@ export function App() {
                   return movableCount(regionId, entry) + (entry.cargoOf ? 0 : ordered);
                 }}
                 moveDrag={moveDrag}
+                squadOn={squad?.regionId === selectedRegionId}
+                onToggleSquad={(entries) => {
+                  if (entries == null) {
+                    setSquad(null);
+                    setSelection(null);
+                    return;
+                  }
+                  setSelection(null);
+                  setSquad({ regionId: selectedRegionId, entries });
+                }}
                 onClose={() => {
+                  setSquad(null);
                   setSelection(null);
                   setSelectedRegionId("");
                 }}

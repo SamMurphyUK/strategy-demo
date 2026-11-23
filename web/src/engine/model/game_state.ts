@@ -65,10 +65,10 @@ export class GameState {
   naval_battles_this_turn: Record<string, boolean> = {};
   factories_controlled_at_turn_start: Record<string, string[]> = {};
   /**
-   * Units the power may buy, frozen at the end of its last mobilize.
+   * Build slots frozen at match start and at the end of mobilize.
    * Absent from snapshots. A missing key means "count the factories held now".
    */
-  productionSlots: Record<string, number> = {};
+  turnBuildCapacity: Record<string, { maxUnits: number; breakdown: { territoryId: string; slots: number }[] }> = {};
   next_instance_id: Record<string, number> = {};
   transport_instances: Record<string, TransportInstance> = {};
   game_over = false;

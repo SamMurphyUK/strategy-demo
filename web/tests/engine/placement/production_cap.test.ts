@@ -42,11 +42,40 @@ describe("production cap", () => {
     const turn = new TurnEngine(state);
     turn.advancePhase();
     expect(state.current_phase).toBe("collect_income");
-    expect(state.productionSlots.ussr).toBe(8);
+    expect(state.turnBuildCapacity.ussr).toEqual({ maxUnits: 8, breakdown: [{ territoryId: "moscow", slots: 8 }] });
     state.regions.moscow.owner_faction_id = "ger";
     expect(purchaseUnitCap(state, "ussr")).toBe(8);
     snapshotProduction(state, "ussr");
     expect(purchaseUnitCap(state, "ussr")).toBe(0);
+  });
+
+  it("subtracts repair damage and ignores a factory captured after the snapshot", () => {
+    const quick = new GameState();
+    quick.scenarioId = "SCENARIO_1942_QUICK";
+    quick.regions.moscow = land("moscow", "ussr", 8);
+    quick.repairTokens.moscow = 2;
+    expect(factorySlots(quick, quick.regions.moscow)).toBe(6);
+
+    const global = new GameState();
+    global.scenarioId = "SCENARIO_GLOBAL_1940";
+    global.current_faction_id = "soviet_union";
+    global.current_phase = "mobilize";
+    global.turn_order = ["soviet_union"];
+    global.regions.moscow = land("moscow", "soviet_union", 8, true);
+    global.regions.karelia = land("karelia", "soviet_union", 2, false);
+    global.repairTokens.moscow = 2;
+    global.repairTokens.karelia = 1;
+    const turn = new TurnEngine(global);
+    turn.advancePhase();
+    expect(global.turnBuildCapacity.soviet_union).toEqual({
+      maxUnits: 10,
+      breakdown: [
+        { territoryId: "karelia", slots: 2 },
+        { territoryId: "moscow", slots: 8 },
+      ],
+    });
+    global.regions.berlin = land("berlin", "soviet_union", 10, true);
+    expect(purchaseUnitCap(global, "soviet_union")).toBe(10);
   });
 
   it("limits a unit by the Industrial Output and the slots that remain", () => {

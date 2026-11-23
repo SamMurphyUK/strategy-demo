@@ -29,6 +29,8 @@ interface Props {
   selectedKey: string;
   movableCount(regionId: string, entry: StackEntry): number;
   moveDrag: RefObject<MoveDragApi | null>;
+  squadOn: boolean;
+  onToggleSquad(entries: { entry: StackEntry; count: number }[] | null): void;
   onClose(): void;
 }
 
@@ -68,7 +70,7 @@ function cargoOfShip(game: GameSessionHandle, entry: StackEntry): StackEntry[] {
   }));
 }
 
-export function RegionInspector({ game, regionId, selectedKey, movableCount, moveDrag, onClose }: Props) {
+export function RegionInspector({ game, regionId, selectedKey, movableCount, moveDrag, squadOn, onToggleSquad, onClose }: Props) {
   const state = game.session.state;
   const faction = state.current_faction_id;
   const phase = state.current_phase;
@@ -157,10 +159,12 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
             {squadTotal > 0 && (
               <button
                 type="button"
-                className="hud-select-all"
-                onPointerDown={(event) => begin(event, squad[0]!.entry, squadTotal, squad)}
-                onPointerMove={(event) => move(event, squad[0]!.entry)}
-                onPointerUp={(event) => end(event, squad[0]!.entry)}
+                className={squadOn ? "hud-select-all active" : "hud-select-all"}
+                aria-pressed={squadOn}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleSquad(squadOn ? null : squad);
+                }}
               >
                 Select all
               </button>
@@ -186,7 +190,7 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                   return (
                     <article
                       key={key}
-                      className={`hud-medallion${canDrag ? " is-movable" : ""}${owned ? "" : " is-locked"}${selectedKey === key ? " is-selected" : ""}`}
+                      className={`hud-medallion${canDrag ? " is-movable" : ""}${owned ? "" : " is-locked"}${selectedKey === key || (squadOn && canDrag) ? " is-selected" : ""}`}
                       style={{ "--rim": ring } as CSSProperties}
                       onPointerDown={(event) => canDrag && begin(event, entry, event.shiftKey ? movable : 1)}
                       onPointerMove={(event) => move(event, entry)}
