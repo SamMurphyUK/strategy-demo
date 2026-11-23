@@ -138,6 +138,8 @@ export class GameState {
   researchPending: Record<string, string[]> = {};
   /** Sea zones that launched a naval raid this combat move. Absent from snapshots. */
   combatRaids: string[] = [];
+  /** Units that bombarded and sit out the battle. Key is `movementStackKey`. */
+  bombardSatOut: Record<string, number> = {};
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS
@@ -325,6 +327,7 @@ export class GameState {
     clearInPlace(this.air_movement_spent);
     clearInPlace(this.airbase_launch);
     this.combatRaids = [];
+    clearInPlace(this.bombardSatOut);
     clearInPlace(this.territories_captured_this_turn);
     clearInPlace(this.naval_battles_this_turn);
     this.amphibious_landings = [];

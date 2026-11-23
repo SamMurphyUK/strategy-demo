@@ -122,9 +122,17 @@ export class CombatEngine {
   }
 
   getCombatUnits(regionId: string, factionId: string): UnitStackEntry[] {
-    return (this.state.region_units[regionId] ?? []).filter(
-      (entry) => entry.faction_id === factionId && isCombatUnit(this.state.unit_types[entry.unit_type_id]),
-    );
+    return (this.state.region_units[regionId] ?? []).filter((entry) => {
+      if (entry.faction_id !== factionId || !isCombatUnit(this.state.unit_types[entry.unit_type_id])) {
+        return false;
+      }
+      const count = entry.instance_id ? 1 : Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+      const sitting = Math.max(
+        0,
+        Math.trunc(this.state.bombardSatOut[this.state.movementStackKey(factionId, regionId, entry.unit_type_id)] ?? 0),
+      );
+      return count > sitting;
+    });
   }
 
   /** Transports do not roll, but they are navy and can be attacked. AA guns fire only their opening volley. */
@@ -431,6 +439,7 @@ export class CombatEngine {
     const entries = (this.state.region_units[regionId] ?? []).filter(
       (entry) => entry.faction_id === factionId && (side === "defender" ? this.isTargetable(entry) : isCombatUnit(this.state.unit_types[entry.unit_type_id])),
     );
+    const skipped: Record<string, number> = {};
     for (const entry of entries) {
       const maxHp = maxHpOf(this.state.unit_types[entry.unit_type_id]);
       const hull = facilitiesActive(this.state) ? Math.max(0, Math.trunc(Number(entry.damage ?? 0))) : 0;
@@ -447,7 +456,15 @@ export class CombatEngine {
         continue;
       }
       const count = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
-      for (let i = 0; i < count; i++) {
+      if (skipped[entry.unit_type_id] == null && side === "attacker") {
+        skipped[entry.unit_type_id] = Math.max(
+          0,
+          Math.trunc(this.state.bombardSatOut[this.state.movementStackKey(factionId, regionId, entry.unit_type_id)] ?? 0),
+        );
+      }
+      const skip = Math.min(count, skipped[entry.unit_type_id] ?? 0);
+      skipped[entry.unit_type_id] = (skipped[entry.unit_type_id] ?? 0) - skip;
+      for (let i = skip; i < count; i++) {
         counters[entry.unit_type_id] = (counters[entry.unit_type_id] ?? 0) + 1;
         units.push({
           id: `${factionId}.${entry.unit_type_id}.${counters[entry.unit_type_id]}`,

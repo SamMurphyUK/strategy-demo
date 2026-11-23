@@ -169,6 +169,15 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
     case "placementforfeited":
       return `${who} forfeited unplaced units (${p.ipc_lost ?? 0} IO lost)`;
     case "incomecollected":
+      if (p.reason === "strategic_bomb") {
+        return `${who} bombed the factory in ${p.region_id}`;
+      }
+      if (p.reason === "tactical_interdiction") {
+        return `${who} bombarded the ${p.facility} in ${p.region_id}`;
+      }
+      if (p.reason === "preparatory_bombardment") {
+        return `${who} bombarded the ${p.cover === "FOREST" ? "wood" : "city"} in ${p.region_id}`;
+      }
       return `${who} collected ${p.amount} IO (now ${p.new_total})`;
     case "turnended":
       return `${who} ended turn. ${factionName(String(p.next_faction_id ?? ""))} to play`;

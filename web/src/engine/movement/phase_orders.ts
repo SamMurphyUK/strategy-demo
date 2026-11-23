@@ -14,7 +14,7 @@ import { MovementEngine } from "./movement";
 import { MovementValidator } from "./movement_validator";
 import { assaultError, transportSeaZone, unloadError } from "../transport/cargo_rules";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
-import { noteOffensive } from "../rules/optional/global1940Evaluator";
+import { bombardTargets, type BombardTarget, BOMBARD_TARGETS } from "../combat/bombardChoice";
 
 export interface MoveOrder {
   id: string;
@@ -27,6 +27,8 @@ export interface MoveOrder {
   path: number[];
   stepsUsed: number;
   shipInstanceIds?: string[];
+  /** Set when this order bombards instead of joining the battle. */
+  bombard?: "factory" | "airbase" | "harbor" | "URBAN" | "FOREST";
   /** Absent on a normal move. Cargo orders are applied when they are issued, then skipped at commit. */
   kind?: "move" | "load_transport" | "unload_transport" | "amphibious_assault";
   transportInstanceId?: string;
@@ -125,6 +127,13 @@ export function recordMoveOrders(state: GameState, command: Command): void {
       };
       if (sea && instanceId !== "") {
         order.shipInstanceIds = [instanceId];
+      }
+      const choice = String(unit.bombard ?? "");
+      if (
+        (BOMBARD_TARGETS as readonly string[]).includes(choice) &&
+        bombardTargets(state, command.player_id, toRegionId, unitType).includes(choice as BombardTarget)
+      ) {
+        order.bombard = choice as BombardTarget;
       }
       state.phase_orders.push(order);
     }

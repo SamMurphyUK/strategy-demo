@@ -426,6 +426,7 @@ export class GameSessionStub {
           this.combat,
           this.placement,
           (evts) => this.syncSeq(evts),
+          () => this.d6(),
         );
         events = [...forfeitEvents, ...endEvents];
         break;

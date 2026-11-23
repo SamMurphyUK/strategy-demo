@@ -205,6 +205,7 @@ export class GameSession {
           this.combat,
           this.placement,
           sync,
+          () => this.rng.rollD6(),
         );
         break;
       }

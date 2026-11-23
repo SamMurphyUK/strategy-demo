@@ -1,6 +1,5 @@
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { fuelRemaining } from "../../engine/air/air_fuel";
-import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
 import { factionPalette } from "../theme/factionPalette";
 import { UnitToken } from "../theme/tokens/UnitToken";
 import type { StackEntry } from "../map/geometry";
@@ -8,6 +7,7 @@ import { stackKey } from "../map/geometry";
 import { factionName, unitName } from "../map/session/event_text";
 import type { GameSessionHandle } from "../map/session/use_game_session";
 import { cargoStacks } from "../map/shipHold";
+import { isActiveFaction } from "../map/tokenStyle";
 import { sortMedallions, territoryStatus } from "./medallionOrder";
 
 interface MoveDragApi {
@@ -36,6 +36,33 @@ interface Props {
 
 const DRAG_PX = 6;
 const SHIP = new Set(["transport", "carrier"]);
+
+/** Keep the stack's own faction id. The display normalizer rewrites Germany to "axis", which then fails the turn check. */
+function inspectorStacks(units: { unit_type_id?: string; faction_id?: string; count?: number; instance_id?: string }[]): StackEntry[] {
+  const stacks = new Map<string, StackEntry>();
+  const singles: StackEntry[] = [];
+  for (const unit of units) {
+    const unitType = String(unit.unit_type_id ?? "").trim().toLowerCase();
+    const factionId = String(unit.faction_id ?? "");
+    if (unitType === "") {
+      continue;
+    }
+    const count = Math.max(0, Math.trunc(Number(unit.count ?? (unit.instance_id ? 1 : 0))));
+    const instance = String(unit.instance_id ?? "");
+    if (instance !== "") {
+      singles.push({ unit_type_id: unitType, faction_id: factionId, count: Math.max(1, count), instance_id: instance });
+      continue;
+    }
+    const key = `${unitType}|${factionId}`;
+    const existing = stacks.get(key);
+    if (existing) {
+      existing.count += count;
+    } else {
+      stacks.set(key, { unit_type_id: unitType, faction_id: factionId, count });
+    }
+  }
+  return [...stacks.values(), ...singles];
+}
 
 function movementPips(game: GameSessionHandle, regionId: string, entry: StackEntry, movable: number): string {
   const state = game.session.state;
@@ -86,20 +113,13 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
 
   const region = shown === "" ? null : state.regions[shown];
   const open = regionId !== "" && region != null;
-  const ground = region
-    ? RegionUnitDisplay.buildDisplayEntries(state.getUnitsInRegion(shown)).map((entry) => ({
-        unit_type_id: String(entry.unit_type_id ?? ""),
-        faction_id: String(entry.faction_id ?? ""),
-        count: Math.max(0, Math.trunc(Number(entry.count ?? 0))),
-        instance_id: entry.instance_id ? String(entry.instance_id) : undefined,
-      }))
-    : [];
+  const ground = region ? inspectorStacks(state.getUnitsInRegion(shown)) : [];
   const entries = region ? sortMedallions(state, faction, [...ground, ...cargoStacks(state, shown)], (entry) => movableCount(shown, entry) > 0) : [];
   const occupied = entries.length > 0;
   const status = region ? territoryStatus(state, faction, region.owner_faction_id, entries) : "FRIENDLY";
   const cover = region?.land_cover ? region.land_cover.toLowerCase() : region?.type === "sea" ? "sea" : "open";
   const squad = entries
-    .filter((entry) => entry.faction_id === faction && movableCount(shown, entry) > 0 && (phase === "combat_move" || phase === "noncombat_move"))
+    .filter((entry) => isActiveFaction(entry.faction_id, faction) && movableCount(shown, entry) > 0 && (phase === "combat_move" || phase === "noncombat_move"))
     .map((entry) => ({ entry, count: movableCount(shown, entry) }));
   const squadTotal = squad.reduce((sum, item) => sum + item.count, 0);
 
@@ -183,7 +203,7 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                 {entries.map((entry) => {
                   const key = stackKey(entry);
                   const movable = movableCount(shown, entry);
-                  const owned = entry.faction_id === faction;
+                  const owned = isActiveFaction(entry.faction_id, faction);
                   const canDrag = owned && movable > 0 && (phase === "combat_move" || phase === "noncombat_move");
                   const cargo = cargoOfShip(game, entry);
                   const ring = factionPalette(entry.faction_id).ring;

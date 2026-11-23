@@ -113,7 +113,7 @@ function aaGun(state: GameState, unit: BattleUnitState): boolean {
   return Boolean(state.unit_types[unit.unit_type_id]?.special?.is_aa);
 }
 
-function suppressionToHit(cover: "URBAN" | "FOREST", unitTypeId: string): number {
+export function suppressionHitOn(cover: "URBAN" | "FOREST", unitTypeId: string): number {
   const artillery = classifyUnit(unitTypeId) === "ARTILLERY";
   if (cover === "URBAN") {
     return artillery ? 2 : 4;
@@ -194,7 +194,7 @@ export function planPreparatorySuppression(
   let suppressed = false;
   const firing = attackers.filter((unit) => assignedSuppression(state, unit) && !dead.has(unit.id)).sort(byId);
   for (const unit of firing) {
-    const rank = suppressionToHit(cover, unit.unit_type_id);
+    const rank = suppressionHitOn(cover, unit.unit_type_id);
     const face = dieFace(roll);
     const hit = face <= rank;
     dice.push({ unitId: unit.id, side: "attacker", rank, roll: face, hit, kind: "suppression" });
@@ -268,6 +268,7 @@ export function runIndustrialBombing(
   regionId: string,
   escortCount: number,
   roll: () => number,
+  bomberLimit?: number,
 ): { error: string } | IndustrialRaid {
   if (!state.rulesetConfig.facilitiesAndPatrols) {
     return { error: "Facilities are off" };
@@ -276,7 +277,8 @@ export function runIndustrialBombing(
   if (region == null || !region.major_factory) {
     return { error: "Region is not a major factory" };
   }
-  const bombers = countClass(state, regionId, attackerFactionId, "HEAVY_BOMBER");
+  const present = countClass(state, regionId, attackerFactionId, "HEAVY_BOMBER");
+  const bombers = bomberLimit == null ? present : Math.min(present, Math.max(0, Math.trunc(bomberLimit)));
   if (bombers <= 0) {
     return { error: "No heavy bombers" };
   }
@@ -336,6 +338,8 @@ export function runInterdiction(
   regionId: string,
   facility: FacilityTarget,
   roll: () => number,
+  bomberLimit?: number,
+  kind: "TACTICAL_BOMBER" | "HEAVY_BOMBER" = "TACTICAL_BOMBER",
 ): { error: string } | InterdictionRaid {
   if (!state.rulesetConfig.facilitiesAndPatrols) {
     return { error: "Facilities are off" };
@@ -353,8 +357,9 @@ export function runInterdiction(
   if (facility === "depot" && !region.forward_depot) {
     return { error: "No depot" };
   }
-  const attack = attackOf(state, regionId, attackerFactionId, "TACTICAL_BOMBER");
-  const bombers = countClass(state, regionId, attackerFactionId, "TACTICAL_BOMBER");
+  const attack = attackOf(state, regionId, attackerFactionId, kind);
+  const present = countClass(state, regionId, attackerFactionId, kind);
+  const bombers = bomberLimit == null ? present : Math.min(present, Math.max(0, Math.trunc(bomberLimit)));
   if (bombers <= 0) {
     return { error: "No tactical bombers" };
   }

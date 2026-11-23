@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
 import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
+import { bombardLabel, bombardTargets } from "../../engine/combat/bombardChoice";
 import { loadJson } from "../../engine/content/res";
 import type { ActiveBattle } from "../../engine/model/battle";
 import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
@@ -656,7 +657,7 @@ export function App() {
   };
 
   /** Move `count` of a stack. The map drag, its split popover, and an inspector drop all come through here. */
-  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null) => {
+  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null, bombard?: string) => {
     if (!isMyTurn) {
       return;
     }
@@ -760,7 +761,7 @@ export function App() {
     }
     const result = game.send(
       "move_units",
-      moveUnitsPayload(regionId, entry, target, Math.min(max, Math.max(1, count))),
+      moveUnitsPayload(regionId, entry, target, Math.min(max, Math.max(1, count)), bombard),
     );
     if (result.result_type === "ok") {
       settleRedirect(regionId, entry, true);
@@ -1063,6 +1064,18 @@ export function App() {
             setSelection(null);
           }}
           onDropMove={commitMove}
+          bombardTargetsFor={(regionId, entry, destination) => {
+            if (phase !== "combat_move") {
+              return [];
+            }
+            return bombardTargets(state, entry.faction_id || faction, destination, entry.unit_type_id).map((id) => ({
+              id,
+              label: bombardLabel(id),
+            }));
+          }}
+          onDropBombard={(regionId, entry, destination, count, targetId, onto) =>
+            commitMove(regionId, entry, destination, count, onto, targetId)
+          }
           unitTitle={(entry) => {
             const name = unitName(entry.unit_type_id, session.state.unit_types);
             const historic = rosterName(entry.unit_type_id, entry.faction_id);

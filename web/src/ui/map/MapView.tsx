@@ -142,7 +142,23 @@ export interface MapViewProps {
   /** The drag or the split popover was dismissed without a move. */
   onDragCancel?(): void;
   /** Drop committed: move `count` of the stack onto `target`. `onto` is the ship under the pointer. */
-  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null): void;
+  onDropMove?(
+    regionId: string,
+    entry: StackEntry,
+    target: string,
+    count: number,
+    onto?: StackEntry | null,
+  ): void;
+  /** Bombard choices for a combat-move drop. Empty means the drop attacks. */
+  bombardTargetsFor?(regionId: string, entry: StackEntry, target: string): { id: string; label: string }[];
+  onDropBombard?(
+    regionId: string,
+    entry: StackEntry,
+    target: string,
+    count: number,
+    bombard: string,
+    onto?: StackEntry | null,
+  ): void;
   /** The inspector starts, moves, and ends a drag with the same guide as a token on the map. */
   registerMoveDrag?(
     api: {
@@ -307,10 +323,49 @@ export function MapView(props: MapViewProps) {
   }, [props.warningRegionId]);
   const [gesture, setGesture] = useState<UnitGesture | null>(null);
   const [split, setSplit] = useState<SplitPrompt | null>(null);
+  const [bombard, setBombard] = useState<{
+    regionId: string;
+    entry: StackEntry;
+    target: string;
+    count: number;
+    x: number;
+    y: number;
+    choices: { id: string; label: string }[];
+    onto: StackEntry | null;
+    listing: boolean;
+  } | null>(null);
   const unitRef = useRef<UnitGesture | null>(null);
   const splitRef = useRef<SplitPrompt | null>(null);
   splitRef.current = split;
   const splitPanel = useRef<HTMLDivElement>(null);
+  const bombardPanel = useRef<HTMLDivElement>(null);
+
+  const askOrDrop = (
+    regionId: string,
+    entry: StackEntry,
+    target: string,
+    count: number,
+    onto: StackEntry | null | undefined,
+    x: number,
+    y: number,
+  ) => {
+    const offered = live.current.props.bombardTargetsFor?.(regionId, entry, target) ?? [];
+    if (offered.length > 0) {
+      setBombard({
+        regionId,
+        entry,
+        target,
+        count,
+        x,
+        y,
+        choices: offered,
+        onto: onto ?? null,
+        listing: false,
+      });
+      return;
+    }
+    live.current.props.onDropMove?.(regionId, entry, target, count, onto ?? undefined);
+  };
   useSyncExternalStore(subscribeTokenArt, getTokenArtVersion); // counters repaint when their art changes
 
   const bounds: Rect = props.frame ?? land?.viewBox ?? (geometry.bounds.w > 0 ? geometry.bounds : WORLD_FALLBACK);
@@ -1359,7 +1414,7 @@ export function MapView(props: MapViewProps) {
           }
           return;
         }
-        p.onDropMove?.(g.regionId, g.entry, result.target, result.count, shipUnder(ls, sp, result.target));
+        askOrDrop(g.regionId, g.entry, result.target, result.count, shipUnder(ls, sp, result.target), sp.x, sp.y);
         return;
       }
       setSplit({
@@ -1449,7 +1504,7 @@ export function MapView(props: MapViewProps) {
           }
           return;
         }
-        p.onDropMove?.(g.regionId, g.entry, result.target, result.count, shipUnderRef.current(ls, point, result.target));
+        askOrDrop(g.regionId, g.entry, result.target, result.count, shipUnderRef.current(ls, point, result.target), point.x, point.y);
       }
     };
     props.registerMoveDrag?.({
@@ -1598,6 +1653,12 @@ export function MapView(props: MapViewProps) {
     }
   }, [split?.regionId, split?.target, split?.x, split?.y]);
 
+  useEffect(() => {
+    if (bombard) {
+      bombardPanel.current?.focus();
+    }
+  }, [bombard?.regionId, bombard?.target, bombard?.listing]);
+
   const confirmSplit = () => {
     const s = splitRef.current;
     if (!s) {
@@ -1605,7 +1666,7 @@ export function MapView(props: MapViewProps) {
     }
     splitRef.current = null;
     setSplit(null);
-    live.current.props.onDropMove?.(s.regionId, s.entry, s.target, s.count);
+    askOrDrop(s.regionId, s.entry, s.target, s.count, null, s.x, s.y);
   };
 
   const cancelSplit = () => {
@@ -1692,6 +1753,88 @@ export function MapView(props: MapViewProps) {
           aria-hidden="true"
         >
           {gesture.count}
+        </div>
+      )}
+      {bombard && (
+        <div
+          ref={bombardPanel}
+          className="bombard-confirm"
+          style={{
+            left: Math.min(Math.max(bombard.x, 8), Math.max(size.w - 220, 8)),
+            top: Math.min(Math.max(bombard.y, 8), Math.max(size.h - 180, 8)),
+          }}
+          role="dialog"
+          aria-label="Attack or bombard"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") {
+              return;
+            }
+            setBombard(null);
+            soundManager.play("order_cancel");
+            live.current.props.onDragCancel?.();
+          }}
+        >
+          <p className="split-title">Confirm</p>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              const pending = bombard;
+              setBombard(null);
+              live.current.props.onDropMove?.(pending.regionId, pending.entry, pending.target, pending.count, pending.onto ?? undefined);
+            }}
+          >
+            Attack
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (bombard.choices.length <= 1) {
+                const only = bombard.choices[0];
+                const pending = bombard;
+                setBombard(null);
+                if (only) {
+                  live.current.props.onDropBombard?.(
+                    pending.regionId,
+                    pending.entry,
+                    pending.target,
+                    pending.count,
+                    only.id,
+                    pending.onto ?? undefined,
+                  );
+                }
+                return;
+              }
+              setBombard({ ...bombard, listing: true });
+            }}
+          >
+            Bombard
+          </button>
+          {bombard.listing && (
+            <div className="bombard-targets">
+              {bombard.choices.map((choice) => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  onClick={() => {
+                    const pending = bombard;
+                    setBombard(null);
+                    live.current.props.onDropBombard?.(
+                      pending.regionId,
+                      pending.entry,
+                      pending.target,
+                      pending.count,
+                      choice.id,
+                      pending.onto ?? undefined,
+                    );
+                  }}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {split && (
