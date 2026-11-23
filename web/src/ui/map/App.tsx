@@ -844,7 +844,7 @@ export function App() {
         if (!(target instanceof Element)) return;
         const button = target.closest("button");
         if (!button || button.closest(".sfx-toggle, .region-panel, .pending-orders")) return;
-        if (!button.closest(".phase-panel, .turn-bar, .editor-panel, .editor-toolbar, .main-menu, .editor-start")) return;
+        if (!button.closest(".phase-panel, .turn-bar, .editor-panel, .editor-toolbar, .main-menu, .editor-start, .campaign-modal")) return;
         playUiPanelFlick();
       }}
     >
@@ -1062,22 +1062,22 @@ export function App() {
           }}
         />
       )}
+      {campaignOpen && (
+        <NewCampaignModal
+          draft={draft}
+          versions={editor.versions}
+          playerFaction={playerFaction}
+          onDraft={setDraft}
+          onPlayerFaction={setPlayerFaction}
+          onImportMap={(name, map) => editor.archiveMap(name, projectMapJson(prepareSavedMap(map))).error}
+          onStart={(choice, seed, launch) => {
+            beginCampaign(choice, seed, launch);
+            setCampaignOpen(false);
+          }}
+          onClose={() => setCampaignOpen(false)}
+        />
+      )}
     </div>
-    {campaignOpen && (
-      <NewCampaignModal
-        draft={draft}
-        versions={editor.versions}
-        playerFaction={playerFaction}
-        onDraft={setDraft}
-        onPlayerFaction={setPlayerFaction}
-        onImportMap={(name, map) => editor.archiveMap(name, projectMapJson(prepareSavedMap(map))).error}
-        onStart={(choice, seed, launch) => {
-          beginCampaign(choice, seed, launch);
-          setCampaignOpen(false);
-        }}
-        onClose={() => setCampaignOpen(false)}
-      />
-    )}
     {approach?.stage === "darken" && <CombatDarken onDone={showBriefing} />}
     {approach?.stage === "briefing" && (
       <CombatIntro

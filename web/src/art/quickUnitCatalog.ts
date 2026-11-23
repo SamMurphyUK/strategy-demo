@@ -88,7 +88,7 @@ function asFaction(factionId: string): QuickFaction | null {
   if (upper === "RUSSIA" || upper === "SOVIET" || upper === "SOVIET_UNION") {
     return "USSR";
   }
-  if (upper === "BRITAIN" || upper === "BRITISH" || upper === "ENGLAND") {
+  if (upper === "BRITAIN" || upper === "BRITISH" || upper === "ENGLAND" || upper === "UNITED_KINGDOM") {
     return "UK";
   }
   if (upper === "AMERICA" || upper === "USA" || upper === "UNITED_STATES" || upper === "ALLIES") {

@@ -7,6 +7,7 @@ interface MatchJob {
   seed: number;
   scenario: ScenarioId;
   difficulty: AIDifficulty;
+  allies?: AIDifficulty;
 }
 
 interface ArenaJob {

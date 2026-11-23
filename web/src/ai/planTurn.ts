@@ -2,10 +2,12 @@ import { Command, CommandType } from "../engine/model/command";
 import type { GameState } from "../engine/model/game_state";
 import { Ruleset } from "../engine/rules/ruleset";
 import { beamSearch } from "./beamSearchPlanner";
-import { commitLoadedCoasts, planImmediateFerry } from "./ferryPlanner";
+import { commitLoadedCoasts, planBridgeheadUnload, planImmediateFerry } from "./ferryPlanner";
 import { combatCandidates, type AttackPackage } from "./combatMoveGen";
 import { planNonCombat } from "./nonCombatPlanner";
 import { planPurchase } from "./purchasePlanner";
+import { ensureAlliancePlans } from "./coalitionWarRoom";
+import { selectPosture } from "./theaterPostures";
 import { threatMap } from "./threatMap";
 import { AI_DIFFICULTY_PROFILES, personaFor, type AIDifficulty, type GameCommand, type TurnPlanResult } from "./types/aiTypes";
 import { validateCommand } from "./validateCommand";
@@ -40,6 +42,8 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
   const seed = request.seed ?? 1;
   const factionId = state.current_faction_id;
   const weights = personaFor(factionId);
+  const plans = ensureAlliancePlans(state);
+  const posture = selectPosture(state, factionId, state.factions[factionId]?.team === "axis" ? plans.axis : plans.allies);
   const ruleset = new Ruleset();
   ruleset.syncFromState(state);
   const phase = state.current_phase;
@@ -85,7 +89,7 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
     state.current_phase = phase;
   }
 
-  const shop = planPurchase(state, factionId, weights, tiles);
+  const shop = planPurchase(state, factionId, weights, tiles, posture);
   const purchasePayload: Record<string, unknown> = {};
   if (shop.purchases.length > 0) {
     purchasePayload.purchases = shop.purchases;
@@ -133,7 +137,35 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
     send("combat", CommandType.STRATEGIC_BOMB, { region_id: attack.to, escorts, facility: "factory" });
   }
   send("combat", CommandType.END_PHASE, {});
+  const loading = new Set(quiet.loads.map((load) => load.transportId));
   for (const move of quiet.moves) {
+    if (loading.has(String(move.instanceId ?? ""))) {
+      push(
+        issue(state, "noncombat_move", CommandType.MOVE_UNITS, {
+          moves: [
+            {
+              from_region_id: move.from,
+              to_region_id: move.to,
+              units: [{ unit_type_id: move.unitType, count: move.count, ...(move.instanceId ? { instance_id: move.instanceId } : {}) }],
+            },
+          ],
+        }, serial),
+      );
+    }
+  }
+  for (const load of quiet.loads) {
+    push(
+      issue(state, "noncombat_move", CommandType.LOAD_TRANSPORT, {
+        transport_instance_id: load.transportId,
+        from_region_id: load.from,
+        units: [{ unit_type_id: load.unitType, count: load.count }],
+      }, serial),
+    );
+  }
+  for (const move of quiet.moves) {
+    if (loading.has(String(move.instanceId ?? ""))) {
+      continue;
+    }
     push(
       issue(
         state,
@@ -158,20 +190,12 @@ export function planTurn(state: GameState, request: PlanRequest = {}): TurnPlanR
       ),
     );
   }
-  for (const load of quiet.loads) {
-    push(
-      issue(
-        state,
-        "noncombat_move",
-        CommandType.LOAD_TRANSPORT,
-        {
-          transport_instance_id: load.transportId,
-          from_region_id: load.from,
-          units: [{ unit_type_id: load.unitType, count: load.count }],
-        },
-        serial,
-      ),
-    );
+  for (const drop of planBridgeheadUnload(state, factionId, tiles)) {
+    send("noncombat_move", CommandType.UNLOAD_TRANSPORT, {
+      transport_instance_id: drop.transportId,
+      to_region_id: drop.to,
+      units: drop.units,
+    });
   }
   send("noncombat_move", CommandType.END_PHASE, quiet.patrols.length > 0 ? { patrols: quiet.patrols } : {});
   if (shop.placements.length > 0) {

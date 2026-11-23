@@ -7,6 +7,9 @@ import type { Ruleset } from "../engine/rules/ruleset";
 import { assaultError } from "../engine/transport/cargo_rules";
 import { classifyUnit, type RulesetUnitType } from "../engine/types/ruleset";
 import { simulateBattleOdds } from "./battleOddsSim";
+import { coalitionAttackAdjust } from "./coalitionWarRoom";
+import { convoySnipeMultiplier } from "./escortSafety";
+import { campaignRuleFlags, shouldRunEvaluator } from "./ruleFlags";
 import { threatAt, type TileThreat } from "./threatMap";
 import type { AIDifficultyProfile, CommanderWeights } from "./types/aiTypes";
 
@@ -105,6 +108,17 @@ function defenseRanks(state: GameState, regionId: string, factionId: string): nu
 }
 
 /** An idle transport still counts. Cargo is not required. */
+function blockedNeutral(state: GameState, regionId: string): boolean {
+  if (shouldRunEvaluator(campaignRuleFlags(state), "neutralInvasion")) {
+    return false;
+  }
+  const owner = state.regions[regionId]?.owner_faction_id ?? "";
+  if (owner !== "") {
+    return false;
+  }
+  return state.neutralBlocs.some((bloc) => bloc.members.includes(regionId));
+}
+
 function enemyHulls(state: GameState, regionId: string, factionId: string): boolean {
   for (const entry of state.getUnitsInRegion(regionId)) {
     const owner = String(entry.faction_id ?? "");
@@ -221,6 +235,7 @@ function accept(
   if (!smartTrade && !cheap && odds.survival < weights.holdSurvivalThreshold) {
     return null;
   }
+  const adjusted = coalitionAttackAdjust(state, factionId, to, value, expectedDestroyed, committed) * convoySnipeMultiplier(state, factionId, to);
   return {
     kind,
     to,
@@ -228,7 +243,7 @@ function accept(
     win: odds.win,
     survival: odds.survival,
     cheap,
-    value,
+    value: adjusted,
     committedTuv: committed,
     expectedTuvSwing: odds.win * prize - (1 - odds.survival) * committed,
     expectedProductionSwing: odds.win * (state.regions[to] != null ? baseOutput(state.regions[to]) : 0),
@@ -296,7 +311,7 @@ export function combatCandidates(
       continue;
     }
     for (const dest of unit.destinations) {
-      if (state.regions[dest]?.isLandRegion() === true) {
+      if (state.regions[dest]?.isLandRegion() === true && !blockedNeutral(state, dest)) {
         targets.add(dest);
       }
     }
@@ -311,7 +326,7 @@ export function combatCandidates(
     const value = threatAt(tiles, to).strategicValue;
     const cover = coverOf(state, to);
     const trade: PackageStack[] = [];
-    if (state.rulesetConfig.terrainModifiers && (cover === "FOREST" || cover === "MOUNTAIN")) {
+    if (shouldRunEvaluator(campaignRuleFlags(state), "chinaGuerrillas") && (cover === "FOREST" || cover === "MOUNTAIN")) {
       trade.push(...take(here, "CHINESE_GUERRILLA", 1));
     }
     if (trade.length === 0) {
@@ -320,8 +335,9 @@ export function combatCandidates(
     }
     const traded = accept(state, factionId, "trade", to, trade, defenders, profile, weights, value, serial, true);
     serial += 1;
+    const flags = campaignRuleFlags(state);
     const suppress =
-      state.rulesetConfig.preparatoryBombardment === true &&
+      shouldRunEvaluator(flags, "preparatorySuppression") &&
       state.rulesetConfig.terrainModifiers === true &&
       (cover === "URBAN" || cover === "FOREST") &&
       !coverSuppressed(state, to) &&
@@ -362,7 +378,7 @@ export function combatCandidates(
     }
 
     const factory = state.regions[to];
-    if (state.rulesetConfig.facilitiesAndPatrols && factory?.major_factory === true) {
+    if (shouldRunEvaluator(campaignRuleFlags(state), "factoryBombing") && factory?.major_factory === true) {
       const bombers = take(here, "HEAVY_BOMBER", 99);
       const bomberCount = bombers.reduce((sum, line) => sum + line.count, 0);
       const bomberCost = bombers.reduce((sum, line) => sum + line.count * (state.unit_types[line.unitType]?.cost ?? 0), 0);
@@ -449,7 +465,7 @@ export function combatCandidates(
     }
   }
 
-  if (state.rulesetConfig.facilitiesAndPatrols) {
+  if (shouldRunEvaluator(campaignRuleFlags(state), "convoyRaiding")) {
     for (const unit of reachable) {
       if (unit.kind !== "DESTROYER" && unit.kind !== "CRUISER") {
         continue;

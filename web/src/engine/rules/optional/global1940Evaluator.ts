@@ -352,6 +352,62 @@ function addPower(
   state.pending_purchases[id] = state.pending_purchases[id] ?? [];
 }
 
+/** The demo map and the 1942 roster use the short ids. Global 1940 plays the long ones. */
+const CLASSIC_POWER: Record<string, string> = {
+  ussr: SOVIET_UNION,
+  ger: GERMANY,
+  uk: UNITED_KINGDOM,
+  jap: JAPAN,
+  usa: UNITED_STATES,
+};
+
+function globalPower(id: string): string {
+  return CLASSIC_POWER[id] ?? id;
+}
+
+function moveFactionKey<T>(record: Record<string, T>, from: string, to: string): void {
+  if (!Object.prototype.hasOwnProperty.call(record, from)) {
+    return;
+  }
+  const value = record[from];
+  delete record[from];
+  if (!Object.prototype.hasOwnProperty.call(record, to)) {
+    record[to] = value;
+  }
+}
+
+/**
+ * A classic board keeps its factories and stacks. Those owners have to be the power
+ * that is actually taking the turn, or mobilize finds no legal region.
+ */
+function claimClassicBoard(state: GameState): void {
+  for (const region of Object.values(state.regions)) {
+    region.owner_faction_id = globalPower(region.owner_faction_id);
+  }
+  for (const stacks of Object.values(state.region_units)) {
+    for (const entry of stacks) {
+      entry.faction_id = globalPower(String(entry.faction_id ?? ""));
+    }
+  }
+  for (const landing of state.amphibious_landings) {
+    landing.faction_id = globalPower(landing.faction_id);
+  }
+  state.current_faction_id = globalPower(state.current_faction_id);
+  state.winner_faction_id = globalPower(state.winner_faction_id);
+  for (const [from, to] of Object.entries(CLASSIC_POWER)) {
+    moveFactionKey(state.ipc, from, to);
+    moveFactionKey(state.pending_purchases, from, to);
+    moveFactionKey(state.factories_controlled_at_turn_start, from, to);
+    moveFactionKey(state.researchUnlocked, from, to);
+    moveFactionKey(state.warStatus, from, to);
+    moveFactionKey(state.wartimeBonusRound, from, to);
+    moveFactionKey(state.researchPity, from, to);
+    moveFactionKey(state.researchPending, from, to);
+    moveFactionKey(state.patrolLock, from, to);
+    delete state.factions[from];
+  }
+}
+
 function installRoster(state: GameState, keepPurse: boolean): void {
   GLOBAL_POWERS.forEach(([id, name, color, team, treasury], index) => {
     addPower(state, id, name, color, team, treasury, index + 1, keepPurse);
@@ -360,6 +416,7 @@ function installRoster(state: GameState, keepPurse: boolean): void {
   state.playedBy[CHINA] = UNITED_STATES;
   state.playedBy[ANZAC] = UNITED_KINGDOM;
   state.neutralBlocs = GLOBAL_BLOCS.map((bloc) => ({ ...bloc, members: [...bloc.members] }));
+  claimClassicBoard(state);
 }
 
 /**

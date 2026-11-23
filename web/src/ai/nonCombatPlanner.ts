@@ -1,3 +1,4 @@
+import { reinforcementLandingRank } from "./coalitionWarRoom";
 import { canLandAt, isAirUnit, isLanded } from "../engine/air/air_fuel";
 import { planStagingFerry } from "./ferryPlanner";
 import { coverOf } from "../engine/rules/optional/terrainResolver";
@@ -9,6 +10,7 @@ import type { Ruleset } from "../engine/rules/ruleset";
 import { TransportLoadValidator } from "../engine/transport/transport_load_validator";
 import { classifyUnit, type RulesetUnitType } from "../engine/types/ruleset";
 import type { AttackPackage } from "./combatMoveGen";
+import { campaignRuleFlags, shouldRunEvaluator } from "./ruleFlags";
 import type { TileThreat } from "./threatMap";
 
 export interface QuietMove {
@@ -180,7 +182,9 @@ export function planNonCombat(
         .getLegalDestinationsForStack(regionId, unitType, factionId, state, ruleset)
         .filter((dest) => canLandAt(state, factionId, unitType, dest, 1))
         .sort((a, b) => {
-          const prefer = (dest: string) => (kind === "FIGHTER" && stations.has(dest) ? 2 : canLandAt(state, factionId, unitType, dest, have) ? 1 : 0);
+          const prefer = (dest: string) =>
+            reinforcementLandingRank(state, factionId, dest, have) +
+            (kind === "FIGHTER" && stations.has(dest) ? 2 : canLandAt(state, factionId, unitType, dest, have) ? 1 : 0);
           return prefer(b) - prefer(a) || (a < b ? -1 : a > b ? 1 : 0);
         });
       if (spots.length === 0) {
@@ -347,7 +351,7 @@ export function planNonCombat(
   consolidateSoviets(state, factionId, ruleset, tiles, used, reserved, moves);
 
   const patrols: PatrolOrder[] = [];
-  if (stage && state.rulesetConfig.facilitiesAndPatrols) {
+  if (shouldRunEvaluator(campaignRuleFlags(state), "airPatrols") && stage) {
     for (const station of stations) {
       let fighters = landingAt.get(station) ?? 0;
       for (const entry of state.getFactionUnitsInRegion(station, factionId)) {

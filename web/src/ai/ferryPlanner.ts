@@ -5,6 +5,7 @@ import { assaultError } from "../engine/transport/cargo_rules";
 import type { Ruleset } from "../engine/rules/ruleset";
 import { classifyUnit } from "../engine/types/ruleset";
 import { threatAt, type TileThreat } from "./threatMap";
+import { evaluateSeaZoneEscortSafety, isPeacetimePower, shouldTriggerEarlyWar } from "./escortSafety";
 
 export interface FerryLoad {
   transportId: string;
@@ -138,7 +139,7 @@ function landingScore(state: GameState, factionId: string, regionId: string, til
     return -1;
   }
   const theater = theaterOf(region.id, region.name);
-  return threatAt(tiles, regionId).strategicValue + (theater === "" ? 0 : 12);
+  return threatAt(tiles, regionId).strategicValue + (theater === "" ? 0 : 25);
 }
 
 function enemyAirOrSub(state: GameState, factionId: string, seaId: string): boolean {
@@ -184,7 +185,7 @@ function escorted(state: GameState, factionId: string, seaId: string): boolean {
 }
 
 function sailAllowed(state: GameState, factionId: string, seaId: string): boolean {
-  return !enemyAirOrSub(state, factionId, seaId) || escorted(state, factionId, seaId);
+  return evaluateSeaZoneEscortSafety(state, factionId, seaId).safe;
 }
 
 /**
@@ -194,7 +195,7 @@ function sailAllowed(state: GameState, factionId: string, seaId: string): boolea
 export function planImmediateFerry(state: GameState, factionId: string, tiles: readonly TileThreat[]): { loads: FerryLoad[]; assaults: FerryAssault[] } {
   const loads: FerryLoad[] = [];
   const assaults: FerryAssault[] = [];
-  if (!SEA_POWERS.has(factionId.trim().toLowerCase())) {
+  if (!SEA_POWERS.has(factionId.trim().toLowerCase()) || (isPeacetimePower(state, factionId) && !shouldTriggerEarlyWar(state, factionId))) {
     return { loads, assaults };
   }
   const reserved = new Map<string, number>();
@@ -313,13 +314,17 @@ export function planStagingFerry(
       sails.push({ from: owned.sea, to: bestSea, unitType: "transport", count: 1, instanceId: transportId });
     }
   }
-  return { loads, sails };
+  const kept = loads.filter((load) => {
+    const sea = sails.find((sail) => sail.instanceId === load.transportId)?.to ?? ownerOf(state, load.transportId)?.sea ?? "";
+    return sea !== "" && state.isAdjacent(load.from, sea);
+  });
+  return { loads: kept, sails };
 }
 
 /** A loaded transport beside a hostile coast has to assault or combat move cannot end. */
 export function commitLoadedCoasts(state: GameState, factionId: string, already: ReadonlySet<string>): FerryAssault[] {
   const assaults: FerryAssault[] = [];
-  if (!state.rulesetConfig.facilitiesAndPatrols) {
+  if (!state.rulesetConfig.facilitiesAndPatrols || (isPeacetimePower(state, factionId) && !shouldTriggerEarlyWar(state, factionId))) {
     return assaults;
   }
   for (const [transportId] of Object.entries(state.transport_instances)) {
@@ -339,4 +344,57 @@ export function commitLoadedCoasts(state: GameState, factionId: string, already:
     }
   }
   return assaults;
+}
+
+export interface FerryUnload {
+  transportId: string;
+  to: string;
+  units: { unit_type_id: string; count: number }[];
+}
+
+/** Friendly coastal drop. A peacetime power does not step onto hostile land. */
+export function planBridgeheadUnload(state: GameState, factionId: string, tiles: readonly TileThreat[]): FerryUnload[] {
+  const drops: FerryUnload[] = [];
+  const peacetime = isPeacetimePower(state, factionId) && !shouldTriggerEarlyWar(state, factionId);
+  for (const [transportId, transport] of Object.entries(state.transport_instances)) {
+    if (cargoCount(state, transportId) <= 0) {
+      continue;
+    }
+    const owned = ownerOf(state, transportId);
+    if (owned == null || owned.faction !== factionId) {
+      continue;
+    }
+    let best = "";
+    let bestScore = -1;
+    for (const coast of state.getAdjacentRegions(owned.sea)) {
+      const region = state.regions[coast];
+      if (region?.isLandRegion() !== true) {
+        continue;
+      }
+      const hostile = state.isRegionHostileTo(coast, factionId);
+      if (hostile && peacetime) {
+        continue;
+      }
+      if (hostile) {
+        continue;
+      }
+      const theater = theaterOf(region.id, region.name);
+      const score = threatAt(tiles, coast).strategicValue + (theater === "" ? 0 : 25);
+      if (score > bestScore) {
+        best = coast;
+        bestScore = score;
+      }
+    }
+    if (best === "") {
+      continue;
+    }
+    drops.push({
+      transportId,
+      to: best,
+      units: (transport.cargo ?? [])
+        .filter((line) => Math.max(0, Math.trunc(Number(line.count ?? 0))) > 0)
+        .map((line) => ({ unit_type_id: String(line.unit_type_id), count: Math.max(0, Math.trunc(Number(line.count ?? 0))) })),
+    });
+  }
+  return drops;
 }

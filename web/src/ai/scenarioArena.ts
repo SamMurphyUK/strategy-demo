@@ -29,7 +29,7 @@ export interface ScenarioRequest {
   seed: number;
   scenario: ScenarioId;
   /** Bot_v2, the candidate. Bot_v1 stays on Easy. */
-  difficulty?: AIDifficulty;
+  allies?: AIDifficulty;
   maxRounds?: number;
 }
 
@@ -443,7 +443,7 @@ export function playScenarioMatch(request: ScenarioRequest): ScenarioGame {
       }
       continue;
     }
-    const difficulty: AIDifficulty = teamOf(session, faction) === "axis" ? v2 : "EASY";
+    const difficulty: AIDifficulty = teamOf(session, faction) === "axis" ? v2 : request.allies ?? "EASY";
     const enemyBefore = unitValue(session, faction, false);
     const plan = planTurn(session.state, {
       difficulty,

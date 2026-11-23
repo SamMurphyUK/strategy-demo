@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { drawUprightStack, type UprightPaint } from "../../../src/ui/map/uprightSprites";
+import { resetFigureScales, setFigureClassScale } from "../../../src/ui/map/figureScaleStore";
+import { beginCampaignFigures, drawUprightStack, takeCampaignFigures, type UprightPaint } from "../../../src/ui/map/uprightSprites";
 
 const FACTIONS = ["ger", "ussr", "uk", "usa", "jap", ""];
 const TYPES = ["infantry", "tank", "fighter", "tactical_bomber", "submarine", "destroyer", "battleship", "carrier"];
@@ -69,5 +70,48 @@ describe("upright faction sprites", () => {
   it("draws the same faction the same way every time", () => {
     expect(figure("tank", "ger")).toBe(figure("tank", "ger"));
     expect(figure("infantry", "ussr")).not.toBe(figure("infantry", "ger"));
+  });
+
+  it("stands the shared Japanese infantry on the campaign map", () => {
+    const ctx = {
+      save() {},
+      restore() {},
+      beginPath() {},
+      ellipse() {},
+      fill() {},
+      stroke() {},
+      translate() {},
+      scale() {},
+      setTransform() {},
+    } as unknown as CanvasRenderingContext2D;
+    beginCampaignFigures();
+    drawUprightStack(ctx, paintOf("infantry", "soviet_union"));
+    drawUprightStack(ctx, paintOf("infantry", "united_kingdom"));
+    const frame = takeCampaignFigures();
+    expect(frame.vectors.length).toBeGreaterThan(0);
+    expect(frame.vectors.every((unit) => unit.parts[0]?.href.includes("jap_infantry_QUICK"))).toBe(true);
+  });
+
+  it("sizes a zoomed class from the debug scale", () => {
+    const ctx = {
+      save() {},
+      restore() {},
+      beginPath() {},
+      ellipse() {},
+      fill() {},
+      stroke() {},
+      translate() {},
+      scale() {},
+      setTransform() {},
+    } as unknown as CanvasRenderingContext2D;
+    beginCampaignFigures();
+    drawUprightStack(ctx, paintOf("infantry", "jap"));
+    const before = takeCampaignFigures().vectors[0]?.unitScale ?? 0;
+    setFigureClassScale("infantry", 2.8);
+    beginCampaignFigures();
+    drawUprightStack(ctx, paintOf("infantry", "jap"));
+    const after = takeCampaignFigures().vectors[0]?.unitScale ?? 0;
+    resetFigureScales();
+    expect(after).toBeCloseTo(before * 2, 5);
   });
 });

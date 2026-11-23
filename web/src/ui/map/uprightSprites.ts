@@ -21,6 +21,7 @@ import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { quickSvgFigure } from "../../art/quickSvgFigure";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
+import { getFigureScale } from "./figureScaleStore";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
@@ -291,14 +292,9 @@ const VEHICLE_SINK = new Set([
 ]);
 /** Placeholder figures stand about this tall, in CSS pixels, and they do not grow with a closer zoom. */
 const UPRIGHT_FIGURE_PX = 24;
-/** Every zoomed sprite, on top of that height. */
-const UPRIGHT_BOOST = 1.4;
-/** Planes and ships, on top of the boost above. */
-const BULK_BOOST = 1.6;
 
 function uprightScale(unitType: string): number {
-  const bulk = AIR_UNITS.has(unitType) || SEA_UNITS.has(unitType) ? BULK_BOOST : 1;
-  return UPRIGHT_BOOST * bulk;
+  return getFigureScale(unitType);
 }
 
 interface CampaignFrame {
@@ -799,8 +795,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const pose = facingPose(paint.aim ?? 0);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
   const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
-  // Shared infantry plays on the battle board. The campaign keeps the faction's own picture.
-  const clip = resolved?.fallback ? null : resolved;
+  // Infantry on this board is the shared Japanese sheet until a power has its own.
+  const infantry = paint.unitType === "infantry" ? resolved ?? resolveQuickClip("JAP", "infantry") : null;
+  const clip = infantry ?? (resolved?.fallback ? null : resolved);
   const sheet = !clip && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
   const bob = clip || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
   const figureScale = uprightScale(paint.unitType);

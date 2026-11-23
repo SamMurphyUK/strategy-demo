@@ -9,6 +9,7 @@ interface MatchJob {
   seed: number;
   scenario: ScenarioId;
   difficulty: AIDifficulty;
+  allies: AIDifficulty;
 }
 
 function runInWorkers(matches: MatchJob[]): Promise<ScenarioGame[]> {
@@ -39,6 +40,7 @@ const matches: MatchJob[] = Array.from({ length: args.games }, (_, index) => ({
   seed: args.seed + index * 97,
   scenario: args.scenarios[index % args.scenarios.length],
   difficulty: args.difficulty,
+  allies: args.allies,
 }));
 
 try {

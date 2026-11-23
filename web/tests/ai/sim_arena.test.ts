@@ -38,6 +38,7 @@ describe("arena cli", () => {
       games: 500,
       scenarios: ["SCENARIO_GLOBAL_1940"],
       difficulty: "NORMAL",
+      allies: "EASY",
       seed: 1940,
     });
     expect(parseArenaArgs([]).scenarios).toEqual(["SCENARIO_1942_QUICK", "SCENARIO_GLOBAL_1940"]);

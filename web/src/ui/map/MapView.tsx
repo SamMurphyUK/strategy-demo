@@ -36,6 +36,7 @@ import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
+import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
   battleScarDescriptors,
@@ -296,6 +297,7 @@ export function MapView(props: MapViewProps) {
   const [spriteClock, setSpriteClock] = useState(0);
   const [tuneOpen, setTuneOpen] = useState(false);
   useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
+  useSyncExternalStore(subscribeFigureScale, getFigureScaleRev);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const wheelZoom = useRef({

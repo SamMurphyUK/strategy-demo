@@ -5,6 +5,7 @@ import { classifyUnit } from "../engine/types/ruleset";
 import { simulateBattleOdds } from "./battleOddsSim";
 import type { TileThreat } from "./threatMap";
 import type { CommanderWeights } from "./types/aiTypes";
+import { preferredFactoryId, purchaseMultiplier, type TheaterPosture } from "./theaterPostures";
 
 export interface PurchaseLine {
   unit_type_id: string;
@@ -178,6 +179,7 @@ export function planPurchase(
   factionId: string,
   _weights: CommanderWeights,
   tiles: readonly TileThreat[],
+  posture: TheaterPosture | null = null,
 ): PurchasePlan {
   const treasury = Math.max(0, Math.trunc(state.ipc[factionId] ?? 0));
   let left = treasury;
@@ -191,7 +193,8 @@ export function planPurchase(
   const transport = findKind(units, ["TRANSPORT", "transport"]);
   const escort = findKind(units, ["DESTROYER", "CARRIER", "destroyer", "carrier"]);
   const fighter = findKind(units, ["FIGHTER", "fighter"]);
-  const factory = factoryRoom(state, factionId);
+  const preferred = preferredFactoryId(state, factionId, posture);
+  const factory = (preferred !== "" ? { regionId: preferred, room: Math.max(0, state.regions[preferred]?.ipc_value ?? 0) } : null) ?? factoryRoom(state, factionId);
   let room = factory?.room ?? 0;
   const capital = capitalOf(state, factionId);
   const locked = capital != null && capitalCaptureOdds(state, factionId) > 0.5;
@@ -255,7 +258,7 @@ export function planPurchase(
         const funded = fundCargo(bought, infantry, artillery, left, room);
         left = funded.left;
         room = funded.room;
-        if (funded.ready && room > 0 && left >= transport.cost) {
+        if (funded.ready && room > 0 && left >= transport.cost && reserveUkGround(bought, infantry, artillery)) {
           addLine(bought, transport.id, 1);
           left -= transport.cost;
           room -= 1;
@@ -273,6 +276,30 @@ export function planPurchase(
     let guard = 0;
     while (left > 0 && room > 0 && guard < 40) {
       guard += 1;
+      if (posture != null && guard === 1) {
+        const biased = [transport, escort, fighter, armor, artillery, infantry].find((unit) => {
+          if (unit == null || purchaseMultiplier(posture, unit.kind) !== 2 || unit.cost > left) {
+            return false;
+          }
+          if (state.unit_types[unit.id]?.category === "sea" && (factory == null || factorySea(state, factionId, factory.regionId) == null)) {
+            return false;
+          }
+          return true;
+        });
+        if (biased != null) {
+          addLine(bought, biased.id, 1);
+          left -= biased.cost;
+          room -= 1;
+          if (biased === infantry) {
+            inf += 1;
+          } else if (biased === artillery) {
+            art += 1;
+          } else if (biased === armor) {
+            heavy += 1;
+          }
+          continue;
+        }
+      }
       const total = Math.max(1, inf + art + heavy);
       if (infantry != null && inf / total < 0.55 && infantry.cost <= left) {
         addLine(bought, infantry.id, 1);
@@ -312,7 +339,7 @@ export function planPurchase(
         const funded = fundCargo(bought, infantry, artillery, left, room);
         left = funded.left;
         room = funded.room;
-        if (funded.ready && left >= transport.cost && room > 0) {
+        if (funded.ready && left >= transport.cost && room > 0 && reserveUkGround(bought, infantry, artillery)) {
           addLine(bought, transport.id, 1);
           left -= transport.cost;
           room -= 1;
@@ -340,6 +367,13 @@ export function planPurchase(
     }
   }
   return { purchases, repairs, research, placements, spent: treasury - left };
+}
+
+function reserveUkGround(bought: Map<string, number>, infantry: Priced | undefined, artillery: Priced | undefined): boolean {
+  const inf = bought.get(infantry?.id ?? "") ?? 0;
+  const art = bought.get(artillery?.id ?? "") ?? 0;
+  const bill = inf * (infantry?.cost ?? 0) + art * (artillery?.cost ?? 0);
+  return (inf + art >= 1 && bill >= 3 && bill <= 6) || inf + art >= 2;
 }
 
 /** 1 infantry and 1 artillery, or 2 infantry, bought beside the transport. */

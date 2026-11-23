@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Command, EconomyEngine, GameState, MovementEngine, PlacementValidator, Region, Unit, VictoryEngine } from "../../../src/engine";
+import { Command, EconomyEngine, GameState, MovementEngine, PlacementValidator, Region, Ruleset, Unit, VictoryEngine } from "../../../src/engine";
 import { neutralDomino } from "../../../src/engine/rules/optional/objectives";
 import {
   advanceGlobalRound,
@@ -54,6 +54,35 @@ describe("1940 campaign", () => {
     ]);
     expect(state.playedBy.china).toBe("united_states");
     expect(state.playedBy.anzac).toBe("united_kingdom");
+  });
+
+  it("mobilizes a Soviet bomber on a factory the classic map still calls ussr", () => {
+    const state = new GameState();
+    state.regions.Moscow = Region.fromDict({
+      id: "Moscow",
+      name: "Moscow",
+      type: "land",
+      ipc_value: 8,
+      owner_faction_id: "ussr",
+      has_factory: true,
+    });
+    state.region_units.Moscow = [{ faction_id: "ussr", unit_type_id: "infantry", count: 2 }];
+    state.ipc.ussr = 15;
+    state.unit_types.strategic_bomber = Unit.fromDict({
+      id: "strategic_bomber",
+      category: "air",
+      cost: 12,
+      movement: 6,
+    });
+    state.applyCampaignLaunch({ scenarioId: "SCENARIO_GLOBAL_1940", ruleset: {} });
+    expect(state.regions.Moscow.owner_faction_id).toBe("soviet_union");
+    expect(state.region_units.Moscow[0]?.faction_id).toBe("soviet_union");
+    expect(state.factions.ussr).toBeUndefined();
+    expect(state.ipc.soviet_union).toBe(28);
+    const rules = new Ruleset();
+    expect(rules.getLegalMobilizeRegions("soviet_union", "strategic_bomber", state)).toEqual(["Moscow"]);
+    const check = new PlacementValidator(state).validatePlacement("soviet_union", "Moscow", "strategic_bomber", 1);
+    expect(check.valid).toBe(true);
   });
 
   it("pays named objectives only while the flag is on", () => {

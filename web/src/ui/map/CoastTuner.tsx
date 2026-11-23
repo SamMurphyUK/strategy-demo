@@ -8,6 +8,8 @@ import {
   type CoastTune,
 } from "./coastTune";
 import { getCoastTune, lockCoastTune, resetCoastTune, setCoastTune, subscribeCoastTune } from "./coastTuneStore";
+import { FIGURE_CLASSES, FIGURE_CLASS_LABEL, type FigureClass } from "./figureScale";
+import { getFigureScales, setFigureClassScale, subscribeFigureScale } from "./figureScaleStore";
 import type { RegionShape, Vec2 } from "./geometry";
 import type { MasterLand } from "./svgLandLoader";
 
@@ -63,6 +65,8 @@ function TuneSlider(props: {
 /** Debug coast panel. Z opens it. The sliders paint on the next frame; Lock in writes the file. */
 export function CoastTuner({ regions, land, viewCenter }: Props) {
   const tune = useSyncExternalStore(subscribeCoastTune, getCoastTune, getCoastTune);
+  const figures = useSyncExternalStore(subscribeFigureScale, getFigureScales, getFigureScales);
+  const [figureClass, setFigureClass] = useState<FigureClass>("infantry");
   const [selected, setSelected] = useState<string[]>([]);
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
@@ -146,6 +150,26 @@ export function CoastTuner({ regions, land, viewCenter }: Props) {
   return (
     <aside className="panel coast-tune" aria-label="Coast tuner" onPointerDown={(event) => event.stopPropagation()}>
       <h2>Coast</h2>
+      <h3>Figures</h3>
+      <label className="coast-slider">
+        <span>Class</span>
+        <select aria-label="Unit class" value={figureClass} onChange={(event) => setFigureClass(event.target.value as FigureClass)}>
+          {FIGURE_CLASSES.map((id) => (
+            <option key={id} value={id}>
+              {FIGURE_CLASS_LABEL[id]}
+            </option>
+          ))}
+        </select>
+        <span />
+      </label>
+      <TuneSlider
+        label="Size"
+        title="Height of this class when the map is zoomed in to the figures"
+        min={0.4}
+        max={4}
+        value={figures[figureClass]}
+        onChange={(value) => setFigureClassScale(figureClass, value)}
+      />
       <h3>Waves</h3>
       <TuneSlider label="Reach" title="Amplitude in screen pixels" min={0} max={16} value={tune.reachPx} onChange={(value) => setNumber("reachPx", value)} />
       <TuneSlider label="Period" title="Seconds for one swell" min={0.5} max={24} value={tune.periodS} onChange={(value) => setNumber("periodS", value)} />

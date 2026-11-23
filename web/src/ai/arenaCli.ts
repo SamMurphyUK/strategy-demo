@@ -7,6 +7,7 @@ export interface ArenaArgs {
   games: number;
   scenarios: ScenarioId[];
   difficulty: AIDifficulty;
+  allies: AIDifficulty;
   seed: number;
 }
 
@@ -30,11 +31,14 @@ export function parseArenaArgs(argv: readonly string[]): ArenaArgs {
       : scenario === "SCENARIO_1942_QUICK"
         ? ["SCENARIO_1942_QUICK"]
         : ["SCENARIO_1942_QUICK", "SCENARIO_GLOBAL_1940"];
+  const allies = flag(argv, "--allies").toUpperCase();
   const profile: AIDifficulty = difficulty === "EASY" || difficulty === "HARD" || difficulty === "NORMAL" ? difficulty : "NORMAL";
+  const allied: AIDifficulty = allies === "EASY" || allies === "HARD" || allies === "NORMAL" ? allies : "EASY";
   return {
     games: Number.isFinite(games) && games > 0 ? games : 4,
     scenarios,
     difficulty: profile,
+    allies: allied,
     seed: Number.isFinite(seed) ? seed : 1940,
   };
 }
