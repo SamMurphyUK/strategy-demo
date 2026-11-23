@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
 import { endCombatMoveGate, retractUnlandableFlights } from "../../../engine/movement/combat_move_gate";
+import { repairMovementLedger } from "../../../engine/movement/phase_orders";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import {
@@ -241,6 +242,16 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
     applyAuthoritativeSnapshot(session, snapshot);
     setVersion((v) => v + 1);
   }, []);
+
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!session) {
+      return;
+    }
+    if (repairMovementLedger(session.state)) {
+      setVersion((v) => v + 1);
+    }
+  }, [version]);
 
   // The session is mutated in place, so `version` is what tells React it changed.
   return useMemo(

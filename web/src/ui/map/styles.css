@@ -1783,6 +1783,8 @@
 .shop-readout.is-tight {
   color: #e2b53c;
 }
+
+.shop-tabs {
   display: flex;
   gap: 4px;
   margin: 0 0 8px;

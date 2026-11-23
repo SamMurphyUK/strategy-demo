@@ -139,6 +139,20 @@ describe("phase-start snapshot replay", () => {
     expect(stackCount(noncombatStart!, "b", "infantry")).toBe(2);
   });
 
+  it("records the order when combat move has no snapshot, and drops holds that never became orders", () => {
+    const session = boot();
+    enterCombatMove(session);
+    session.state.phase_start_snapshot = null;
+    session.state.phase_orders = [];
+    session.state.recordAttackHold("ger", "a", "infantry", 2);
+    move(session, "again", "a", "b", "tank", 1);
+    expect(session.state.phase_start_snapshot).not.toBeNull();
+    expect(session.state.units_attacking_this_phase["ger|a|infantry"]).toBeUndefined();
+    expect(session.state.phase_orders.map((order) => [order.unitType, order.fromRegionId, order.toRegionId])).toEqual([
+      ["tank", "a", "b"],
+    ]);
+  });
+
   it("records each successful move on the phase order list", () => {
     const session = boot();
     enterCombatMove(session);

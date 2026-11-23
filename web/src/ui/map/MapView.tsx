@@ -106,6 +106,11 @@ export interface MapViewProps {
   onRegionClick(regionId: string): void;
   /** Pointer went up on map space that is not a region, after a press shorter than the pan threshold. */
   onBackgroundClick?(): void;
+  /**
+   * The next click is a destination, not a new selection.
+   * Select all sets this so a click on a defended territory is not swallowed by the token there.
+   */
+  captureClick?: boolean;
   onRegionHover(regionId: string): void;
   onStackClick(regionId: string, entry: StackEntry, key: string): void;
   /** Unit type id to land, air or sea, from the scenario data. Without it the standard unit ids decide. */
@@ -1064,6 +1069,20 @@ export function MapView(props: MapViewProps) {
       });
       return;
     }
+    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
+    const armed = p.highlight.kind === "move" ? p.highlight : null;
+    if (p.captureClick) {
+      if (id !== "") {
+        p.onRegionClick(id);
+      } else {
+        p.onBackgroundClick?.();
+      }
+      return;
+    }
+    if (armed && id !== "" && id !== armed.from && armed.legal.includes(id)) {
+      p.onRegionClick(id);
+      return;
+    }
     const plus = pickPlus(ls, sp, plusHit);
     if (plus) {
       p.onOpenInspector?.(plus.region.id);
@@ -1084,7 +1103,6 @@ export function MapView(props: MapViewProps) {
       p.onStackClick(picked.counter.regionId, picked.counter.slot.entry, picked.counter.slot.key);
       return;
     }
-    const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
     if (id !== "") {
       p.onRegionClick(id);
       return;

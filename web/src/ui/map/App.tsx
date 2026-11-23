@@ -35,7 +35,6 @@ import { concealNeutralGarrison } from "./neutralGarrison";
 import type { MasterLand } from "./svgLandLoader";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
-import { PendingOrders } from "./panels/PendingOrders";
 import { PhasePanel } from "./panels/PhasePanel";
 import { PhaseChip } from "../hud/PhaseChip";
 import { PhaseDrawer } from "../hud/PhaseDrawer";
@@ -537,8 +536,8 @@ export function App() {
         setSquad(null);
         setSelection(null);
         setSelectedRegionId(regionId);
-        return;
       }
+      return;
     }
     if (selection?.kind === "stack" && selection.cargoOf !== "") {
       if (!isMyTurn) {
@@ -1028,7 +1027,9 @@ export function App() {
           relief={relief}
           isUnmoved={editing ? NEVER : isUnmoved}
           onRegionClick={onRegionClick}
+          captureClick={squad?.regionId === selectedRegionId}
           onBackgroundClick={() => {
+            setSquad(null);
             setSelection(null);
             setSelectedRegionId("");
           }}
@@ -1190,7 +1191,6 @@ export function App() {
           </aside>
         )}
       </div>
-      {!editing && !menuOpen && <PendingOrders game={game} commandsEnabled={isMyTurn} onCancelled={() => setSelection(null)} />}
       {menuOpen && (
         <MainMenu
           mapName={game.mapName}

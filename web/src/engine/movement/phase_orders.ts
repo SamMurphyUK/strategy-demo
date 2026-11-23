@@ -46,10 +46,36 @@ export function beginMovementPhase(state: GameState): void {
   if (state.current_phase === "noncombat_move") {
     releaseAirArrivals(state);
   }
+  const shot = cloneData(state);
+  shot.phase_orders = [];
+  shot.phase_order_seq = 0;
+  shot.phase_start_snapshot = null;
   state.phase_orders = [];
   state.phase_order_seq = 0;
-  state.phase_start_snapshot = null;
-  state.phase_start_snapshot = cloneData(state);
+  state.phase_start_snapshot = shot;
+}
+
+/**
+ * A movement phase with no snapshot cannot record orders, so the map has nothing to draw.
+ * Holds left over from those lost orders are released, then the snapshot is taken.
+ * Returns true when the board changed.
+ */
+export function repairMovementLedger(state: GameState): boolean {
+  if (state.current_phase !== "combat_move" && state.current_phase !== "noncombat_move") {
+    return false;
+  }
+  if (state.phase_start_snapshot != null) {
+    return false;
+  }
+  for (const key of Object.keys(state.units_attacking_this_phase)) {
+    delete state.units_attacking_this_phase[key];
+  }
+  state.phase_orders = [];
+  state.phase_order_seq = 0;
+  const shot = cloneData(state);
+  shot.phase_start_snapshot = null;
+  state.phase_start_snapshot = shot;
+  return true;
 }
 
 /** Aircraft move again in noncombat, within whatever fuel the combat move left them. Land and sea stay spent. */
@@ -115,6 +141,7 @@ function orderIsHeld(state: GameState): boolean {
  * the units stay where they are until the phase ends, and can be cancelled one by one.
  */
 export function applyRecordedMove(state: GameState, command: Command, movement: MovementEngine): GameEvent[] {
+  repairMovementLedger(state);
   const moves = (command.payload.moves ?? []) as unknown[];
   const going: Dict[] = [];
   for (const move of moves) {
