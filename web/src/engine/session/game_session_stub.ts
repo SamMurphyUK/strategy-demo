@@ -22,7 +22,7 @@ import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { Ruleset } from "../rules/ruleset";
-import { purchaseRepair, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
+import { commitPurchaseRepairs, planPurchaseRepairs, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
 import { classifyUnit } from "../types/ruleset";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { processEndPhase, purchaseResult, startTurn } from "../turn/phase_controllers";
@@ -197,17 +197,61 @@ export class GameSessionStub {
 
     switch (cmd.type) {
       case CommandType.PURCHASE_UNITS: {
-        const repairError = this.applyPurchaseRepairs(cmd);
-        if (repairError) {
-          return repairError;
+        const repairLines = this.repairLines(cmd);
+        if (Array.isArray(cmd.payload.repairs) && cmd.payload.repairs.some((entry) => !isDict(entry))) {
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: "Nothing to repair." }, events: [] };
+        }
+        const planned = repairLines.length > 0 ? planPurchaseRepairs(this.state, cmd.player_id, repairLines) : null;
+        if (planned != null && "error" in planned) {
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: planned.error }, events: [] };
+        }
+        const unitLines = this.purchaseLines(cmd);
+        if (planned != null && !("error" in planned) && unitLines.length === 0) {
+          commitPurchaseRepairs(this.state, cmd.player_id, planned);
+          this._seq += 1;
+          events = this.syncSeq([
+            GameEvent.create(
+              GameEventType.INCOME_COLLECTED,
+              {
+                faction_id: cmd.player_id,
+                amount: -planned.spend,
+                new_total: this.state.getFactionIpc(cmd.player_id),
+                reason: "purchase_repair",
+              },
+              this._seq,
+            ),
+          ]);
+          break;
+        }
+        if (planned != null && !("error" in planned) && planned.spend > 0) {
+          this.state.modifyIpc(cmd.player_id, -planned.spend);
         }
         const affordError = this.validatePurchaseAffordability(cmd);
         if (affordError) {
+          if (planned != null && !("error" in planned) && planned.spend > 0) {
+            this.state.modifyIpc(cmd.player_id, planned.spend);
+          }
           return affordError;
+        }
+        if (planned != null && !("error" in planned)) {
+          for (const line of planned.lines) {
+            const left = Math.max(0, Math.trunc(this.state.repairTokens[line.regionId] ?? 0)) - line.spend;
+            if (left <= 0) {
+              delete this.state.repairTokens[line.regionId];
+            } else {
+              this.state.repairTokens[line.regionId] = left;
+            }
+          }
         }
         const existingPending: PurchaseLine[] = deepCopy(this.state.pending_purchases[cmd.player_id] ?? []);
         const purchase = purchaseResult(this.economy.processPurchase(cmd));
         if (!purchase.success) {
+          if (planned != null && !("error" in planned)) {
+            this.state.modifyIpc(cmd.player_id, planned.spend);
+            for (const line of planned.lines) {
+              this.state.repairTokens[line.regionId] = (this.state.repairTokens[line.regionId] ?? 0) + line.spend;
+            }
+          }
           return this.purchaseFailureResult(purchase, sourceId);
         }
         let newLines: Dict[] = cmd.payload.purchases ?? [];
@@ -281,7 +325,11 @@ export class GameSessionStub {
         if (bombError) {
           return bombError;
         }
-        events = this.syncSeq(this.processStrategicBomb(cmd));
+        const raid = this.processStrategicBomb(cmd);
+        if (!Array.isArray(raid)) {
+          return raid;
+        }
+        events = this.syncSeq(raid);
         break;
       }
 
@@ -898,7 +946,7 @@ export class GameSessionStub {
   }
 
   /** Damage uses `(nextInt() % 6) + 1` like CombatEngine, and is reported as negative income. */
-  private processStrategicBomb(cmd: Command): GameEvent[] {
+  private processStrategicBomb(cmd: Command): GameEvent[] | StubResult {
     const regionId = String(cmd.payload.region_id ?? "");
     if (this.state.rulesetConfig.facilitiesAndPatrols) {
       return this.processFacilityRaid(cmd, regionId);
@@ -919,13 +967,13 @@ export class GameSessionStub {
     ];
   }
 
-  private processFacilityRaid(cmd: Command, regionId: string): GameEvent[] {
+  private processFacilityRaid(cmd: Command, regionId: string): GameEvent[] | StubResult {
     const facility = String(cmd.payload.facility ?? "");
     const roll = () => this.d6();
     if (facility === "airbase" || facility === "harbor" || facility === "depot") {
       const raid = runInterdiction(this.state, cmd.player_id, regionId, facility as FacilityTarget, roll);
       if ("error" in raid) {
-        return [];
+        return this.bombError(raid.error);
       }
       this._seq += 1;
       return [
@@ -938,7 +986,7 @@ export class GameSessionStub {
     }
     const raid = runIndustrialBombing(this.state, cmd.player_id, regionId, Math.trunc(Number(cmd.payload.escorts ?? 0)), roll);
     if ("error" in raid) {
-      return [];
+      return this.bombError(raid.error);
     }
     this._seq += 1;
     return [
@@ -950,26 +998,25 @@ export class GameSessionStub {
     ];
   }
 
-  private applyPurchaseRepairs(cmd: Command): StubResult | null {
-    const repairs: unknown[] = Array.isArray(cmd.payload.repairs) ? cmd.payload.repairs : [];
-    if (repairs.length === 0) {
-      return null;
+  private purchaseLines(cmd: Command): Dict[] {
+    const purchases: unknown[] = Array.isArray(cmd.payload.purchases) ? cmd.payload.purchases : [];
+    if (purchases.length > 0) {
+      return purchases.filter(isDict);
     }
+    const units: unknown[] = Array.isArray(cmd.payload.units) ? cmd.payload.units : [];
+    return units.filter(isDict);
+  }
+
+  private repairLines(cmd: Command): { regionId: string; tokens: number }[] {
+    const repairs: unknown[] = Array.isArray(cmd.payload.repairs) ? cmd.payload.repairs : [];
+    const lines: { regionId: string; tokens: number }[] = [];
     for (const entry of repairs) {
       if (!isDict(entry)) {
-        return { result_type: "error", error: { code: "PURCHASE_FAILED", message: "Nothing to repair." }, events: [] };
+        continue;
       }
-      const problem = purchaseRepair(
-        this.state,
-        cmd.player_id,
-        String(entry.region_id ?? ""),
-        Math.trunc(Number(entry.tokens ?? 0)),
-      );
-      if (problem !== "") {
-        return { result_type: "error", error: { code: "PURCHASE_FAILED", message: problem }, events: [] };
-      }
+      lines.push({ regionId: String(entry.region_id ?? ""), tokens: Math.trunc(Number(entry.tokens ?? 0)) });
     }
-    return null;
+    return lines;
   }
 
   private d6(): number {

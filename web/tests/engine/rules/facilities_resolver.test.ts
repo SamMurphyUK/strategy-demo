@@ -129,6 +129,18 @@ describe("airbase and harbor facilities", () => {
     expect(state.airbase_launch["red|s1|fighter"]).toBe(true);
     expect(fuelRemaining(state, "red", "s1", "fighter")).toBe(1);
 
+    const elsewhere = new GameState();
+    elsewhere.rulesetConfig.facilitiesAndPatrols = true;
+    elsewhere.unit_types.fighter = unit("fighter", "air", 3, 4, 4);
+    region(elsewhere, "plain", true, "red");
+    const strip = region(elsewhere, "strip", true, "red");
+    strip.airbase = true;
+    region(elsewhere, "far", true, "red");
+    noteAirArrival(elsewhere, "red", "plain", "strip", "fighter", 1);
+    noteAirArrival(elsewhere, "red", "strip", "far", "fighter", 1);
+    expect(elsewhere.airbase_launch["red|far|fighter"]).toBeUndefined();
+    expect(fuelRemaining(elsewhere, "red", "far", "fighter")).toBe(2);
+
     field.airbase_disabled_until = state.game_round;
     const closed = new GameState();
     closed.rulesetConfig.facilitiesAndPatrols = true;

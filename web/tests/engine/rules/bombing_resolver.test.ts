@@ -146,11 +146,26 @@ describe("bombing resolver", () => {
     const heavy = runIndustrialBombing(state, "red", "plant", 0, faces([6, 3, 2]));
     expect("tokens" in heavy && heavy.tokens).toBe(5);
 
-    expect(purchaseRepair(state, "red", "plant", 2)).toBe("");
-    expect(state.getFactionIpc("red")).toBe(2);
+    expect(purchaseRepair(state, "red", "plant", 2)).toBe("That factory is not yours.");
+    expect(state.getFactionIpc("red")).toBe(4);
+    state.ipc.blue = 4;
+    expect(purchaseRepair(state, "blue", "plant", 2)).toBe("");
+    expect(state.getFactionIpc("blue")).toBe(2);
     expect(state.repairTokens.plant).toBe(3);
-    expect(purchaseRepair(state, "red", "plant", 4)).toBe("Not enough Industrial Output.");
+    expect(purchaseRepair(state, "blue", "plant", 4)).toBe("Not enough Industrial Output.");
     expect(state.repairTokens.plant).toBe(3);
+
+    state.rulesetConfig.techTree = false;
+    state.region_units.plant = [
+      { faction_id: "red", unit_type_id: "bomber", count: 1 },
+      { faction_id: "blue", unit_type_id: "fighter", count: 1 },
+    ];
+    state.repairTokens.plant = 0;
+    const unescorted = runIndustrialBombing(state, "red", "plant", 0, faces([6, 1, 3]));
+    expect("bomberLosses" in unescorted && unescorted.bomberLosses).toBe(0);
+    expect("interceptorLosses" in unescorted && unescorted.interceptorLosses).toBe(0);
+    expect("tokens" in unescorted && unescorted.tokens).toBe(3);
+    expect(state.region_units.plant.find((entry) => entry.faction_id === "blue")?.count).toBe(1);
   });
 
   it("closes an airbase, harbor, or depot through the next round when a tactical bomber hits", () => {

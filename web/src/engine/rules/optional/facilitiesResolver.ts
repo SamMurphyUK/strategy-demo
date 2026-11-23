@@ -69,8 +69,8 @@ export function airRangeBonus(state: GameState, factionId: string, regionId: str
 }
 
 /**
- * Remember that a plane which left an operational airbase keeps the extra range
- * for the rest of the turn. No-op when facilities are off.
+ * A plane that began the turn on an operational airbase keeps the extra range
+ * after it leaves. Leaving a different airbase later does not grant it.
  */
 export function carryAirbaseLaunch(
   state: GameState,
@@ -79,13 +79,16 @@ export function carryAirbaseLaunch(
   toRegionId: string,
   unitTypeId: string,
   sourceEmpty: boolean,
+  priorSpent = 0,
 ): void {
   if (!facilitiesActive(state) || fromRegionId === "" || toRegionId === "" || fromRegionId === toRegionId) {
     return;
   }
   const fromKey = launchKey(factionId, fromRegionId, unitTypeId);
   const toKey = launchKey(factionId, toRegionId, unitTypeId);
-  if (state.airbase_launch[fromKey] || operationalAirbase(state, fromRegionId, factionId)) {
+  const startedHere =
+    state.airbase_launch[fromKey] === true || (priorSpent <= 0 && operationalAirbase(state, fromRegionId, factionId));
+  if (startedHere) {
     state.airbase_launch[toKey] = true;
   }
   if (sourceEmpty) {

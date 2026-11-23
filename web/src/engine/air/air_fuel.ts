@@ -135,7 +135,7 @@ export function noteAirArrival(
   if (sourceEmpty) {
     delete state.air_movement_spent[fromKey];
   }
-  carryAirbaseLaunch(state, factionId, fromRegion, toRegion, unitType, sourceEmpty);
+  carryAirbaseLaunch(state, factionId, fromRegion, toRegion, unitType, sourceEmpty, prior);
 }
 
 interface CarrierStats {

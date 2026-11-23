@@ -346,10 +346,6 @@ export function runIndustrialBombing(
   }
   const escortLosses = Math.min(escorts, interceptorHits);
   const interceptorLosses = Math.min(interceptors, escortHits);
-  const overflow = interceptorHits - escortLosses;
-  if (overflow > 0) {
-    bomberLosses = Math.min(bombers, bomberLosses + overflow);
-  }
   const surviving = bombers - bomberLosses;
   const dicePerBomber = heavyBombersActive(state, attackerFactionId) ? 2 : 1;
   let damage = 0;
@@ -437,26 +433,64 @@ function attackOf(state: GameState, regionId: string, factionId: string, kind: R
   return 0;
 }
 
-/** One Industrial Output repairs one token during purchase. */
-export function purchaseRepair(state: GameState, factionId: string, regionId: string, tokens: number): string {
+export interface RepairPlan {
+  spend: number;
+  lines: { regionId: string; spend: number }[];
+}
+
+/** Checks every repair line before any Industrial Output is spent. */
+export function planPurchaseRepairs(state: GameState, factionId: string, lines: { regionId: string; tokens: number }[]): { error: string } | RepairPlan {
   if (!state.rulesetConfig.facilitiesAndPatrols) {
-    return "Facilities are off.";
+    return { error: "Facilities are off." };
   }
-  const have = Math.max(0, Math.trunc(state.repairTokens[regionId] ?? 0));
-  const spend = Math.min(have, Math.max(0, Math.trunc(tokens)));
+  const planned: { regionId: string; spend: number }[] = [];
+  let spend = 0;
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const region = state.regions[line.regionId];
+    if (region == null || region.owner_faction_id !== factionId) {
+      return { error: "That factory is not yours." };
+    }
+    if (seen.has(line.regionId)) {
+      return { error: "Nothing to repair." };
+    }
+    seen.add(line.regionId);
+    const have = Math.max(0, Math.trunc(state.repairTokens[line.regionId] ?? 0));
+    const want = Math.max(0, Math.trunc(line.tokens));
+    const take = Math.min(have, want);
+    if (take <= 0) {
+      return { error: "Nothing to repair." };
+    }
+    planned.push({ regionId: line.regionId, spend: take });
+    spend += take;
+  }
   if (spend <= 0) {
-    return "Nothing to repair.";
+    return { error: "Nothing to repair." };
   }
-  const treasury = state.getFactionIpc(factionId);
-  if (treasury < spend) {
-    return "Not enough Industrial Output.";
+  if (state.getFactionIpc(factionId) < spend) {
+    return { error: "Not enough Industrial Output." };
   }
-  state.modifyIpc(factionId, -spend);
-  const left = have - spend;
-  if (left <= 0) {
-    delete state.repairTokens[regionId];
-  } else {
-    state.repairTokens[regionId] = left;
+  return { spend, lines: planned };
+}
+
+export function commitPurchaseRepairs(state: GameState, factionId: string, plan: RepairPlan): void {
+  state.modifyIpc(factionId, -plan.spend);
+  for (const line of plan.lines) {
+    const left = Math.max(0, Math.trunc(state.repairTokens[line.regionId] ?? 0)) - line.spend;
+    if (left <= 0) {
+      delete state.repairTokens[line.regionId];
+    } else {
+      state.repairTokens[line.regionId] = left;
+    }
   }
+}
+
+/** One Industrial Output repairs one token during purchase. The owner pays. */
+export function purchaseRepair(state: GameState, factionId: string, regionId: string, tokens: number): string {
+  const plan = planPurchaseRepairs(state, factionId, [{ regionId, tokens }]);
+  if ("error" in plan) {
+    return plan.error;
+  }
+  commitPurchaseRepairs(state, factionId, plan);
   return "";
 }
