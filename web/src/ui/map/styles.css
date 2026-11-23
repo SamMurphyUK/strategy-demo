@@ -1363,7 +1363,11 @@
 /* The menu sits on the left third. The map behind it is the live board, dimmed. */
 .campaign.menu-open .turn-bar,
 .campaign.menu-open .sidebar,
-.campaign.menu-open .pending-orders {
+.campaign.menu-open .pending-orders,
+.campaign.menu-open .hud-drawer-host,
+.campaign.menu-open .hud-inspector-slot,
+.campaign.menu-open .hud-phase-chip,
+.campaign.menu-open .hud-log {
   display: none;
 }
 
@@ -1704,6 +1708,343 @@
   flex-direction: column;
   gap: 4px;
   color: var(--parchment);
+}
+
+.hud-drawer-host {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 88px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.hud-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: auto;
+  pointer-events: none;
+  color: #f4f1ea;
+  background-color: rgba(16, 18, 21, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform: translateX(110%);
+  opacity: 0;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hud-drawer-buy {
+  width: 400px;
+}
+
+.hud-drawer-place {
+  width: 236px;
+}
+
+.hud-drawer.is-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hud-drawer .phase-panel {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.hud-drawer .phase-panel::before {
+  display: none;
+}
+
+.hud-drawer {
+  overflow-x: hidden;
+}
+
+.shop-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.shop-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 2px;
+  font-size: 11px;
+}
+
+.hud-drawer-buy .catalog {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  overflow-x: hidden;
+}
+
+.hud-drawer .unit-card {
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.hud-drawer .unit-card.is-blocked {
+  opacity: 0.45;
+}
+
+.hud-drawer .unit-card.is-blocked button {
+  pointer-events: none;
+}
+
+.hud-inspector-slot {
+  position: absolute;
+  bottom: 16px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.hud-inspector-slot.is-pill {
+  left: 50%;
+  width: max-content;
+  min-width: 260px;
+  height: 44px;
+  transform: translateX(-50%);
+}
+
+.hud-inspector-slot.is-full {
+  left: 16px;
+  right: 176px;
+  height: 156px;
+  margin-inline: auto;
+  width: min(960px, calc(100% - 192px));
+}
+
+.hud-inspector {
+  height: 100%;
+  overflow: hidden;
+  color: #f4f1ea;
+  background-color: rgba(16, 18, 21, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform: translateY(110%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 120ms ease-in,
+    opacity 120ms ease-in;
+}
+
+.hud-inspector.is-open {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 150ms linear;
+}
+
+.hud-inspector.is-passing {
+  pointer-events: none;
+}
+
+.hud-inspector-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 0 36px 0 10px;
+  animation: hud-swap 120ms ease-out;
+}
+
+@keyframes hud-swap {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.hud-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 1;
+  min-width: 28px;
+  padding: 0;
+  color: #f4f1ea;
+  background: transparent;
+  border: 0;
+}
+
+.hud-emblem {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 92px;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  height: 92px;
+  border: 2px solid;
+  border-radius: 50%;
+  font: 11px/1.2 var(--mono, "Courier New", monospace);
+  text-align: center;
+}
+
+.hud-inspector-slot.is-pill .hud-emblem {
+  flex-direction: row;
+  gap: 8px;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+}
+
+.hud-inspector-slot.is-pill .hud-emblem b {
+  font-size: 13px;
+}
+
+.hud-medallions {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.hud-medallions::-webkit-scrollbar {
+  height: 6px;
+}
+
+.hud-medallions::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.hud-medallion {
+  position: relative;
+  display: flex;
+  flex: 0 0 92px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  height: 92px;
+  border: 1px solid var(--rim, rgba(255, 255, 255, 0.2));
+  border-radius: 50%;
+  color: #f4f1ea;
+}
+
+.hud-medallion.is-movable {
+  cursor: grab;
+}
+
+.hud-medallion.is-movable:hover {
+  transform: translateY(-4px);
+  border-color: #f4f1ea;
+}
+
+.hud-roundel {
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  opacity: 0.32;
+}
+
+.hud-medallion .unit-token,
+.hud-unit-label,
+.hud-pips,
+.hud-count {
+  position: relative;
+  opacity: 1;
+}
+
+.hud-unit-label,
+.hud-pips {
+  font: 10px/1.1 var(--mono, "Courier New", monospace);
+}
+
+.hud-count {
+  position: absolute;
+  right: 4px;
+  bottom: 8px;
+  min-width: 0;
+  padding: 0 4px;
+  color: #1a1815;
+  background: #e2b53c;
+  border: 0;
+}
+
+.hud-lock {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font: 9px/1 var(--mono, "Courier New", monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hud-cargo {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(16, 18, 21, 0.92);
+}
+
+.hud-phase-chip,
+.hud-log,
+.map-wrap > .cargo-hover {
+  position: absolute;
+  z-index: 6;
+  color: #f4f1ea;
+  background-color: rgba(16, 18, 21, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.hud-phase-chip {
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 148px;
+  padding: 8px;
+  animation: hud-swap 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hud-log {
+  top: 52px;
+  left: 12px;
+  width: 280px;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.hud-log .event-log {
+  min-height: 0;
+}
+
+.map-wrap > .cargo-hover {
+  left: 12px;
+  bottom: 180px;
+  margin: 0;
 }
 
 .editor-start-check {

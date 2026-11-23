@@ -21,6 +21,8 @@ import { applyPatrolOrders } from "../rules/optional/airAndNavalRaiding";
 import { assaultError, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
+import { purchaseUnitCap } from "../placement/productionCap";
+import { factoryPrice, factoryRoom, isFactoryKind } from "../placement/factoryRules";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { Ruleset } from "../rules/ruleset";
@@ -718,10 +720,14 @@ export class GameSessionStub {
       purchases = cmd.payload.units ?? [];
     }
     let totalCost = 0;
+    let unitCount = 0;
     for (const purchase of purchases) {
       const utid = String(purchase.unit_type_id ?? "");
       const count = Math.trunc(Number(purchase.count ?? 1));
-      let cost = Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
+      if (!isFactoryKind(utid)) {
+        unitCount += Math.max(0, count);
+      }
+      let cost = isFactoryKind(utid) ? factoryPrice(this.state, utid) : Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
       if (cost === 0) {
         const ut = this.state.unit_types[utid];
         if (ut) {
@@ -738,6 +744,53 @@ export class GameSessionStub {
       totalCost += cost * count;
     }
 
+    const reserved: Record<string, number> = {};
+    for (const line of this.state.pending_purchases[cmd.player_id] ?? []) {
+      const id = String(line.unit_type_id ?? "");
+      if (isFactoryKind(id)) {
+        reserved[id] = (reserved[id] ?? 0) + Math.max(0, Math.trunc(Number(line.count ?? 0)));
+      }
+    }
+    for (const purchase of purchases) {
+      const id = String(purchase.unit_type_id ?? "");
+      if (!isFactoryKind(id)) {
+        continue;
+      }
+      const count = Math.max(0, Math.trunc(Number(purchase.count ?? 1)));
+      if (count > factoryRoom(this.state, cmd.player_id, id, reserved)) {
+        const failEvt = this.createEvent(
+          "purchase_failed",
+          { faction_id: cmd.player_id, reason: "factory_site" },
+          String(cmd.command_id),
+        );
+        const recorded = this.recordEvents([failEvt], String(cmd.command_id));
+        return {
+          result_type: "error",
+          error: { code: "PURCHASE_FAILED", message: "factory_site" },
+          events: recorded,
+        };
+      }
+      reserved[id] = (reserved[id] ?? 0) + count;
+    }
+
+    const cap = purchaseUnitCap(this.state, cmd.player_id);
+    const already = (this.state.pending_purchases[cmd.player_id] ?? []).reduce(
+      (sum, line) => sum + Math.max(0, Math.trunc(Number(line.count ?? 0))),
+      0,
+    );
+    if (already + unitCount > cap) {
+      const failEvt = this.createEvent(
+        "purchase_failed",
+        { faction_id: cmd.player_id, reason: "production_cap" },
+        String(cmd.command_id),
+      );
+      const recorded = this.recordEvents([failEvt], String(cmd.command_id));
+      return {
+        result_type: "error",
+        error: { code: "PURCHASE_FAILED", message: "production_cap" },
+        events: recorded,
+      };
+    }
     if (totalCost > (this.state.ipc[cmd.player_id] ?? 0)) {
       const failEvt = this.createEvent(
         "purchase_failed",
@@ -824,7 +877,7 @@ export class GameSessionStub {
     for (const p of pending) {
       const utid = String(p.unit_type_id ?? "");
       const count = Math.trunc(Number(p.count ?? 1));
-      let cost = Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
+      let cost = isFactoryKind(utid) ? factoryPrice(this.state, utid) : Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
       if (cost === 0) {
         const ut = this.state.unit_types[utid];
         if (ut) {

@@ -7,7 +7,9 @@ import type { PurchaseLine } from "../../../engine/model/types";
 import type { Selection } from "../App";
 import { UnitToken } from "../../theme/tokens/UnitToken";
 import { playCampaignCue } from "../campaignAudio";
-import { canStageAnother, purchasePhaseAdvance, stageStep, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
+import { purchasePhaseAdvance, stagedUnits, stageStep, UNCONFIRMED_BASKET_MESSAGE } from "../purchaseBasket";
+import { factoryBlockReason, factoryLabel, factoryPrice, factoryRoom, FACTORY_KINDS, isFactoryKind } from "../../../engine/placement/factoryRules";
+import { maxAffordable, purchaseUnitCap } from "../../../engine/placement/productionCap";
 import { factionName, phaseName, unitName } from "../session/event_text";
 import type { GameSessionHandle } from "../session/use_game_session";
 
@@ -147,6 +149,33 @@ export function PhasePanel({
   );
 }
 
+type ShopTab = "land" | "air" | "sea" | "industrial";
+
+const SHOP_TABS: ShopTab[] = ["land", "air", "sea", "industrial"];
+const SHOP_LABEL: Record<ShopTab, string> = {
+  land: "Land",
+  air: "Air",
+  sea: "Sea",
+  industrial: "Industry",
+};
+
+function shopTabOf(id: string, unit: { category?: string; special?: Record<string, unknown> } | undefined): ShopTab {
+  if (isFactoryKind(id)) {
+    return "industrial";
+  }
+  const category = String(unit?.category ?? "");
+  if (category === "air") {
+    return "air";
+  }
+  if (category === "sea") {
+    return "sea";
+  }
+  if (category === "structure" || category === "industrial" || category === "building" || unit?.special?.is_facility === true) {
+    return "industrial";
+  }
+  return "land";
+}
+
 function PurchaseBody({
   game,
   pending,
@@ -162,6 +191,9 @@ function PurchaseBody({
   const state = session.state;
   const faction = state.current_faction_id;
   const costs = session.getCostTable();
+  for (const kind of FACTORY_KINDS) {
+    costs[kind] = factoryPrice(state, kind);
+  }
   const [staged, setStaged] = useState<Record<string, number>>({});
   const stagedRef = useRef(staged);
 
@@ -170,13 +202,30 @@ function PurchaseBody({
     setStaged({});
   }, [faction, game.seed]);
 
+  const [tab, setTab] = useState<ShopTab>("land");
   const total = Object.entries(staged).reduce((sum, [id, n]) => sum + (costs[id] ?? 0) * n, 0);
   const ipc = state.getFactionIpc(faction);
+  const bought = (pending ?? []).reduce(
+    (sum, line) => sum + (isFactoryKind(line.unit_type_id) ? 0 : Math.max(0, Math.trunc(line.count))),
+    0,
+  );
+  const slots = Math.max(0, purchaseUnitCap(state, faction) - bought);
   useEffect(() => {
     onStagedTotal(total);
   }, [total, onStagedTotal]);
   const bump = (id: string, d: number) => {
-    const next = stageStep(stagedRef.current, id, d, costs, ipc);
+    if (d > 0 && isFactoryKind(id)) {
+      const taken = { ...stagedRef.current };
+      for (const line of pending ?? []) {
+        if (isFactoryKind(line.unit_type_id)) {
+          taken[line.unit_type_id] = (taken[line.unit_type_id] ?? 0) + line.count;
+        }
+      }
+      if (factoryRoom(state, faction, id, taken) < 1) {
+        return;
+      }
+    }
+    const next = stageStep(stagedRef.current, id, d, costs, ipc, isFactoryKind(id) ? Number.POSITIVE_INFINITY : slots);
     if (next === stagedRef.current) {
       return;
     }
@@ -203,38 +252,62 @@ function PurchaseBody({
 
   return (
     <>
-      <p className="muted catalog-legend">Cost in Industrial Output · attack / defense / movement</p>
+      <p className="muted catalog-legend">
+        Build up to <b className="mono">{slots}</b> units · <b className="mono">{ipc - total}</b> IO left
+      </p>
+      <div className="shop-tabs" role="tablist" aria-label="Purchase categories">
+        {SHOP_TABS.map((id) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
+            {SHOP_LABEL[id]}
+          </button>
+        ))}
+      </div>
       <ul className="catalog">
-        {Object.keys(costs).map((id) => {
-          const ut = state.unit_types[id];
-          const count = staged[id] ?? 0;
-          return (
-            <li key={id} className={count > 0 ? "unit-card staged" : "unit-card"}>
-              <UnitToken unit={id} faction={faction} size={56} />
-              <div className="unit-card-info">
-                <span className="unit-name">{unitName(id, state.unit_types)}</span>
-                <span className="unit-stats mono">
-                  {costs[id]} IO · {ut.attack}/{ut.defense}/{ut.movement}
-                </span>
-              </div>
-              <div className="stepper">
-                <button type="button" onClick={() => bump(id, -1)} disabled={count === 0} aria-label="Remove one">
-                  −
-                </button>
-                <span className="mono">{count}</span>
-                <button
-                  type="button"
-                  onClick={() => bump(id, 1)}
-                  disabled={!commandsEnabled || !canStageAnother(costs[id] ?? 0, ipc, total)}
-                  aria-label="Add one"
-                >
-                  +
-                </button>
-              </div>
-            </li>
-          );
-        })}
+        {(tab === "industrial" ? [...FACTORY_KINDS] : Object.keys(costs).filter((id) => !isFactoryKind(id) && shopTabOf(id, state.unit_types[id]) === tab)).map((id) => {
+            const ut = state.unit_types[id];
+            const count = staged[id] ?? 0;
+            const taken = { ...staged };
+            for (const line of pending ?? []) {
+              if (isFactoryKind(line.unit_type_id)) {
+                taken[line.unit_type_id] = (taken[line.unit_type_id] ?? 0) + line.count;
+              }
+            }
+            const blocked = isFactoryKind(id) ? factoryBlockReason(state, faction, id) : null;
+            const room = isFactoryKind(id) ? factoryRoom(state, faction, id, taken) : slots - stagedUnits(staged);
+            const max = blocked ? 0 : count + maxAffordable(costs[id] ?? 0, ipc - total, Math.max(0, room));
+            return (
+              <li key={id} className={`${count > 0 ? "unit-card staged" : "unit-card"}${blocked ? " is-blocked" : ""}`} title={blocked ?? undefined}>
+                <UnitToken unit={id} faction={faction} size={48} />
+                <div className="unit-card-info">
+                  <span className="unit-name">{isFactoryKind(id) ? factoryLabel(id) : unitName(id, state.unit_types)}</span>
+                  <span className="unit-stats mono">
+                    {isFactoryKind(id)
+                      ? `${costs[id]} IO`
+                      : `${costs[id]} IO · ${ut.attack}/${ut.defense}/${ut.movement}`}
+                  </span>
+                  <span className="unit-max mono">max {max}</span>
+                </div>
+                <div className="stepper">
+                  <button type="button" onClick={() => bump(id, -1)} disabled={count === 0 || blocked != null} aria-label="Remove one">
+                    −
+                  </button>
+                  <span className="mono">{count}</span>
+                  <button
+                    type="button"
+                    onClick={() => bump(id, 1)}
+                    disabled={blocked != null || !commandsEnabled || count >= max}
+                    aria-label="Add one"
+                  >
+                    +
+                  </button>
+                </div>
+              </li>
+            );
+          })}
       </ul>
+      {tab !== "industrial" && Object.keys(costs).every((id) => shopTabOf(id, state.unit_types[id]) !== tab) && (
+        <p className="muted">Nothing in this list.</p>
+      )}
       <p className={total > ipc ? "warn" : "budget"}>
         Total <b className="mono">{total}</b> IO of <b className="mono">{ipc}</b> available
       </p>

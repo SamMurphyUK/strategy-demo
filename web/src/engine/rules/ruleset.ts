@@ -1,5 +1,6 @@
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
+import { factorySiteFits, isFactoryKind } from "../placement/factoryRules";
 
 export class Ruleset {
   // ---------------------------------------------------------
@@ -145,6 +146,9 @@ export class Ruleset {
 
   canMobilizeUnitAt(unitType: string, regionId: string, factionId: string, state: GameState): boolean {
     const region = state.regions[regionId];
+    if (isFactoryKind(unitType)) {
+      return region != null && factorySiteFits(state, factionId, unitType, region);
+    }
     const unit = state.unit_types[unitType];
     if (region == null || unit == null) {
       return false;
@@ -186,7 +190,7 @@ export class Ruleset {
       return legal;
     }
     const unit = state.unit_types[unitType];
-    if (unit == null) {
+    if (unit == null && !isFactoryKind(unitType)) {
       return legal;
     }
     for (const regionId of Object.keys(state.regions)) {

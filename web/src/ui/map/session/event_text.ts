@@ -58,6 +58,15 @@ export function phaseName(phase: string): string {
 }
 
 export function unitName(unitTypeId: string, unitTypes: Record<string, { name?: string }> = {}): string {
+  if (unitTypeId === "minor_factory") {
+    return "Minor complex";
+  }
+  if (unitTypeId === "major_factory") {
+    return "Major complex";
+  }
+  if (unitTypeId === "factory_upgrade") {
+    return "Upgrade to major";
+  }
   const fromCatalog = unitTypes[unitTypeId]?.name;
   if (fromCatalog) {
     return fromCatalog;

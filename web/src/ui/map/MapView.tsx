@@ -104,6 +104,8 @@ export interface MapViewProps {
   combatMarkers: CombatMarker[];
   isUnmoved(regionId: string, entry: StackEntry): boolean;
   onRegionClick(regionId: string): void;
+  /** Pointer went up on map space that is not a region, after a press shorter than the pan threshold. */
+  onBackgroundClick?(): void;
   onRegionHover(regionId: string): void;
   onStackClick(regionId: string, entry: StackEntry, key: string): void;
   /** Unit type id to land, air or sea, from the scenario data. Without it the standard unit ids decide. */
@@ -165,7 +167,8 @@ export interface MapViewProps {
   frame?: Rect | null;
 }
 
-const DRAG_THRESHOLD_PX = 4;
+/** A press shorter than this is a click. Panning starts at 5px so a camera drag never selects a region. */
+const DRAG_THRESHOLD_PX = 5;
 /** The knife turns a drag into a freehand stroke after this much travel, then samples every STROKE_STEP_PX. */
 const STROKE_START_PX = 6;
 const STROKE_STEP_PX = 3;
@@ -1046,7 +1049,9 @@ export function MapView(props: MapViewProps) {
     const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
     if (id !== "") {
       p.onRegionClick(id);
+      return;
     }
+    p.onBackgroundClick?.();
   };
 
   /** Capture can throw when the pointer is already gone (a quick touchpad tap). The gesture still works. */

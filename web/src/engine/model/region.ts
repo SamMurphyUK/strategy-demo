@@ -9,6 +9,8 @@ export class Region {
   type: string = "";
   ipc_value = 0;
   owner_faction_id = "";
+  /** The power that started with this territory. Captures do not change it. */
+  original_owner_id = "";
   is_capital = false;
   has_factory = false;
   adjacent: string[] = [];
@@ -36,6 +38,7 @@ export class Region {
     region.type = String(data.type ?? "land");
     region.ipc_value = toInt(data.ipc_value ?? 0);
     region.owner_faction_id = String(data.owner_faction_id ?? "");
+    region.original_owner_id = String(data.original_owner_id ?? region.owner_faction_id);
     region.is_capital = Boolean(data.is_capital ?? false);
     region.has_factory = Boolean(data.has_factory ?? false);
     const adj: unknown[] = Array.isArray(data.adjacent) ? data.adjacent : [];
@@ -67,6 +70,9 @@ export class Region {
       type: this.type,
       ipc_value: this.ipc_value,
       owner_faction_id: this.owner_faction_id,
+      ...(this.original_owner_id !== "" && this.original_owner_id !== this.owner_faction_id
+        ? { original_owner_id: this.original_owner_id }
+        : {}),
       is_capital: this.is_capital,
       has_factory: this.has_factory,
       adjacent: this.adjacent,

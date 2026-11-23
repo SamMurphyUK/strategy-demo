@@ -36,7 +36,9 @@ import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PendingOrders } from "./panels/PendingOrders";
 import { PhasePanel } from "./panels/PhasePanel";
-import { RegionPanel } from "./panels/RegionPanel";
+import { PhaseChip } from "../hud/PhaseChip";
+import { PhaseDrawer } from "../hud/PhaseDrawer";
+import { RegionInspector } from "../hud/RegionInspector";
 import { RoomPill } from "./panels/RoomPill";
 import { TurnBar } from "./panels/TurnBar";
 import { unitName } from "./session/event_text";
@@ -230,6 +232,8 @@ export function App() {
     setEditing(false);
     setBoardGate(false);
     setCoastForPlay(false);
+    setSelection(null);
+    setSelectedRegionId("");
     setMenuOpen(true);
   }, [stashSave]);
 
@@ -239,6 +243,8 @@ export function App() {
       setEditing(false);
       setBoardGate(false);
       setCoastForPlay(false);
+      setSelection(null);
+      setSelectedRegionId("");
       setMenuOpen(false);
     },
     [game],
@@ -253,6 +259,8 @@ export function App() {
       setEditing(false);
       setBoardGate(false);
       setCoastForPlay(false);
+      setSelection(null);
+      setSelectedRegionId("");
       setMenuOpen(false);
     },
     [game],
@@ -272,12 +280,13 @@ export function App() {
     setEditing(false);
     setBoardGate(false);
     setCoastForPlay(true);
+    setSelection(null);
+    setSelectedRegionId("");
     setMenuOpen(false);
   }, [editor, game]);
 
   const [selectedRegionId, setSelectedRegionId] = useState("");
   /** Bumped when a capped fan opens the region inspector, so the panel can take focus. */
-  const [inspectorFocus, setInspectorFocus] = useState(0);
   const resolveDrop = useRef<(clientX: number, clientY: number) => string>(() => "");
   const registerDropResolver = useCallback((fn: (clientX: number, clientY: number) => string) => {
     resolveDrop.current = fn;
@@ -537,10 +546,12 @@ export function App() {
       setSelectedRegionId(regionId);
       return;
     }
-    if (selection?.kind === "stack") {
+    if (regionId === selectedRegionId) {
       setSelection(null);
+      return;
     }
-    setSelectedRegionId(regionId === selectedRegionId ? "" : regionId);
+    setSelection(null);
+    setSelectedRegionId(regionId);
   };
 
   /** How many of this stack the current faction can still move this phase. */
@@ -693,7 +704,9 @@ export function App() {
       soundManager.play(
         phase === "combat_move" && state.isRegionHostileTo(target, entry.faction_id) ? "battle_arrow_lock" : "token_drop",
       );
+      return;
     }
+    setSelection(null);
   };
 
   /** A stack dragged out of the inspector and dropped on `target`: the whole movable stack. */
@@ -735,6 +748,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setSelection(null);
+        setSelectedRegionId("");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -878,11 +892,14 @@ export function App() {
           relief={relief}
           isUnmoved={editing ? NEVER : isUnmoved}
           onRegionClick={onRegionClick}
+          onBackgroundClick={() => {
+            setSelection(null);
+            setSelectedRegionId("");
+          }}
           onRegionHover={setHoverRegionId}
           onStackClick={(regionId, entry) => selectStack(regionId, entry)}
           onOpenInspector={(regionId) => {
             setSelectedRegionId(regionId);
-            setInspectorFocus((n) => n + 1);
           }}
           registerDropResolver={registerDropResolver}
           movableMax={(regionId, entry) => (isMyTurn ? movableCount(regionId, entry) : 0)}
@@ -955,43 +972,59 @@ export function App() {
           inBattle={approach !== null || battleOnScreen !== null}
         >
           {editing && !boardGate && <EditorToolbar editor={editor} />}
-        </MapView>
-        <aside className="sidebar">
-          {editing ? (
-            <EditorPanel editor={editor} onPlaytest={playtest} />
-          ) : (
+          {!editing && !menuOpen && (
             <>
-              <PhasePanel
+              <PhaseDrawer phase={phase}>
+                <PhasePanel
+                  game={game}
+                  selection={selection}
+                  setSelection={setSelection}
+                  legalTargets={legalTargets}
+                  pending={pendingForFaction}
+                  commandsEnabled={isMyTurn}
+                  onFight={approachBattle}
+                  onStrandedCargo={focusStrandedTransport}
+                />
+              </PhaseDrawer>
+              <RegionInspector
                 game={game}
-                selection={selection}
-                setSelection={setSelection}
-                legalTargets={legalTargets}
-                pending={pendingForFaction}
+                regionId={selectedRegionId}
+                selectedKey={selection?.kind === "stack" ? selection.key : ""}
+                movableCount={movableCount}
+                onClose={() => {
+                  setSelection(null);
+                  setSelectedRegionId("");
+                }}
+                onDragStart={(entry, count) => armDrag(selectedRegionId, entry, count)}
+                onDragEnd={(entry, clientX, clientY, count) => {
+                  const target = resolveDrop.current(clientX, clientY);
+                  if (target !== "" && target !== selectedRegionId) {
+                    commitMove(selectedRegionId, entry, target, count);
+                    return;
+                  }
+                  setSelection(null);
+                }}
+              />
+              <PhaseChip
+                game={game}
                 commandsEnabled={isMyTurn}
                 onFight={approachBattle}
                 onStrandedCargo={focusStrandedTransport}
               />
+              <div className="hud-log">
+                <EventLog log={game.log} />
+              </div>
               {hoverRegionId !== "" && seaZoneCargoLabel(state, hoverRegionId) !== "" && (
                 <p className="cargo-hover">{seaZoneCargoLabel(state, hoverRegionId)}</p>
               )}
-              <RegionPanel
-                game={game}
-                regionId={selectedRegionId}
-                selection={selection}
-                focusNonce={inspectorFocus}
-                onSelectStack={selectStack}
-                onDragStart={(entry) => pickStack(selectedRegionId, entry)}
-                onDragEnd={(entry, clientX, clientY) => {
-                  const target = resolveDrop.current(clientX, clientY);
-                  if (target !== "" && target !== selectedRegionId) {
-                    dropStack(selectedRegionId, entry, target);
-                  }
-                }}
-              />
-              <EventLog log={game.log} />
             </>
           )}
-        </aside>
+        </MapView>
+        {editing && (
+          <aside className="sidebar">
+            <EditorPanel editor={editor} onPlaytest={playtest} />
+          </aside>
+        )}
       </div>
       {!editing && !menuOpen && <PendingOrders game={game} commandsEnabled={isMyTurn} onCancelled={() => setSelection(null)} />}
       {menuOpen && (

@@ -3,6 +3,7 @@ import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import type { Dict, PurchaseLine } from "../model/types";
 import { Unit } from "../model/unit";
+import { applyFactory, isFactoryKind } from "./factoryRules";
 
 export class PlacementEngine {
   private _seq: number;
@@ -102,6 +103,14 @@ export class PlacementEngine {
 
   private addToRegion(rid: string, faction: string, entry: Dict): void {
     const state = this.state;
+    const unitTypeId = String(entry.unit_type_id ?? "");
+    if (isFactoryKind(unitTypeId)) {
+      const count = Math.max(0, Math.trunc(Number(entry.count ?? 1)));
+      for (let i = 0; i < count; i += 1) {
+        applyFactory(state, faction, unitTypeId, rid);
+      }
+      return;
+    }
     if (!(rid in state.region_units)) {
       state.region_units[rid] = [];
     }

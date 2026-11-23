@@ -383,6 +383,7 @@ function moveFactionKey<T>(record: Record<string, T>, from: string, to: string):
 function claimClassicBoard(state: GameState): void {
   for (const region of Object.values(state.regions)) {
     region.owner_faction_id = globalPower(region.owner_faction_id);
+    region.original_owner_id = globalPower(region.original_owner_id);
   }
   for (const stacks of Object.values(state.region_units)) {
     for (const entry of stacks) {

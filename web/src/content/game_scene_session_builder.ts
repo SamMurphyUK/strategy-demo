@@ -53,8 +53,10 @@ export function buildMapData(mapJson: Dict): Dict {
       type: regionTypeFromMetadata(meta, regionId),
       ipc_value: Math.trunc(Number(meta.ipc ?? 0)),
       owner_faction_id: owner,
+      original_owner_id: owner,
       is_capital: Boolean(meta.victory ?? false),
-      has_factory: Boolean(meta.factory ?? false),
+      has_factory: Boolean(meta.factory ?? false) || meta.factory_size === "major" || meta.factory_size === "minor",
+      major_factory: meta.factory_size === "major" || (meta.factory === true && meta.factory_size !== "minor"),
     });
   }
   return {

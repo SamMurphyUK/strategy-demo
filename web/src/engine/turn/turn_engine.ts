@@ -4,6 +4,7 @@ import { beginMovementPhase } from "../movement/phase_orders";
 import { lockPatrols } from "../rules/optional/airAndNavalRaiding";
 import { repairCapitalShips } from "../rules/optional/facilitiesResolver";
 import { advanceGlobalRound } from "../rules/optional/global1940Evaluator";
+import { snapshotProduction } from "../placement/productionCap";
 
 export const PHASES = [
   "purchase",
@@ -30,6 +31,7 @@ export class TurnEngine {
     state.clearFoughtThisRound();
     repairCapitalShips(state, state.current_faction_id);
     this.recordFactories();
+    snapshotProduction(state);
     return [
       GameEvent.create(
         GameEventType.PHASE_CHANGED,
@@ -44,6 +46,9 @@ export class TurnEngine {
     const state = this.state;
     const oldPhase = state.current_phase;
     const idx = (PHASES as readonly string[]).indexOf(state.current_phase);
+    if (oldPhase === "mobilize") {
+      snapshotProduction(state);
+    }
     if (idx < PHASES.length - 1) {
       state.current_phase = PHASES[idx + 1];
       this.syncMovementTracking(oldPhase, state.current_phase);
