@@ -16,7 +16,8 @@ import { GameState, type StateSnapshot } from "../model/game_state";
 import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
-import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
+import { endCombatMoveGate } from "../movement/combat_move_gate";
+import { assaultError, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
@@ -372,9 +373,9 @@ export class GameSessionStub {
 
       case CommandType.END_PHASE: {
         if (this.state.current_phase === "combat_move") {
-          const cargo = strandedCargoGate(this.state);
-          if (!cargo.advance) {
-            return { result_type: "error", error: { code: "CARGO_STRANDED", message: cargo.warning }, events: [] };
+          const gate = endCombatMoveGate(this.state);
+          if (!gate.advance) {
+            return { result_type: "error", error: { code: gate.code, message: gate.warning }, events: [] };
           }
         }
         let forfeitEvents: GameEvent[] = [];

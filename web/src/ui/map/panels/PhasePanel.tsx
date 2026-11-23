@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { describeStranded, fuelRemaining, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
-import { combatCargoCommit, strandedCargoGate } from "../../../engine/transport/cargo_rules";
+import { endCombatMoveGate } from "../../../engine/movement/combat_move_gate";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Battle } from "../../../engine/combat/combat";
 import type { PurchaseLine } from "../../../engine/model/types";
@@ -51,7 +51,7 @@ export function PhasePanel({
     setStagedIpc((prev) => (prev === total ? prev : total));
   }, []);
   const purchaseGate = purchasePhaseAdvance(phase === "purchase" ? stagedIpc : 0);
-  const cargoGate = phase === "combat_move" ? strandedCargoGate(state) : { advance: true, seaZoneId: "", warning: "" };
+  const moveGate = phase === "combat_move" ? endCombatMoveGate(state) : { advance: true, regionId: "", warning: "", code: "" as const };
 
   return (
     <section className="panel phase-panel">
@@ -97,7 +97,7 @@ export function PhasePanel({
           </button>
         )}
         {mustReturn !== "" && <p className="warn">{mustReturn}</p>}
-        {cargoGate.warning !== "" && <p className="warn">{cargoGate.warning}</p>}
+        {moveGate.warning !== "" && <p className="warn">{moveGate.warning}</p>}
         {mustPlace !== "" && <p className="warn">{mustPlace}</p>}
         {doomed.length > 0 && (
           <p className="warn">{describeStranded(state, doomed)} will be lost when the phase ends.</p>
@@ -112,8 +112,8 @@ export function PhasePanel({
                 setBasketWarning(true);
                 return;
               }
-              const cargo = combatCargoCommit(state, onStrandedCargo);
-              if (!cargo.advance) {
+              if (!moveGate.advance) {
+                onStrandedCargo?.(moveGate.regionId);
                 return;
               }
               setBasketWarning(false);

@@ -5,6 +5,7 @@ import type { UnitStackEntry } from "../model/types";
 import { normalizeUnitTypeAndFaction } from "../presentation/region_unit_display";
 import { airRangeBonus, carryAirbaseLaunch } from "../rules/optional/facilitiesResolver";
 import { airTransitCost, friendlyPatrolCovers, hasActivePatrols, patrolAirReach } from "../rules/optional/airAndNavalRaiding";
+import { hasTech } from "../rules/optional/techTree";
 
 export interface StrandedPlane {
   regionId: string;
@@ -83,8 +84,18 @@ export function fuelSpent(state: GameState, factionId: string, regionId: string,
   return ledger + pending;
 }
 
+/** +1 while Long-Range Aircraft is unlocked. The flag keeps this at zero. */
+export function longRangeBonus(state: GameState, factionId: string): number {
+  return hasTech(state, factionId, "long_range_aircraft") ? 1 : 0;
+}
+
+/**
+ * Printed movement, plus one when the stack started on an operational airbase,
+ * plus one for Long-Range Aircraft, minus the fuel already spent.
+ */
 export function fuelRemaining(state: GameState, factionId: string, regionId: string, unitType: string): number {
-  const bonus = airRangeBonus(state, factionId, regionId, unitType);
+  const startedAtAirbase = airRangeBonus(state, factionId, regionId, unitType);
+  const bonus = startedAtAirbase + longRangeBonus(state, factionId);
   return Math.max(0, airMovement(state, unitType) + bonus - fuelSpent(state, factionId, regionId, unitType));
 }
 

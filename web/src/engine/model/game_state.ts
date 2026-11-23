@@ -131,18 +131,25 @@ export class GameState {
   researchPity: Record<string, number> = {};
   /** Faction id → techs waiting for the purchase-phase roll. Absent from snapshots. */
   researchPending: Record<string, string[]> = {};
+  /** Sea zones that launched a naval raid this combat move. Absent from snapshots. */
+  combatRaids: string[] = [];
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS
   // ---------------------------------------------------------
 
   applyCampaignLaunch(raw: unknown): void {
-    const launch = normalizeLaunch(raw);
-    this.scenarioId = launch.scenarioId;
-    this.rulesetConfig = launch.ruleset;
+    this.hydrateCampaignLaunch(raw);
     if (this.scenarioId === "SCENARIO_GLOBAL_1940") {
       installGlobal1940(this);
     }
+  }
+
+  /** Rules only. A missing save is 1942 Quick with every toggle off. Does not rebuild the board. */
+  hydrateCampaignLaunch(raw: unknown): void {
+    const launch = normalizeLaunch(raw);
+    this.scenarioId = launch.scenarioId;
+    this.rulesetConfig = launch.ruleset;
   }
 
   getAdjacentRegions(regionId: string): string[] {
@@ -309,6 +316,7 @@ export class GameState {
     clearInPlace(this.units_attacking_this_phase);
     clearInPlace(this.air_movement_spent);
     clearInPlace(this.airbase_launch);
+    this.combatRaids = [];
     clearInPlace(this.territories_captured_this_turn);
     clearInPlace(this.naval_battles_this_turn);
     this.amphibious_landings = [];

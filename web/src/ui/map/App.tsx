@@ -17,7 +17,8 @@ import {
   type MapCamera,
   panToTerritory,
 } from "./combatCamera";
-import { movesOnlyInNoncombat, seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
+import { endCombatMoveGate } from "../../engine/movement/combat_move_gate";
+import { movesOnlyInNoncombat, seaZoneCargoLabel, transportSeaZone } from "../../engine/transport/cargo_rules";
 import { holdMarks } from "./shipHold";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorStart } from "./editor/EditorStart";
@@ -50,7 +51,7 @@ import { UnitBakeReviewPanel } from "../../art/UnitBakeReviewPanel";
 import { MainMenu } from "./menu/MainMenu";
 import { readCampaignSaves, writeCampaignSave, type CampaignSave } from "./menu/campaignSave";
 import { type PlayChoice } from "./session/play_map";
-import { launchForScenario, type CampaignLaunchConfig } from "../../engine/types/ruleset";
+import { launchForScenario, legacyLaunch, type CampaignLaunchConfig } from "../../engine/types/ruleset";
 import { NewCampaignModal, draftLaunch, type CampaignDraft } from "./menu/NewCampaignModal";
 import { useCampaignSession } from "./session/use_campaign_session";
 
@@ -246,11 +247,9 @@ export function App() {
   const resumeSave = useCallback(
     (save: CampaignSave) => {
       const choice: PlayChoice = { id: save.mapId, name: save.mapName, map: save.map };
-      game.newGame(save.seed, choice);
+      game.newGame(save.seed, choice, legacyLaunch());
       game.restore(save.snapshot);
-      if (save.launch) {
-        game.applyLaunch(save.launch);
-      }
+      game.hydrateLaunch(save.launch);
       setEditing(false);
       setBoardGate(false);
       setCoastForPlay(false);
@@ -743,7 +742,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "combat_move" || strandedCargoGate(state).advance) {
+    if (phase !== "combat_move" || endCombatMoveGate(state).advance) {
       setWarningSea("");
     }
   }, [phase, version, state]);

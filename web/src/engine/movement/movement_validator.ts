@@ -3,6 +3,7 @@ import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { adjustedMoveRange, airRangeBonus } from "../rules/optional/facilities";
+import { hasTech } from "../rules/optional/techTree";
 import { airTransitCost, hasActivePatrols, patrolAirReach, patrolGrounded } from "../rules/optional/airAndNavalRaiding";
 import { commandedFactions } from "../rules/optional/global1940Evaluator";
 import { movementEnterCost, terrainActive } from "../rules/optional/terrain";
@@ -34,6 +35,9 @@ export class MovementValidator {
     }
     let moveRange = adjustedMoveRange(state, unitTypeId, start, ruleset.getUnitMoveRange(unitTypeId, state), factionId);
     if (isAirUnit(state, unitTypeId) && airRangeBonus(state, factionId, start, unitTypeId) > 0) {
+      moveRange += 1;
+    }
+    if (isAirUnit(state, unitTypeId) && hasTech(state, factionId, "long_range_aircraft")) {
       moveRange += 1;
     }
 

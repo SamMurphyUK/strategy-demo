@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { planesLostMessage, planesMustLandMessage, strandedPlanes } from "../../../engine/air/air_fuel";
-import { strandedCargoGate } from "../../../engine/transport/cargo_rules";
+import { endCombatMoveGate } from "../../../engine/movement/combat_move_gate";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import {
@@ -41,7 +41,10 @@ export interface GameSessionHandle {
   /** The board as a snapshot the host would broadcast. */
   capture(): StubStateSnapshot;
   /** Puts a saved snapshot back on the live session. */
+  restore(snapshot: StubStateSnapshot): void;
   applyLaunch(launch: CampaignLaunchConfig): void;
+  /** Rules from a save. A missing launch is 1942 Quick with every toggle off. */
+  hydrateLaunch(launch?: CampaignLaunchConfig): void;
   /** `demo`, or the id of the saved version this game was started from. */
   mapId: string;
   mapName: string;
@@ -102,11 +105,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
         }
       }
       if (type === "end_phase" && session.state.current_phase === "combat_move") {
-        const cargo = strandedCargoGate(session.state);
-        if (!cargo.advance) {
-          append([{ kind: "error", text: cargo.warning }]);
+        const gate = endCombatMoveGate(session.state);
+        if (!gate.advance) {
+          append([{ kind: "error", text: gate.warning }]);
           setVersion((v) => v + 1);
-          return { result_type: "error", error: { code: "CARGO_STRANDED", message: cargo.warning }, events: [] };
+          return { result_type: "error", error: { code: gate.code, message: gate.warning }, events: [] };
         }
       }
       if (type === "end_phase" && session.state.current_phase === "noncombat_move") {
@@ -224,6 +227,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
     setVersion((v) => v + 1);
   }, []);
 
+  const hydrateLaunch = useCallback((launch?: CampaignLaunchConfig) => {
+    sessionRef.current?.state.hydrateCampaignLaunch(launch);
+    setVersion((v) => v + 1);
+  }, []);
+
   const restore = useCallback((snapshot: StubStateSnapshot) => {
     const session = sessionRef.current;
     if (!session) {
@@ -248,10 +256,11 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
       capture,
       restore,
       applyLaunch,
+      hydrateLaunch,
       mapId: choice.id,
       mapName: choice.name,
       map: choice.map,
     }),
-    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, capture, restore, applyLaunch, choice],
+    [version, seed, log, send, cancelPhaseOrder, applyRemote, noteError, newGame, capture, restore, applyLaunch, hydrateLaunch, choice],
   );
 }

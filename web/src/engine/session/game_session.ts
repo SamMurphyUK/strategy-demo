@@ -7,7 +7,8 @@ import { GameState, type StateSnapshot } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
-import { assaultError, strandedCargoGate, unloadError } from "../transport/cargo_rules";
+import { endCombatMoveGate } from "../movement/combat_move_gate";
+import { assaultError, unloadError } from "../transport/cargo_rules";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
 import { PlacementEngine } from "../placement/placement";
 import { PCG, type PcgSeed } from "../rng/pcg";
@@ -181,11 +182,11 @@ export class GameSession {
 
       case CommandType.END_PHASE: {
         if (this.state.current_phase === "combat_move") {
-          const cargo = strandedCargoGate(this.state);
-          if (!cargo.advance) {
+          const gate = endCombatMoveGate(this.state);
+          if (!gate.advance) {
             return {
               result_type: "error",
-              error: { code: "CARGO_STRANDED", message: cargo.warning },
+              error: { code: gate.code, message: gate.warning },
               events: [],
               new_state: this.state.toSnapshot(),
             };

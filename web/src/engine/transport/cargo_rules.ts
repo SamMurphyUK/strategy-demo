@@ -5,6 +5,9 @@ import type { CargoLine } from "../model/types";
 export const STRANDED_CARGO_MESSAGE =
   "Units embarked during Combat Move must disembark into an invasion or have their embark order cancelled before ending Combat Move.";
 
+export const HOSTILE_COAST_MESSAGE =
+  "A loaded transport is beside a hostile coast. Unload or raid before ending Combat Move.";
+
 export interface StrandedCargo {
   transportInstanceId: string;
   seaZoneId: string;
@@ -134,6 +137,59 @@ export function strandedCombatCargo(state: GameState): StrandedCargo[] {
     });
   }
   return stranded;
+}
+
+function transportCommitted(state: GameState, instanceId: string): boolean {
+  for (const assault of state.pending_amphibious_assaults) {
+    if (String(assault.transport_instance_id ?? "") === instanceId) {
+      return true;
+    }
+  }
+  for (const order of state.phase_orders) {
+    if (order.transportInstanceId !== instanceId) {
+      continue;
+    }
+    if (order.kind === "amphibious_assault" || order.kind === "unload_transport") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function besideHostileCoast(state: GameState, seaZoneId: string, factionId: string): boolean {
+  for (const regionId of state.getAdjacentRegions(seaZoneId)) {
+    const region = state.regions[regionId];
+    if (region?.isLandRegion() && state.isRegionHostileTo(regionId, factionId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Sea zone of a loaded transport that is still beside a hostile coast, or "". */
+export function hostileCoastTransport(state: GameState): string {
+  if (state.current_phase !== "combat_move") {
+    return "";
+  }
+  const factionId = state.current_faction_id;
+  const raided = new Set(state.combatRaids);
+  for (const instanceId of Object.keys(state.transport_instances)) {
+    if (!transportOwnedBy(state, instanceId, factionId)) {
+      continue;
+    }
+    if (cargoCount(state.transport_instances[instanceId]?.cargo) <= 0) {
+      continue;
+    }
+    if (transportCommitted(state, instanceId)) {
+      continue;
+    }
+    const sea = transportSeaZone(state, instanceId);
+    if (raided.has(sea) || !besideHostileCoast(state, sea, factionId)) {
+      continue;
+    }
+    return sea;
+  }
+  return "";
 }
 
 export function strandedCargoGate(state: GameState): CargoCommit {

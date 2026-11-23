@@ -717,6 +717,7 @@ export function resolveNavalRaid(
     if (target.isSeaRegion()) {
       moveRaiders(state, factionId, from, to);
     }
+    noteCombatRaid(state, from);
     return { ok: true, error: "", pinned: true, harborDisabled: false, raiderLosses: 0, defenderLosses: 0 };
   }
   const guns = coastalGuns(state, factionId, to);
@@ -741,7 +742,14 @@ export function resolveNavalRaid(
   const defenderLosses = applyLosses(state, [...ships, ...guns], raiderHits);
   const raiderLosses = applyLosses(state, raiders, gunHits);
   const harborDisabled = ships.reduce((sum, line) => sum + line.count, 0) === 0 && disableHarbor(state, factionId, to);
+  noteCombatRaid(state, from);
   return { ok: true, error: "", pinned: false, harborDisabled, raiderLosses, defenderLosses };
+}
+
+function noteCombatRaid(state: GameState, seaZoneId: string): void {
+  if (seaZoneId !== "" && !state.combatRaids.includes(seaZoneId)) {
+    state.combatRaids.push(seaZoneId);
+  }
 }
 
 function raidTarget(state: GameState, factionId: string, regionId: string): boolean {
