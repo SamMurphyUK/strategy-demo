@@ -3,6 +3,7 @@ import type { GameState } from "../model/game_state";
 import { beginMovementPhase } from "../movement/phase_orders";
 import { lockPatrols } from "../rules/optional/airAndNavalRaiding";
 import { repairCapitalShips } from "../rules/optional/facilitiesResolver";
+import { advanceGlobalRound } from "../rules/optional/global1940Evaluator";
 
 export const PHASES = [
   "purchase",
@@ -83,6 +84,7 @@ export class TurnEngine {
     if (nextIdx === 0) {
       state.game_round += 1;
       state.clearFoughtThisRound();
+      advanceGlobalRound(state);
     }
     state.current_phase = PHASES[0];
     state.clearMovementPhaseTracking();

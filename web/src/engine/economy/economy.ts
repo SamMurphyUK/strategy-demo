@@ -3,6 +3,7 @@ import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { convoyRaidLoss } from "../rules/optional/facilities";
+import { commandedIncome, globalObjectivePay, wartimeStipend } from "../rules/optional/global1940Evaluator";
 import { objectiveBonus } from "../rules/optional/objectives";
 
 export class EconomyEngine {
@@ -31,7 +32,13 @@ export class EconomyEngine {
   }
 
   collectIncome(factionId: string): GameEvent[] {
-    const income = this.calculateIncome(factionId) + objectiveBonus(this.state, factionId) - convoyRaidLoss(this.state, factionId);
+    const income =
+      this.calculateIncome(factionId) +
+      commandedIncome(this.state, factionId) +
+      objectiveBonus(this.state, factionId) +
+      globalObjectivePay(this.state, factionId) +
+      wartimeStipend(this.state, factionId) -
+      convoyRaidLoss(this.state, factionId);
     this.state.ipc[factionId] = (this.state.ipc[factionId] ?? 0) + income;
     return [
       GameEvent.create(

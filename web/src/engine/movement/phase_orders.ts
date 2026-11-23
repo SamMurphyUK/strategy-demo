@@ -14,6 +14,7 @@ import { MovementEngine } from "./movement";
 import { MovementValidator } from "./movement_validator";
 import { assaultError, transportSeaZone, unloadError } from "../transport/cargo_rules";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
+import { noteOffensive } from "../rules/optional/global1940Evaluator";
 
 export interface MoveOrder {
   id: string;
@@ -130,6 +131,9 @@ export function applyRecordedMove(state: GameState, command: Command, movement: 
       }
     } else {
       going.push(move);
+      if (state.current_phase === "combat_move") {
+        noteOffensive(state, command.player_id, String(move.to_region_id ?? ""));
+      }
     }
   }
   const events = movement.processMove(commandWithMoves(command, going));

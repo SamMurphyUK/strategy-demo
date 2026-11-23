@@ -1,5 +1,6 @@
 import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
+import { scoreGlobalVictory } from "../rules/optional/global1940Evaluator";
 
 export class VictoryEngine {
   private _seq: number;
@@ -15,6 +16,21 @@ export class VictoryEngine {
     const state = this.state;
     if (state.game_over) {
       return [];
+    }
+    if (state.scenarioId === "SCENARIO_GLOBAL_1940") {
+      const scored = scoreGlobalVictory(state);
+      if (scored == null) {
+        return [];
+      }
+      state.game_over = true;
+      state.winner_faction_id = scored.winner;
+      return [
+        GameEvent.create(
+          GameEventType.GAME_FINISHED,
+          { winner_faction_id: scored.winner, reason: scored.reason },
+          this.nextSeq(),
+        ),
+      ];
     }
     for (const faction of Object.keys(state.factions)) {
       let controlsAll = true;

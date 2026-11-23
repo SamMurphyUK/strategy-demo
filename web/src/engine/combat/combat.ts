@@ -7,6 +7,7 @@ import type { PCG } from "../rng/pcg";
 import { forgetDepartedAir } from "../air/air_fuel";
 import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
 import { neutralDomino } from "../rules/optional/objectives";
+import { noteOffensive } from "../rules/optional/global1940Evaluator";
 import { optionalCombatRanks } from "../rules/optional/combat_ranks";
 import { guerrillaSlipAway, guerrillaSurpriseActive } from "../rules/optional/terrainResolver";
 import { capitalHullDamage, facilitiesActive, planScramble, type ScrambleLift } from "../rules/optional/facilitiesResolver";
@@ -462,6 +463,7 @@ export class CombatEngine {
 
   private openBattle(battle: Battle): GameEvent[] {
     neutralDomino(this.state, battle.region_id, battle.attacker_faction_id);
+    noteOffensive(this.state, battle.attacker_faction_id, battle.region_id);
     const active: ActiveBattle = {
       region_id: battle.region_id,
       attacker_faction_id: battle.attacker_faction_id,

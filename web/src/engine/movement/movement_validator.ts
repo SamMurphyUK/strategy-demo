@@ -4,6 +4,7 @@ import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { adjustedMoveRange, airRangeBonus } from "../rules/optional/facilities";
 import { airTransitCost, hasActivePatrols, patrolAirReach, patrolGrounded } from "../rules/optional/airAndNavalRaiding";
+import { commandedFactions } from "../rules/optional/global1940Evaluator";
 import { movementEnterCost, terrainActive } from "../rules/optional/terrain";
 import type { Ruleset } from "../rules/ruleset";
 import {
@@ -253,9 +254,11 @@ export class MovementValidator {
 
   private availableStackCount(regionId: string, factionId: string, unitTypeId: string, state: GameState): number {
     let total = 0;
-    for (const entry of state.getFactionUnitsInRegion(regionId, factionId)) {
-      if (String(entry.unit_type_id ?? "") === unitTypeId && !("instance_id" in entry)) {
-        total += Math.trunc(Number(entry.count ?? 0));
+    for (const owner of [factionId, ...commandedFactions(state, factionId)]) {
+      for (const entry of state.getFactionUnitsInRegion(regionId, owner)) {
+        if (String(entry.unit_type_id ?? "") === unitTypeId && !("instance_id" in entry)) {
+          total += Math.trunc(Number(entry.count ?? 0));
+        }
       }
     }
     return total;

@@ -2,6 +2,7 @@ import type { GameState } from "../model/game_state";
 import type { Region } from "../model/region";
 import type { Dict } from "../model/types";
 import { depotBuildsBlocked, factoryBuildCap } from "../rules/optional/bombingResolver";
+import { chinaPlacement } from "../rules/optional/global1940Evaluator";
 import type { Ruleset } from "../rules/ruleset";
 import { MoveError, ValidationResult } from "../validation/validation_types";
 
@@ -25,6 +26,15 @@ export class PlacementValidator {
     if (region == null) {
       result.valid = false;
       result.errors.push(`Region does not exist: ${regionId}`);
+      return result;
+    }
+    const china = chinaPlacement(state, factionId, regionId, unitTypeId, count);
+    if (china === "ok") {
+      return result;
+    }
+    if (china != null) {
+      result.valid = false;
+      result.errors.push(china);
       return result;
     }
     if (!region.has_factory) {

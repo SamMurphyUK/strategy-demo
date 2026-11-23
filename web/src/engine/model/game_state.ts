@@ -1,5 +1,6 @@
 import type { MoveOrder, PhaseStartSnapshot } from "../movement/phase_orders";
 import type { NeutralBloc, NationalObjective } from "../rules/optional/objectives";
+import { installGlobal1940, commandedFactions } from "../rules/optional/global1940Evaluator";
 import type { UnitExperience } from "../rules/optional/veterancy";
 import { DEFAULT_LEGACY_RULESET, normalizeLaunch, type OptionalRulesetConfig, type ScenarioId } from "../types/ruleset";
 import type { ActiveBattle } from "./battle";
@@ -118,6 +119,18 @@ export class GameState {
   veteranRerollRound: Record<string, number> = {};
   nationalObjectives: NationalObjective[] = [];
   neutralBlocs: NeutralBloc[] = [];
+  /** Faction id → PEACETIME or WARTIME. Absent from snapshots. */
+  warStatus: Record<string, "PEACETIME" | "WARTIME"> = {};
+  /** Faction id → the round wartime income begins. Absent from snapshots. */
+  wartimeBonusRound: Record<string, number> = {};
+  /** Faction id → who plays that power. China is played by the United States. Absent from snapshots. */
+  playedBy: Record<string, string> = {};
+  /** Set once Free France has joined the United Kingdom. Absent from snapshots. */
+  freeFranceAbsorbed = false;
+  /** Faction id → pips carried into the next research roll. Absent from snapshots. */
+  researchPity: Record<string, number> = {};
+  /** Faction id → techs waiting for the purchase-phase roll. Absent from snapshots. */
+  researchPending: Record<string, string[]> = {};
 
   // ---------------------------------------------------------
   // REGION + ADJACENCY HELPERS
@@ -127,6 +140,9 @@ export class GameState {
     const launch = normalizeLaunch(raw);
     this.scenarioId = launch.scenarioId;
     this.rulesetConfig = launch.ruleset;
+    if (this.scenarioId === "SCENARIO_GLOBAL_1940") {
+      installGlobal1940(this);
+    }
   }
 
   getAdjacentRegions(regionId: string): string[] {
@@ -224,17 +240,22 @@ export class GameState {
   }
 
   movableStackCount(factionId: string, regionId: string, unitTypeId: string): number {
+    const owners = [factionId, ...commandedFactions(this, factionId)];
     let total = 0;
-    for (const entry of this.getFactionUnitsInRegion(regionId, factionId)) {
-      if (String(entry.unit_type_id ?? "") === unitTypeId && !("instance_id" in entry)) {
-        total += Math.trunc(Number(entry.count ?? 0));
+    for (const owner of owners) {
+      let have = 0;
+      for (const entry of this.getFactionUnitsInRegion(regionId, owner)) {
+        if (String(entry.unit_type_id ?? "") === unitTypeId && !("instance_id" in entry)) {
+          have += Math.trunc(Number(entry.count ?? 0));
+        }
       }
+      const key = this.movementStackKey(owner, regionId, unitTypeId);
+      const arrived = Math.trunc(Number(this.units_arrived_this_phase[key] ?? 0));
+      const embarked = Math.trunc(Number(this.units_embarked_this_phase[key] ?? 0));
+      const attacking = Math.trunc(Number(this.units_attacking_this_phase[key] ?? 0));
+      total += Math.max(0, have - arrived - embarked - attacking);
     }
-    const key = this.movementStackKey(factionId, regionId, unitTypeId);
-    const arrived = Math.trunc(Number(this.units_arrived_this_phase[key] ?? 0));
-    const embarked = Math.trunc(Number(this.units_embarked_this_phase[key] ?? 0));
-    const attacking = Math.trunc(Number(this.units_attacking_this_phase[key] ?? 0));
-    return Math.max(0, total - arrived - embarked - attacking);
+    return total;
   }
 
   recordStackEmbark(factionId: string, regionId: string, unitTypeId: string, count: number): void {

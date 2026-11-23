@@ -13,6 +13,10 @@ export interface NeutralBloc {
   members: string[];
   /** The power the rest of the bloc joins when one member is attacked. */
   joins: string;
+  /** Join the other side from the invader instead of the fixed `joins` power. */
+  oppose?: boolean;
+  /** Infantry placed on each territory that flips. Omitted blocs do not spawn any. */
+  garrison?: number;
 }
 
 export function objectiveBonus(state: GameState, factionId: string): number {
@@ -32,6 +36,27 @@ export function objectiveBonus(state: GameState, factionId: string): number {
   return bonus;
 }
 
+const AXIS = new Set(["germany", "italy", "japan"]);
+
+function sideJoined(state: GameState, bloc: NeutralBloc, attackerId: string): string {
+  if (!bloc.oppose) {
+    return bloc.joins;
+  }
+  const axis = AXIS.has(attackerId) || state.factions[attackerId]?.team === "axis";
+  return axis ? "united_kingdom" : "germany";
+}
+
+function spawnGarrison(state: GameState, regionId: string, factionId: string, count: number): void {
+  const units = state.region_units[regionId] ?? [];
+  state.region_units[regionId] = units;
+  const found = units.find((entry) => entry.faction_id === factionId && entry.unit_type_id === "infantry" && entry.instance_id == null);
+  if (found) {
+    found.count += count;
+    return;
+  }
+  units.push({ faction_id: factionId, unit_type_id: "infantry", count });
+}
+
 /** Attacking one member of a bloc brings the others in on `joins`. Returns the regions that flipped. */
 export function neutralDomino(state: GameState, attackedRegionId: string, attackerId: string): string[] {
   if (!state.rulesetConfig.nationalObjectivesAndNeutrals) {
@@ -39,7 +64,8 @@ export function neutralDomino(state: GameState, attackedRegionId: string, attack
   }
   const flipped: string[] = [];
   for (const bloc of state.neutralBlocs) {
-    if (!bloc.members.includes(attackedRegionId) || bloc.joins === "" || state.sameTeam(bloc.joins, attackerId)) {
+    const joins = sideJoined(state, bloc, attackerId);
+    if (!bloc.members.includes(attackedRegionId) || joins === "" || state.sameTeam(joins, attackerId)) {
       continue;
     }
     for (const regionId of bloc.members) {
@@ -47,10 +73,13 @@ export function neutralDomino(state: GameState, attackedRegionId: string, attack
         continue;
       }
       const region = state.regions[regionId];
-      if (region == null || region.owner_faction_id === bloc.joins) {
+      if (region == null || region.owner_faction_id === joins) {
         continue;
       }
-      region.owner_faction_id = bloc.joins;
+      region.owner_faction_id = joins;
+      if ((bloc.garrison ?? 0) > 0) {
+        spawnGarrison(state, regionId, joins, bloc.garrison ?? 0);
+      }
       flipped.push(regionId);
     }
   }

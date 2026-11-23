@@ -23,6 +23,7 @@ import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { Ruleset } from "../rules/ruleset";
 import { standDownPatrols } from "../rules/optional/airAndNavalRaiding";
+import { buyResearch, rollResearchPhase, type ResearchOrder } from "../rules/optional/techTree";
 import { commitPurchaseRepairs, planPurchaseRepairs, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
 import { classifyUnit } from "../types/ruleset";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
@@ -207,16 +208,39 @@ export class GameSessionStub {
           if (stood != null) {
             return { result_type: "error", error: { code: "PURCHASE_FAILED", message: stood }, events: [] };
           }
-          if (repairLines.length === 0 && this.purchaseLines(cmd).length === 0) {
+          if (repairLines.length === 0 && this.purchaseLines(cmd).length === 0 && this.researchOrders(cmd).length === 0) {
             events = [];
             break;
           }
         }
+        const researchOrders = this.researchOrders(cmd);
+        const pendingBefore = [...(this.state.researchPending[cmd.player_id] ?? [])];
+        const researchError = researchOrders.length > 0 ? buyResearch(this.state, cmd.player_id, researchOrders) : null;
+        if (researchError != null) {
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: researchError }, events: [] };
+        }
+        const researchSpend = researchOrders.reduce((sum, order) => sum + order.count, 0) * 5;
+        const refundResearch = () => {
+          if (researchSpend <= 0) {
+            return;
+          }
+          this.state.modifyIpc(cmd.player_id, researchSpend);
+          if (pendingBefore.length === 0) {
+            delete this.state.researchPending[cmd.player_id];
+          } else {
+            this.state.researchPending[cmd.player_id] = pendingBefore;
+          }
+        };
         const planned = repairLines.length > 0 ? planPurchaseRepairs(this.state, cmd.player_id, repairLines) : null;
         if (planned != null && "error" in planned) {
+          refundResearch();
           return { result_type: "error", error: { code: "PURCHASE_FAILED", message: planned.error }, events: [] };
         }
         const unitLines = this.purchaseLines(cmd);
+        if (unitLines.length === 0 && planned == null && researchSpend > 0) {
+          events = [];
+          break;
+        }
         if (planned != null && !("error" in planned) && unitLines.length === 0) {
           commitPurchaseRepairs(this.state, cmd.player_id, planned);
           this._seq += 1;
@@ -242,6 +266,7 @@ export class GameSessionStub {
           if (planned != null && !("error" in planned) && planned.spend > 0) {
             this.state.modifyIpc(cmd.player_id, planned.spend);
           }
+          refundResearch();
           return affordError;
         }
         if (planned != null && !("error" in planned)) {
@@ -263,6 +288,7 @@ export class GameSessionStub {
               this.state.repairTokens[line.regionId] = (this.state.repairTokens[line.regionId] ?? 0) + line.spend;
             }
           }
+          refundResearch();
           return this.purchaseFailureResult(purchase, sourceId);
         }
         let newLines: Dict[] = cmd.payload.purchases ?? [];
@@ -354,6 +380,9 @@ export class GameSessionStub {
         let forfeitEvents: GameEvent[] = [];
         if (this.state.current_phase === "mobilize") {
           forfeitEvents = this.forfeitPendingAtMobilizeEnd(cmd.player_id);
+        }
+        if (this.state.current_phase === "purchase") {
+          rollResearchPhase(this.state, cmd.player_id, () => this.d6());
         }
         const endEvents = processEndPhase(
           this.state.current_phase,
@@ -1016,6 +1045,18 @@ export class GameSessionStub {
     }
     const units: unknown[] = Array.isArray(cmd.payload.units) ? cmd.payload.units : [];
     return units.filter(isDict);
+  }
+
+  private researchOrders(cmd: Command): ResearchOrder[] {
+    const lines: unknown[] = Array.isArray(cmd.payload.research) ? cmd.payload.research : [];
+    const orders: ResearchOrder[] = [];
+    for (const entry of lines) {
+      if (!isDict(entry)) {
+        continue;
+      }
+      orders.push({ tech: String(entry.tech ?? ""), count: Math.trunc(Number(entry.count ?? 1)) });
+    }
+    return orders;
   }
 
   private repairLines(cmd: Command): { regionId: string; tokens: number }[] {

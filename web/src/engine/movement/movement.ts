@@ -2,6 +2,7 @@ import type { Command } from "../model/command";
 import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import type { Dict, UnitStackEntry } from "../model/types";
+import { commandedFactions } from "../rules/optional/global1940Evaluator";
 
 export class MovementEngine {
   private _seq: number;
@@ -80,18 +81,43 @@ export class MovementEngine {
   }
 
   private transfer(from: string, to: string, faction: string, entry: Dict): void {
-    this.removeFromRegion(from, faction, entry);
-    this.addToRegion(to, faction, entry);
-    if ("instance_id" in entry) {
-      this.state.recordInstanceMoved(String(entry.instance_id ?? ""));
-    } else {
-      this.state.recordStackArrival(
-        faction,
-        to,
-        String(entry.unit_type_id ?? ""),
-        Math.trunc(Number(entry.count ?? 1)),
-      );
+    const commanded = commandedFactions(this.state, faction);
+    if (commanded.length === 0 || "instance_id" in entry) {
+      this.removeFromRegion(from, faction, entry);
+      this.addToRegion(to, faction, entry);
+      if ("instance_id" in entry) {
+        this.state.recordInstanceMoved(String(entry.instance_id ?? ""));
+      } else {
+        this.state.recordStackArrival(faction, to, String(entry.unit_type_id ?? ""), Math.trunc(Number(entry.count ?? 1)));
+      }
+      return;
     }
+    let left = Math.trunc(Number(entry.count ?? 1));
+    const unitType = String(entry.unit_type_id ?? "");
+    for (const owner of [faction, ...commanded]) {
+      if (left <= 0) {
+        break;
+      }
+      const have = this.stackCount(from, owner, unitType);
+      const take = Math.min(have, left);
+      if (take <= 0) {
+        continue;
+      }
+      this.removeFromRegion(from, owner, { unit_type_id: unitType, count: take });
+      this.addToRegion(to, owner, { unit_type_id: unitType, count: take });
+      this.state.recordStackArrival(owner, to, unitType, take);
+      left -= take;
+    }
+  }
+
+  private stackCount(regionId: string, factionId: string, unitTypeId: string): number {
+    let total = 0;
+    for (const entry of this.state.getFactionUnitsInRegion(regionId, factionId)) {
+      if (String(entry.unit_type_id ?? "") === unitTypeId && entry.instance_id == null) {
+        total += Math.trunc(Number(entry.count ?? 0));
+      }
+    }
+    return total;
   }
 
   private removeFromRegion(rid: string, faction: string, entry: Dict): void {
