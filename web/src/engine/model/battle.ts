@@ -10,6 +10,8 @@ export interface BattleUnitState {
   max_hp: number;
   /** Came off a transport this combat. It cannot retreat. */
   amphibious?: boolean;
+  /** Airbase this plane scrambled from. Survivors return there. */
+  scramble_from?: string;
 }
 
 export interface BattleDie {

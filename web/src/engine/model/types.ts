@@ -10,6 +10,8 @@ export interface UnitStackEntry {
   id?: number;
   /** Legacy per-unit region used alongside `id`. */
   region?: string;
+  /** Hits missing on a capital ship. Omitted when the hull is intact. */
+  damage?: number;
 }
 
 export interface CargoLine {

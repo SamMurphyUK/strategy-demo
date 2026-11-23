@@ -1,6 +1,7 @@
 import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import { beginMovementPhase } from "../movement/phase_orders";
+import { repairCapitalShips } from "../rules/optional/facilitiesResolver";
 
 export const PHASES = [
   "purchase",
@@ -25,6 +26,7 @@ export class TurnEngine {
     state.turn_number = 1;
     state.game_round = 1;
     state.clearFoughtThisRound();
+    repairCapitalShips(state, state.current_faction_id);
     this.recordFactories();
     return [
       GameEvent.create(
@@ -81,6 +83,7 @@ export class TurnEngine {
     }
     state.current_phase = PHASES[0];
     state.clearMovementPhaseTracking();
+    repairCapitalShips(state, state.current_faction_id);
     this.recordFactories();
     events.push(
       GameEvent.create(

@@ -16,6 +16,10 @@ export class Region {
   land_cover = "";
   airbase = false;
   harbor = false;
+  /** Game round through which the airbase stays closed. Zero means it is open. */
+  airbase_disabled_until = 0;
+  /** Game round through which the harbor stays closed. Zero means it is open. */
+  harbor_disabled_until = 0;
 
   static fromDict(data: Dict): Region {
     const region = new Region();
@@ -31,6 +35,8 @@ export class Region {
     region.land_cover = String(data.land_cover ?? "");
     region.airbase = data.airbase === true;
     region.harbor = data.harbor === true;
+    region.airbase_disabled_until = toInt(data.airbase_disabled_until ?? 0);
+    region.harbor_disabled_until = toInt(data.harbor_disabled_until ?? 0);
     return region;
   }
 
@@ -55,6 +61,8 @@ export class Region {
       ...(this.land_cover !== "" ? { land_cover: this.land_cover } : {}),
       ...(this.airbase ? { airbase: true } : {}),
       ...(this.harbor ? { harbor: true } : {}),
+      ...(this.airbase_disabled_until > 0 ? { airbase_disabled_until: this.airbase_disabled_until } : {}),
+      ...(this.harbor_disabled_until > 0 ? { harbor_disabled_until: this.harbor_disabled_until } : {}),
     };
   }
 }

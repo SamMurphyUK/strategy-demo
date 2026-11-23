@@ -1,51 +1,22 @@
 import type { GameState } from "../../model/game_state";
-import { classifyUnit, type RulesetUnitType } from "../../types/ruleset";
+import { classifyUnit } from "../../types/ruleset";
+import { facilitiesActive } from "./facilitiesResolver";
 
-const SEA: ReadonlySet<RulesetUnitType> = new Set(["SUBMARINE", "DESTROYER", "CRUISER", "CARRIER", "BATTLESHIP", "TRANSPORT"]);
-const CAPITAL: ReadonlySet<RulesetUnitType> = new Set(["CARRIER", "BATTLESHIP"]);
-const AIR: ReadonlySet<RulesetUnitType> = new Set(["FIGHTER", "TACTICAL_BOMBER", "HEAVY_BOMBER"]);
-
-export function facilitiesActive(state: GameState): boolean {
-  return state.rulesetConfig.facilitiesAndPatrols === true;
-}
-
-export function adjustedMoveRange(state: GameState, unitTypeId: string, fromRegionId: string, base: number): number {
-  if (!facilitiesActive(state) || base <= 0) {
-    return base;
-  }
-  const kind = classifyUnit(unitTypeId);
-  if (kind == null) {
-    return base;
-  }
-  if (AIR.has(kind) && state.regions[fromRegionId]?.airbase === true) {
-    return base + 1;
-  }
-  if (SEA.has(kind)) {
-    for (const neighbor of state.getAdjacentRegions(fromRegionId)) {
-      const region = state.regions[neighbor];
-      if (region?.harbor === true && region.owner_faction_id !== "" && state.sameTeam(region.owner_faction_id, state.current_faction_id)) {
-        return base + 1;
-      }
-    }
-  }
-  return base;
-}
-
-/** A damaged capital ship at a friendly harbor is repaired by one hit. */
-export function harborRepair(state: GameState, factionId: string, regionId: string, unitTypeId: string, damage: number): number {
-  if (!facilitiesActive(state) || damage <= 0) {
-    return damage;
-  }
-  const kind = classifyUnit(unitTypeId);
-  if (kind == null || !CAPITAL.has(kind)) {
-    return damage;
-  }
-  const here = state.regions[regionId];
-  if (here?.harbor === true && state.sameTeam(here.owner_faction_id, factionId)) {
-    return damage - 1;
-  }
-  return damage;
-}
+export {
+  adjustedMoveRange,
+  airRangeBonus,
+  capitalHullDamage,
+  carryAirbaseLaunch,
+  facilitiesActive,
+  harborRepair,
+  harborStagingLoad,
+  navalRangeBonus,
+  operationalAirbase,
+  operationalHarbor,
+  planScramble,
+  repairCapitalShips,
+} from "./facilitiesResolver";
+export type { ScrambleLift } from "./facilitiesResolver";
 
 export interface PatrolZone {
   regionId: string;

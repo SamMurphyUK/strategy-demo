@@ -76,6 +76,8 @@ export class GameState {
   units_attacking_this_phase: Record<string, number> = {};
   /** Air movement already spent this turn, keyed `faction|region|unitType`. Combat move and noncombat share it. */
   air_movement_spent: Record<string, number> = {};
+  /** Air stacks that began this turn on an operational airbase. Absent from snapshots. */
+  airbase_launch: Record<string, boolean> = {};
   /** Land taken this turn. Aircraft cannot land there until the next turn. */
   territories_captured_this_turn: Record<string, boolean> = {};
   /** Territories where a battle was resolved during the current round. Cleared when the round advances. */
@@ -267,6 +269,7 @@ export class GameState {
     clearInPlace(this.instances_moved_this_phase);
     clearInPlace(this.units_attacking_this_phase);
     clearInPlace(this.air_movement_spent);
+    clearInPlace(this.airbase_launch);
     clearInPlace(this.territories_captured_this_turn);
     clearInPlace(this.naval_battles_this_turn);
     this.amphibious_landings = [];

@@ -9,6 +9,7 @@ import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
 import { neutralDomino } from "../rules/optional/objectives";
 import { optionalCombatRanks } from "../rules/optional/combat_ranks";
 import { guerrillaSlipAway, guerrillaSurpriseActive } from "../rules/optional/terrainResolver";
+import { capitalHullDamage, facilitiesActive, planScramble, type ScrambleLift } from "../rules/optional/facilitiesResolver";
 import { grantVictoryExperience, veteranMayReroll } from "../rules/optional/veterancy";
 import { classifyUnit } from "../types/ruleset";
 import {
@@ -168,6 +169,18 @@ export class CombatEngine {
         const ids: unknown = payload.unit_ids;
         return this.retreat(factionId, String(payload.to_region_id ?? ""), Array.isArray(ids) ? ids.map(String) : undefined);
       }
+      case "scramble": {
+        const raw: unknown[] = Array.isArray(payload.units) ? payload.units : [];
+        const picks: ScrambleLift[] = raw.map((entry) => {
+          const row = entry as Dict;
+          return {
+            fromRegionId: String(row.from_region_id ?? ""),
+            unitTypeId: String(row.unit_type_id ?? ""),
+            count: Math.trunc(Number(row.count ?? 0)),
+          };
+        });
+        return this.scramble(factionId, picks);
+      }
     }
     return null;
   }
@@ -181,6 +194,44 @@ export class CombatEngine {
       return fail("NO_BATTLE", `No battle to fight in ${regionId}`);
     }
     return { ok: true, events: this.openBattle(battle) };
+  }
+
+  /**
+   * The defender sends fighters or tactical bombers from an adjacent operational airbase.
+   * Survivors fly home when the battle ends.
+   */
+  scramble(defenderFactionId: string, picks: ScrambleLift[]): BattleCommandResult {
+    const battle = this.state.active_battle;
+    if (battle == null) {
+      return fail("NO_ACTIVE_BATTLE", "No battle is being fought");
+    }
+    if (battle.defender_faction_id !== defenderFactionId) {
+      return fail("OUT_OF_TURN", "Only the defender scrambles");
+    }
+    if (battle.stage !== "awaiting_roll" || battle.round !== 1) {
+      return fail("WRONG_BATTLE_STAGE", "Scramble happens before the first roll");
+    }
+    const planned = planScramble(this.state, battle.region_id, defenderFactionId, picks);
+    if (!planned.ok) {
+      return fail("SCRAMBLE_REJECTED", planned.reason);
+    }
+    let n = 0;
+    for (const lift of planned.lifts) {
+      this.liftStack(lift.fromRegionId, defenderFactionId, lift.unitTypeId, lift.count);
+      const maxHp = maxHpOf(this.state.unit_types[lift.unitTypeId]);
+      for (let i = 0; i < lift.count; i++) {
+        n += 1;
+        battle.defenders.push({
+          id: `scramble.${lift.fromRegionId}.${lift.unitTypeId}.${n}`,
+          faction_id: defenderFactionId,
+          unit_type_id: lift.unitTypeId,
+          hp: maxHp,
+          max_hp: maxHp,
+          scramble_from: lift.fromRegionId,
+        });
+      }
+    }
+    return { ok: true, events: [] };
   }
 
   /** Rolls round 1, or presses on into the next round from the decision. */
@@ -372,13 +423,15 @@ export class CombatEngine {
     );
     for (const entry of entries) {
       const maxHp = maxHpOf(this.state.unit_types[entry.unit_type_id]);
+      const hull = facilitiesActive(this.state) ? Math.max(0, Math.trunc(Number(entry.damage ?? 0))) : 0;
+      const hp = Math.max(1, maxHp - hull);
       if (entry.instance_id) {
         units.push({
           id: entry.instance_id,
           faction_id: factionId,
           unit_type_id: entry.unit_type_id,
           instance_id: entry.instance_id,
-          hp: maxHp,
+          hp,
           max_hp: maxHp,
         });
         continue;
@@ -390,7 +443,7 @@ export class CombatEngine {
           id: `${factionId}.${entry.unit_type_id}.${counters[entry.unit_type_id]}`,
           faction_id: factionId,
           unit_type_id: entry.unit_type_id,
-          hp: maxHp,
+          hp,
           max_hp: maxHp,
         });
       }
@@ -838,12 +891,25 @@ export class CombatEngine {
       return !fought.has(key);
     });
     const attackerStacks = this.toStacks(b.attackers);
-    const defenderStacks = this.toStacks(b.defenders);
+    const returning = new Map<string, BattleUnitState[]>();
+    const stayingDefenders = b.defenders.filter((unit) => {
+      if (unit.scramble_from && unit.scramble_from !== regionId) {
+        const group = returning.get(unit.scramble_from) ?? [];
+        group.push(unit);
+        returning.set(unit.scramble_from, group);
+        return false;
+      }
+      return true;
+    });
+    const defenderStacks = this.toStacks(stayingDefenders);
     state.region_units[regionId] = [...kept, ...defenderStacks];
     if (retreatTo !== "") {
       this.mergeInto(retreatTo, attackerStacks);
     } else {
       state.region_units[regionId].push(...attackerStacks);
+    }
+    for (const [origin, units] of returning) {
+      this.mergeInto(origin, this.toStacks(units));
     }
 
     const events: GameEvent[] = [];
@@ -879,18 +945,35 @@ export class CombatEngine {
     return [...events, finished];
   }
 
-  /** Damage is not carried out of a battle; the survivors return as plain stacks. */
+  /** Damage leaves a battle only for a capital ship while facilities are on. */
   private toStacks(units: BattleUnitState[]): UnitStackEntry[] {
     const stacks: UnitStackEntry[] = [];
+    const persist = facilitiesActive(this.state);
     for (const unit of units) {
       if (!isAlive(unit)) {
         continue;
       }
+      const damage = persist ? capitalHullDamage(unit.unit_type_id, unit.hp, unit.max_hp) : 0;
       if (unit.instance_id) {
-        stacks.push({ faction_id: unit.faction_id, unit_type_id: unit.unit_type_id, count: 1, instance_id: unit.instance_id });
+        const entry: UnitStackEntry = {
+          faction_id: unit.faction_id,
+          unit_type_id: unit.unit_type_id,
+          count: 1,
+          instance_id: unit.instance_id,
+        };
+        if (damage > 0) {
+          entry.damage = damage;
+        }
+        stacks.push(entry);
         continue;
       }
-      const existing = stacks.find((s) => s.unit_type_id === unit.unit_type_id && s.instance_id == null);
+      if (damage > 0) {
+        stacks.push({ faction_id: unit.faction_id, unit_type_id: unit.unit_type_id, count: 1, damage });
+        continue;
+      }
+      const existing = stacks.find(
+        (s) => s.unit_type_id === unit.unit_type_id && s.instance_id == null && (s.damage ?? 0) === 0,
+      );
       if (existing) {
         existing.count += 1;
       } else {
@@ -898,6 +981,25 @@ export class CombatEngine {
       }
     }
     return stacks;
+  }
+
+  private liftStack(regionId: string, factionId: string, unitTypeId: string, count: number): void {
+    const units = this.state.region_units[regionId] ?? [];
+    let left = count;
+    for (let i = units.length - 1; i >= 0 && left > 0; i--) {
+      const entry = units[i];
+      if (entry.faction_id !== factionId || entry.unit_type_id !== unitTypeId || entry.instance_id) {
+        continue;
+      }
+      const have = Math.trunc(Number(entry.count ?? 0));
+      if (have > left) {
+        entry.count = have - left;
+        left = 0;
+      } else {
+        left -= have;
+        units.splice(i, 1);
+      }
+    }
   }
 
   private removeStacks(regionId: string, stacks: UnitStackEntry[]): void {

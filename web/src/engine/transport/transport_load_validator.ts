@@ -2,6 +2,7 @@ import type { GameState } from "../model/game_state";
 import { type CargoLine, type Dict, isDict } from "../model/types";
 import type { Unit } from "../model/unit";
 import { MoveError, ValidationResult } from "../validation/validation_types";
+import { facilitiesActive, harborStagingLoad } from "../rules/optional/facilitiesResolver";
 import { assaultError, cargoFits, movesOnlyInNoncombat, transportSeaZone, unloadError } from "./cargo_rules";
 
 export class TransportLoadValidator {
@@ -27,6 +28,24 @@ export class TransportLoadValidator {
         if (this.canLoadUnits(transportId, fromRegion, [{ unit_type_id: unitTypeId, count: 1 }], factionId, state)) {
           if (!legal.includes(seaId)) {
             legal.push(seaId);
+          }
+        }
+      }
+    }
+    if (facilitiesActive(state)) {
+      for (const landId of state.getAdjacentRegions(fromRegion)) {
+        if (!state.regions[landId]?.isLandRegion()) {
+          continue;
+        }
+        for (const seaId of state.getAdjacentRegions(landId)) {
+          if (!state.regions[seaId]?.isSeaRegion() || legal.includes(seaId)) {
+            continue;
+          }
+          for (const transportId of this.friendlyTransportIds(seaId, factionId, state)) {
+            if (this.canLoadUnits(transportId, fromRegion, [{ unit_type_id: unitTypeId, count: 1 }], factionId, state)) {
+              legal.push(seaId);
+              break;
+            }
           }
         }
       }
@@ -81,7 +100,10 @@ export class TransportLoadValidator {
       return false;
     }
     const seaRegion = transportSeaZone(state, transportInstanceId);
-    if (seaRegion === "" || !state.isAdjacent(fromRegion, seaRegion)) {
+    if (seaRegion === "") {
+      return false;
+    }
+    if (!state.isAdjacent(fromRegion, seaRegion) && !harborStagingLoad(state, factionId, seaRegion, fromRegion)) {
       return false;
     }
     if (state.current_phase === "noncombat_move" && state.isRegionHostileTo(seaRegion, factionId)) {

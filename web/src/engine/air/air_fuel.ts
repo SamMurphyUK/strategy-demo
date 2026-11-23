@@ -3,6 +3,7 @@
 import type { GameState } from "../model/game_state";
 import type { UnitStackEntry } from "../model/types";
 import { normalizeUnitTypeAndFaction } from "../presentation/region_unit_display";
+import { airRangeBonus, carryAirbaseLaunch } from "../rules/optional/facilitiesResolver";
 
 export interface StrandedPlane {
   regionId: string;
@@ -82,7 +83,8 @@ export function fuelSpent(state: GameState, factionId: string, regionId: string,
 }
 
 export function fuelRemaining(state: GameState, factionId: string, regionId: string, unitType: string): number {
-  return Math.max(0, airMovement(state, unitType) - fuelSpent(state, factionId, regionId, unitType));
+  const bonus = airRangeBonus(state, factionId, regionId, unitType);
+  return Math.max(0, airMovement(state, unitType) + bonus - fuelSpent(state, factionId, regionId, unitType));
 }
 
 /**
@@ -129,9 +131,11 @@ export function noteAirArrival(
   const toKey = airKey(factionId, toRegion, unitType);
   const already = state.air_movement_spent[toKey];
   state.air_movement_spent[toKey] = already == null ? arrived : Math.max(Math.trunc(Number(already)), arrived);
-  if (airCount(state, factionId, fromRegion, unitType) <= 0) {
+  const sourceEmpty = airCount(state, factionId, fromRegion, unitType) <= 0;
+  if (sourceEmpty) {
     delete state.air_movement_spent[fromKey];
   }
+  carryAirbaseLaunch(state, factionId, fromRegion, toRegion, unitType, sourceEmpty);
 }
 
 interface CarrierStats {
