@@ -8,6 +8,9 @@ export const SHELF_FACTION_ORDER = ["GER", "USSR", "UK", "US", "JAP"] as const;
 /** Battle map key for the shaded Japanese walk, drawn from its PNGs. */
 export const POLISHED_WALK_KEY = "walk:jap:polished";
 
+/** The infantry sheet every faction plays until that faction has its own folder. */
+export const CURRENT_INFANTRY_CLIP = "jap_infantry_QUICK";
+
 export type ShelfKind = "vector" | "clips" | "picture";
 
 export interface ShelfUnit {
@@ -188,6 +191,7 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
     const preview = text(clip.preview);
     const unitId = text(clip.unitId) ?? "";
     const walk = polished && unitId === "jap_infantry";
+    const current = unitId === CURRENT_INFANTRY_CLIP;
     units.push({
       key: `clips:${dir}`,
       kind: "clips",
@@ -200,7 +204,7 @@ export function vectorShelf(manifest: unknown): ShelfUnit[] {
       stamped: false,
       preview: publicUrl(preview && preview.endsWith(".svg") && safePath(preview) ? preview : `${dir}/idle_0.svg`),
       fieldPick: walk ? POLISHED_WALK_KEY : unitId.endsWith("_QUICK") || unitId.endsWith("_v2") ? `walk:${unitId}:vector` : null,
-      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk${unitId.endsWith("_QUICK") ? ", QUICK" : unitId.endsWith("_v2") ? ", v2" : ""}, ${polished ? "polished vector" : "vector"}`,
+      label: `${factionId} ${unitTypeLabel(unitTypeId)} walk${unitId.endsWith("_QUICK") ? ", QUICK" : unitId.endsWith("_v2") ? ", v2" : ""}${current ? ", current" : ""}, ${polished ? "polished vector" : "vector"}`,
     });
   }
   return units;

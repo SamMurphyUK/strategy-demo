@@ -23,10 +23,13 @@ export class AmphibiousEngine {
     if (td == null) {
       return [];
     }
-    const cargo = (deepCopy(td.cargo) as CargoLine[]).filter(
-      (line) => !movesOnlyInNoncombat(this.state, String(line.unit_type_id ?? "")),
-    );
-    td.cargo = (td.cargo ?? []).filter((line) => movesOnlyInNoncombat(this.state, String(line.unit_type_id ?? "")));
+    const requested = Array.isArray(command.payload.units) ? command.payload.units : null;
+    const split = splitAssaultCargo(this.state, deepCopy(td.cargo ?? []) as CargoLine[], requested);
+    if (split.taken.length === 0) {
+      return [];
+    }
+    const cargo = split.taken;
+    td.cargo = split.rest;
     const aid = `amp_${String(this.state.pending_amphibious_assaults.length + 1).padStart(3, "0")}`;
     this.state.pending_amphibious_assaults.push({
       assault_id: aid,
@@ -102,6 +105,53 @@ export function deployPendingAssaults(state: GameState): number {
     });
   }
   return assaults.length;
+}
+
+/**
+ * `requested` null takes every line that can fight and leaves AA aboard.
+ * A list takes only those units, and the rest of the cargo stays on the ship.
+ */
+export function splitAssaultCargo(
+  state: GameState,
+  lines: CargoLine[],
+  requested: unknown[] | null,
+): { taken: CargoLine[]; rest: CargoLine[] } {
+  if (requested == null) {
+    return {
+      taken: lines.filter((line) => !movesOnlyInNoncombat(state, String(line.unit_type_id ?? ""))),
+      rest: lines.filter((line) => movesOnlyInNoncombat(state, String(line.unit_type_id ?? ""))),
+    };
+  }
+  const rest = lines.map((line) => ({
+    unit_type_id: String(line.unit_type_id ?? ""),
+    count: Math.max(0, Math.trunc(Number(line.count ?? 0))),
+  }));
+  const taken: CargoLine[] = [];
+  for (const ask of requested) {
+    if (ask == null || typeof ask !== "object") {
+      continue;
+    }
+    const type = String((ask as { unit_type_id?: unknown }).unit_type_id ?? "");
+    let need = Math.trunc(Number((ask as { count?: unknown }).count ?? 0));
+    if (type === "" || need <= 0 || movesOnlyInNoncombat(state, type)) {
+      continue;
+    }
+    for (const line of rest) {
+      if (line.unit_type_id !== type || line.count <= 0 || need <= 0) {
+        continue;
+      }
+      const n = Math.min(line.count, need);
+      line.count -= n;
+      need -= n;
+      const have = taken.find((item) => item.unit_type_id === type);
+      if (have) {
+        have.count += n;
+      } else {
+        taken.push({ unit_type_id: type, count: n });
+      }
+    }
+  }
+  return { taken, rest: rest.filter((line) => line.count > 0) };
 }
 
 function addStack(state: GameState, regionId: string, factionId: string, unitTypeId: string, count: number): void {

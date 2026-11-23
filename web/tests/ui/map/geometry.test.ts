@@ -90,6 +90,7 @@ describe("layoutRegionStacks", () => {
     expect(stackKey({ unit_type_id: "transport", faction_id: "axis", count: 1, instance_id: "t1" })).toBe(
       "transport|axis|t1",
     );
+    expect(stackKey({ unit_type_id: "infantry", faction_id: "axis", count: 1, cargoOf: "t1" })).toBe("cargo|t1|infantry");
   });
 });
 

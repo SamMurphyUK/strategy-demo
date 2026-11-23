@@ -8,8 +8,19 @@ import {
   LIGHT_FROM,
   mixHex,
   SHELF_GROW,
+  SURF_PERIOD_S,
+  SURF_WAVELENGTH,
+  buildSurfCoast,
+  CLIFF_BIG_SPAN,
+  CLIFF_SMALL_LIFT,
+  CLIFF_TINY_LIFT,
+  CLIFF_TINY_SPAN,
+  cliffLift,
   shelfBands,
   shelfCoverage,
+  surfJitter,
+  surfLocalPx,
+  surfScreenPx,
 } from "../../../src/ui/map/coastRelief";
 import { MAX_BAKE_SCALE } from "../../../src/ui/map/mapBakeMath";
 import { MILITARY } from "../../../src/ui/theme/militaryPalette";
@@ -113,5 +124,110 @@ describe("deep sea tone", () => {
     expect(luma(deep)).toBeGreaterThan(luma(MILITARY.charcoal));
     // The shelf colour stays lighter than the open sea, so the shallows read as shallow.
     expect(luma(MILITARY.spruce)).toBeGreaterThan(luma(deep));
+  });
+});
+
+describe("cliff lip by landmass size", () => {
+  it("leaves continents and big islands at the base lip", () => {
+    expect(cliffLift(CLIFF_BIG_SPAN)).toBe(1);
+    expect(cliffLift(89)).toBe(1);
+    expect(cliffLift(200)).toBe(1);
+  });
+
+  it("shortens smaller islands by 30 percent", () => {
+    expect(cliffLift(CLIFF_TINY_SPAN)).toBe(CLIFF_SMALL_LIFT);
+    expect(cliffLift(53)).toBe(CLIFF_SMALL_LIFT);
+    expect(cliffLift(19)).toBe(CLIFF_SMALL_LIFT);
+    expect(CLIFF_SMALL_LIFT).toBeCloseTo(0.7, 5);
+  });
+
+  it("shortens very small islands by 40 percent", () => {
+    expect(cliffLift(CLIFF_TINY_SPAN - 0.01)).toBe(CLIFF_TINY_LIFT);
+    expect(cliffLift(4)).toBe(CLIFF_TINY_LIFT);
+    expect(CLIFF_TINY_LIFT).toBeCloseTo(0.6, 5);
+  });
+});
+
+describe("coast surf", () => {
+  it("is narrow in the trough and wide at the crest", () => {
+    expect(surfScreenPx(0)).toBeCloseTo(-1.5, 5);
+    expect(surfScreenPx(SURF_PERIOD_S / 2)).toBeCloseTo(1.5, 5);
+    expect(surfScreenPx(SURF_PERIOD_S)).toBeCloseTo(-1.5, 5);
+  });
+
+  it("narrows by retracing the way it widened", () => {
+    const samples = [0.125, 0.25, 0.375];
+    for (const share of samples) {
+      expect(surfScreenPx(SURF_PERIOD_S * share)).toBeCloseTo(surfScreenPx(SURF_PERIOD_S * (1 - share)), 5);
+    }
+    expect(surfScreenPx(SURF_PERIOD_S * 0.25)).toBeCloseTo(0, 5);
+    expect(surfScreenPx(SURF_PERIOD_S * 0.75)).toBeCloseTo(0, 5);
+  });
+
+  it("shares its clock with the unit breathe, three bobs to one swell", () => {
+    expect(SURF_PERIOD_S).toBeCloseTo(Math.PI * 2, 8);
+    expect(SURF_PERIOD_S).toBeCloseTo(3 * ((Math.PI * 2) / 3), 8);
+  });
+
+  it("lets the crest travel along the shore, and keeps the grain fixed", () => {
+    const atStart = surfLocalPx(0.4, 0, 0);
+    const quarter = surfLocalPx(0.4, SURF_WAVELENGTH / 4, 0);
+    expect(quarter).not.toBeCloseTo(atStart, 2);
+    // Grain is a fixed outward nudge, including while the tide is still inward.
+    expect(surfLocalPx(0.4, 12, 1)).toBeGreaterThan(surfLocalPx(0.4, 12, -1));
+    expect(surfLocalPx(SURF_PERIOD_S / 2, 12, 1)).toBeGreaterThan(surfLocalPx(SURF_PERIOD_S / 2, 12, -1));
+    expect(surfJitter(4, 9)).toBe(surfJitter(4, 9));
+    expect(surfJitter(4, 9)).toBeGreaterThanOrEqual(-1);
+    expect(surfJitter(4, 9)).toBeLessThanOrEqual(1);
+  });
+
+  it("pushes a coast outward into the sea and joins a closed shore", () => {
+    const square: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    const land = (x: number, y: number) => x > 0 && x < 10 && y > 0 && y < 10;
+    const [run] = buildSurfCoast([square], null, land);
+    const at = (x: number, y: number) => run.find((p) => p.x === x && p.y === y);
+    const south = at(10, 10)!;
+    const north = at(0, 0)!;
+    expect(south.ny).toBeGreaterThan(0.5);
+    expect(north.ny).toBeLessThan(-0.5);
+    expect(run[0].x).toBe(run[run.length - 1].x);
+    expect(run[0].y).toBe(run[run.length - 1].y);
+    expect(run[0].along).toBeCloseTo(run[run.length - 1].along, 6);
+    expect(run[0].lift).toBe(1);
+  });
+
+  it("keeps a parent's cliff lift on every shore of that landmass", () => {
+    const island: [number, number][] = [
+      [0, 0],
+      [20, 0],
+      [20, 8],
+      [0, 8],
+    ];
+    const land = (x: number, y: number) => x > 0 && x < 20 && y > 0 && y < 8;
+    const [run] = buildSurfCoast([island], null, land, () => CLIFF_SMALL_LIFT);
+    expect(run.every((p) => p.lift === CLIFF_SMALL_LIFT)).toBe(true);
+  });
+
+  it("leaves out an edge that lies on the world seam", () => {
+    const square: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    const land = (x: number, y: number) => x > 0 && x < 10 && y > 0 && y < 10;
+    const runs = buildSurfCoast([square], { left: 0, right: 100 }, land);
+    expect(runs).toHaveLength(1);
+    const run = runs[0];
+    expect(run.some((p) => p.x === 10)).toBe(true);
+    for (let i = 1; i < run.length; i++) {
+      const seamEdge = run[i - 1].x === 0 && run[i].x === 0;
+      expect(seamEdge).toBe(false);
+    }
   });
 });

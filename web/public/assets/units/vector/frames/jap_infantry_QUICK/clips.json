@@ -1,0 +1,55 @@
+{
+  "kind": "sprite-clips",
+  "version": 1,
+  "unitId": "jap_infantry_QUICK",
+  "width": 80,
+  "height": 80,
+  "feet": {
+    "x": 40,
+    "y": 71
+  },
+  "scale": 4,
+  "polished": false,
+  "clips": {
+    "idle": [
+      "idle_0",
+      "idle_1",
+      "idle_2",
+      "idle_3",
+      "idle_4",
+      "idle_5",
+      "idle_7"
+    ],
+    "walk": [
+      "walk_0",
+      "walk_1",
+      "walk_2",
+      "walk_3",
+      "walk_4",
+      "walk_5",
+      "walk_6",
+      "walk_7"
+    ],
+    "fire": [
+      "fire_0",
+      "fire_1",
+      "fire_2",
+      "fire_3"
+    ],
+    "damaged": [
+      "damaged_0",
+      "damaged_1",
+      "damaged_2",
+      "damaged_3"
+    ]
+  },
+  "factionId": "JAP",
+  "unitTypeId": "infantry",
+  "muzzle": {
+    "x": 55,
+    "y": 35
+  },
+  "flashFrames": [
+    2
+  ]
+}

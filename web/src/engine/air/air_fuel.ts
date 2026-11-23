@@ -378,19 +378,49 @@ export function landingRegions(state: GameState, factionId: string, unitType: st
   return spots;
 }
 
+/** Planes already at 0 hit points in the open battle. The map stack is rewritten only when the battle ends. */
+function shotDownThisBattle(state: GameState, factionId: string, regionId: string, unitType: string): number {
+  const battle = state.active_battle;
+  if (battle == null || battle.region_id !== regionId) {
+    return 0;
+  }
+  let down = 0;
+  for (const unit of [...battle.attackers, ...battle.defenders]) {
+    if (unit.hp > 0 || unit.instance_id) {
+      continue;
+    }
+    if (unit.faction_id !== factionId || unit.unit_type_id !== unitType) {
+      continue;
+    }
+    down += 1;
+  }
+  return down;
+}
+
 export function strandedPlanes(state: GameState, factionId: string): StrandedPlane[] {
   const planes: StrandedPlane[] = [];
+  const downedLeft: Record<string, number> = {};
   for (const regionId of Object.keys(state.region_units)) {
     for (const entry of state.region_units[regionId] ?? []) {
       if (String(entry.faction_id ?? "") !== factionId) {
         continue;
       }
       const unitType = String(entry.unit_type_id ?? "");
-      const count = stackCount(entry) - orderedCount(state, factionId, regionId, unitType);
-      if (!isAirUnit(state, unitType) || count <= 0) {
+      if (!isAirUnit(state, unitType)) {
         continue;
       }
       if ("instance_id" in entry && String(entry.instance_id ?? "") !== "") {
+        continue;
+      }
+      const downKey = `${regionId}|${unitType}`;
+      if (!(downKey in downedLeft)) {
+        downedLeft[downKey] = shotDownThisBattle(state, factionId, regionId, unitType);
+      }
+      const present = stackCount(entry) - orderedCount(state, factionId, regionId, unitType);
+      const downed = Math.min(Math.max(0, present), downedLeft[downKey]);
+      downedLeft[downKey] -= downed;
+      const count = present - downed;
+      if (count <= 0) {
         continue;
       }
       if (isLanded(state, factionId, unitType, regionId)) {
@@ -414,9 +444,25 @@ export function describeStranded(state: GameState, planes: readonly StrandedPlan
     .map((plane) => {
       const name = state.unit_types[plane.unitType]?.name || plane.unitType;
       const where = state.regions[plane.regionId]?.name || plane.regionId;
-      return `${name} in ${where} (${plane.fuel} fuel)`;
+      const howMany = plane.count === 1 ? name : `${plane.count} ${name}`;
+      return `${howMany} in ${where} (${plane.fuel} fuel)`;
     })
     .join(", ");
+}
+
+/** A flight that is gone is not still airborne, so it keeps no fuel bill. */
+export function forgetDepartedAir(state: GameState, factionId: string): void {
+  for (const key of Object.keys(state.air_movement_spent)) {
+    const parts = key.split("|");
+    if (parts.length !== 3 || parts[0] !== factionId) {
+      continue;
+    }
+    const regionId = parts[1];
+    const unitType = parts[2];
+    if (airCount(state, factionId, regionId, unitType) <= 0) {
+      delete state.air_movement_spent[key];
+    }
+  }
 }
 
 /** Empty when noncombat may end. Otherwise the sentence the phase panel and the log both use. */

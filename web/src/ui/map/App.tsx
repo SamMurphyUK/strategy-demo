@@ -17,7 +17,8 @@ import {
   type MapCamera,
   panToTerritory,
 } from "./combatCamera";
-import { seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
+import { movesOnlyInNoncombat, seaZoneCargoLabel, strandedCargoGate, transportSeaZone } from "../../engine/transport/cargo_rules";
+import { holdMarks } from "./shipHold";
 import { EditorPanel } from "./editor/EditorPanel";
 import { EditorStart } from "./editor/EditorStart";
 import { EditorToolbar } from "./editor/EditorToolbar";
@@ -52,7 +53,17 @@ import { type PlayChoice } from "./session/play_map";
 import { useCampaignSession } from "./session/use_campaign_session";
 
 export type Selection =
-  | { kind: "stack"; regionId: string; key: string; unitTypeId: string; instanceId: string; max: number; count: number }
+  | {
+      kind: "stack";
+      regionId: string;
+      key: string;
+      unitTypeId: string;
+      instanceId: string;
+      /** Set when the stack is cargo leaving one transport. Empty for the ship itself. */
+      cargoOf: string;
+      max: number;
+      count: number;
+    }
   | { kind: "place"; unitTypeId: string }
   | null;
 
@@ -83,6 +94,19 @@ function storedVolume(): number {
 const NO_HIGHLIGHT: HighlightMode = { kind: "none" };
 const NO_MARKERS: CombatMarker[] = [];
 const NEVER = () => false;
+
+function chosenStack(regionId: string, entry: StackEntry, max: number, count: number): Selection {
+  return {
+    kind: "stack",
+    regionId,
+    key: stackKey(entry),
+    unitTypeId: entry.unit_type_id,
+    instanceId: entry.instance_id ?? "",
+    cargoOf: entry.cargoOf ?? "",
+    max,
+    count,
+  };
+}
 
 /** Piece counts per region, copied so later moves cannot change a combat-move snapshot. */
 function facingStacksFrom(state: { region_units: Record<string, { faction_id?: string; count?: number; instance_id?: string }[]> }): FacingStacks {
@@ -359,7 +383,10 @@ export function App() {
     return out;
   }, [state, version]);
 
-  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string) => {
+  const destinationsFor = (regionId: string, unitTypeId: string, instanceId: string, cargoOf = "") => {
+    if (cargoOf !== "") {
+      return session.getLegalUnloadDestinations(cargoOf, faction);
+    }
     const moves = offeredMoveDestinations(
       state,
       phase,
@@ -380,7 +407,7 @@ export function App() {
 
   const legalTargets = useMemo(() => {
     if (selection?.kind === "stack") {
-      return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId);
+      return destinationsFor(selection.regionId, selection.unitTypeId, selection.instanceId, selection.cargoOf);
     }
     if (selection?.kind === "place") {
       return session.getLegalMobilizeRegions(faction, selection.unitTypeId);
@@ -442,6 +469,25 @@ export function App() {
   const pendingForFaction = state.pending_purchases[faction] ?? [];
 
   const onRegionClick = (regionId: string) => {
+    if (selection?.kind === "stack" && selection.cargoOf !== "") {
+      if (!isMyTurn) {
+        setSelectedRegionId(regionId);
+        return;
+      }
+      const entry: StackEntry = {
+        unit_type_id: selection.unitTypeId,
+        faction_id: faction,
+        count: selection.count,
+        cargoOf: selection.cargoOf,
+      };
+      if (legalTargets.includes(regionId)) {
+        commitMove(selection.regionId, entry, regionId, selection.count);
+      } else {
+        setSelection(null);
+        setSelectedRegionId(regionId === selectedRegionId ? "" : regionId);
+      }
+      return;
+    }
     const placing = selection?.kind === "place" && legalTargets.includes(regionId);
     const moving = selection?.kind === "stack" && legalTargets.includes(regionId);
     if (!isMyTurn && (placing || moving)) {
@@ -490,6 +536,20 @@ export function App() {
     if (!MOVEMENT_PHASES.includes(phase) || !isActiveFaction(entry.faction_id, faction)) {
       return 0;
     }
+    if (entry.cargoOf) {
+      if (phase === "combat_move" && movesOnlyInNoncombat(state, entry.unit_type_id)) {
+        return 0;
+      }
+      const aboard = (state.transport_instances[entry.cargoOf]?.cargo ?? []).reduce(
+        (sum, line) =>
+          sum + (String(line.unit_type_id ?? "") === entry.unit_type_id ? Math.max(0, Math.trunc(Number(line.count ?? 0))) : 0),
+        0,
+      );
+      if (aboard <= 0 || session.getLegalUnloadDestinations(entry.cargoOf, faction).length === 0) {
+        return 0;
+      }
+      return Math.min(entry.count, aboard);
+    }
     const base = entry.instance_id
       ? state.hasInstanceMoved(entry.instance_id)
         ? 0
@@ -518,15 +578,11 @@ export function App() {
     }
     const max = movableCount(regionId, entry);
     setSelectedRegionId(regionId);
-    setSelection(
-      max <= 0
-        ? null
-        : { kind: "stack", regionId, key: stackKey(entry), unitTypeId: entry.unit_type_id, instanceId: entry.instance_id ?? "", max, count: max },
-    );
+    setSelection(max <= 0 ? null : chosenStack(regionId, entry, max, max));
   };
 
   /** Move `count` of a stack. The map drag, its split popover, and an inspector drop all come through here. */
-  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number) => {
+  const commitMove = (regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null) => {
     if (!isMyTurn) {
       return;
     }
@@ -535,14 +591,46 @@ export function App() {
       setSelection(null);
       return;
     }
-    const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "");
+    const legal = destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "");
     if (!legal.includes(target)) {
       setSelection(null);
       return;
     }
+    if (entry.cargoOf) {
+      const transportId = entry.cargoOf;
+      const sea = transportSeaZone(state, transportId);
+      const hostile = phase === "combat_move" && state.isRegionHostileTo(target, entry.faction_id);
+      const units = [{ unit_type_id: entry.unit_type_id, count: Math.min(max, Math.max(1, count)) }];
+      const result = hostile
+        ? game.send("designate_amphibious", {
+            transport_instance_id: transportId,
+            origin_sea_zone_id: sea,
+            target_region_id: target,
+            units,
+          })
+        : game.send("unload_transport", {
+            transport_instance_id: transportId,
+            to_region_id: target,
+            units,
+          });
+      if (result.result_type === "ok") {
+        setSelection(null);
+        setSelectedRegionId(target);
+        soundManager.play(hostile ? "battle_arrow_lock" : "token_drop");
+      }
+      return;
+    }
     const category = state.unit_types[entry.unit_type_id]?.category;
     if (category === "land" && state.regions[target]?.isSeaRegion()) {
-      const transportId = session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
+      const ontoCarrier = Math.trunc(Number(state.unit_types[onto?.unit_type_id ?? ""]?.special?.fighter_capacity ?? 0)) > 0;
+      if (ontoCarrier) {
+        setSelection(null);
+        return;
+      }
+      const transportId =
+        onto?.unit_type_id === "transport" && onto.instance_id
+          ? onto.instance_id
+          : session.findTransportForLoad(regionId, target, entry.unit_type_id, entry.faction_id);
       if (transportId === "") {
         setSelection(null);
         return;
@@ -608,19 +696,7 @@ export function App() {
     const max = movableCount(regionId, entry);
     if (max > 0) soundManager.play("token_pickup");
     setSelectedRegionId(regionId);
-    setSelection(
-      max <= 0
-        ? null
-        : {
-            kind: "stack",
-            regionId,
-            key: stackKey(entry),
-            unitTypeId: entry.unit_type_id,
-            instanceId: entry.instance_id ?? "",
-            max,
-            count: Math.min(max, Math.max(1, count)),
-          },
-    );
+    setSelection(max <= 0 ? null : chosenStack(regionId, entry, max, Math.min(max, Math.max(1, count))));
   };
 
   const selectStack = (regionId: string, entry: StackEntry) => {
@@ -640,15 +716,7 @@ export function App() {
       return;
     }
     soundManager.play("token_pickup");
-    setSelection({
-      kind: "stack",
-      regionId,
-      key,
-      unitTypeId: entry.unit_type_id,
-      instanceId: entry.instance_id ?? "",
-      max,
-      count: max,
-    });
+    setSelection(chosenStack(regionId, entry, max, max));
   };
 
   useEffect(() => {
@@ -804,7 +872,9 @@ export function App() {
           }}
           registerDropResolver={registerDropResolver}
           movableMax={(regionId, entry) => (isMyTurn ? movableCount(regionId, entry) : 0)}
-          legalMovesFor={(regionId, entry) => destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "")}
+          legalMovesFor={(regionId, entry) =>
+            destinationsFor(regionId, entry.unit_type_id, entry.instance_id ?? "", entry.cargoOf ?? "")
+          }
           onArmDrag={armDrag}
           onDragCount={(count) => setSelection((s) => (s?.kind === "stack" ? { ...s, count } : s))}
           onDragCancel={() => setSelection(null)}
@@ -850,6 +920,7 @@ export function App() {
             const cargo = state.transport_instances[iid]?.cargo;
             return Array.isArray(cargo) && cargo.length > 0;
           }}
+          holdFor={(regionId, entry) => holdMarks(state, regionId, entry)}
           cargoCount={(entry) => {
             const iid = entry.instance_id ?? "";
             if (iid === "") {

@@ -1,7 +1,8 @@
 /**
  * Shelf vectors for the campaign and battle boards.
  * A clip folder's clips.json is the index. A still is used only when that faction and type
- * has no folder yet. No shared-faction substitute, and no hand-written frame counts.
+ * has no folder yet. Frame counts come from those files.
+ * Infantry is shared: every faction uses the QUICK sheet until that faction has its own folder.
  */
 
 import vectorManifest from "../../public/assets/units/vector/manifest.json";
@@ -193,8 +194,33 @@ for (const [path, raw] of Object.entries(CLIP_FILES)) {
   };
   const key = `${faction}:${unitType}`;
   const prev = CLIP_INDEX.get(key);
-  if (!prev || frames > prev.frames) {
-    CLIP_INDEX.set(key, { ref, frames });
+  const next = { ref, frames };
+  if (!prev || preferClip(next, prev)) {
+    CLIP_INDEX.set(key, next);
+  }
+}
+
+/** More frames win. A tie keeps the `_QUICK` sheet, which is the current infantry reference. */
+function preferClip(next: IndexedClip, prev: IndexedClip): boolean {
+  if (next.frames !== prev.frames) {
+    return next.frames > prev.frames;
+  }
+  return /_QUICK$/i.test(next.ref.unitId) && !/_QUICK$/i.test(prev.ref.unitId);
+}
+
+const infantryQuick = [...CLIP_INDEX.values()].find(
+  (item) => item.ref.unitTypeId === "infantry" && /_QUICK$/i.test(item.ref.unitId),
+);
+if (infantryQuick) {
+  for (const faction of QUICK_FACTIONS) {
+    const key = `${faction}:infantry`;
+    if (CLIP_INDEX.has(key)) {
+      continue;
+    }
+    CLIP_INDEX.set(key, {
+      frames: infantryQuick.frames,
+      ref: { ...infantryQuick.ref, fallback: true },
+    });
   }
 }
 

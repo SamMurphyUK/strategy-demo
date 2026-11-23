@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FrameEditor } from "./FrameEditor";
 import { FIELD_PICK_KEY } from "./nativeBattleOverlay";
-import { candidateShelf, groupShelf, shelfUnits, vectorShelf, type ShelfUnit } from "./unitShelf";
+import { CURRENT_INFANTRY_CLIP, candidateShelf, groupShelf, shelfUnits, vectorShelf, type ShelfUnit } from "./unitShelf";
 import { SpriteStampPanel } from "./SpriteStampPanel";
 import { GraphicsSettingsPanel } from "./GraphicsSettingsPanel";
 
@@ -169,7 +169,11 @@ export function UnitBakeReviewPanel() {
               />
             )}
             {galleryPick.kind === "clips" && (
-              <figcaption>On a battle map opens the polished walk, drawn from its PNG frames. The walk takes no stamp: a soldier wore no national emblem on his body.</figcaption>
+              <figcaption>
+                {galleryPick.key.endsWith(`/${CURRENT_INFANTRY_CLIP}`)
+                  ? "Current infantry sheet. Every faction uses these frames on the battle board until that faction has its own."
+                  : "On a battle map opens the polished walk, drawn from its PNG frames. The walk takes no stamp: a soldier wore no national emblem on his body."}
+              </figcaption>
             )}
           </figure>
         )}
@@ -264,7 +268,8 @@ function shelfCaption(item: ShelfUnit, row: SavedCandidate | undefined): string 
   const seed = typeof item.seed === "number" ? ` ${item.seed}` : "";
   const kind = item.kind === "clips" ? "walk, " : "";
   if (item.vectorised) {
-    return `${kind}${item.stamped ? "stamped vector" : item.polished ? "polished vector" : "vector"}${seed}${item.width ? ` · ${item.width}×${item.height}` : ""}`;
+    const current = item.key.endsWith(`/${CURRENT_INFANTRY_CLIP}`) ? "current · " : "";
+    return `${current}${kind}${item.stamped ? "stamped vector" : item.polished ? "polished vector" : "vector"}${seed}${item.width ? ` · ${item.width}×${item.height}` : ""}`;
   }
   const parts = [`picture${seed}`];
   if (row?.silhouetteIoU != null) {

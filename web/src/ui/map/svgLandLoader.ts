@@ -8,6 +8,8 @@ export const LAND_SVG_URL = `${import.meta.env.BASE_URL}assets/ne_110m_land_FINA
 export interface MasterLand {
   /** Every land path in the SVG, in viewBox units. Fill with nonzero so lakes (opposite winding) stay open. */
   masterLandPath: Path2D;
+  /** The same outline as one SVG path string, in viewBox units. */
+  pathData: string;
   /** The same land as boolean-ready geometry: what region cutters are clipped against. */
   polygons: MultiPolygon;
   /** The SVG viewBox. Map world space is this rectangle. */
@@ -32,8 +34,10 @@ export function parseLandSvg(svgText: string): MasterLand {
     Number.parseFloat(svg.getAttribute("width") ?? ""),
     Number.parseFloat(svg.getAttribute("height") ?? ""),
   );
+  const pathData = combinePathData(data);
   return {
-    masterLandPath: new Path2D(combinePathData(data)),
+    masterLandPath: new Path2D(pathData),
+    pathData,
     polygons: landFromPathData(data),
     viewBox,
     pathCount: data.length,

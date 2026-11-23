@@ -44,10 +44,25 @@ export interface VehicleSvgUnit {
   face?: 1 | -1;
   /** Clockwise degrees around the feet, after the mirror. */
   turnDeg?: number;
+  /**
+   * Fade the part of this picture that falls inside the stage's shore veil.
+   * The rest of the picture stays solid.
+   */
+  shoreFade?: boolean;
   parts: VehicleSvgPart[];
 }
 
+/** Land silhouette used to fade the inland part of a ship. World-unit path, screen-pixel transforms. */
+export interface ShoreVeil {
+  path: string;
+  transforms: string[];
+  /** Opacity of the inland part, 0–1. */
+  alpha: number;
+}
+
 interface UnitNode {
+  /** Untransformed wrapper, so a screen-space shore mask lines up with the map. */
+  veil: SVGGElement;
   group: SVGGElement;
   root: SVGGElement;
   signature: string;
@@ -56,6 +71,8 @@ interface UnitNode {
 
 export interface VehicleStage {
   sync(camera: VehicleStageCamera, units: readonly VehicleSvgUnit[], light: UnitSkyLight | null): void;
+  /** The land mask ships use when `shoreFade` is set. Pass null to drop it. */
+  setShoreVeil(veil: ShoreVeil | null): void;
   clear(): void;
 }
 
@@ -70,6 +87,56 @@ function signatureOf(parts: readonly VehicleSvgPart[]): string {
 
 function element<T extends SVGElement>(name: string): T {
   return document.createElementNS(SVG_NS, name) as T;
+}
+
+/** Show `href` without clearing the picture that is already on screen. A new file stays hidden until it loads. */
+function showPicture(scale: SVGGElement, href: string, width: string, height: string): void {
+  const images = [...scale.querySelectorAll("image")];
+  let match = images.find((image) => image.getAttribute("href") === href) ?? null;
+  if (!match) {
+    const blank = images.find((image) => !image.getAttribute("href"));
+    match = blank ?? element<SVGImageElement>("image");
+    if (!blank) {
+      match.setAttribute("preserveAspectRatio", "none");
+      match.setAttribute("visibility", "hidden");
+      scale.append(match);
+    }
+    const shown = match;
+    shown.addEventListener(
+      "load",
+      () => {
+        shown.setAttribute("data-ready", "1");
+        if (shown.getAttribute("data-wanted") === "1") revealPicture(scale, shown);
+      },
+      { once: true },
+    );
+    shown.setAttribute("href", href);
+    if (blank) shown.setAttribute("data-ready", "1");
+  }
+  for (const image of scale.querySelectorAll("image")) {
+    if (image === match) image.setAttribute("data-wanted", "1");
+    else image.removeAttribute("data-wanted");
+  }
+  match.setAttribute("width", width);
+  match.setAttribute("height", height);
+  if (match.getAttribute("data-ready") === "1") revealPicture(scale, match);
+}
+
+function revealPicture(scale: SVGGElement, shown: SVGImageElement): void {
+  let mask: string | null = null;
+  for (const image of scale.querySelectorAll("image")) {
+    const own = image.getAttribute("mask");
+    if (own) mask = own;
+  }
+  for (const image of scale.querySelectorAll("image")) {
+    if (image === shown) {
+      image.removeAttribute("visibility");
+      if (mask) image.setAttribute("mask", mask);
+    } else {
+      image.setAttribute("visibility", "hidden");
+      if (mask) image.removeAttribute("mask");
+    }
+  }
 }
 
 function affineTransform(part: VehicleSvgPart): string {
@@ -107,7 +174,56 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   svg.replaceChildren(defs, camera);
   const units = new Map<string, UnitNode>();
   const filterId = `field-unit-light-${++stageSerial}`;
+  const shoreId = `field-shore-${stageSerial}`;
   let lightKey = "";
+  let shore: ShoreVeil | null = null;
+  let shoreKey = "";
+  let shoreCss = { w: 1, h: 1 };
+
+  const applyShore = () => {
+    const mark = shore ? `${shore.path.slice(0, 32)}|${shore.path.length}|${shore.path.slice(-32)}` : "";
+    const key = shore ? `${shoreCss.w}x${shoreCss.h}|${shore.alpha}|${shore.transforms.join(";")}|${mark}` : "";
+    if (key === shoreKey) {
+      return;
+    }
+    shoreKey = key;
+    const existing = defs.querySelector(`#${shoreId}`);
+    if (!shore) {
+      existing?.remove();
+      return;
+    }
+    const mask = (existing as SVGMaskElement | null) ?? element<SVGMaskElement>("mask");
+    mask.id = shoreId;
+    mask.setAttribute("maskUnits", "userSpaceOnUse");
+    mask.setAttribute("maskContentUnits", "userSpaceOnUse");
+    mask.setAttribute("mask-type", "luminance");
+    mask.setAttribute("x", "0");
+    mask.setAttribute("y", "0");
+    mask.setAttribute("width", String(shoreCss.w));
+    mask.setAttribute("height", String(shoreCss.h));
+    mask.replaceChildren();
+    const rect = element<SVGRectElement>("rect");
+    rect.setAttribute("x", "0");
+    rect.setAttribute("y", "0");
+    rect.setAttribute("width", String(shoreCss.w));
+    rect.setAttribute("height", String(shoreCss.h));
+    rect.setAttribute("fill", "#ffffff");
+    mask.append(rect);
+    const gray = Math.round(Math.min(1, Math.max(0, shore.alpha)) * 255);
+    const fill = `rgb(${gray},${gray},${gray})`;
+    for (const transform of shore.transforms) {
+      const wrap = element<SVGGElement>("g");
+      wrap.setAttribute("transform", transform);
+      const path = element<SVGPathElement>("path");
+      path.setAttribute("d", shore.path);
+      path.setAttribute("fill", fill);
+      wrap.append(path);
+      mask.append(wrap);
+    }
+    if (!existing) {
+      defs.append(mask);
+    }
+  };
 
   const applyLight = (light: UnitSkyLight | null) => {
     const next = light?.key ?? "";
@@ -150,8 +266,10 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
 
   const build = (unit: VehicleSvgUnit): UnitNode => {
     dropMasks(unit.id);
+    const veil = element<SVGGElement>("g");
     const group = element<SVGGElement>("g");
     const root = element<SVGGElement>("g");
+    veil.append(group);
     group.append(root);
     const parts: SVGGElement[] = [];
     unit.parts.forEach((part, index) => {
@@ -186,7 +304,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
       root.append(layer);
       parts.push(layer);
     });
-    return { group, root, signature: signatureOf(unit.parts), parts };
+    return { veil, group, root, signature: signatureOf(unit.parts), parts };
   };
 
   const paint = (node: UnitNode, unit: VehicleSvgUnit) => {
@@ -194,6 +312,11 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
     const turn = unit.turnDeg ?? 0;
     const mirror = face < 0 ? ` scale(${face} 1)` : "";
     const spin = turn !== 0 ? ` rotate(${turn})` : "";
+    if (unit.shoreFade) {
+      node.veil.setAttribute("mask", `url(#${shoreId})`);
+    } else {
+      node.veil.removeAttribute("mask");
+    }
     node.group.setAttribute(
       "transform",
       `translate(${unit.x} ${unit.y})${spin}${mirror} scale(${unit.unitScale})`,
@@ -212,18 +335,11 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
       }
       const scale = layer.querySelector("[data-scale]");
       // Resolution scale is folded into affineTransform; keep inner group identity.
-      scale?.setAttribute("transform", "");
-      const image = layer.querySelector("image");
-      if (!image) {
+      if (!(scale instanceof SVGGElement)) {
         return;
       }
-      const width = String(part.width * part.resolution);
-      const height = String(part.height * part.resolution);
-      if (image.getAttribute("href") !== part.href) {
-        image.setAttribute("href", part.href);
-      }
-      image.setAttribute("width", width);
-      image.setAttribute("height", height);
+      scale.setAttribute("transform", "");
+      showPicture(scale, part.href, String(part.width * part.resolution), String(part.height * part.resolution));
       if (!part.maskHref) {
         return;
       }
@@ -242,6 +358,8 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
       svg.setAttribute("width", String(width));
       svg.setAttribute("height", String(height));
+      shoreCss = { w: width, h: height };
+      applyShore();
       camera.setAttribute("transform", `translate(${cameraState.camX} ${cameraState.camY}) scale(${cameraState.viewScale})`);
       applyLight(light);
       const live = new Set(list.map((unit) => unit.id));
@@ -249,7 +367,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
         if (live.has(id)) {
           continue;
         }
-        node.group.remove();
+        node.veil.remove();
         dropMasks(id);
         units.delete(id);
       }
@@ -257,17 +375,23 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
         let node = units.get(unit.id);
         const signature = signatureOf(unit.parts);
         if (!node || node.signature !== signature) {
-          node?.group.remove();
+          node?.veil.remove();
           node = build(unit);
           units.set(unit.id, node);
         }
         paint(node, unit);
-        camera.appendChild(node.group);
+        camera.appendChild(node.veil);
       }
+    },
+    setShoreVeil(next) {
+      shore = next && next.path && next.transforms.length > 0 ? next : null;
+      applyShore();
     },
     clear() {
       units.clear();
       lightKey = "";
+      shore = null;
+      shoreKey = "";
       camera.removeAttribute("filter");
       camera.replaceChildren();
       defs.replaceChildren();

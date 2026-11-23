@@ -324,6 +324,8 @@ export interface StackEntry {
   faction_id: string;
   count: number;
   instance_id?: string;
+  /** Land cargo being moved off this transport, one circle at a time. */
+  cargoOf?: string;
 }
 
 export interface PlacedStack {
@@ -375,6 +377,9 @@ export function layoutStackSlots(entries: StackEntry[]): StackSlot[] {
 }
 
 export function stackKey(entry: StackEntry): string {
+  if (entry.cargoOf) {
+    return `cargo|${entry.cargoOf}|${entry.unit_type_id}`;
+  }
   const base = `${entry.unit_type_id}|${entry.faction_id}`;
   return entry.instance_id ? `${base}|${entry.instance_id}` : base;
 }

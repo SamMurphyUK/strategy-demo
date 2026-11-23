@@ -77,6 +77,21 @@ import {
 } from "./operationalArrows";
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
+import { buildSurfCoast, cliffLift, ringSpan, surfLocalPx, type SurfSample, type SurfTune } from "./coastRelief";
+import {
+  applyShoreLifts,
+  planCliffStamps,
+  SHIPPED_CLIFF_LIP,
+  surfTuneFromCoast,
+  type CliffRegion,
+} from "./coastTune";
+import { getCoastTune } from "./coastTuneStore";
+import { ringsOf, type Pt } from "./mapBakeMath";
+import polygonClipping from "polygon-clipping";
+import { pointInMultiPolygon, type MultiPolygon } from "./regionClip";
+import type { ShoreVeil } from "../../art/fieldVehicleStage";
+import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
+import { drawHoldCircles } from "./shipHold";
 import {
   type MapLod,
   type TerrainStamp,
@@ -103,6 +118,8 @@ export interface TerrainScene {
   regions: RegionShape[];
   /** True region shapes (coastline-clipped) when `exact`, rough cutters otherwise. */
   paths: Map<string, Path2D>;
+  /** Coastline-clipped polygons, when the land mask has loaded. Cliff overrides stamp these. */
+  shapes?: Map<string, MultiPolygon> | null;
   exact: boolean;
   owners: Record<string, string>;
   highlight: HighlightMode;
@@ -255,34 +272,88 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
   setWorldTransform(ctx, view, dpr);
 }
 
-/** Southern cliff lip in the water. Depth grows with the camera tilt. The baked land is put back on top. */
-function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed: number): void {
-  const landRegions = s.regions.filter((region) => region.type === "land" && s.paths.has(region.id));
-  if (landRegions.length === 0) {
+/**
+ * Share of the original near-cliff drop (`2.5 × relief`). Raised from 0.4 so the lip reaches the
+ * land. The deeper third shadow (`5 × relief`) stays gone. The shipped share is `SHIPPED_CLIFF_LIP`.
+ */
+
+/** Charcoal rim on the outer cliff edge, in map units. It does not grow with the lip. */
+const CLIFF_RIM = 0.55;
+
+function landRegionsOf(s: TerrainScene): RegionShape[] {
+  return s.regions.filter((region) => region.type === "land" && s.paths.has(region.id));
+}
+
+/** The continent silhouette the cliff is extruded from. The master coast when it has loaded. */
+function fillLandSilhouette(ctx: CanvasRenderingContext2D, s: TerrainScene): void {
+  if (s.land) {
+    ctx.fill(s.land.masterLandPath);
     return;
   }
-  const relief = cliffDepthScale(s.view.k);
-  // 60% less drop: a small cliff lip, and a thinner shadow just under it.
-  const lip = 0.4;
-  const extrude = (dy: number, fill: string, stroke: string, width: number) => {
-    ctx.save();
-    ctx.translate(0, dy);
-    ctx.fillStyle = fill;
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = width;
-    ctx.lineJoin = "miter";
-    for (const region of landRegions) {
-      const path = s.paths.get(region.id);
-      if (!path) {
-        continue;
-      }
+  for (const region of landRegionsOf(s)) {
+    const path = s.paths.get(region.id);
+    if (path) {
       ctx.fill(path, "evenodd");
+    }
+  }
+}
+
+function strokeLandSilhouette(ctx: CanvasRenderingContext2D, s: TerrainScene): void {
+  if (s.land) {
+    ctx.stroke(s.land.masterLandPath);
+    return;
+  }
+  for (const region of landRegionsOf(s)) {
+    const path = s.paths.get(region.id);
+    if (path) {
       ctx.stroke(path);
     }
-    ctx.restore();
+  }
+}
+
+/**
+ * Southern cliff under the land. A single downward copy leaves a water gap under any island
+ * shorter than the drop, so the silhouette is stamped every device pixel from the coast down
+ * to the lip. The baked land is put back on top. One taupe face; no second darker extrude.
+ */
+function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed: number): void {
+  const landRegions = landRegionsOf(s);
+  if (!s.land && landRegions.length === 0) {
+    return;
+  }
+  const { sy } = projectionScales(s.view.k);
+  const step = 1 / (s.dpr * sy);
+  ctx.fillStyle = MILITARY.taupe;
+  ctx.strokeStyle = MILITARY.charcoal;
+  ctx.lineWidth = CLIFF_RIM;
+  ctx.lineJoin = "miter";
+  const stamp = (path: Path2D | null, dy: number) => {
+    const steps = Math.max(1, Math.min(120, Math.ceil(dy / step)));
+    for (let i = steps; i >= 0; i--) {
+      ctx.save();
+      ctx.translate(0, (dy * i) / steps);
+      if (path) {
+        ctx.fill(path, "evenodd");
+        if (i === steps) {
+          ctx.stroke(path);
+        }
+      } else {
+        fillLandSilhouette(ctx, s);
+        if (i === steps) {
+          strokeLandSilhouette(ctx, s);
+        }
+      }
+      ctx.restore();
+    }
   };
-  extrude(5 * relief * lip, "rgba(75, 61, 68, 0.65)", "rgba(75, 61, 68, 0.65)", 1 * lip);
-  extrude(2.5 * relief * lip, MILITARY.taupe, MILITARY.charcoal, 1.5 * lip);
+  const lip = cliffLip(s.view.k, getCoastTune().cliffLip);
+  if (s.land) {
+    for (const group of cliffGroups(s)) {
+      stamp(group.path, lip * group.lift);
+    }
+  } else {
+    stamp(null, lip);
+  }
 
   ctx.save();
   if (s.land) {
@@ -299,6 +370,291 @@ function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed:
   }
   ctx.drawImage(s.baked.canvas, s.bounds.x - bleed, s.bounds.y, s.bounds.w + bleed * 2, s.bounds.h);
   ctx.restore();
+}
+
+/** How far the cliff lip hangs below the continent, in map units. */
+export function cliffLip(zoom: number, lip = SHIPPED_CLIFF_LIP): number {
+  return 2.5 * cliffDepthScale(zoom) * lip;
+}
+
+const surfCoasts = new WeakMap<object, { key: string; runs: SurfSample[][] }>();
+
+interface CliffGroup {
+  lift: number;
+  path: Path2D;
+}
+
+const cliffGroupCache = new WeakMap<object, { key: string; groups: CliffGroup[] }>();
+
+function polygonsForRegion(region: RegionShape, shapes: Map<string, MultiPolygon> | null | undefined): MultiPolygon {
+  const clipped = shapes?.get(region.id);
+  if (clipped && clipped.length > 0) {
+    return clipped;
+  }
+  const rough: MultiPolygon = [[region.points.map((point) => [point.x, point.y])]];
+  for (const extra of region.extra ?? []) {
+    rough.push([extra.map((point) => [point.x, point.y])]);
+  }
+  return rough;
+}
+
+function cliffRegionsOf(scene: TerrainScene): CliffRegion[] {
+  const regions: CliffRegion[] = [];
+  for (const region of scene.regions) {
+    if (region.type !== "land") {
+      continue;
+    }
+    regions.push({ id: region.id, polygons: polygonsForRegion(region, scene.shapes) });
+  }
+  return regions;
+}
+
+function geometryKey(regions: readonly CliffRegion[]): string {
+  let hash = 2166136261;
+  const mix = (n: number) => {
+    hash ^= n | 0;
+    hash = Math.imul(hash, 16777619);
+  };
+  mix(regions.length);
+  for (const region of regions) {
+    for (let i = 0; i < region.id.length; i++) {
+      mix(region.id.charCodeAt(i));
+    }
+    mix(region.polygons.length);
+    const ring = region.polygons[0]?.[0];
+    if (ring && ring.length > 0) {
+      mix(ring.length);
+      mix(Math.round(ring[0][0] * 10));
+      mix(Math.round(ring[0][1] * 10));
+    }
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function overrideKey(overrides: Readonly<Record<string, number>>): string {
+  return Object.keys(overrides)
+    .sort()
+    .map((id) => `${id}=${overrides[id]}`)
+    .join(",");
+}
+
+function polygonsPath(polygons: MultiPolygon): Path2D {
+  const path = new Path2D();
+  for (const poly of polygons) {
+    for (const ring of poly) {
+      if (ring.length === 0) {
+        continue;
+      }
+      ring.forEach(([x, y], i) => (i === 0 ? path.moveTo(x, y) : path.lineTo(x, y)));
+      path.closePath();
+    }
+  }
+  return path;
+}
+
+/** One path per polygon when a union fails, so a shared border cannot cancel the fill. */
+function pathsForStamp(polygons: MultiPolygon, territory: boolean): Path2D[] {
+  if (!territory || polygons.length <= 1) {
+    return [polygonsPath(polygons)];
+  }
+  try {
+    const unioned = polygonClipping.union(polygons[0], ...polygons.slice(1));
+    return [polygonsPath(unioned)];
+  } catch {
+    return polygons.map((polygon) => polygonsPath([polygon]));
+  }
+}
+
+/**
+ * Landmasses grouped by cliff lift. While every region on a landmass is still the size lift, the
+ * stamp is that landmass, holes included. An override splits the island into territory shapes.
+ */
+function cliffGroups(scene: TerrainScene): CliffGroup[] {
+  const land = scene.land;
+  if (!land) {
+    return [];
+  }
+  const tune = getCoastTune();
+  const regions = cliffRegionsOf(scene);
+  const key = `${overrideKey(tune.cliffOverrides)}|${geometryKey(regions)}`;
+  const hit = cliffGroupCache.get(land);
+  if (hit?.key === key) {
+    return hit.groups;
+  }
+  const groups = planCliffStamps(land.polygons, regions, tune.cliffOverrides).flatMap((stamp) =>
+    pathsForStamp(stamp.polygons, stamp.territory).map((path) => ({ lift: stamp.lift, path })),
+  );
+  cliffGroupCache.set(land, { key, groups });
+  return groups;
+}
+
+/** Shoreline samples for this land shape. Wavelength and cliff overrides rebuild them; the swell does not. */
+function surfCoast(scene: TerrainScene): SurfSample[][] {
+  const land = scene.land;
+  if (!land) {
+    return [];
+  }
+  const tune = getCoastTune();
+  const regions = cliffRegionsOf(scene);
+  const key = `${tune.wavelength}|${overrideKey(tune.cliffOverrides)}|${geometryKey(regions)}`;
+  const hit = surfCoasts.get(land);
+  if (hit?.key === key) {
+    return hit.runs;
+  }
+  const seam = { left: land.viewBox.x, right: land.viewBox.x + land.viewBox.w };
+  const liftOf = new Map<Pt[], number>();
+  for (const poly of land.polygons) {
+    const lift = cliffLift(ringSpan(poly[0]));
+    for (const ring of poly) {
+      liftOf.set(ring, lift);
+    }
+  }
+  const runs = buildSurfCoast(
+    ringsOf(land.polygons),
+    seam,
+    (x, y) => pointInMultiPolygon({ x, y }, land.polygons),
+    (ring) => liftOf.get(ring) ?? 1,
+    surfTuneFromCoast(tune),
+  );
+  applyShoreLifts(runs, regions, tune.cliffOverrides);
+  surfCoasts.set(land, { key, runs });
+  return runs;
+}
+
+/**
+ * Resting place of the soft bloom edge, in screen pixels past the cliff. The tide slides this
+ * by `surfLocalPx`, so the same shelf colour widens and narrows in the water that is already light.
+ * The shipped rest, brush, blur and alpha live on the coast tune.
+ */
+
+let tideSharp: HTMLCanvasElement | null = null;
+let tideSoft: HTMLCanvasElement | null = null;
+
+function tideCanvas(slot: "sharp" | "soft", width: number, height: number): HTMLCanvasElement {
+  const current = slot === "sharp" ? tideSharp : tideSoft;
+  const canvas = current ?? document.createElement("canvas");
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = Math.max(1, width);
+    canvas.height = Math.max(1, height);
+  }
+  if (slot === "sharp") {
+    tideSharp = canvas;
+  } else {
+    tideSoft = canvas;
+  }
+  return canvas;
+}
+
+/**
+ * One soft edge in the water, outside the cliff. It slides out and back along the shore normal
+ * on the same path, so the narrow half is the wide half played in reverse. Seam runs are already
+ * omitted. The whole run stays one stroke, so a crest does not pop a new segment into view.
+ */
+function bloomEdge(
+  runs: SurfSample[][],
+  timeSeconds: number,
+  toWorld: number,
+  drop: number,
+  restPx: number,
+  tune: SurfTune,
+): Path2D {
+  const edge = new Path2D();
+  for (const run of runs) {
+    run.forEach((p, i) => {
+      const signed = surfLocalPx(timeSeconds, p.along, p.jitter, tune);
+      const clear = drop * p.lift * Math.max(0, p.ny);
+      const reach = clear + (restPx + signed) * toWorld;
+      const x = p.x + p.nx * reach;
+      const y = p.y + p.ny * reach;
+      if (i === 0) {
+        edge.moveTo(x, y);
+      } else {
+        edge.lineTo(x, y);
+      }
+    });
+  }
+  return edge;
+}
+
+/**
+ * The baked shallow bloom, breathing. Same shelf tint, slid along the shore normal, clipped off
+ * the land and off the cliff. Call this after the held coast so the idle redraw can move it
+ * without repainting the land.
+ */
+export function drawCoastSurf(ctx: CanvasRenderingContext2D, scene: TerrainScene, timeSeconds: number): void {
+  const land = scene.land;
+  const canvas = ctx.canvas;
+  if (!land || canvas.width === 0 || canvas.height === 0) {
+    return;
+  }
+  const runs = surfCoast(scene);
+  if (runs.length === 0) {
+    return;
+  }
+  const tune = getCoastTune();
+  const surf = surfTuneFromCoast(tune);
+  const { sy } = projectionScales(scene.view.k);
+  const toWorld = 1 / (scene.dpr * sy);
+  const drop = cliffLip(scene.view.k, tune.cliffLip);
+  const edge = bloomEdge(runs, timeSeconds, toWorld, drop, tune.bloomRestPx, surf);
+
+  const sharp = tideCanvas("sharp", canvas.width, canvas.height);
+  const soft = tideCanvas("soft", canvas.width, canvas.height);
+  const sg = sharp.getContext("2d");
+  const bg = soft.getContext("2d");
+  if (!sg || !bg) {
+    return;
+  }
+  sg.setTransform(1, 0, 0, 1, 0, 0);
+  sg.clearRect(0, 0, sharp.width, sharp.height);
+  sg.lineJoin = "round";
+  sg.lineCap = "round";
+  sg.lineWidth = tune.bloomBrushPx * toWorld;
+  for (const dx of scene.copies) {
+    setWorldTransform(sg, scene.view, scene.dpr);
+    sg.translate(dx, 0);
+    sg.globalAlpha = tune.bloomAlpha;
+    sg.strokeStyle = MILITARY.spruce;
+    sg.stroke(edge);
+  }
+
+  bg.setTransform(1, 0, 0, 1, 0, 0);
+  bg.clearRect(0, 0, soft.width, soft.height);
+  bg.filter = `blur(${tune.bloomBlurPx}px)`;
+  bg.drawImage(sharp, 0, 0);
+  bg.filter = "none";
+  bg.globalAlpha = 1;
+  bg.globalCompositeOperation = "destination-out";
+  bg.fillStyle = "#000";
+  for (const dx of scene.copies) {
+    setWorldTransform(bg, scene.view, scene.dpr);
+    bg.translate(dx, 0);
+    for (const group of cliffGroups(scene)) {
+      bg.fill(group.path, "evenodd");
+      bg.save();
+      bg.translate(0, drop * group.lift);
+      bg.fill(group.path, "evenodd");
+      bg.restore();
+    }
+  }
+  bg.globalCompositeOperation = "source-over";
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(soft, 0, 0);
+  ctx.restore();
+}
+
+/** Land mask for ships that sit too far inland. Null until the continent has loaded. */
+export function shoreVeilFor(scene: TerrainScene): ShoreVeil | null {
+  if (!scene.land) {
+    return null;
+  }
+  return {
+    path: scene.land.pathData,
+    alpha: SEA_LAND_ALPHA,
+    transforms: scene.copies.map((dx) => landScreenTransform(scene.view, dx)),
+  };
 }
 
 function fillLandWash(ctx: CanvasRenderingContext2D, s: TerrainScene, color: string): void {
@@ -555,6 +911,8 @@ export interface GameOverlay {
   isLoaded?(entry: StackEntry): boolean;
   /** How many land units are aboard, for the cargo pill. */
   cargoCount?(entry: StackEntry): number;
+  /** Transport cargo seats. Null means this piece has no circles. */
+  holdFor?(regionId: string, entry: StackEntry): import("./shipHold").HoldMark[] | null;
   /** Unit type id to land, air or sea, from the scenario's unit data. */
   categories?: Record<string, string>;
   /** The token under the pointer. Drawn last so a tucked card comes to the front. */
@@ -567,8 +925,8 @@ export interface GameOverlay {
   facingStacks?: FacingStacks;
 }
 
-/** Facility icons stay at this opacity. The map shows through, and nothing else (layer, hover) changes it. */
-export const FACILITY_ICON_ALPHA = 0.66;
+/** Facility icons stay at this opacity. Forty percent more opaque than the old 0.66, and nothing else changes it. */
+export const FACILITY_ICON_ALPHA = Math.min(1, 0.66 * 1.4);
 
 /** The Tri-Wedge: airbase ▼, factory ▲ and harbour ▼ as one trapezoid. See facilityBadge.ts for the geometry. */
 export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBadge, f: Facilities, dpr = 1): void {
@@ -704,6 +1062,10 @@ export function drawRegionUnits(ctx: CanvasRenderingContext2D, layout: RegionLay
       cargoCount: game.cargoCount?.(entry) ?? 0,
       fuel: game.fuelFor?.(region.id, entry) ?? null,
     });
+    const seats = game.holdFor?.(region.id, entry);
+    if (seats) {
+      drawHoldCircles(ctx, counter.x, counter.y, tokenPx, false, seats.length);
+    }
     const selected = game.selectedStack?.regionId === region.id && game.selectedStack.key === counter.slot.key;
     const unmoved = game.isUnmoved(region.id, entry);
     if (selected || unmoved) {
@@ -819,10 +1181,14 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             fuel: game.fuelFor?.(layout.region.id, entry) ?? null,
             loaded: game.isLoaded?.(entry) ?? false,
             cargoCount: game.cargoCount?.(entry) ?? 0,
+            holds: game.holdFor?.(layout.region.id, entry)?.length ?? null,
             idleTime: game.idleTime,
             idlePhase: idlePhase(layout.region.id, entry.unit_type_id),
             aim: facing(layout.region.id, entry.faction_id),
             vectorKey: `${layout.region.id}|${layout.copyDx}|${counter.slot.key}`,
+            landAt: scene.land
+              ? (sx, sy) => isLandAt(scene.land!, screenToWorld(copyView, { x: sx, y: sy }))
+              : undefined,
           });
         },
       });

@@ -17,8 +17,8 @@ import {
 import type { VehicleSvgPart, VehicleSvgUnit } from "./fieldVehicleStage";
 import { contactShadow, depthUnitScale, type ContactShadow } from "./nativeBattleOverlay";
 import { quickFrameUrl, type QuickClipRef } from "./quickUnitCatalog";
-import { buildTankView, tankLayerSources, type TankView } from "./tankView";
-import { foldLayerShift, resolveUnitAnimProfile } from "./unitAnimationProfiles";
+import { buildTankView, splitStillView, tankLayerSources, type TankView } from "./tankView";
+import { foldLayerShift, namedAnimProfile, resolveUnitAnimProfile } from "./unitAnimationProfiles";
 import type { VehicleMode, VehicleOffsets } from "./vehicleMotion";
 
 export interface FieldPictureInput {
@@ -51,6 +51,12 @@ export interface FieldPicture {
 
 const tankViews = new Map<string, TankView | null>();
 const tankLoads = new Map<string, Promise<void>>();
+const stillViews = new Map<string, TankView | null>();
+const stillLoads = new Map<string, Promise<void>>();
+
+function seedRigId(unitId: string): string {
+  return unitId.replace(/\.(?:stamped|polished)$/i, "");
+}
 
 function foldedOffsets(unitTypeId: string, offsets: VehicleOffsets): VehicleOffsets {
   const parts = foldLayerShift(resolveUnitAnimProfile(unitTypeId), offsets);
@@ -167,6 +173,51 @@ function ensureTank(clip: QuickClipRef): TankView | null {
   return null;
 }
 
+/** Split a stamped still with its seed rig so the profile can slide tracks, hull, turret, and gun. */
+function ensureStill(clip: QuickClipRef): TankView | null {
+  if (!clip.file || !namedAnimProfile(clip.unitTypeId)) {
+    return null;
+  }
+  const key = clip.unitId;
+  if (stillViews.has(key)) {
+    return stillViews.get(key) ?? null;
+  }
+  if (stillLoads.has(key) || typeof Image === "undefined" || typeof OffscreenCanvas === "undefined") {
+    return null;
+  }
+  const file = clip.file;
+  const rigId = seedRigId(clip.unitId);
+  const pending = (async () => {
+    try {
+      const canvas = await rasterFrame(file);
+      stillViews.set(key, await splitStillView(rigId, canvas, true));
+    } catch {
+      stillViews.set(key, null);
+    }
+  })();
+  stillLoads.set(key, pending);
+  return null;
+}
+
+function stillParts(clip: QuickClipRef, offsets: VehicleOffsets): VehicleSvgPart[] | null {
+  const view = ensureStill(clip);
+  const urls = view?.raster.urls;
+  if (!view || !urls) {
+    return null;
+  }
+  const folded = foldedOffsets(clip.unitTypeId, offsets);
+  const part = (role: "tracks" | "torso" | "head" | "weapon", href: string): VehicleSvgPart => ({
+    role,
+    href,
+    x: folded[role].x,
+    y: folded[role].y,
+    width: clip.width,
+    height: clip.height,
+    resolution: view.resolution,
+  });
+  return [part("tracks", urls.tracksIdle), part("torso", urls.torso), part("head", urls.head), part("weapon", urls.weapon)];
+}
+
 function tankParts(clip: QuickClipRef, offsets: VehicleOffsets, mode: VehicleMode, frame: number): VehicleSvgPart[] | null {
   const view = ensureTank(clip);
   if (!view) {
@@ -196,7 +247,7 @@ export function fieldPicture(input: FieldPictureInput): FieldPicture {
   }
   const layered = isFighter25DId(input.clip.unitId)
     ? fighterParts(input.clip, input.offsets, input.time, input.mode)
-    : tankParts(input.clip, input.offsets, input.mode, input.frame);
+    : (tankParts(input.clip, input.offsets, input.mode, input.frame) ?? stillParts(input.clip, input.offsets));
   const parts: VehicleSvgPart[] = layered ?? [
     {
       role: "torso",

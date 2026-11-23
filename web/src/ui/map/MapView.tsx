@@ -2,7 +2,8 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useStat
 import { DRAG_PITCH_OFFSET, dragPitchStep, soundManager } from "../../audio/sound_manager";
 import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
-import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, type Vec2 } from "./geometry";
+import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, stackKey, type Vec2 } from "./geometry";
+import { pickHold, seatStack, type HoldMark, type HoldShip } from "./shipHold";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
 import { buildCutterPaths, buildRegionPaths, pickCounter, pickFrontCounter, pickPlus, pickRegion } from "./hitTest";
 import {
@@ -11,10 +12,12 @@ import {
   drawStandingBattleIcons,
   drawEditorOverlay,
   drawEditorUnits,
+  drawCoastSurf,
   drawGameOverlay,
   drawMoveGuide,
   drawOperationalArrows,
   drawTerrain,
+  shoreVeilFor,
   type EditorOverlay,
   type GameOverlay,
   layoutRegions,
@@ -31,6 +34,8 @@ import { SplitStackPopover } from "./splitPopover";
 import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
+import { CoastTuner } from "./CoastTuner";
+import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
   battleScarDescriptors,
@@ -110,6 +115,8 @@ export interface MapViewProps {
   isLoaded?(entry: StackEntry): boolean;
   /** Pieces aboard, drawn as the cargo pill. */
   cargoCount?(entry: StackEntry): number;
+  /** Transport cargo seats. Null means this piece draws no circles. */
+  holdFor?(regionId: string, entry: StackEntry): HoldMark[] | null;
   /** Sea zone to ring while combat-move cargo is still aboard. */
   warningRegionId?: string;
   /** A capped fan or its [+] was clicked: select the region and open the inspector. */
@@ -126,8 +133,8 @@ export interface MapViewProps {
   onDragCount?(count: number): void;
   /** The drag or the split popover was dismissed without a move. */
   onDragCancel?(): void;
-  /** Drop committed: move `count` of the stack onto `target`. */
-  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number): void;
+  /** Drop committed: move `count` of the stack onto `target`. `onto` is the ship under the pointer. */
+  onDropMove?(regionId: string, entry: StackEntry, target: string, count: number, onto?: StackEntry | null): void;
   /** Display name for a stack in the split popover. Falls back to the type id. */
   unitTitle?(entry: StackEntry): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
@@ -212,6 +219,25 @@ const BAKE_SETTLE_MS = 120;
 /** Upright figures breathe at this rate. The motion is half a hertz, so twelve frames cover it. */
 const IDLE_BOB_MS = 84;
 
+/** Text fields keep their keys. A range slider is not one of them, so Z still closes the tuner. */
+function isTextField(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) {
+    return false;
+  }
+  if (el.isContentEditable) {
+    return true;
+  }
+  if (el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
+    return true;
+  }
+  if (el.tagName !== "INPUT") {
+    return false;
+  }
+  const type = (el as HTMLInputElement).type.toLowerCase();
+  return type === "" || type === "text" || type === "search" || type === "url" || type === "tel" || type === "email" || type === "password" || type === "number";
+}
+
 function strokeWarningRing(
   ctx: CanvasRenderingContext2D,
   dpr: number,
@@ -268,6 +294,8 @@ export function MapView(props: MapViewProps) {
   const spriteGate = useRef<MapLod | null>(null);
   const spriteFade = useRef<{ toSprites: boolean; start: number } | null>(null);
   const [spriteClock, setSpriteClock] = useState(0);
+  const [tuneOpen, setTuneOpen] = useState(false);
+  useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
   const cameraLock = useRef(false);
   const cameraJob = useRef<{ cancel: () => void } | null>(null);
   const wheelZoom = useRef({
@@ -541,10 +569,11 @@ export function MapView(props: MapViewProps) {
     };
   }, []);
 
-  const paintCampaignVectors = (dpr: number, cssW: number, cssH: number, fade: number) => {
+  const paintCampaignVectors = (dpr: number, cssW: number, cssH: number, fade: number, scene: TerrainScene | null) => {
     const frame = takeCampaignFigures();
     const stage = vectorStage.current;
     if (stage && cssW > 0 && cssH > 0) {
+      stage.setShoreVeil(scene ? shoreVeilFor(scene) : null);
       stage.sync({ cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1 }, frame.vectors, null);
       if (vectorRef.current) {
         vectorRef.current.style.opacity = fade < 1 ? String(Math.max(0, fade)) : "";
@@ -614,6 +643,7 @@ export function MapView(props: MapViewProps) {
       land,
       regions: geometry.regions,
       paths,
+      shapes: clipped,
       exact,
       owners: props.owners,
       highlight: dragHighlight ?? props.highlight,
@@ -645,6 +675,7 @@ export function MapView(props: MapViewProps) {
           }),
     };
     drawTerrain(ctx, scene);
+    const surfTime = performance.now() / 1000;
     const refImg = referenceRef.current;
     if (refImg && props.frame && refImg.complete && refImg.naturalWidth > 0) {
       const { sx, sy } = projectionScales(view.k);
@@ -674,12 +705,13 @@ export function MapView(props: MapViewProps) {
       fuelFor: props.fuelFor,
       isLoaded: props.isLoaded,
       cargoCount: props.cargoCount,
+      holdFor: props.holdFor,
       categories: props.unitCategories,
       idleTime: settled ? performance.now() / 1000 : undefined,
       sameTeam: props.sameTeam,
       facingStacks: props.facingStacks,
     };
-    if (settled) {
+    if (!editor) {
       let hold = terrainHold.current;
       if (!hold) {
         hold = document.createElement("canvas");
@@ -701,15 +733,16 @@ export function MapView(props: MapViewProps) {
         warningPulse,
       };
     }
+    drawCoastSurf(ctx, scene, surfTime);
     if (editor) {
       beginCampaignFigures();
       drawEditorUnits(ctx, scene, overlay);
       drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
-      paintCampaignVectors(dpr, size.w, size.h, 0);
+      paintCampaignVectors(dpr, size.w, size.h, 0, scene);
     } else {
       beginCampaignFigures();
       drawGameOverlay(ctx, scene, overlay);
-      paintCampaignVectors(dpr, size.w, size.h, unitFade);
+      paintCampaignVectors(dpr, size.w, size.h, unitFade, scene);
       if (props.warningRegionId) {
         const pulse = 0.5 + 0.5 * Math.sin(warningPulse / 2);
         strokeWarningRing(ctx, dpr, layouts, props.warningRegionId, pulse);
@@ -747,13 +780,10 @@ export function MapView(props: MapViewProps) {
     }
   });
 
-  // While the upright figures are on screen and the camera is still, blit the held coast and redraw only the sprites.
+  // While the camera is still, blit the held coast, move the surf, and redraw the sprites.
   useEffect(() => {
-    if (mapLod !== 2) {
-      return;
-    }
     const tick = () => {
-      if (document.hidden || !spritesSettled.current || cameraLock.current || drag.current) {
+      if (document.hidden || cameraLock.current || drag.current || wheelZoom.current.active) {
         return;
       }
       const canvas = canvasRef.current;
@@ -766,11 +796,22 @@ export function MapView(props: MapViewProps) {
       if (hold.width !== canvas.width || hold.height !== canvas.height) {
         return;
       }
+      const now = performance.now() / 1000;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(hold, 0, 0);
+      drawCoastSurf(ctx, frame.scene, now);
       beginCampaignFigures();
-      drawGameOverlay(ctx, frame.scene, { ...frame.overlay, idleTime: performance.now() / 1000 });
-      paintCampaignVectors(frame.scene.dpr, frame.scene.width, frame.scene.height, frame.scene.unitFade ?? 1);
+      drawGameOverlay(ctx, frame.scene, {
+        ...frame.overlay,
+        idleTime: spritesSettled.current ? now : frame.overlay.idleTime,
+      });
+      paintCampaignVectors(
+        frame.scene.dpr,
+        frame.scene.width,
+        frame.scene.height,
+        frame.scene.unitFade ?? 1,
+        frame.scene,
+      );
       if (frame.warningRegionId) {
         const pulse = 0.5 + 0.5 * Math.sin(frame.warningPulse / 2);
         strokeWarningRing(ctx, frame.scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);
@@ -787,6 +828,49 @@ export function MapView(props: MapViewProps) {
     const { tokenHitPx: hit, uprightReach: reach } = live.current;
     // The upright picture is wider and taller than the token, and a squad stands out to either side.
     return reach > 0 ? pickFrontCounter(ls, sp, Math.max(hit, 48), Math.max(reach, 52)) : pickCounter(ls, sp, hit);
+  };
+
+  /** Transport circles, front to back. The token size matches the hit radius the overlay was drawn with. */
+  const holdShips = (ls: RegionLayout[]): HoldShip[] => {
+    const { tokenHitPx, uprightReach, props } = live.current;
+    const d = Math.max(1, (tokenHitPx - 4) * 2);
+    const upright = uprightReach > 0;
+    const ships: HoldShip[] = [];
+    for (const layout of ls) {
+      for (const counter of layout.counters) {
+        const entry = counter.slot.entry;
+        if (entry.unit_type_id !== "transport" || !entry.instance_id) {
+          continue;
+        }
+        const marks = props.holdFor?.(layout.region.id, entry) ?? null;
+        if (marks == null) {
+          continue;
+        }
+        ships.push({
+          regionId: layout.region.id,
+          entry,
+          x: counter.x,
+          y: counter.y,
+          d,
+          upright,
+          marks,
+        });
+      }
+    }
+    return ships;
+  };
+
+  /** The ship under the pointer when its region is the drop target, otherwise the token there. */
+  const shipUnder = (ls: RegionLayout[], sp: Vec2, target: string): StackEntry | null => {
+    const hold = pickHold(holdShips(ls), sp.x, sp.y);
+    if (hold && hold.ship.regionId === target) {
+      return hold.ship.entry;
+    }
+    const token = pickUnit(ls, sp);
+    if (token && token.counter.regionId === target) {
+      return token.counter.slot.entry;
+    }
+    return null;
   };
 
   const pointer = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -942,6 +1026,12 @@ export function MapView(props: MapViewProps) {
       p.onOpenInspector?.(plus.region.id);
       return;
     }
+    const hold = pickHold(holdShips(ls), sp.x, sp.y);
+    if (hold) {
+      const entry = hold.mark ? seatStack(hold.mark) : hold.ship.entry;
+      p.onStackClick(hold.ship.regionId, entry, stackKey(entry));
+      return;
+    }
     const picked = pickUnit(ls, sp);
     if (picked) {
       if (picked.layout.capped) {
@@ -1007,26 +1097,31 @@ export function MapView(props: MapViewProps) {
       // Knife: dragging draws the cut. Alt-drag still pans.
       drag.current = { kind: "swipe", from, points: [], moved: false, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
     } else if (!ed && pickPlus(ls, sp, plusHit) === null) {
-      const picked = pickUnit(ls, sp);
-      const max = picked ? (p.movableMax?.(picked.counter.regionId, picked.counter.slot.entry) ?? 0) : 0;
-      if (picked && max > 0) {
-        const slotWorld = screenToWorld(v, { x: picked.counter.x, y: picked.counter.y });
+      const hold = pickHold(holdShips(ls), sp.x, sp.y);
+      const seat = hold?.mark ? seatStack(hold.mark) : null;
+      const picked = seat ? null : pickUnit(ls, sp);
+      const entry = seat ?? picked?.counter.slot.entry ?? null;
+      const regionId = seat ? hold!.ship.regionId : (picked?.counter.regionId ?? "");
+      const origin = seat ? { x: hold!.ship.x, y: hold!.ship.y } : picked ? { x: picked.counter.x, y: picked.counter.y } : null;
+      const max = entry ? (p.movableMax?.(regionId, entry) ?? 0) : 0;
+      if (entry && origin && max > 0) {
+        const slotWorld = screenToWorld(v, origin);
         const originWorld = {
           x: live.current.wrap ? wrapWorldX(slotWorld.x, live.current.bounds) : slotWorld.x,
           y: slotWorld.y,
         };
         const next: UnitGesture = {
-          regionId: picked.counter.regionId,
-          key: picked.counter.slot.key,
-          entry: picked.counter.slot.entry,
+          regionId,
+          key: stackKey(entry),
+          entry,
           originWorld,
           max,
-          count: max,
+          count: seat ? 1 : max,
           adjusted: false,
           moved: false,
           armed: false,
           pointer: sp,
-          legal: p.legalMovesFor?.(picked.counter.regionId, picked.counter.slot.entry) ?? [],
+          legal: p.legalMovesFor?.(regionId, entry) ?? [],
           startX: e.clientX,
           startY: e.clientY,
           wheel: 0,
@@ -1180,6 +1275,7 @@ export function MapView(props: MapViewProps) {
         resolveClick(e);
         return;
       }
+      const { layouts: ls } = live.current;
       const world = screenToWorld(v, sp);
       const id = pickRegion(p.geometry.regions, ps, p.land, pickWorld(world), ex);
       const result = finishUnitDrag(
@@ -1194,7 +1290,7 @@ export function MapView(props: MapViewProps) {
         return;
       }
       if (result.type === "commit") {
-        p.onDropMove?.(g.regionId, g.entry, result.target, result.count);
+        p.onDropMove?.(g.regionId, g.entry, result.target, result.count, shipUnder(ls, sp, result.target));
         return;
       }
       setSplit({
@@ -1269,6 +1365,15 @@ export function MapView(props: MapViewProps) {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "z" || e.key === "Z")) {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("bake") === "1" || params.get("field") === "1" || live.current.props.inBattle || isTextField(e.target)) {
+          return;
+        }
+        e.preventDefault();
+        setTuneOpen((open) => !open);
+        return;
+      }
       if (e.key === "Escape") {
         if (splitRef.current) {
           splitRef.current = null;
@@ -1383,6 +1488,7 @@ export function MapView(props: MapViewProps) {
           Fit map
         </button>
       </div>
+      {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={viewCenter(view, size.w, size.h)} />}
       {props.children}
       {mapLod === 2 && hoverChip && (
         <div className="unit-hover-label" style={{ left: hoverChip.x, top: hoverChip.y }}>

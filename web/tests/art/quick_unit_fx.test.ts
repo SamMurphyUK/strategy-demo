@@ -18,8 +18,9 @@ describe("quick unit muzzle and exhaust", () => {
     expect(resolveQuickClip("US", "tank")?.fx.smoke).toEqual({ x: 6, y: 58 });
     expect(resolveQuickClip("JAP", "tank")?.fx.muzzle).toEqual({ x: 172, y: 28 });
     expect(resolveQuickClip("JAP", "tank")?.fx.smoke).toEqual({ x: 5, y: 55 });
-    expect(resolveQuickClip("JAP", "infantry")?.unitId).toBe("jap_infantry_v2");
-    expect(resolveQuickClip("GER", "fighter")?.fx.muzzle).toEqual({ x: 133, y: 72 });
+    expect(resolveQuickClip("JAP", "infantry")?.unitId).toBe("jap_infantry_QUICK");
+    expect(resolveQuickClip("GER", "fighter")?.unitId).toBe("ger_fighter_seed1.stamped");
+    expect(resolveQuickClip("GER", "fighter")?.fx.muzzle).toBeNull();
   });
 
   it("draws the muzzle flash in front of the barrel on the shot frame", () => {
@@ -57,9 +58,8 @@ describe("quick unit muzzle and exhaust", () => {
       return;
     }
     expect(quickFxRects(clip.fx, clip.feet, "idle", 0, 1)).toEqual([]);
-    // Walk always vents a light exhaust cycle when the clip has a smoke mark.
-    expect(quickFxRects(clip.fx, clip.feet, "walk", 6, 1).some((rect) => rect.kind === "smoke")).toBe(true);
-    expect(quickFxRects(clip.fx, clip.feet, "walk", 0, 1).some((rect) => rect.kind === "smoke")).toBe(true);
+    expect(quickFxRects(clip.fx, clip.feet, "walk", 6, 1)).toEqual([]);
+    expect(quickFxRects(clip.fx, clip.feet, "walk", 0, 1)).toEqual([]);
 
     const puff = quickFxRects(clip.fx, clip.feet, "idle", 6, 1);
     const anchor = quickAnchor(clip.fx.smoke, clip.feet, 1);

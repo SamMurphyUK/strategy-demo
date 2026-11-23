@@ -15,7 +15,8 @@ import {
   type TankCue,
 } from "../theme/factionRoster";
 import { MILITARY } from "../theme/militaryPalette";
-import { hasQuickUnit } from "../../art/quickUnitDraw";
+import { drawHoldCircles } from "./shipHold";
+import { hasQuickUnit, INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { quickSvgFigure } from "../../art/quickSvgFigure";
@@ -24,6 +25,7 @@ import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
 import { squadOffsets } from "./zoomLod";
+import { landShareOf, seaLandOpacity, spriteScreenBox } from "./seaOverlap";
 
 const CHARCOAL = MILITARY.charcoal;
 const STEEL = MILITARY.steel;
@@ -64,6 +66,10 @@ export interface UprightPaint {
   aim?: FaceOctant;
   /** Stable id for the vector overlay. One stack keeps its SVG node while the camera moves. */
   vectorKey?: string;
+  /** Screen point to "this pixel is on the continent". Ships use it to fade the inland overlap. */
+  landAt?: (x: number, y: number) => boolean;
+  /** Transport seats. Null draws none. 0 draws two empty rings. */
+  holds?: number | null;
 }
 
 /** The guns are drawn toward +x, so +1 faces right and -1 faces left. */
@@ -792,7 +798,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const color = factionPalette(paint.factionId).primary;
   const pose = facingPose(paint.aim ?? 0);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
-  const clip = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
+  const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
+  // Shared infantry plays on the battle board. The campaign keeps the faction's own picture.
+  const clip = resolved?.fallback ? null : resolved;
   const sheet = !clip && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
   const bob = clip || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
   const figureScale = uprightScale(paint.unitType);
@@ -801,7 +809,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const sink = VEHICLE_SINK.has(paint.unitType) ? VEHICLE_SINK_PX : 0;
   const poseName = clip && clip.idle > 0 ? "idle" : "walk";
   const poseCount = clip ? clip[poseName] : 0;
-  const frameIndex = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / 0.125) % poseCount : 0;
+  const idleTick =
+    paint.unitType === "infantry" && poseName === "idle" ? INFANTRY_IDLE_TICK_SECONDS : QUICK_TICK_SECONDS;
+  const frameIndex = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / idleTick) % poseCount : 0;
   const href = clip && poseCount > 0 ? quickFrameUrl(clip, poseName, frameIndex) : null;
   const asVector = campaignFrame != null && clip != null && href != null;
   withCrisp(ctx, paint.dpr, (at) => {
@@ -811,19 +821,34 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
       if (asVector && clip && href) {
-        campaignFrame?.vectors.push(
-          quickSvgFigure({
-            id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
-            clip,
-            href,
-            x: x + off.x,
-            y: y + off.y + sink,
-            unitScale: pixelScale,
-            face: pose.face,
-            rootX: -clip.feet.x,
-            rootY: -clip.feet.y,
-          }),
-        );
+        const figure = quickSvgFigure({
+          id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
+          clip,
+          href,
+          x: x + off.x,
+          y: y + off.y + sink,
+          unitScale: pixelScale,
+          face: pose.face,
+          rootX: -clip.feet.x,
+          rootY: -clip.feet.y,
+        });
+        if (SEA_UNITS.has(paint.unitType) && paint.landAt) {
+          const box = spriteScreenBox(
+            x + off.x,
+            y + off.y + sink,
+            clip.width,
+            clip.height,
+            clip.feet.x,
+            clip.feet.y,
+            pixelScale,
+            pose.face,
+          );
+          const share = landShareOf(box, 8, 5, paint.landAt);
+          if (seaLandOpacity(share) != null) {
+            figure.shoreFade = true;
+          }
+        }
+        campaignFrame?.vectors.push(figure);
         continue;
       }
       ctx.save();
@@ -866,6 +891,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
         target.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
       }
     }
+    if (paint.holds != null) {
+      drawHoldCircles(target, x, y, paint.tokenPx, true, paint.holds);
+    }
     if (paint.selected || paint.unmoved) {
       target.beginPath();
       target.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
@@ -889,6 +917,9 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       ctx.fillStyle = GOLD;
       ctx.fillRect(Math.round(x - rx * 0.55), Math.round(y - ry * 0.2), s, s);
     }
+  }
+  if (!asVector && paint.holds != null) {
+    drawHoldCircles(ctx, x, y, paint.tokenPx, true, paint.holds);
   }
   if (!asVector && (paint.selected || paint.unmoved)) {
     ctx.beginPath();

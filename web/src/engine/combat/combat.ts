@@ -4,6 +4,7 @@ import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import { type Dict, deepCopy, type UnitStackEntry } from "../model/types";
 import type { PCG } from "../rng/pcg";
+import { forgetDepartedAir } from "../air/air_fuel";
 import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
 import {
   assignAaHits,
@@ -784,6 +785,8 @@ export class CombatEngine {
       this.nextSeq(),
     );
     state.noteTerritoryFought(regionId);
+    forgetDepartedAir(state, b.attacker_faction_id);
+    forgetDepartedAir(state, b.defender_faction_id);
     state.active_battle = null;
     return [...events, finished];
   }

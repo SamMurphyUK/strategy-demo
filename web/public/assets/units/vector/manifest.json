@@ -1102,6 +1102,18 @@
       "polished": false
     },
     {
+      "dir": "assets/units/vector/frames/jap_infantry_QUICK",
+      "source": "public/assets/units/frames/jap_infantry_QUICK/clips.json",
+      "unitId": "jap_infantry_QUICK",
+      "factionId": "JAP",
+      "unitTypeId": "infantry",
+      "width": 80,
+      "height": 80,
+      "frames": 23,
+      "preview": "assets/units/vector/frames/jap_infantry_QUICK/idle_0.svg",
+      "polished": false
+    },
+    {
       "dir": "assets/units/vector/frames/jap_infantry_polished",
       "source": "public/assets/units/frames/jap_infantry_polished/clips.json",
       "unitId": "jap_infantry",

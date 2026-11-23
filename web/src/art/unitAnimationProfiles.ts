@@ -289,8 +289,7 @@ const QUICK = /_quick$/;
 const SEED = /_seed\d+$/;
 const FACTION = /^(?:ger|ussr|uk|usa|us|jap)_/;
 
-/** Map a unit id, a menu value, or a roster type onto its profile. Unknown ids use the tank. */
-export function resolveUnitAnimProfile(unitId: string): UnitAnimProfile {
+function profileKey(unitId: string): string {
   let text = unitId.trim().toLowerCase();
   for (let guard = 0; guard < 6; guard += 1) {
     const next = text.replace(STATE_PREFIX, "").replace(TAIL, "").replace(QUICK, "").replace(SEED, "").replace(FACTION, "");
@@ -299,5 +298,16 @@ export function resolveUnitAnimProfile(unitId: string): UnitAnimProfile {
     }
     text = next;
   }
-  return UNIT_ANIM_PROFILES[ALIASES[text] ?? "tank"];
+  return text;
+}
+
+/** The profile written for this type. Infantry, carriers, and unknown ids have none. */
+export function namedAnimProfile(unitId: string): UnitAnimProfile | null {
+  const id = ALIASES[profileKey(unitId)];
+  return id ? UNIT_ANIM_PROFILES[id] : null;
+}
+
+/** Map a unit id, a menu value, or a roster type onto its profile. Unknown ids use the tank. */
+export function resolveUnitAnimProfile(unitId: string): UnitAnimProfile {
+  return namedAnimProfile(unitId) ?? UNIT_ANIM_PROFILES.tank;
 }

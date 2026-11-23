@@ -4,12 +4,15 @@ import {
   isLanded,
   offeredMoveDestinations,
   planesMustLandMessage,
+  strandedPlanes,
 } from "../../../src/engine/air/air_fuel";
+import { CombatEngine } from "../../../src/engine/combat/combat";
 import { Command, CommandType } from "../../../src/engine/model/command";
 import { applyRecordedMove, beginMovementPhase, commitCombatAttacks } from "../../../src/engine/movement/phase_orders";
 import { MovementEngine } from "../../../src/engine/movement/movement";
 import { MovementValidator } from "../../../src/engine/movement/movement_validator";
 import type { GameState } from "../../../src/engine/model/game_state";
+import { PCG } from "../../../src/engine/rng/pcg";
 import { processEndPhase } from "../../../src/engine/turn/phase_controllers";
 import { TurnEngine } from "../../../src/engine/turn/turn_engine";
 import { TestStateBuilder } from "../helpers/test_state_builder";
@@ -182,6 +185,73 @@ describe("air fuel and combat-move targets", () => {
     expect(offeredMoveDestinations(state, "combat_move", "red", "home", "fighter", dests)).toContain("pack");
   });
 
+  it("does not send a plane destroyed in the battle home to refuel", () => {
+    const state = board();
+    const wing = state.region_units.home.find((entry) => entry.unit_type_id === "fighter");
+    if (wing) wing.count = 2;
+    beginMovementPhase(state);
+    const movement = new MovementEngine(state);
+    applyRecordedMove(state, moveCount("home", "enemy", 2), movement);
+    commitCombatAttacks(state);
+
+    const combat = new CombatEngine(state, new PCG(1, 1));
+    const started = combat.startBattle("enemy", "red");
+    expect(started.ok).toBe(true);
+    const battle = state.active_battle!;
+    const lost = battle.attackers.find((unit) => unit.unit_type_id === "fighter");
+    expect(lost).toBeDefined();
+    lost!.hp = 0;
+    const stillUp = strandedPlanes(state, "red").find((plane) => plane.regionId === "enemy");
+    expect(stillUp?.count).toBe(1);
+    expect(planesMustLandMessage(state, "red")).toContain("Fighter in enemy (3 fuel)");
+    for (const defender of battle.defenders) defender.hp = 0;
+    battle.stage = "awaiting_casualties";
+    battle.attacker_hits_to_take = 0;
+    const finished = combat.assignAttackerCasualties("red", []);
+    expect(finished.ok).toBe(true);
+    expect(state.active_battle).toBeNull();
+
+    const turn = new TurnEngine(state);
+    turn.advancePhase();
+    turn.advancePhase();
+    expect(state.current_phase).toBe("noncombat_move");
+
+    const fighters = (state.region_units.enemy ?? []).filter((entry) => entry.unit_type_id === "fighter");
+    expect(fighters).toEqual([{ faction_id: "red", unit_type_id: "fighter", count: 1 }]);
+    expect(planesMustLandMessage(state, "red")).toContain("Fighter in enemy (3 fuel)");
+    expect(state.air_movement_spent["red|enemy|fighter"]).toBe(1);
+    expect(state.air_movement_spent["red|home|fighter"]).toBeUndefined();
+  });
+
+  it("drops the fuel bill when the whole flight is shot down", () => {
+    const state = board();
+    beginMovementPhase(state);
+    const movement = new MovementEngine(state);
+    applyRecordedMove(state, move("home", "enemy"), movement);
+    commitCombatAttacks(state);
+
+    const combat = new CombatEngine(state, new PCG(1, 1));
+    const started = combat.startBattle("enemy", "red");
+    expect(started.ok).toBe(true);
+    const battle = state.active_battle!;
+    const lost = battle.attackers.find((unit) => unit.unit_type_id === "fighter");
+    expect(lost).toBeDefined();
+    lost!.hp = 0;
+    battle.stage = "awaiting_casualties";
+    battle.attacker_hits_to_take = 0;
+    const finished = combat.assignAttackerCasualties("red", []);
+    expect(finished.ok).toBe(true);
+
+    const turn = new TurnEngine(state);
+    turn.advancePhase();
+    turn.advancePhase();
+
+    const fighters = Object.values(state.region_units).flat().filter((entry) => entry.unit_type_id === "fighter");
+    expect(fighters).toEqual([]);
+    expect(planesMustLandMessage(state, "red")).toBe("");
+    expect(state.air_movement_spent["red|enemy|fighter"]).toBeUndefined();
+  });
+
   it("will not land a plane on territory captured this turn", () => {
     const builder = new TestStateBuilder();
     builder.withRegion("home", true, "red").withRegion("taken", true, "red").withAdjacent("home", "taken");
@@ -213,11 +283,15 @@ function builderEnemyOnOwn(state: GameState): void {
 }
 
 function move(from: string, to: string): Command {
+  return moveCount(from, to, 1);
+}
+
+function moveCount(from: string, to: string, count: number): Command {
   return Command.fromDict({
     player_id: "red",
     type: CommandType.MOVE_UNITS,
     payload: {
-      moves: [{ from_region_id: from, to_region_id: to, units: [{ unit_type_id: "fighter", count: 1 }] }],
+      moves: [{ from_region_id: from, to_region_id: to, units: [{ unit_type_id: "fighter", count }] }],
     },
   });
 }

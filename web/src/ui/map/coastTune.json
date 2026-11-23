@@ -1,0 +1,21 @@
+{
+  "reachPx": 7.65281796088416,
+  "periodS": 10.6957528063881,
+  "wavelength": 213.446591829649,
+  "grainPx": 0.852910542761254,
+  "bloomRestPx": 1.35632449947923,
+  "bloomBrushPx": 3.76067584770281,
+  "bloomBlurPx": 7,
+  "bloomAlpha": 0.42,
+  "cliffLip": 0.541835435713459,
+  "cliffOverrides": {
+    "Borneo": 0,
+    "Carol Islands": 0,
+    "East Australia": 0.645527138062724,
+    "East Indies": 0,
+    "New Guinea": 0,
+    "Philippine Islands": 0,
+    "Solomon Islands": 0,
+    "West Australia": 0.645527138062724
+  }
+}

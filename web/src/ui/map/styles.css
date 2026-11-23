@@ -463,6 +463,79 @@
     margin: 6px 0;
   }
 
+  & .coast-tune {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 6;
+    width: min(320px, calc(100% - 24px));
+    max-height: calc(100% - 24px);
+    overflow: auto;
+    pointer-events: auto;
+  }
+
+  & .coast-tune h3 {
+    margin: 12px 0 6px;
+    color: var(--gold-text);
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  & .coast-slider {
+    display: grid;
+    grid-template-columns: 96px 1fr 40px;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+    color: var(--parchment);
+    font: 11px/1.2 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  & .coast-tune input[type="range"] {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--gold);
+    background: transparent;
+    border: 0;
+  }
+
+  & .coast-region-list {
+    list-style: none;
+    max-height: 168px;
+    margin: 6px 0;
+    padding: 0;
+    overflow: auto;
+  }
+
+  & .coast-region-list li + li {
+    margin-top: 4px;
+  }
+
+  & .coast-region-list button {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+  }
+
+  & .coast-region-list button span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  & .coast-tune-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
   & .muted {
     color: var(--ink-soft);
   }
@@ -1305,6 +1378,10 @@
 
 .campaign.menu-open .map-wrap {
   pointer-events: none;
+}
+
+.campaign.menu-open .coast-tune {
+  pointer-events: auto;
 }
 
 .campaign.menu-open .map-wrap::after {

@@ -28,6 +28,7 @@ import {
   WaterGeyser,
 } from './combatTypes';
 import { fieldContactLocal, fieldPicture } from '../../art/fieldUnitPicture';
+import { departureAscent, departureShadowAlpha } from './departureShadow';
 import { paintContactShadow } from '../../art/nativeBattleOverlay';
 import { hasQuickUnit, paintQuickFx, paintQuickStep, stepQuickFrame } from '../../art/quickUnitDraw';
 import { resolveQuickClip } from '../../art/quickUnitCatalog';
@@ -547,6 +548,33 @@ function drawMoonCrescent(ctx: CanvasRenderingContext2D, x: number, y: number) {
 // ============================================================================
 // AMBIENT OCCLUSION & DROP SHADOW HELPER
 // ============================================================================
+
+/** Ground shadow for a plane. A departing plane leaves it on the ground and fades it out as it climbs. */
+function paintDepartureShadow(
+  ctx: CanvasRenderingContext2D,
+  unit: CombatUnit,
+  noDropShadow: boolean,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  contactWidth: number,
+): void {
+  if (noDropShadow) {
+    return;
+  }
+  const climbing = departureAscent(unit);
+  const alpha = departureShadowAlpha(climbing);
+  if (alpha <= 0.02) {
+    return;
+  }
+  ctx.save();
+  if (climbing > 0) {
+    ctx.translate(0, climbing);
+  }
+  drawAmbientOcclusionShadow(ctx, cx, cy, rx, ry, contactWidth, alpha);
+  ctx.restore();
+}
 
 /**
  * Draws an actual smooth ambient occlusion contact shadow underneath units,
@@ -1947,7 +1975,17 @@ function drawBattleQuickUnit(
       part.opacity = (part.opacity ?? 1) * 0.25;
     }
   }
-  paintContactShadow(ctx, fieldContactLocal(clip, picture.unitScale, face, step.offsets.root));
+  const climbing = departureAscent(unit);
+  const shadowAlpha = departureShadowAlpha(climbing);
+  if (shadowAlpha > 0.02) {
+    ctx.save();
+    ctx.globalAlpha *= shadowAlpha;
+    if (climbing > 0) {
+      ctx.translate(0, climbing);
+    }
+    paintContactShadow(ctx, fieldContactLocal(clip, picture.unitScale, face, step.offsets.root));
+    ctx.restore();
+  }
   ctx.save();
   if (face < 0) {
     ctx.scale(-1, 1);
@@ -2754,10 +2792,7 @@ function drawFighter(
   noDropShadow = false,
   cue: FighterCue = { radial: false, roundTips: false, scoop: false, fixedGear: false, canopy: 6 },
 ) {
-  // Ambient occlusion drop shadow (omitted if noDropShadow)
-  if (!noDropShadow) {
-    drawAmbientOcclusionShadow(ctx, 0, 18, 16, 5, 14);
-  }
+  paintDepartureShadow(ctx, unit, noDropShadow, 0, 18, 16, 5, 14);
 
   const revSpeed = (unit.animAnticipation > 0 || unit.isMarching) ? 80 : 40;
   const jitter = unit.animAnticipation > 0 ? (Math.random() - 0.5) * 1.5 : 0;
@@ -2832,10 +2867,7 @@ function drawTacticalBomber(
   noDropShadow = false,
   cue?: BomberCue,
 ) {
-  // Ambient occlusion drop shadow (omitted if noDropShadow)
-  if (!noDropShadow) {
-    drawAmbientOcclusionShadow(ctx, 0, 20, 20, 6, 18);
-  }
+  paintDepartureShadow(ctx, unit, noDropShadow, 0, 20, 20, 6, 18);
 
   const revSpeed = (unit.animAnticipation > 0 || unit.isMarching) ? 70 : 35;
   const jitter = unit.animAnticipation > 0 ? (Math.random() - 0.5) * 1.5 : 0;
@@ -2912,10 +2944,7 @@ function drawStrategicBomber(
   noDropShadow = false,
   cue?: BomberCue,
 ) {
-  // Ambient occlusion drop shadow (omitted if noDropShadow)
-  if (!noDropShadow) {
-    drawAmbientOcclusionShadow(ctx, 0, 22, 26, 7, 24);
-  }
+  paintDepartureShadow(ctx, unit, noDropShadow, 0, 22, 26, 7, 24);
 
   const jitter = unit.animAnticipation > 0 ? (Math.random() - 0.5) * 1.5 : 0;
   const alt = (unit.isMarching ? -14 : -10) + Math.sin(time * 2.5) * 2 + jitter;

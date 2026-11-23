@@ -1,6 +1,6 @@
 // The static base map, painted once onto an offscreen canvas and blitted every frame.
 //
-//   Layer 0  dark slate water with cached pixel wave bands, then stepped shelf shallows and a sand edge
+//   Layer 0  dark slate water with cached pixel wave bands, then stepped shelf shallows. The shallows breathe live.
 //   Layer 1  muted faction land, a 4×4 dither, and a light paper grain
 //   Layer 2  inner sepia shade along every territory's inside edge, then the coast bevel (light top-left)
 //   Layer 3  territory borders and the coastline ink
@@ -78,7 +78,6 @@ const SHELF = MILITARY.spruce;
 /** Coastal bevel: a pale edge toward the light, a dark one away from it. */
 const BEVEL_HIGHLIGHT = { color: MILITARY.cream, alpha: 0.3 };
 const BEVEL_SHADOW = { color: MILITARY.charcoal, alpha: 0.4 };
-const SAND = MILITARY.tan;
 const INNER_SHADE = MILITARY.charcoal;
 /** Faction land from the strip. `FACTION_TINT` remains the tested parchment palette. */
 const TACTICAL_LAND: Record<FactionKey, string> = {
@@ -305,21 +304,12 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     ctx.drawImage(shelf, bounds.x, bounds.y, bounds.w, bounds.h);
   }
 
-  // Sand edge, stroked before the land fill so only the seaward half remains.
+  // The coastline path. The live surf strokes it; the bevel still uses it inland.
   const coast = land
     ? runsPath(ringsOf(land.polygons).flatMap((ring) => ringRuns(ring, seam)))
     : landRegions.length > 0
       ? outlinePath(landRegions.flatMap((region) => shapeOf(region, input)), seam)
       : null;
-  if (coast) {
-    ctx.save();
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.strokeStyle = SAND;
-    ctx.lineWidth = 5 / sx;
-    ctx.stroke(coast);
-    ctx.restore();
-  }
 
   // Neutral land under everything, then a hatch on the decorative gaps the territories will cover.
   if (land) {
@@ -453,7 +443,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
 }
 
 /** Bump when the baked paint changes, so a live view throws away the old bitmap. */
-export const BAKE_PAINT = 3;
+export const BAKE_PAINT = 4;
 
 /** Owns the cached base map. Create one per map view. */
 export class TerrainBake {

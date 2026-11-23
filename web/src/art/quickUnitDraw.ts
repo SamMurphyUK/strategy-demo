@@ -6,7 +6,7 @@
 
 import { resolveQuickClip, quickFrameUrl, type QuickClipRef } from "./quickUnitCatalog";
 import { quickAnchor, quickFxRects, quickMuzzleBloom, type QuickFxPose } from "./quickUnitFx";
-import { resolveUnitAnimProfile } from "./unitAnimationProfiles";
+import { namedAnimProfile, resolveUnitAnimProfile } from "./unitAnimationProfiles";
 import { lightUnitSprite, type UnitSkyLight } from "./unitLighting";
 import { MILITARY } from "../ui/theme/militaryPalette";
 import { graphicsSettings } from "../ui/battle/graphicsSettings";
@@ -29,6 +29,14 @@ const FLAT_OFFSETS: VehicleOffsets = {
   hull: { x: 0, y: 0 },
   turret: { x: 0, y: 0 },
 };
+
+/** Walk and fire stay on the shared 8 Hz clock. Infantry idle breathes much slower. */
+export const QUICK_TICK_SECONDS = 0.125;
+export const INFANTRY_IDLE_TICK_SECONDS = 0.65;
+
+function tickSecondsFor(unitTypeId: string, mode: VehicleMode): number {
+  return unitTypeId === "infantry" && mode === "idle" ? INFANTRY_IDLE_TICK_SECONDS : QUICK_TICK_SECONDS;
+}
 
 const images = new Map<string, HTMLImageElement | null>();
 const failedImages = new Set<string>();
@@ -268,11 +276,13 @@ export function stepQuickFrame(request: QuickDrawRequest): QuickFrameStep | null
   const profile = resolveUnitAnimProfile(request.unitTypeId);
   const anim = animFor(request.key, vehicleMode(request.mode), request.damaged === true);
   const wanted = vehicleMode(request.mode);
+  const period = tickSecondsFor(request.unitTypeId, wanted);
   if (anim.mode !== wanted) {
     tickVehicle(anim, wanted, Math.random, profile);
-    lastTicks.set(request.key, Math.floor(request.time / 0.125));
+    // Landing on idle starts at frame 0 (settle). Walk and fire keep their own clocks.
+    lastTicks.set(request.key, Math.floor(request.time / period));
   } else {
-    const tick = Math.floor(request.time / 0.125);
+    const tick = Math.floor(request.time / period);
     const prior = lastTicks.get(request.key) ?? tick;
     const steps = Math.max(0, Math.min(8, tick - prior));
     for (let i = 0; i < steps; i += 1) {
@@ -292,7 +302,12 @@ export function stepQuickFrame(request: QuickDrawRequest): QuickFrameStep | null
   if (!href) {
     return null;
   }
-  const offsets = clip.file || request.unitTypeId === "infantry" ? FLAT_OFFSETS : vehicleOffsets(anim, profile);
+  // A stamped vehicle still has one picture and a profile. The profile moves its layers.
+  // Infantry frames already contain the step, and a type with no profile stays flat.
+  const offsets =
+    request.unitTypeId === "infantry" || (clip.file && !namedAnimProfile(request.unitTypeId))
+      ? FLAT_OFFSETS
+      : vehicleOffsets(anim, profile);
   return { clip, href, pose: drawPose, index, offsets };
 }
 

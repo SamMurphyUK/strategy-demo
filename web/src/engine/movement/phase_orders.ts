@@ -257,7 +257,9 @@ export function applyCargoCommand(
   }
   if (command.type === CommandType.DESIGNATE_AMPHIBIOUS) {
     const events = (amphibious ?? new AmphibiousEngine(state)).designateAssault(command);
-    rememberCargo(state, command, "amphibious_assault");
+    if (events.length > 0) {
+      rememberCargo(state, command, "amphibious_assault");
+    }
     return events;
   }
   return [];
@@ -353,6 +355,7 @@ function commandForCargo(order: MoveOrder): Command {
       transport_instance_id: order.transportInstanceId,
       origin_sea_zone_id: order.fromRegionId,
       target_region_id: order.toRegionId,
+      units: order.cargo ?? [],
     },
   });
 }

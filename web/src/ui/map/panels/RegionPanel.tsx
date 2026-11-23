@@ -9,6 +9,7 @@ import { type StackEntry, stackKey } from "../geometry";
 import { factionName, unitName } from "../session/event_text";
 import { isActiveFaction } from "../tokenStyle";
 import type { GameSessionHandle } from "../session/use_game_session";
+import { cargoStacks } from "../shipHold";
 import { orderStacks } from "../unitStacks";
 
 interface Props {
@@ -50,7 +51,10 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
     );
   }
 
-  const entries = orderStacks(RegionUnitDisplay.buildDisplayEntries(state.getUnitsInRegion(regionId)), region.type === "sea");
+  const entries = [
+    ...orderStacks(RegionUnitDisplay.buildDisplayEntries(state.getUnitsInRegion(regionId)), region.type === "sea"),
+    ...cargoStacks(state, regionId),
+  ];
   const tags = [
     region.type === "sea" ? "Sea zone" : "Land",
     region.ipc_value > 0 ? `${region.ipc_value} IPC` : "",
@@ -114,7 +118,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
                     }
                     if (p.dragging) {
                       onDragEnd(entry, e.clientX, e.clientY);
-                    } else {
+                    } else if (!entry.cargoOf || isActiveFaction(entry.faction_id, state.current_faction_id)) {
                       onSelectStack(regionId, entry);
                     }
                   }}
@@ -130,7 +134,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
                     {fuel != null && <span className="stack-fuel mono">fuel {fuel}</span>}
                     {cargo && <span className="stack-cargo">{cargo}</span>}
                   </span>
-                  <b className="stack-count mono">×{entry.count}</b>
+                  <b className="stack-count mono">{entry.cargoOf ? `${entry.count} aboard` : `×${entry.count}`}</b>
                 </button>
                 {drag?.key === key &&
                   createPortal(

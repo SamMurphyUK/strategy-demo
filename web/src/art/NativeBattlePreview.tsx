@@ -344,6 +344,7 @@ interface PlacedUnit {
 
 const WALK_URL = "/assets/units/frames/jap_infantry";
 const WALK_V2_URL = "/assets/units/frames/jap_infantry_v2";
+const QUICK_INFANTRY_URL = "/assets/units/frames/jap_infantry_QUICK";
 const POLISHED_WALK_URL = "/assets/units/frames/jap_infantry_polished";
 const QUICK_TANK_URL = "/assets/units/frames/ger_tank_seed1_QUICK";
 const QUICK_TANK_VECTOR_URL = "/assets/units/vector/frames/ger_tank_seed1_QUICK";
@@ -357,6 +358,7 @@ const QUICK_JAP_TANK_URL = "/assets/units/frames/jap_tank_seed1_QUICK";
 const QUICK_JAP_TANK_VECTOR_URL = "/assets/units/vector/frames/jap_tank_seed1_QUICK";
 const VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry";
 const VECTOR_WALK_V2_URL = "/assets/units/vector/frames/jap_infantry_v2";
+const QUICK_INFANTRY_VECTOR_URL = "/assets/units/vector/frames/jap_infantry_QUICK";
 const POLISHED_VECTOR_WALK_URL = "/assets/units/vector/frames/jap_infantry_polished";
 const FACTION_ORDER = ["GER", "UK", "US", "USSR", "JAP"];
 
@@ -1170,6 +1172,12 @@ export function NativeBattlePreview() {
     }
     if (key === "walk:jap_infantry_v2:vector") {
       return loadVectorWalk(VECTOR_WALK_V2_URL, "vector", "JAP", "infantry", "Japanese walk, v2");
+    }
+    if (key === "walk:jap_infantry_QUICK") {
+      return loadPngWalk(QUICK_INFANTRY_URL, "Infantry, QUICK", "JAP", "infantry");
+    }
+    if (key === "walk:jap_infantry_QUICK:vector") {
+      return loadVectorWalk(QUICK_INFANTRY_VECTOR_URL, "vector", "JAP", "infantry", "Infantry, QUICK");
     }
     if (key === "walk:jap:polished") {
       return loadPolishedWalk();
@@ -2026,6 +2034,8 @@ export function NativeBattlePreview() {
                 <option value="walk:jap:polished-vector">Japanese walk, polished vector</option>
                 <option value="walk:jap_infantry_v2">Japanese walk, v2</option>
                 <option value="walk:jap_infantry_v2:vector">Japanese walk, v2, vector</option>
+                <option value="walk:jap_infantry_QUICK">Infantry, QUICK, current</option>
+                <option value="walk:jap_infantry_QUICK:vector">Infantry, QUICK, current, vector</option>
                 <option value="walk:ger_tank_seed1_QUICK">GER tank, QUICK</option>
                 <option value="walk:ger_tank_seed1_QUICK:vector">GER tank, QUICK, vector</option>
                 <option value="walk:ussr_tank_seed1_QUICK">USSR tank, QUICK</option>
