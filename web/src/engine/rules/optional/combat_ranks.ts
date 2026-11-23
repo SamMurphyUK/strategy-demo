@@ -3,6 +3,7 @@ import type { BattleSide, BattleUnitState } from "../../model/battle";
 import type { GameState } from "../../model/game_state";
 import type { Unit } from "../../model/unit";
 import { adjustCombatRank } from "./terrain";
+import { pairArtillery } from "./terrainResolver";
 
 /** The 1942 ranks, then the optional terrain and bombardment adjustments. */
 export function optionalCombatRanks(
@@ -22,6 +23,9 @@ export function optionalCombatRanks(
   for (const unit of units) {
     const base = ranks.get(unit.id) ?? 0;
     next.set(unit.id, adjustCombatRank(state, regionId, units, unit, side, base, round));
+  }
+  if (rules.terrainModifiers && side === "attacker") {
+    return pairArtillery(units, next, unitTypes);
   }
   return next;
 }

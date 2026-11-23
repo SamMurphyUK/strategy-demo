@@ -201,6 +201,10 @@ export function isArmorClass(unitTypeId: string): boolean {
   return classifyUnit(unitTypeId) === "ARMOR";
 }
 
+export function isMechClass(unitTypeId: string): boolean {
+  return classifyUnit(unitTypeId) === "MECH";
+}
+
 export function isBomberClass(unitTypeId: string): boolean {
   const kind = classifyUnit(unitTypeId);
   return kind === "TACTICAL_BOMBER" || kind === "HEAVY_BOMBER";

@@ -3,7 +3,7 @@ import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { adjustedMoveRange } from "../rules/optional/facilities";
-import { movementEnterCost } from "../rules/optional/terrain";
+import { movementEnterCost, terrainActive } from "../rules/optional/terrain";
 import type { Ruleset } from "../rules/ruleset";
 import {
   MoveError,
@@ -142,6 +142,8 @@ export class MovementValidator {
         state,
         ruleset.isSeaUnit(unitTypeId, state),
         factionId,
+        false,
+        unitTypeId,
       ).includes(toRegion)
     ) {
       result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Destination is out of movement range"));
@@ -181,6 +183,8 @@ export class MovementValidator {
             state,
             ruleset.isSeaUnit(unitTypeId, state),
             factionId,
+            false,
+            unitTypeId,
           ).includes(toRegion)
     ) {
       result.errors.push(MoveError.of("MOVE_OUT_OF_RANGE", "Destination is out of movement range"));
@@ -278,6 +282,9 @@ export class MovementValidator {
   }
 
   floodFill(start: string, range: number, state: GameState, seaOnly = false, factionId = "", air = false, unitTypeId = ""): string[] {
+    if (terrainActive(state) && !air && unitTypeId !== "") {
+      return this.terrainReach(start, range, state, seaOnly, factionId, unitTypeId);
+    }
     const visited: Record<string, boolean> = {};
     const frontier: { region: string; dist: number }[] = [{ region: start, dist: 0 }];
     const result: string[] = [];
@@ -320,6 +327,65 @@ export class MovementValidator {
         }
         const cost = movementEnterCost(state, unitTypeId, region, n, range, dist);
         frontier.push({ region: n, dist: dist + cost });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Same borders as `floodFill`, but a cheap desert step must not hide a tile
+   * that a dearer path reached first.
+   */
+  private terrainReach(
+    start: string,
+    range: number,
+    state: GameState,
+    seaOnly: boolean,
+    factionId: string,
+    unitTypeId: string,
+  ): string[] {
+    const best: Record<string, number> = { [start]: 0 };
+    const frontier: { region: string; dist: number }[] = [{ region: start, dist: 0 }];
+    const settled: Record<string, boolean> = {};
+    const result: string[] = [];
+
+    while (frontier.length > 0) {
+      frontier.sort((a, b) => a.dist - b.dist);
+      const current = frontier.shift()!;
+      const region = current.region;
+      const dist = current.dist;
+      if (settled[region] || dist > (best[region] ?? dist) + 1e-9 || dist > range + 1e-9) {
+        continue;
+      }
+      const regionObj = state.regions[region];
+      if (seaOnly && regionObj != null && !regionObj.isSeaRegion()) {
+        continue;
+      }
+      settled[region] = true;
+      if (region !== start) {
+        result.push(region);
+      }
+      if (factionId !== "" && this.regionHasEnemyUnits(region, factionId, state)) {
+        continue;
+      }
+      for (const n of state.getAdjacentRegions(region)) {
+        const neighbor = state.regions[n];
+        if (seaOnly) {
+          if (neighbor == null || !neighbor.isSeaRegion()) {
+            continue;
+          }
+        } else if (neighbor != null && neighbor.isSeaRegion()) {
+          continue;
+        }
+        const next = dist + movementEnterCost(state, unitTypeId, region, n, range, dist);
+        if (next > range + 1e-9) {
+          continue;
+        }
+        if (best[n] != null && next >= best[n] - 1e-9) {
+          continue;
+        }
+        best[n] = next;
+        frontier.push({ region: n, dist: next });
       }
     }
     return result;

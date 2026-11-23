@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EconomyEngine, Faction, GameState, Region, Unit, firingRanks } from "../../../src/engine";
+import { CombatEngine, EconomyEngine, Faction, GameState, MovementValidator, PCG, Region, Ruleset, Unit, firingRanks } from "../../../src/engine";
 import {
   applyRuleToggle,
   classifyUnit,
@@ -115,7 +115,9 @@ describe("optional ruleset", () => {
       scenarioId: "SCENARIO_GLOBAL_1940",
       ruleset: { terrainModifiers: true },
     });
-    expect(movementEnterCost(state, "infantry", "city", "dune", 2, 0)).toBe(2);
+    expect(movementEnterCost(state, "infantry", "city", "dune", 2, 0)).toBe(1);
+    expect(movementEnterCost(state, "tank", "city", "dune", 2, 0)).toBe(1);
+    expect(movementEnterCost(state, "tank", "dune", "dune", 2, 0)).toBe(0.5);
     expect(movementEnterCost(state, "infantry", "city", "snow", 2, 0)).toBe(2);
     expect(movementEnterCost(state, "fighter", "city", "dune", 4, 0)).toBe(1);
     state.regions.city.land_cover = "URBAN";
@@ -128,6 +130,126 @@ describe("optional ruleset", () => {
     const attack = optionalCombatRanks(state, "dune", 1, armor, "attacker");
     expect(attack.get("tank-1")).toBe(2);
     expect(declarePreparatoryBombardment(state, "city", ["gun"])).toBe("Preparatory bombardment needs terrain.");
+  });
+
+  it("sorts cover infantry by experience and lets guerrillas fight in the wood", () => {
+    const state = board();
+    state.applyCampaignLaunch({ scenarioId: "SCENARIO_GLOBAL_1940", ruleset: { terrainModifiers: true } });
+    state.unit_types.artillery = Unit.fromDict({
+      id: "artillery",
+      name: "Artillery",
+      category: "land",
+      attack: 2,
+      defense: 2,
+      movement: 1,
+      cost: 4,
+    });
+    state.unit_types.chinese_guerrilla = Unit.fromDict({
+      id: "chinese_guerrilla",
+      name: "Chinese Guerrilla",
+      category: "land",
+      attack: 1,
+      defense: 1,
+      movement: 1,
+      cost: 3,
+    });
+    state.regions.city.land_cover = "URBAN";
+    state.unitExperience.a = { xp: 2, veteran: false };
+    state.unitExperience.b = { xp: 2, veteran: false };
+    const defenders = [
+      piece("a", "infantry"),
+      piece("b", "infantry"),
+      piece("c", "infantry"),
+      piece("e", "infantry"),
+      piece("d", "chinese_guerrilla"),
+    ];
+    const ranks = optionalCombatRanks(state, "city", 1, defenders, "defender");
+    expect(ranks.get("c")).toBe(3);
+    expect(ranks.get("e")).toBe(3);
+    expect(ranks.get("a")).toBe(3);
+    expect(ranks.get("b")).toBe(2);
+    expect(ranks.get("d")).toBe(1);
+    state.terrainSuppressed.city = state.game_round;
+    state.regions.peak = Region.fromDict({ id: "peak", name: "Peak", type: "land", land_cover: "MOUNTAIN" });
+    const held = optionalCombatRanks(state, "peak", 1, [piece("c", "infantry"), piece("a", "infantry"), piece("b", "infantry")], "defender");
+    expect(held.get("c")).toBe(3);
+    expect(held.get("b")).toBe(2);
+
+    const attack = optionalCombatRanks(
+      state,
+      "woods",
+      1,
+      [piece("gun", "artillery"), piece("scout", "chinese_guerrilla"), piece("rifle", "infantry")],
+      "attacker",
+    );
+    expect(attack.get("rifle")).toBe(2);
+    expect(attack.get("scout")).toBe(1);
+
+    state.regions.woods = Region.fromDict({
+      id: "woods",
+      name: "Woods",
+      type: "land",
+      owner_faction_id: "blue",
+      land_cover: "FOREST",
+    });
+    state.regions.home = Region.fromDict({ id: "home", name: "Home", type: "land", owner_faction_id: "red" });
+    state.adjacency.woods = ["home"];
+    state.adjacency.home = ["woods"];
+    state.current_faction_id = "red";
+    state.current_phase = "combat_move";
+    state.region_units.woods = [
+      { faction_id: "red", unit_type_id: "chinese_guerrilla", count: 1 },
+      { faction_id: "blue", unit_type_id: "infantry", count: 1 },
+    ];
+    state.unit_types.chinese_guerrilla.attack = 6;
+    const combat = new CombatEngine(state, new PCG(1, 1));
+    expect(combat.startBattle("woods", "red").ok).toBe(true);
+    const rolled = combat.applyBattleCommand("battle_roll", "red", {});
+    expect(rolled?.ok).toBe(true);
+    const dice = rolled?.events.find((event) => event.type === "dice_rolled");
+    expect(Array.isArray(dice?.payload.dice) ? dice?.payload.dice.length : 0).toBe(1);
+    expect(state.region_units.woods?.some((unit) => unit.faction_id === "blue" && unit.count > 0)).toBe(false);
+  });
+
+  it("stops on mountain and snow and lets armor cross two desert tiles", () => {
+    const state = board();
+    state.applyCampaignLaunch({ scenarioId: "SCENARIO_GLOBAL_1940", ruleset: { terrainModifiers: true } });
+    state.current_faction_id = "red";
+    state.current_phase = "combat_move";
+    state.unit_types.mech_infantry = Unit.fromDict({
+      id: "mech_infantry",
+      name: "Mechanised Infantry",
+      category: "land",
+      attack: 1,
+      defense: 2,
+      movement: 1,
+      cost: 4,
+    });
+    state.unit_types.tank.movement = 1;
+    const link = (a: string, b: string) => {
+      state.adjacency[a] = [...(state.adjacency[a] ?? []), b];
+      state.adjacency[b] = [...(state.adjacency[b] ?? []), a];
+    };
+    state.regions.a = Region.fromDict({ id: "a", name: "A", type: "land", land_cover: "DESERT", owner_faction_id: "red" });
+    state.regions.b = Region.fromDict({ id: "b", name: "B", type: "land", land_cover: "DESERT", owner_faction_id: "red" });
+    state.regions.c = Region.fromDict({ id: "c", name: "C", type: "land", land_cover: "DESERT", owner_faction_id: "red" });
+    link("a", "b");
+    link("b", "c");
+    state.region_units.a = [{ faction_id: "red", unit_type_id: "tank", count: 1 }];
+    const ruleset = new Ruleset();
+    const moves = new MovementValidator();
+    expect(moves.getLegalDestinationsForStack("a", "tank", "red", state, ruleset).sort()).toEqual(["b", "c"]);
+    state.region_units.a = [{ faction_id: "red", unit_type_id: "infantry", count: 1 }];
+    expect(moves.getLegalDestinationsForStack("a", "infantry", "red", state, ruleset)).toEqual(["b"]);
+
+    state.regions.gate = Region.fromDict({ id: "gate", name: "Gate", type: "land", land_cover: "OPEN", owner_faction_id: "red" });
+    state.regions.peak = Region.fromDict({ id: "peak", name: "Peak", type: "land", land_cover: "MOUNTAIN", owner_faction_id: "red" });
+    state.regions.far = Region.fromDict({ id: "far", name: "Far", type: "land", land_cover: "OPEN", owner_faction_id: "red" });
+    link("gate", "peak");
+    link("peak", "far");
+    state.unit_types.infantry.movement = 2;
+    state.region_units.gate = [{ faction_id: "red", unit_type_id: "infantry", count: 1 }];
+    expect(moves.getLegalDestinationsForStack("gate", "infantry", "red", state, ruleset)).toEqual(["peak"]);
   });
 
   it("promotes one veteran from a bloody win and ignores a quiet win", () => {

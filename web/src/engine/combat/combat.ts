@@ -8,7 +8,9 @@ import { forgetDepartedAir } from "../air/air_fuel";
 import { navalBattleBlocksBombardment } from "../transport/cargo_rules";
 import { neutralDomino } from "../rules/optional/objectives";
 import { optionalCombatRanks } from "../rules/optional/combat_ranks";
+import { guerrillaSlipAway, guerrillaSurpriseActive } from "../rules/optional/terrainResolver";
 import { grantVictoryExperience, veteranMayReroll } from "../rules/optional/veterancy";
+import { classifyUnit } from "../types/ruleset";
 import {
   assignAaHits,
   assignBombardHits,
@@ -162,8 +164,10 @@ export class CombatEngine {
         const ids: unknown = payload.unit_ids;
         return this.assignAttackerCasualties(factionId, Array.isArray(ids) ? ids.map(String) : undefined);
       }
-      case CommandType.BATTLE_RETREAT:
-        return this.retreat(factionId, String(payload.to_region_id ?? ""));
+      case CommandType.BATTLE_RETREAT: {
+        const ids: unknown = payload.unit_ids;
+        return this.retreat(factionId, String(payload.to_region_id ?? ""), Array.isArray(ids) ? ids.map(String) : undefined);
+      }
     }
     return null;
   }
@@ -236,7 +240,7 @@ export class CombatEngine {
     return { ok: true, events };
   }
 
-  retreat(factionId: string, toRegionId: string): BattleCommandResult {
+  retreat(factionId: string, toRegionId: string, slipIds?: string[]): BattleCommandResult {
     const battle = this.state.active_battle;
     const error = this.checkTurn(battle, factionId, ["awaiting_decision"]);
     if (error) {
@@ -246,6 +250,30 @@ export class CombatEngine {
       return fail("INVALID_RETREAT", `Cannot retreat to ${toRegionId}`);
     }
     const b = battle!;
+    if (slipIds != null && slipIds.length > 0) {
+      const slipping = guerrillaSlipAway(this.state, b.region_id, b.attackers, slipIds);
+      if (slipping == null) {
+        return fail("INVALID_RETREAT", "Those units cannot slip away");
+      }
+      const alive = b.attackers.filter(isAlive);
+      const gone = new Set(slipping.map((unit) => unit.id));
+      if (alive.every((unit) => gone.has(unit.id))) {
+        return { ok: true, events: this.finish(b, "attacker_retreated", toRegionId) };
+      }
+      this.mergeInto(toRegionId, this.toStacks(slipping));
+      this.removeStacks(b.region_id, this.toStacks(slipping));
+      b.attackers = b.attackers.filter((unit) => !gone.has(unit.id));
+      return {
+        ok: true,
+        events: [
+          GameEvent.create(
+            GameEventType.UNITS_MOVED,
+            { region_id: b.region_id, retreat_to: toRegionId, units: this.toStacks(slipping) },
+            this.nextSeq(),
+          ),
+        ],
+      };
+    }
     const staying = b.attackers.filter(
       (unit) => isAlive(unit) && unit.amphibious && this.state.unit_types[unit.unit_type_id]?.category === "land",
     );
@@ -637,6 +665,31 @@ export class CombatEngine {
     };
     surprise("attacker");
     surprise("defender");
+
+    if (guerrillaSurpriseActive(this.state, b.region_id)) {
+      const guerrillas = b.attackers.filter((unit) => isAlive(unit) && classifyUnit(unit.unit_type_id) === "CHINESE_GUERRILLA");
+      let hits = 0;
+      const ranks = this.combatRanks(b.attackers, "attacker");
+      for (const unit of guerrillas) {
+        const die = this.rollDie(unit, "attacker", ranks.get(unit.id) ?? 0, true);
+        dice.push(die);
+        fired.add(unit.id);
+        if (die.hit) {
+          hits += 1;
+        }
+      }
+      if (hits > 0) {
+        const spent = restrictedCasualties(
+          b.defenders,
+          { any: 0, skipAir: hits, skipSub: 0 },
+          "defender",
+          types,
+          this.combatRanks(b.defenders, "defender"),
+        );
+        this.applyCasualties(b, spent.plan);
+        casualties.push(...spent.plan.map((hit) => ({ ...hit, surprise: true })));
+      }
+    }
 
     const fire = (side: BattleSide, destroyer: boolean): HitBudget => {
       const own = side === "attacker" ? b.attackers : b.defenders;
