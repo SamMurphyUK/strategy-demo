@@ -26,7 +26,7 @@ function scoreAttack(
   const loss = (1 - attack.survival) * attack.cost * weights.tuvPreservationWeight;
   let counter = 0;
   if (profile.lookaheadPly === 2) {
-    counter = (threat.counterReach1 + threat.counterReach2 * 0.5) * (1 - attack.survival) * weights.tuvPreservationWeight;
+    counter = threat.enemyThreat1Turn * (1 - attack.survival) * weights.tuvPreservationWeight;
   }
   return gain - loss - counter;
 }

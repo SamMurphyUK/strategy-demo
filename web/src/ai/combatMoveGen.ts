@@ -67,8 +67,11 @@ export function combatCandidates(
           continue;
         }
         seen.add(key);
-        const odds = battleOdds(state, factionId, regionId, to, profile.fastOddsIterations, seed + found.length + 1);
         const cheap = cheapUnit(unitType, unit.cost);
+        if (threatAt(tiles, to).zoneClassification === "DEAD_ZONE" && !cheap) {
+          continue;
+        }
+        const odds = battleOdds(state, factionId, regionId, to, profile.fastOddsIterations, seed + found.length + 1);
         const winBar = cheap ? weights.tradeWinThreshold : weights.holdWinThreshold;
         if (odds.win < winBar) {
           continue;

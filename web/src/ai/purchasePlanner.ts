@@ -46,7 +46,7 @@ function capitalThreatened(state: GameState, factionId: string, tiles: readonly 
       continue;
     }
     const threat = tiles.find((tile) => tile.regionId === region.id);
-    if (threat != null && threat.counterReach1 > 0) {
+    if (threat != null && threat.enemyThreat1Turn > 0) {
       return true;
     }
   }
