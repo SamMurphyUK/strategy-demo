@@ -10,7 +10,14 @@ import {
 } from "../../../src/engine/types/ruleset";
 import { optionalCombatRanks } from "../../../src/engine/rules/optional/combat_ranks";
 import { declarePreparatoryBombardment, movementEnterCost } from "../../../src/engine/rules/optional/terrain";
-import { bloodyParity, grantVictoryExperience, type BattleStrength } from "../../../src/engine/rules/optional/veterancy";
+import {
+  AWAITING_PROMOTION_CHOICE,
+  bloodyParity,
+  choosePromotion,
+  grantVictoryExperience,
+  promotionState,
+  type BattleStrength,
+} from "../../../src/engine/rules/optional/veterancy";
 import { researchRoll } from "../../../src/engine/rules/optional/tech";
 import { neutralDomino, objectiveBonus } from "../../../src/engine/rules/optional/objectives";
 import { validateLaunch } from "../../../src/engine/rules/optional/validate";
@@ -277,8 +284,13 @@ describe("optional ruleset", () => {
       winner: "attacker",
     };
     grantVictoryExperience(state, bloody);
-    expect(state.unitExperience.vet).toEqual({ xp: 2, veteran: true });
+    expect(state.unitExperience.vet).toEqual({ xp: 2, veteran: false });
     expect(state.unitExperience.second).toEqual({ xp: 2, veteran: false });
+    expect(promotionState(state)).toBe(AWAITING_PROMOTION_CHOICE);
+    expect(choosePromotion(state, "vet")).toBe("");
+    expect(state.unitExperience.vet).toEqual({ xp: 3, veteran: true });
+    expect(state.unitExperience.second).toEqual({ xp: 2, veteran: false });
+    expect(promotionState(state)).toBe("");
   });
 
   it("carries a missed research pip and pays an objective only when the flag is on", () => {

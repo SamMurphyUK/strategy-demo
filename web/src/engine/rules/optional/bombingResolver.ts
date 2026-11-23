@@ -2,7 +2,7 @@ import type { BattleSide, BattleUnitState } from "../../model/battle";
 import type { GameState } from "../../model/game_state";
 import type { Region } from "../../model/region";
 import { classifyUnit, type RulesetUnitType } from "../../types/ruleset";
-import { operationalAirbase } from "./facilitiesResolver";
+import { consumeInterceptFighters, interceptingFighters } from "./airAndNavalRaiding";
 import { coverOf, coverSuppressed } from "./terrainResolver";
 
 export type FacilityTarget = "airbase" | "harbor" | "depot";
@@ -241,55 +241,13 @@ function removeClass(state: GameState, regionId: string, factionId: string, kind
   }
 }
 
-/** Fighters on an operational airbase at the target, or on one beside it. */
+/** Fighters that set isPatrolling on a station covering this raid. */
 export function patrollingFighters(state: GameState, defenderFactionId: string, regionId: string): number {
-  if (!state.rulesetConfig.facilitiesAndPatrols || defenderFactionId === "") {
-    return 0;
-  }
-  const regions = [regionId, ...state.getAdjacentRegions(regionId)];
-  let total = 0;
-  for (const id of regions) {
-    if (!operationalAirbase(state, id, defenderFactionId)) {
-      continue;
-    }
-    for (const entry of state.region_units[id] ?? []) {
-      if (!state.sameTeam(String(entry.faction_id ?? ""), defenderFactionId) || entry.instance_id) {
-        continue;
-      }
-      if (classifyUnit(String(entry.unit_type_id ?? "")) !== "FIGHTER") {
-        continue;
-      }
-      total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
-    }
-  }
-  return total;
+  return interceptingFighters(state, defenderFactionId, regionId);
 }
 
 function removePatrollingFighters(state: GameState, defenderFactionId: string, regionId: string, count: number): void {
-  let left = count;
-  const regions = [regionId, ...state.getAdjacentRegions(regionId)]
-    .filter((id, index, all) => all.indexOf(id) === index && operationalAirbase(state, id, defenderFactionId))
-    .sort();
-  for (const id of regions) {
-    const units = state.region_units[id] ?? [];
-    for (let i = units.length - 1; i >= 0 && left > 0; i--) {
-      const entry = units[i];
-      if (!state.sameTeam(String(entry.faction_id ?? ""), defenderFactionId) || entry.instance_id) {
-        continue;
-      }
-      if (classifyUnit(String(entry.unit_type_id ?? "")) !== "FIGHTER") {
-        continue;
-      }
-      const have = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
-      if (have > left) {
-        entry.count = have - left;
-        left = 0;
-      } else {
-        left -= have;
-        units.splice(i, 1);
-      }
-    }
-  }
+  consumeInterceptFighters(state, defenderFactionId, regionId, count);
 }
 
 export interface IndustrialRaid {

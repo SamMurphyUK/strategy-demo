@@ -4,6 +4,7 @@ import type { GameState } from "../model/game_state";
 import type { UnitStackEntry } from "../model/types";
 import { normalizeUnitTypeAndFaction } from "../presentation/region_unit_display";
 import { airRangeBonus, carryAirbaseLaunch } from "../rules/optional/facilitiesResolver";
+import { airTransitCost, friendlyPatrolCovers, hasActivePatrols, patrolAirReach } from "../rules/optional/airAndNavalRaiding";
 
 export interface StrandedPlane {
   regionId: string;
@@ -327,6 +328,9 @@ export function airCannotStrike(state: GameState, factionId: string, regionId: s
   if (region == null || !region.isSeaRegion()) {
     return false;
   }
+  if (friendlyPatrolCovers(state, regionId, factionId)) {
+    return false;
+  }
   let subs = 0;
   let others = 0;
   for (const entry of state.getUnitsInRegion(regionId)) {
@@ -354,7 +358,7 @@ export function airCannotStrike(state: GameState, factionId: string, regionId: s
 
 /** After flying to `to`, fuel remains to reach a friendly landing spot. */
 export function canReturnAfter(state: GameState, factionId: string, unitType: string, from: string, to: string): boolean {
-  const steps = airSteps(state, from, to);
+  const steps = airTransitCost(state, factionId, from, to) ?? airSteps(state, from, to);
   const fuel = fuelRemaining(state, factionId, from, unitType);
   if (!Number.isFinite(steps) || steps > fuel) {
     return false;
@@ -363,7 +367,8 @@ export function canReturnAfter(state: GameState, factionId: string, unitType: st
     return true;
   }
   const left = fuel - steps;
-  for (const spot of regionsWithin(state, to, left)) {
+  const spots = hasActivePatrols(state) ? patrolAirReach(state, factionId, to, left) : regionsWithin(state, to, left);
+  for (const spot of spots) {
     if (canLandAt(state, factionId, unitType, spot)) {
       return true;
     }

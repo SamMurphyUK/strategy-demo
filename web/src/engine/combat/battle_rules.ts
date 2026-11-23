@@ -211,6 +211,7 @@ export function restrictedCasualties(
   side: BattleSide,
   unitTypes: Record<string, Unit>,
   ranks: Map<string, number>,
+  experience?: Record<string, { xp: number }>,
 ): { plan: BattleCasualty[]; used: HitBudget } {
   const hp = new Map(units.map((u) => [u.id, u.hp]));
   const order = units.map((u, index) => ({ unit: u, index }));
@@ -224,6 +225,10 @@ export function restrictedCasualties(
         break;
       }
       living.sort((a, b) => {
+        if (experience != null) {
+          const xp = (experience[a.unit.id]?.xp ?? 0) - (experience[b.unit.id]?.xp ?? 0);
+          if (xp !== 0) return xp;
+        }
         const cost = (unitTypes[a.unit.unit_type_id]?.cost ?? 0) - (unitTypes[b.unit.unit_type_id]?.cost ?? 0);
         if (cost !== 0) return cost;
         const rank = (ranks.get(a.unit.id) ?? 0) - (ranks.get(b.unit.id) ?? 0);

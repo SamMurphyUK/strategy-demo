@@ -17,7 +17,8 @@ import {
   suppressionBomber,
   type BombDie,
 } from "../rules/optional/bombingResolver";
-import { grantVictoryExperience, veteranMayReroll } from "../rules/optional/veterancy";
+import { friendlyPatrolCovers, patrolInterceptLifts, subSurpriseBlocked } from "../rules/optional/airAndNavalRaiding";
+import { grantVictoryExperience, markVeteranReroll, veteranMayReroll } from "../rules/optional/veterancy";
 import { classifyUnit } from "../types/ruleset";
 import {
   assignAaHits,
@@ -274,6 +275,7 @@ export class CombatEngine {
         "attacker",
         this.state.unit_types,
         this.combatRanks(b.attackers, "attacker"),
+        this.casualtyExperience(),
       ).plan;
     } else {
       const built = this.planChosenHits(b, unitIds);
@@ -474,6 +476,7 @@ export class CombatEngine {
       last_casualties: [],
     };
     this.stampAmphibious(active);
+    this.pullPatrols(active);
     if (active.battle_type === "naval") {
       this.state.naval_battles_this_turn[active.region_id] = true;
     }
@@ -501,10 +504,52 @@ export class CombatEngine {
     return optionalCombatRanks(this.state, battle?.region_id ?? "", battle?.round ?? 1, units, side);
   }
 
+  /** Lowest XP dies first while veterancy is on. Omitted, the old cheapest-first order stays. */
+  private casualtyExperience(): Record<string, { xp: number }> | undefined {
+    return this.state.rulesetConfig.unitVeterancy === true ? this.state.unitExperience : undefined;
+  }
+
+  /** Patrolling fighters join a battle in their home tile's adjacent sea, then fly home. */
+  private pullPatrols(active: ActiveBattle): void {
+    const lifts = patrolInterceptLifts(this.state, active.region_id, active.defender_faction_id);
+    let serial = 0;
+    for (const lift of lifts) {
+      let left = lift.count;
+      const units = this.state.region_units[lift.from] ?? [];
+      for (let i = units.length - 1; i >= 0 && left > 0; i -= 1) {
+        const entry = units[i];
+        if (entry.faction_id !== lift.factionId || entry.unit_type_id !== lift.unitTypeId || entry.instance_id) {
+          continue;
+        }
+        const have = Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+        const take = Math.min(have, left);
+        if (have === take) {
+          units.splice(i, 1);
+        } else {
+          entry.count = have - take;
+        }
+        left -= take;
+      }
+      const arrived = lift.count - left;
+      for (let i = 0; i < arrived; i += 1) {
+        serial += 1;
+        active.defenders.push({
+          id: `patrol.${lift.from}.${serial}`,
+          faction_id: lift.factionId,
+          unit_type_id: lift.unitTypeId,
+          hp: 1,
+          max_hp: 1,
+          scramble_from: lift.from,
+        });
+      }
+    }
+  }
+
   private rollDie(unit: BattleUnitState, side: BattleSide, rank: number, surprise: boolean): BattleDie {
     const roll = this.rng.rollD6();
     const hit = hitsOn(roll, rank);
     if (!hit && veteranMayReroll(this.state, unit.id)) {
+      markVeteranReroll(this.state, unit.id);
       const again = this.rng.rollD6();
       return { unit_id: unit.id, side, rank, roll: again, hit: hitsOn(again, rank), surprise };
     }
@@ -611,6 +656,12 @@ export class CombatEngine {
     const types = this.state.unit_types;
     const attackingLeave = new Set(escapingSubmarines(b.attackers, b.defenders, "defender", types).map((unit) => unit.id));
     const defendingLeave = new Set(escapingSubmarines(b.defenders, b.attackers, "attacker", types).map((unit) => unit.id));
+    if (friendlyPatrolCovers(this.state, b.region_id, b.defender_faction_id)) {
+      attackingLeave.clear();
+    }
+    if (friendlyPatrolCovers(this.state, b.region_id, b.attacker_faction_id)) {
+      defendingLeave.clear();
+    }
     const drop = (units: BattleUnitState[], leaving: Set<string>): string[] => {
       const ids = units.filter((unit) => leaving.has(unit.id)).map((unit) => unit.id);
       if (ids.length === 0) {
@@ -633,6 +684,8 @@ export class CombatEngine {
     }
     const attackerLost = b.attackers.filter((unit) => !isAlive(unit)).length;
     const defenderLost = b.defenders.filter((unit) => !isAlive(unit)).length;
+    const sideCost = (units: BattleUnitState[]) =>
+      units.reduce((sum, unit) => sum + Math.max(0, Math.trunc(Number(this.state.unit_types[unit.unit_type_id]?.cost ?? 0))), 0);
     grantVictoryExperience(this.state, {
       attacker: b.attackers.length,
       defender: b.defenders.length,
@@ -641,6 +694,8 @@ export class CombatEngine {
       attackerSurvivors: b.attackers.filter(isAlive),
       defenderSurvivors: b.defenders.filter(isAlive),
       winner: result === "attacker_won" ? "attacker" : "defender",
+      attackerCost: sideCost(b.attackers),
+      defenderCost: sideCost(b.defenders),
     });
   }
 
@@ -747,6 +802,8 @@ export class CombatEngine {
 
     const attackerDestroyer = b.attackers.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
     const defenderDestroyer = b.defenders.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"));
+    const attackerSeesSubs = attackerDestroyer || friendlyPatrolCovers(this.state, b.region_id, b.attacker_faction_id);
+    const defenderSeesSubs = defenderDestroyer || friendlyPatrolCovers(this.state, b.region_id, b.defender_faction_id);
 
     const surprise = (side: BattleSide) => {
       const own = side === "attacker" ? b.attackers : b.defenders;
@@ -754,7 +811,9 @@ export class CombatEngine {
       if (enemy.some((u) => isAlive(u) && this.hasFlag(u, "cancels_submarine_abilities"))) {
         return;
       }
-      const subs = own.filter((u) => isAlive(u) && this.hasFlag(u, "has_surprise_strike"));
+      const subs = own.filter(
+        (u) => isAlive(u) && this.hasFlag(u, "has_surprise_strike") && !subSurpriseBlocked(this.state, b.region_id, u.faction_id),
+      );
       if (subs.length === 0) {
         return;
       }
@@ -767,7 +826,14 @@ export class CombatEngine {
         if (die.hit) hits += 1;
       }
       const enemySide: BattleSide = side === "attacker" ? "defender" : "attacker";
-      const spent = restrictedCasualties(enemy, { any: 0, skipAir: hits, skipSub: 0 }, enemySide, types, this.combatRanks(enemy, enemySide));
+      const spent = restrictedCasualties(
+        enemy,
+        { any: 0, skipAir: hits, skipSub: 0 },
+        enemySide,
+        types,
+        this.combatRanks(enemy, enemySide),
+        this.casualtyExperience(),
+      );
       this.applyCasualties(b, spent.plan);
       casualties.push(...spent.plan.map((c) => ({ ...c, surprise: true })));
     };
@@ -793,6 +859,7 @@ export class CombatEngine {
           "defender",
           types,
           this.combatRanks(b.defenders, "defender"),
+          this.casualtyExperience(),
         );
         this.applyCasualties(b, spent.plan);
         casualties.push(...spent.plan.map((hit) => ({ ...hit, surprise: true })));
@@ -823,8 +890,8 @@ export class CombatEngine {
       }
       return budget;
     };
-    const attackerBudget = fire("attacker", attackerDestroyer);
-    const defenderBudget = fire("defender", defenderDestroyer);
+    const attackerBudget = fire("attacker", attackerSeesSubs);
+    const defenderBudget = fire("defender", defenderSeesSubs);
 
     const defenderPlan = restrictedCasualties(
       b.defenders,
@@ -832,6 +899,7 @@ export class CombatEngine {
       "defender",
       types,
       this.combatRanks(b.defenders, "defender"),
+      this.casualtyExperience(),
     );
     this.applyCasualties(b, defenderPlan.plan);
     casualties.push(...defenderPlan.plan);
@@ -842,6 +910,7 @@ export class CombatEngine {
       "attacker",
       types,
       this.combatRanks(b.attackers, "attacker"),
+      this.casualtyExperience(),
     ).used;
     b.attacker_hits_to_take = taken.any + taken.skipAir + taken.skipSub;
     b.attacker_hits_skip_air = taken.skipAir;

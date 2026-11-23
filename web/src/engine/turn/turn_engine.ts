@@ -1,6 +1,7 @@
 import { GameEvent, GameEventType } from "../model/event";
 import type { GameState } from "../model/game_state";
 import { beginMovementPhase } from "../movement/phase_orders";
+import { lockPatrols } from "../rules/optional/airAndNavalRaiding";
 import { repairCapitalShips } from "../rules/optional/facilitiesResolver";
 
 export const PHASES = [
@@ -73,8 +74,10 @@ export class TurnEngine {
         this.nextSeq(),
       ),
     );
+    const ending = state.current_faction_id;
     const idx = state.turn_order.indexOf(state.current_faction_id);
     const nextIdx = (idx + 1) % state.turn_order.length;
+    lockPatrols(state, ending);
     state.current_faction_id = state.turn_order[nextIdx];
     state.turn_number += 1;
     if (nextIdx === 0) {

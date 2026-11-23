@@ -26,6 +26,8 @@ export class Region {
   forward_depot = false;
   /** Printed build output. Zero uses the territory value. */
   base_output = 0;
+  /** A convoy sea zone. Omitted from saves while false. */
+  is_convoy_zone = false;
 
   static fromDict(data: Dict): Region {
     const region = new Region();
@@ -46,6 +48,7 @@ export class Region {
     region.major_factory = data.major_factory === true;
     region.forward_depot = data.forward_depot === true;
     region.base_output = toInt(data.base_output ?? 0);
+    region.is_convoy_zone = data.is_convoy_zone === true;
     return region;
   }
 
@@ -75,6 +78,7 @@ export class Region {
       ...(this.major_factory ? { major_factory: true } : {}),
       ...(this.forward_depot ? { forward_depot: true } : {}),
       ...(this.base_output > 0 ? { base_output: this.base_output } : {}),
+      ...(this.is_convoy_zone ? { is_convoy_zone: true } : {}),
     };
   }
 }

@@ -128,6 +128,7 @@ describe("bombing resolver", () => {
       { faction_id: "red", unit_type_id: "fighter", count: 1 },
       { faction_id: "blue", unit_type_id: "fighter", count: 1 },
     ];
+    state.patrolCounts["blue|plant"] = 1;
     const raid = runIndustrialBombing(state, "red", "plant", 1, faces([6, 1, 2, 4]));
     expect("error" in raid).toBe(false);
     if ("error" in raid) {
@@ -160,6 +161,7 @@ describe("bombing resolver", () => {
       { faction_id: "red", unit_type_id: "bomber", count: 1 },
       { faction_id: "blue", unit_type_id: "fighter", count: 1 },
     ];
+    state.patrolCounts["blue|plant"] = 1;
     state.repairTokens.plant = 0;
     const unescorted = runIndustrialBombing(state, "red", "plant", 0, faces([6, 1, 3]));
     expect("bomberLosses" in unescorted && unescorted.bomberLosses).toBe(0);

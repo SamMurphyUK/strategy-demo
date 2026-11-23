@@ -106,6 +106,16 @@ export class GameState {
   /** Faction id → unlocked research names. Absent from snapshots. */
   researchUnlocked: Record<string, string[]> = {};
   unitExperience: Record<string, UnitExperience> = {};
+  /** `faction|region` → fighters with isPatrolling set. Absent from snapshots. */
+  patrolCounts: Record<string, number> = {};
+  /** Faction id → those fighters stay up until purchase stand-down. Absent from snapshots. */
+  patrolLock: Record<string, boolean> = {};
+  /** `faction|region` → this move may enter without the patrol bypass tax. Absent from snapshots. */
+  patrolBypassWaived: Record<string, boolean> = {};
+  /** Winning pieces waiting for one promotion to xp 3. Absent from snapshots. */
+  pendingPromotion: { id: string; cost: number }[] = [];
+  /** Battle-piece id → the combat round that already spent its veteran reroll. Absent from snapshots. */
+  veteranRerollRound: Record<string, number> = {};
   nationalObjectives: NationalObjective[] = [];
   neutralBlocs: NeutralBloc[] = [];
 

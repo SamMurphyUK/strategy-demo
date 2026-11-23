@@ -3,6 +3,7 @@ import { CarrierConstraintChecker } from "../air/carrier_constraint_checker";
 import type { GameState } from "../model/game_state";
 import type { Dict } from "../model/types";
 import { adjustedMoveRange, airRangeBonus } from "../rules/optional/facilities";
+import { airTransitCost, hasActivePatrols, patrolAirReach, patrolGrounded } from "../rules/optional/airAndNavalRaiding";
 import { movementEnterCost, terrainActive } from "../rules/optional/terrain";
 import type { Ruleset } from "../rules/ruleset";
 import {
@@ -27,6 +28,9 @@ export class MovementValidator {
       return preview;
     }
     const factionId = String(unit.faction_id ?? "");
+    if (patrolGrounded(state, factionId, start, unitTypeId)) {
+      return preview;
+    }
     let moveRange = adjustedMoveRange(state, unitTypeId, start, ruleset.getUnitMoveRange(unitTypeId, state), factionId);
     if (isAirUnit(state, unitTypeId) && airRangeBonus(state, factionId, start, unitTypeId) > 0) {
       moveRange += 1;
@@ -34,7 +38,10 @@ export class MovementValidator {
 
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
     const air = isAirUnit(state, unitTypeId);
-    const reachable = this.floodFill(start, moveRange, state, seaOnly, factionId, air, unitTypeId);
+    const reachable =
+      air && hasActivePatrols(state)
+        ? patrolAirReach(state, factionId, start, moveRange)
+        : this.floodFill(start, moveRange, state, seaOnly, factionId, air, unitTypeId);
 
     for (const region of reachable) {
       if (ruleset.canUnitEnterRegion(unitTypeId, region, state, state.current_phase)) {
@@ -63,6 +70,9 @@ export class MovementValidator {
     if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       return legal;
     }
+    if (patrolGrounded(state, factionId, fromRegion, unitTypeId)) {
+      return legal;
+    }
     const air = isAirUnit(state, unitTypeId);
     const printed = ruleset.getUnitMoveRange(unitTypeId, state);
     let moveRange = air ? fuelRemaining(state, factionId, fromRegion, unitTypeId) : printed;
@@ -77,7 +87,11 @@ export class MovementValidator {
       moveRange = 1;
     }
     const seaOnly = ruleset.isSeaUnit(unitTypeId, state);
-    for (const dest of this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, air, unitTypeId)) {
+    const reached =
+      air && hasActivePatrols(state)
+        ? patrolAirReach(state, factionId, fromRegion, moveRange)
+        : this.floodFill(fromRegion, moveRange, state, seaOnly, factionId, air, unitTypeId);
+    for (const dest of reached) {
       if (ruleset.canUnitEnterRegion(unitTypeId, dest, state, state.current_phase)) {
         legal.push(dest);
       }
@@ -180,9 +194,12 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "Land units cannot enter sea zones"));
     } else if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
+    } else if (patrolGrounded(state, factionId, fromRegion, unitTypeId)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "Fighters on patrol stay up until purchase"));
     } else if (
       isAirUnit(state, unitTypeId)
-        ? airSteps(state, fromRegion, toRegion) > fuelRemaining(state, factionId, fromRegion, unitTypeId)
+        ? (airTransitCost(state, factionId, fromRegion, toRegion) ?? airSteps(state, fromRegion, toRegion)) >
+          fuelRemaining(state, factionId, fromRegion, unitTypeId)
         : !state.isAdjacent(fromRegion, toRegion) &&
           !this.floodFill(
             fromRegion,

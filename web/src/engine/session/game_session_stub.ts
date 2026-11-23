@@ -22,6 +22,7 @@ import { PlacementEngine } from "../placement/placement";
 import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
 import { Ruleset } from "../rules/ruleset";
+import { standDownPatrols } from "../rules/optional/airAndNavalRaiding";
 import { commitPurchaseRepairs, planPurchaseRepairs, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
 import { classifyUnit } from "../types/ruleset";
 import { TransportLoadValidator } from "../transport/transport_load_validator";
@@ -200,6 +201,16 @@ export class GameSessionStub {
         const repairLines = this.repairLines(cmd);
         if (Array.isArray(cmd.payload.repairs) && cmd.payload.repairs.some((entry) => !isDict(entry))) {
           return { result_type: "error", error: { code: "PURCHASE_FAILED", message: "Nothing to repair." }, events: [] };
+        }
+        if (cmd.payload.stand_down_patrols === true) {
+          const stood = standDownPatrols(this.state, cmd.player_id);
+          if (stood != null) {
+            return { result_type: "error", error: { code: "PURCHASE_FAILED", message: stood }, events: [] };
+          }
+          if (repairLines.length === 0 && this.purchaseLines(cmd).length === 0) {
+            events = [];
+            break;
+          }
         }
         const planned = repairLines.length > 0 ? planPurchaseRepairs(this.state, cmd.player_id, repairLines) : null;
         if (planned != null && "error" in planned) {
