@@ -290,7 +290,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         shade = smoothstep(0.4, 0.6, shade);
         c *= 1.0 - uShadowAlpha * shade;
         float glint = hash21(floor(m * 3.0) + floor(uTime * 2.0) * 13.0);
-        c += uSunColor * step(0.9965, glint) * 0.2 * uWater * uDirect * (1.0 - shade);
+        c += uSunColor * step(0.9978, glint) * 0.14 * uWater * uDirect * (1.0 - shade);
 
         c *= lit(uSunDir.z);
         c *= 1.0 - cloudShade(vScene);
@@ -501,7 +501,8 @@ export function craterMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         // The pit is lit on the side away from the sun, the way a hollow is.
         float side = dot(normalize(vAt + 0.0001), normalize(uSunDir.xy + 0.0001));
         vec3 c = d < 0.46 ? uPit * (1.0 + 0.25 * step(0.2, -side) * uRelief) : uRim * (1.0 + 0.18 * step(0.2, side) * uRelief);
-        gl_FragColor = vec4(c * lit(uSunDir.z), 0.9);
+        // The churned rim lets the territory's colour through. The pit is nearly solid.
+        gl_FragColor = vec4(c * lit(uSunDir.z), d < 0.46 ? 0.9 : 0.55);
       }
     `,
   });

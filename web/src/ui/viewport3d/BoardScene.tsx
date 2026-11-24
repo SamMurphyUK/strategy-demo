@@ -72,6 +72,8 @@ const AMBIENT_FRAME_MS = 1000 / 30;
 const OPENING_SECONDS = 70;
 /** Lens blur at the top and bottom edge at the closest zoom, in CSS pixels. */
 const LENS_RADIUS = 3.2;
+/** Longest a prop's shadow runs along the ground, per unit of its height. */
+const PROP_SHADOW_REACH = 0.9;
 /** Lift of ground marks above the land, in world units, so they do not fight it for depth. */
 const CRATER_LIFT = 0.02;
 const UNIT_SHADOW_LIFT = 0.04;
@@ -348,7 +350,8 @@ export function BoardScene(props: BoardSceneProps) {
     shared.uDirect.value = sun.direct;
     shared.uRelief.value = detail.relief;
     const fall = shadowDirection(sun);
-    const reach = Math.min(shadowReach(sun), 1.3);
+    // Kept short: a forest's long shadows read as hatching across the territory.
+    const reach = Math.min(shadowReach(sun), PROP_SHADOW_REACH);
     shared.uShadowVec.value.set(fall.x * reach, fall.y * reach);
     shared.uShadowAlpha.value = sun.shadow * detail.relief;
 
