@@ -5,9 +5,9 @@ alwaysApply: true
 
 # Presentation and a later Three.js viewport
 
-`web/src/ui/map/` and `web/src/ui/battle/` are the v1 picture. A Three.js viewport can replace them after the demo. The campaign already plays `GameSession`. Before starting that port, ask: should the viewport use React Three Fiber (R3F)? The HUD is already React; prefer R3F's declarative JSX over a large imperative vanilla Three.js file unless they choose vanilla. Do not put combat odds, legal moves, supply, or ownership rules in `MapView.tsx`, `mapRenderer.ts`, or battle canvas code. Derived layout (stack seats, counts, battle marks) comes from pure helpers over a snapshot.
+`web/src/ui/map/` and `web/src/ui/battle/` are the v1 picture. A Three.js viewport can replace them after the demo. The campaign already plays `GameSession`. That port uses React Three Fiber (R3F), decided on 24 November 2026: the HUD is already React, and R3F's declarative JSX is easier to work with here than a large imperative vanilla Three.js file. Do not put combat odds, legal moves, supply, or ownership rules in `MapView.tsx`, `mapRenderer.ts`, or battle canvas code. Derived layout (stack seats, counts, battle marks) comes from pure helpers over a snapshot.
 
-Keep camera math (`viewMath.ts`, LOD) and spatial hit tests (which region or stack) free of `CanvasRenderingContext2D`, `drawImage`, `Path2D`, and `ctx.filter`, so a later camera matrix and raycast can reuse them.
+Keep camera math (`viewMath.ts`, LOD) and spatial hit tests (which region or stack) free of `CanvasRenderingContext2D`, `drawImage`, `Path2D`, and `ctx.filter`, so a later camera matrix and raycast can reuse them. `regionPick.ts` is the region picker that meets this. `hitTest.ts` still picks with `Path2D` and serves the 2D map only; do not build on it.
 
 HUD (turn bar, purchase, inspector, menus, war room) stays React. Do not couple it to pan, zoom, pointer pixels, or animation frames. Store those in `useRef`. Notify React only on discrete changes: selection, hover *label*, phase, modal open or close. Do not put pan/zoom deltas or 60 fps ticks in `useState`.
 

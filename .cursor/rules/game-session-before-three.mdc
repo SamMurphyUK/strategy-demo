@@ -1,14 +1,12 @@
 ---
-description: Before a Three.js viewport port, ask whether the viewport should use React Three Fiber
+description: The Three.js viewport port uses React Three Fiber
 alwaysApply: true
 ---
 
-# React Three Fiber before a Three.js viewport
+# The Three.js viewport is React Three Fiber
 
 The campaign, host, and arena play `GameSession` in `web/src/engine/session/game_session.ts`.
 
-If the user asks to start, plan, or begin a Three.js map/battle viewport port, stop and ask this first, as a question:
+Decided on 24 November 2026: the map and battle viewport port uses React Three Fiber (R3F). The HUD is already React, and declarative JSX is easier to reason about and refactor here than large imperative vanilla Three.js files.
 
-**Should this viewport use React Three Fiber (R3F)?** The HUD is already React. Declarative JSX is usually easier to reason about and refactor here than large imperative vanilla Three.js files. Do not start a vanilla Three.js tree unless they choose that.
-
-Do not start Three.js work until they answer.
+Do not start a vanilla Three.js tree. If a piece of the port seems to need one, stop and ask first.
