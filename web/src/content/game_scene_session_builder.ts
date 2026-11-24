@@ -9,22 +9,56 @@ export const RULES_PATH = "res://data/scenarios/minimal/rules.json";
 export const PLAYABLE_FACTIONS = ["ussr", "ger", "uk", "jap", "usa"];
 /** Classic 1942 order: Soviet Union, Germany, United Kingdom, Japan, United States. */
 export const TURN_ORDER = ["ussr", "ger", "uk", "jap", "usa"] as const;
+/** Ids used by `demomap_global_1940.json`. The records (colour, team, treasury) live in that file. */
+export const GLOBAL_1940_FACTION_IDS = [
+  "germany",
+  "soviet_union",
+  "japan",
+  "united_kingdom",
+  "uk_pacific",
+  "italy",
+  "anzac",
+  "china",
+  "free_france",
+  "united_states",
+] as const;
 const FACTION_DISPLAY: Record<string, string> = {
   Allies: "allies",
   Axis: "axis",
   USSR: "ussr",
   GER: "ger",
   UK: "uk",
+  "UK Europe": "united_kingdom",
+  "UK Pacific": "uk_pacific",
+  UKP: "uk_pacific",
   USA: "usa",
   JAP: "jap",
+  ITA: "italy",
+  Italy: "italy",
+  CHI: "china",
+  China: "china",
+  ANZAC: "anzac",
+  FRA: "free_france",
+  France: "free_france",
+  "Free France": "free_france",
 };
 
 const FACTION_NAMES: Record<string, string> = {
   ussr: "Soviet Union",
+  soviet_union: "Soviet Union",
   ger: "Germany",
+  germany: "Germany",
   uk: "United Kingdom",
+  united_kingdom: "United Kingdom (Europe)",
+  uk_pacific: "United Kingdom (Pacific)",
   jap: "Japan",
+  japan: "Japan",
   usa: "United States",
+  united_states: "United States",
+  italy: "Italy",
+  china: "China",
+  anzac: "ANZAC",
+  free_france: "Free France",
   allies: "Allies",
   axis: "Axis",
   neutral: "Neutral",
@@ -47,16 +81,20 @@ export function buildMapData(mapJson: Dict): Dict {
     if (owner === "" && regionId === "region_1") {
       owner = "ussr";
     }
+    const type = regionTypeFromMetadata(meta, regionId);
+    const cover = String(meta.land_cover ?? "").trim();
     regions.push({
       id: regionId,
       name: String(meta.name ?? "") || regionId,
-      type: regionTypeFromMetadata(meta, regionId),
+      type,
       ipc_value: Math.trunc(Number(meta.ipc ?? 0)),
       owner_faction_id: owner,
       original_owner_id: owner,
       is_capital: Boolean(meta.victory ?? false),
       has_factory: Boolean(meta.factory ?? false) || meta.factory_size === "major" || meta.factory_size === "minor",
       major_factory: meta.factory_size === "major" || (meta.factory === true && meta.factory_size !== "minor"),
+      ...(cover !== "" ? { land_cover: cover } : {}),
+      ...(type === "sea" && meta.is_convoy_zone === true ? { is_convoy_zone: true } : {}),
     });
   }
   return {
@@ -67,8 +105,9 @@ export function buildMapData(mapJson: Dict): Dict {
 }
 
 export function buildFactionsData(mapJson: Dict = {}): Dict {
-  if (Array.isArray(mapJson.factions) && mapJson.factions.length > 0) {
-    return { schema_version: "0.5", factions: mapJson.factions };
+  const authored = authoredFactions(mapJson);
+  if (authored.length > 0) {
+    return { schema_version: "0.5", factions: authored };
   }
   return {
     schema_version: "0.5",
@@ -82,6 +121,19 @@ export function buildFactionsData(mapJson: Dict = {}): Dict {
   };
 }
 
+/** Playable faction ids for this map. A map with no `factions` list keeps the classic five. */
+export function playableFactionIds(mapJson: Dict = {}): string[] {
+  const ids = authoredFactions(mapJson).map((faction) => String(faction.id ?? "")).filter((id) => id !== "");
+  return ids.length > 0 ? ids : [...PLAYABLE_FACTIONS];
+}
+
+function authoredFactions(mapJson: Dict): Dict[] {
+  if (!Array.isArray(mapJson.factions)) {
+    return [];
+  }
+  return mapJson.factions.filter((item): item is Dict => isDict(item) && String(item.id ?? "") !== "");
+}
+
 /** Land IPC each playable faction owns on this map. Sea zones and neutrals add nothing. */
 export function territoryIncome(mapJson: Dict): Record<string, number> {
   const totals: Record<string, number> = {};
@@ -92,7 +144,7 @@ export function territoryIncome(mapJson: Dict): Record<string, number> {
       continue;
     }
     const owner = ownerFromMetadataFaction(String(meta.faction ?? ""));
-    if (!PLAYABLE_FACTIONS.includes(owner)) {
+    if (!playableFactionIds(mapJson).includes(owner)) {
       continue;
     }
     totals[owner] = (totals[owner] ?? 0) + Math.trunc(Number(meta.ipc ?? 0));
@@ -129,8 +181,11 @@ export function buildSetupData(mapJson: Dict): Dict {
   // An authored list, including an empty one, is the whole setup. The region_1 fallback below is only
   // for older files that omit the key; a blank slicing map must be allowed to start with no units.
   if (Array.isArray(mapJson.starting_units)) {
-    const order = Array.isArray(mapJson.turn_order) ? mapJson.turn_order : [...TURN_ORDER];
-    return { schema_version: "0.5", turn_order: order, starting_units: mapJson.starting_units };
+    return {
+      schema_version: "0.5",
+      turn_order: turnOrderFromMap(mapJson),
+      starting_units: mapJson.starting_units,
+    };
   }
   const startingUnits: Dict[] = [];
   for (const regionEntry of extractRegions(mapJson)) {
@@ -140,7 +195,7 @@ export function buildSetupData(mapJson: Dict): Dict {
     if (owner === "" && regionId === "region_1") {
       owner = "ussr";
     }
-    if (PLAYABLE_FACTIONS.includes(owner)) {
+    if (playableFactionIds(mapJson).includes(owner)) {
       startingUnits.push({ region_id: regionId, faction_id: owner, unit_type_id: "infantry", count: 2 });
     }
   }
@@ -149,9 +204,21 @@ export function buildSetupData(mapJson: Dict): Dict {
   }
   return {
     schema_version: "0.5",
-    turn_order: [...TURN_ORDER],
+    turn_order: turnOrderFromMap(mapJson),
     starting_units: startingUnits,
   };
+}
+
+function turnOrderFromMap(mapJson: Dict): string[] {
+  if (Array.isArray(mapJson.turn_order) && mapJson.turn_order.length > 0) {
+    return mapJson.turn_order.map((id) => String(id));
+  }
+  const ranked = authoredFactions(mapJson)
+    .slice()
+    .sort((a, b) => Number(a.turn_order ?? 0) - Number(b.turn_order ?? 0))
+    .map((faction) => String(faction.id ?? ""))
+    .filter((id) => id !== "");
+  return ranked.length > 0 ? ranked : [...TURN_ORDER];
 }
 
 export function displayNameForFactionId(factionId: string): string {

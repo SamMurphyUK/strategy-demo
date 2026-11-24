@@ -7,8 +7,9 @@ alwaysApply: true
 
 New work lands in `web/`. From that directory, `npm test` runs Vitest and `npm run build` runs the Vite production build. Both should pass before a change is finished.
 
-- `web/src/engine` is the rules. It must not import React, the DOM, Canvas, or Web Audio.
-- `web/src/ui` displays state and sends commands. It does not write `GameState` except through the session.
+- `web/src/engine` is the pure simulation. It must not import React, Three.js, the DOM (`window`, `document`), Canvas, or Web Audio. Rules, combat, economy, optional 1940 flags, and `GameState` changes live here as deterministic TypeScript.
+- `web/src/ai` must not import UI or renderer modules. Every planner command goes through `validateCommand` before it is returned.
+- `web/src/ui` displays snapshots and sends commands. It does not write `GameState` except through the session (`applyCommand` on the stub today). HUD and the map/battle renderer follow the same rule.
 - The campaign map plays `GameSessionStub`. Leave `GameSession` unwired unless asked.
 - Tests live in `web/tests/**/*.test.ts`. Do not delete or loosen an existing test to make a change pass.
 - `data/`, `demomap01.json`, and `docs/event_schema.json` are the shared content the engine loads. Do not fork a second copy.

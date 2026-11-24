@@ -1027,6 +1027,7 @@ export function separateBlockedPieces(
         polygon: piece.polygon,
         cx: piece.cx,
         cy: piece.cy,
+        ...(current.is_convoy_zone ? { is_convoy_zone: true } : {}),
       });
     }
     next = {

@@ -12,8 +12,11 @@ export function factionName(factionId: string): string {
     case "axis":
       return "Germany";
     case "uk":
-    case "united_kingdom":
       return "United Kingdom";
+    case "united_kingdom":
+      return "United Kingdom (Europe)";
+    case "uk_pacific":
+      return "United Kingdom (Pacific)";
     case "jap":
     case "japan":
       return "Japan";

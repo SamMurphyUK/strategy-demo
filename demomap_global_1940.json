@@ -26,6 +26,12 @@
       0.333,
       0.55
     ],
+    "uk_pacific": [
+      0.71,
+      0.604,
+      0.408,
+      0.55
+    ],
     "united_states": [
       0.447,
       0.455,
@@ -44,6 +50,30 @@
       0.345,
       0.55
     ],
+    "italy": [
+      0.18,
+      0.49,
+      0.196,
+      0.55
+    ],
+    "china": [
+      0.541,
+      0.416,
+      0.184,
+      0.55
+    ],
+    "anzac": [
+      0.545,
+      0.118,
+      0.247,
+      0.55
+    ],
+    "free_france": [
+      0.424,
+      0.557,
+      0.749,
+      0.55
+    ],
     "Neutral": [
       0.65,
       0.612,
@@ -53,58 +83,50 @@
   },
   "factions": [
     {
-      "id": "soviet_union",
-      "name": "Soviet Union",
-      "color": "#9A4E48",
-      "team": "allies",
-      "turn_order": 1,
-      "starting_ipc": 15
-    },
-    {
       "id": "germany",
       "name": "Germany",
       "color": "#857577",
       "team": "axis",
-      "turn_order": 2,
+      "turn_order": 1,
       "starting_ipc": 22
     },
     {
-      "id": "united_kingdom",
-      "name": "United Kingdom",
-      "color": "#9E7F55",
+      "id": "soviet_union",
+      "name": "Soviet Union",
+      "color": "#9A4E48",
       "team": "allies",
-      "turn_order": 3,
-      "starting_ipc": 21
+      "turn_order": 2,
+      "starting_ipc": 15
     },
     {
       "id": "japan",
       "name": "Japan",
       "color": "#B77958",
       "team": "axis",
-      "turn_order": 4,
+      "turn_order": 3,
       "starting_ipc": 16
     },
     {
-      "id": "united_states",
-      "name": "United States",
-      "color": "#72745C",
+      "id": "united_kingdom",
+      "name": "United Kingdom (Europe)",
+      "color": "#9E7F55",
+      "team": "allies",
+      "turn_order": 4,
+      "starting_ipc": 21
+    },
+    {
+      "id": "uk_pacific",
+      "name": "United Kingdom (Pacific)",
+      "color": "#B59A68",
       "team": "allies",
       "turn_order": 5,
-      "starting_ipc": 17
+      "starting_ipc": 0
     },
     {
       "id": "italy",
       "name": "Italy",
       "color": "#2E7D32",
       "team": "axis",
-      "turn_order": 5,
-      "starting_ipc": 0
-    },
-    {
-      "id": "china",
-      "name": "China",
-      "color": "#8A6A2F",
-      "team": "allies",
       "turn_order": 6,
       "starting_ipc": 0
     },
@@ -112,6 +134,14 @@
       "id": "anzac",
       "name": "ANZAC",
       "color": "#8B1E3F",
+      "team": "allies",
+      "turn_order": 7,
+      "starting_ipc": 0
+    },
+    {
+      "id": "china",
+      "name": "China",
+      "color": "#8A6A2F",
       "team": "allies",
       "turn_order": 8,
       "starting_ipc": 0
@@ -123,6 +153,14 @@
       "team": "allies",
       "turn_order": 9,
       "starting_ipc": 0
+    },
+    {
+      "id": "united_states",
+      "name": "United States",
+      "color": "#72745C",
+      "team": "allies",
+      "turn_order": 10,
+      "starting_ipc": 17
     }
   ],
   "turn_order": [
@@ -130,8 +168,11 @@
     "soviet_union",
     "japan",
     "united_kingdom",
+    "uk_pacific",
     "italy",
+    "anzac",
     "china",
+    "free_france",
     "united_states"
   ],
   "starting_units": [

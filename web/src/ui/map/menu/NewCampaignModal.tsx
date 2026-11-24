@@ -14,8 +14,9 @@ import {
 import type { MapVersion } from "../editor/mapVersions";
 import { factionName } from "../session/event_text";
 import { demoPlayChoice, playChoiceFromVersion, type PlayChoice } from "../session/play_map";
+import { GLOBAL_1940_FACTION_IDS, PLAYABLE_FACTIONS } from "../../../content/game_scene_session_builder";
 
-const POWERS = ["ussr", "ger", "uk", "jap", "usa"] as const;
+const POWERS = PLAYABLE_FACTIONS;
 
 const SCENARIO_CARDS: Record<ScenarioId, { title: string; detail: string }> = {
   SCENARIO_1942_QUICK: {
@@ -175,7 +176,7 @@ export function NewCampaignModal({
         <label>
           Your power
           <select aria-label="Your power" value={playerFaction} onChange={(event) => onPlayerFaction(event.target.value)}>
-            {POWERS.map((faction) => (
+            {(scenarioId === "SCENARIO_GLOBAL_1940" ? GLOBAL_1940_FACTION_IDS : POWERS).map((faction) => (
               <option key={faction} value={faction}>
                 {factionName(faction)}
               </option>

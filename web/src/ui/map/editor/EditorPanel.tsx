@@ -7,6 +7,7 @@ import { unitLabel } from "../unitStacks";
 import {
   FACTORY_LEVELS,
   type FactoryLevel,
+  LAND_COVER_OPTIONS,
   neighborsOf,
   OWNER_OPTIONS,
   sampleGarrison,
@@ -44,6 +45,14 @@ function CommitInput(props: {
 }
 
 const FACTORY_LABELS: Record<FactoryLevel, string> = { none: "None", minor: "Minor", major: "Major" };
+const COVER_LABELS: Record<(typeof LAND_COVER_OPTIONS)[number], string> = {
+  "": "Open",
+  URBAN: "Urban",
+  FOREST: "Forest",
+  MOUNTAIN: "Mountain",
+  DESERT: "Desert",
+  SNOW: "Snow",
+};
 
 /** Always lists the current value, even if it is not one of the usual options. */
 function withCurrent(options: readonly string[], current: string): string[] {
@@ -137,7 +146,32 @@ export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlayt
                   />
                   Harbour
                 </label>
+                <label>
+                  Land cover
+                  <select
+                    value={selected.land_cover ?? ""}
+                    onChange={(e) =>
+                      editor.patchSelected({ land_cover: e.target.value === "" ? undefined : e.target.value })
+                    }
+                  >
+                    {LAND_COVER_OPTIONS.map((cover) => (
+                      <option key={cover || "open"} value={cover}>
+                        {COVER_LABELS[cover]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </>
+            )}
+            {selected.is_sea && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={selected.is_convoy_zone ?? false}
+                  onChange={(e) => editor.patchSelected({ is_convoy_zone: e.target.checked })}
+                />
+                Convoy zone
+              </label>
             )}
             <label className="check">
               <input

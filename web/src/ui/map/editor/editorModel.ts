@@ -21,8 +21,20 @@ import { fillKey, parseLatticeCells, type LatticeCell } from "./seaLattice";
 export type { Pair };
 export type LinkKind = "land" | "sea" | "coastal";
 
-/** Starting owners as demomap01.json spells them (`metadata.faction`). */
-export const OWNER_OPTIONS = ["GER", "USSR", "UK", "USA", "JAP", "Neutral"] as const;
+/** Starting owners as map JSON spells them (`metadata.faction`). */
+export const OWNER_OPTIONS = [
+  "GER",
+  "USSR",
+  "UK",
+  "UK Pacific",
+  "USA",
+  "JAP",
+  "ITA",
+  "CHI",
+  "ANZAC",
+  "FRA",
+  "Neutral",
+] as const;
 
 export const LAND_SVG_REF = "assets/ne_110m_land_FINAL_02.svg";
 const DEFAULT_ANCHOR_CAPACITY = 5;
@@ -60,7 +72,23 @@ export const UNIT_TYPE_OPTIONS = [
   "transport",
 ] as const;
 
-export const UNIT_FACTION_OPTIONS = ["ussr", "ger", "uk", "jap", "usa", "neutral"] as const;
+export const UNIT_FACTION_OPTIONS = [
+  "ussr",
+  "ger",
+  "uk",
+  "uk_pacific",
+  "jap",
+  "usa",
+  "italy",
+  "china",
+  "anzac",
+  "free_france",
+  "neutral",
+] as const;
+
+/** Land cover for 1940 terrain. Empty is open ground and is not written to the file. */
+export const LAND_COVER_OPTIONS = ["", "URBAN", "FOREST", "MOUNTAIN", "DESERT", "SNOW"] as const;
+export type LandCover = (typeof LAND_COVER_OPTIONS)[number];
 /** A point this close to an edge counts as lying on it (for welding T-junctions). */
 const ON_EDGE_EPS = 0.05;
 
@@ -92,6 +120,10 @@ export interface EditorRegion {
   unit_slots?: [number, number][];
   /** Squares and wedges painted by the sea lattice. The polygon is dissolved from these. */
   lattice?: LatticeCell[];
+  /** Land cover for 1940 terrain. Empty or absent is open ground. */
+  land_cover?: string;
+  /** Sea only. A convoy sea zone. Absent means false. */
+  is_convoy_zone?: boolean;
 }
 
 /** The region's facility anchor, or the default below its unit anchor. */
@@ -711,6 +743,13 @@ export interface SplitPlan {
   fresh: { polygon: Vec2[]; cx: number; cy: number };
 }
 
+function terrainOf(region: EditorRegion): Pick<EditorRegion, "land_cover" | "is_convoy_zone"> {
+  return {
+    ...(region.land_cover ? { land_cover: region.land_cover } : {}),
+    ...(region.is_sea && region.is_convoy_zone ? { is_convoy_zone: true } : {}),
+  };
+}
+
 /**
  * Applies a split: `keep` replaces the region's outline, `fresh` becomes a new region right after it (same
  * owner and layer, no ipc, factory or units), and both are welded to the neighbors they touch, so the cut
@@ -733,6 +772,7 @@ export function applySplit(map: EditorMap, regionId: string, plan: SplitPlan): {
     polygon: plan.fresh.polygon.map((p) => ({ ...p })),
     cx: plan.fresh.cx,
     cy: plan.fresh.cy,
+    ...terrainOf(original),
   };
   const regions: EditorRegion[] = [];
   for (const r of map.regions) {
@@ -775,6 +815,7 @@ export function applySplitMany(
       polygon: piece.polygon.map((p) => ({ ...p })),
       cx: piece.cx,
       cy: piece.cy,
+      ...terrainOf(original),
     });
   }
   const keep = pieces[0];
@@ -1254,6 +1295,8 @@ function facilityFieldsOf(meta: Dict, isSea: boolean): Partial<EditorRegion> {
     ...(slots.length > 0 ? { unit_slots: slots.map((p) => [p.x, p.y] as [number, number]) } : {}),
     ...(!isSea && meta.has_airbase === true ? { has_airbase: true } : {}),
     ...(!isSea && meta.has_harbour === true ? { has_harbour: true } : {}),
+    ...(!isSea && String(meta.land_cover ?? "").trim() !== "" ? { land_cover: String(meta.land_cover).trim() } : {}),
+    ...(isSea && meta.is_convoy_zone === true ? { is_convoy_zone: true } : {}),
     ...(facility ? { facility_anchor: [facility.x, facility.y] as [number, number] } : {}),
     ...(air ? { air_anchor: [air.x, air.y] as [number, number] } : {}),
   };
@@ -1377,6 +1420,8 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         ...(region.lattice && region.lattice.length > 0
           ? { lattice_cells: region.lattice.map((cell) => ({ col: cell.col, row: cell.row, fill: fillKey(cell.fill) })) }
           : {}),
+        ...(!region.is_sea && region.land_cover ? { land_cover: region.land_cover } : {}),
+        ...(region.is_sea && region.is_convoy_zone ? { is_convoy_zone: true } : {}),
       },
       polygon: region.polygon.map((p) => [r(p.x), r(p.y)]),
       ...(region.extra && region.extra.length > 0
