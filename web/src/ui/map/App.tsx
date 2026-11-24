@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
 import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
 import { bombardLabel, bombardTargets } from "../../engine/combat/bombardChoice";
@@ -132,6 +132,9 @@ function facingStacksFrom(state: { region_units: Record<string, { faction_id?: s
   return out;
 }
 
+/** The React Three Fiber board, behind `?view=3d`. Loaded on demand so Three.js stays out of the 2D bundle. */
+const MapViewport3D = lazy(() => import("../viewport3d/MapViewport3D"));
+
 export function App() {
   const { game, room, online, isMyTurn, battleFeed } = useCampaignSession();
   const { session, version } = game;
@@ -164,6 +167,7 @@ export function App() {
   const artQuery = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const spriteEditor = artQuery.get("bake") === "1";
   const fieldTest = artQuery.get("field") === "1";
+  const view3d = artQuery.get("view") === "3d";
   const [menuOpen, setMenuOpen] = useState(!(spriteEditor || fieldTest));
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [draft, setDraft] = useState<CampaignDraft>({
@@ -197,6 +201,8 @@ export function App() {
   }, [editor.map]);
   const saves = useMemo(() => readCampaignSaves(), [saveTick]);
   const board = editing ? boardFrame(editor.map) : null;
+  // The map editor draws on the 2D canvas, so it keeps the 2D map.
+  const Viewport = view3d && !editing ? MapViewport3D : MapView;
 
   const stashSave = useCallback((): CampaignSave => {
     return {
@@ -1014,7 +1020,8 @@ export function App() {
         onNewCampaign={() => setCampaignOpen(true)}
       />
       <div className="main">
-        <MapView
+        <Suspense fallback={<div className="map-wrap" />}>
+        <Viewport
           geometry={editing ? editor.geometry : geometry}
           land={land}
           landError={landError}
@@ -1206,7 +1213,8 @@ export function App() {
               )}
             </>
           )}
-        </MapView>
+        </Viewport>
+        </Suspense>
         {editing && (
           <aside className="sidebar">
             <EditorPanel editor={editor} onPlaytest={playtest} />
