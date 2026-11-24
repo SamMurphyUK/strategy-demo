@@ -1,0 +1,36 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/UK/uk_tac_bomber_seed1.outlined.polished.png",
+  "width": 208,
+  "height": 272,
+  "stamps": [
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 31,
+      "x": 148,
+      "y": 222,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 17,
+      "x": 83,
+      "y": 147,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 31,
+      "x": 147,
+      "y": 55,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "jobs": {
+    "US/us_fighter_landed/seed1/rd_fast__default/48x48": {
+      "idempotencyKey": "85fa2fe4-0370-4041-b214-8f4372618a37",
+      "blueprintId": "us_fighter_landed",
+      "seed": 1,
+      "status": "pending",
+      "quotedCost": 0.03
+    },
+    "US/us_fighter_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "230d6d98-5b02-452c-a957-cf5a87439c72",
+      "blueprintId": "us_fighter_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "873d045e-e8c8-4927-94eb-6dd93a23fe8e",
+      "cost": 0.03
+    },
+    "GER/ger_fighter_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "ae6920b6-3ff5-4965-8894-0f68c1e1df55",
+      "blueprintId": "ger_fighter_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "e392ce8e-ab01-4cb2-abea-4c7966f4a2c2",
+      "cost": 0.03
+    },
+    "GER/ger_tac_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "8dea582b-d8f0-4a4a-ad7a-4ab575255d01",
+      "blueprintId": "ger_tac_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "a59fe285-3ca4-430e-b11f-59c2331a83b8",
+      "cost": 0.03
+    },
+    "GER/ger_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "63bed191-6091-47fe-af48-0a7dc0c5400b",
+      "blueprintId": "ger_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "c6ce9359-17f6-4c0c-bcb1-242b40c5b9de",
+      "cost": 0.03
+    },
+    "USSR/ussr_fighter_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "23842527-4ed7-4183-981d-14c2d6dbe327",
+      "blueprintId": "ussr_fighter_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "a7b88fee-0499-444f-95eb-13f06653ce1c",
+      "cost": 0.03
+    },
+    "USSR/ussr_tac_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "2c09bc61-508f-461a-8ea8-a111a058c2d3",
+      "blueprintId": "ussr_tac_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "4d66b7e7-1dd2-4a7e-b002-7442843b9191",
+      "cost": 0.03
+    },
+    "USSR/ussr_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "57f2b094-1d88-4a95-8f73-08c88077139b",
+      "blueprintId": "ussr_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "621fe701-09fd-4ceb-8412-11c58cb74732",
+      "cost": 0.03
+    },
+    "UK/uk_fighter_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "7766b691-d76b-4d2a-b48d-ca9895db69d0",
+      "blueprintId": "uk_fighter_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "16b235d6-e69a-4c9f-a45b-b601c05aa39b",
+      "cost": 0.03
+    },
+    "UK/uk_tac_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "99d4d901-10c7-43d2-b591-02f9479a5895",
+      "blueprintId": "uk_tac_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "69c0287a-1987-4048-8678-6cfadf558958",
+      "cost": 0.03
+    },
+    "UK/uk_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "1e67ac22-d3a2-4e6b-be12-9538bf0bf790",
+      "blueprintId": "uk_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "b083440c-c6f2-4fc0-bab1-139037252933",
+      "cost": 0.03
+    },
+    "US/us_tac_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "40bf682f-bd10-4fea-98bb-66be67b43e93",
+      "blueprintId": "us_tac_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "b747b52e-e17a-4bef-95d2-1ded3da321dc",
+      "cost": 0.03
+    },
+    "US/us_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "f06e48cf-ad18-478e-8121-522e2da91eae",
+      "blueprintId": "us_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "7e08a39b-eea9-448a-bad4-904100558f2b",
+      "cost": 0.03
+    },
+    "JAP/jap_fighter_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "fa23b91b-275b-49a4-9fdc-a30747b2ff9e",
+      "blueprintId": "jap_fighter_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "4932413a-ac3b-4260-85a2-e17c82eb28c0",
+      "cost": 0.03
+    },
+    "JAP/jap_tac_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "27a7440a-91c1-4db7-ab2d-5453eaf9ad27",
+      "blueprintId": "jap_tac_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "6b650362-eb63-481d-9dee-e90b7d53ca6f",
+      "cost": 0.03
+    },
+    "JAP/jap_bomber_landed/seed1/rd_fast__default/64x64": {
+      "idempotencyKey": "b9724d54-38e1-4ce5-a12a-49f8c60e8542",
+      "blueprintId": "jap_bomber_landed",
+      "seed": 1,
+      "status": "succeeded",
+      "quotedCost": 0.03,
+      "taskId": "4b3778a8-90d9-49cc-9adb-cd93ee3ececb",
+      "cost": 0.03
+    }
+  }
+}

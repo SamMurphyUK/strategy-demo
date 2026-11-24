@@ -1,0 +1,36 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/UK/uk_fighter_seed1.outlined.polished.png",
+  "width": 160,
+  "height": 176,
+  "stamps": [
+    {
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true,
+      "emblem": "uk_roundel_type_c",
+      "size": 17,
+      "x": 63,
+      "y": 63
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 23,
+      "x": 107,
+      "y": 20,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 23,
+      "x": 108,
+      "y": 104,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

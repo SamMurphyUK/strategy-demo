@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/GER/ger_tac_bomber_seed1.outlined.polished.png",
+  "width": 192,
+  "height": 224,
+  "stamps": [
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 23,
+      "x": 119,
+      "y": 42,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 23,
+      "x": 121,
+      "y": 184,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

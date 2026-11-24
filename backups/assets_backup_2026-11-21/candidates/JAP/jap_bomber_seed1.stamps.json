@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/JAP/jap_bomber_seed1.outlined.polished.png",
+  "width": 320,
+  "height": 400,
+  "stamps": [
+    {
+      "emblem": "jap_hinomaru_darker",
+      "size": 31,
+      "x": 159,
+      "y": 345,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "jap_hinomaru_darker",
+      "size": 31,
+      "x": 157,
+      "y": 52,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

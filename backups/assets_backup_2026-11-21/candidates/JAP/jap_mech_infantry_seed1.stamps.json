@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/JAP/jap_mech_infantry_seed1.outlined.polished.png",
+  "width": 160,
+  "height": 80,
+  "stamps": [
+    {
+      "emblem": "jap_hinomaru_darker",
+      "size": 17,
+      "x": 58,
+      "y": 26,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

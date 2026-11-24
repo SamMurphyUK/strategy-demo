@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/US/us_bomber_seed1.outlined.polished.png",
+  "width": 368,
+  "height": 496,
+  "stamps": [
+    {
+      "emblem": "us_star_and_bars",
+      "size": 41,
+      "x": 228,
+      "y": 72,
+      "flip": true,
+      "turn": true,
+      "onlyOnSprite": true
+    }
+  ]
+}

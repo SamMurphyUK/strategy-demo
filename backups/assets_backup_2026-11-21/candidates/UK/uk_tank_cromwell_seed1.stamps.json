@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/UK/uk_tank_cromwell_seed1.outlined.polished.png",
+  "width": 176,
+  "height": 96,
+  "stamps": [
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 17,
+      "x": 87,
+      "y": 41,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

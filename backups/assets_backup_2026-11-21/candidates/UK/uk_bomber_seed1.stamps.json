@@ -1,0 +1,36 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/UK/uk_bomber_seed1.outlined.polished.png",
+  "width": 352,
+  "height": 464,
+  "stamps": [
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 23,
+      "x": 121,
+      "y": 249,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 41,
+      "x": 224,
+      "y": 370,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "uk_roundel_type_c",
+      "size": 41,
+      "x": 225,
+      "y": 98,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

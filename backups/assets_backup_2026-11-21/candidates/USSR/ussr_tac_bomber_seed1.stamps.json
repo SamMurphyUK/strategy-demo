@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_tac_bomber_seed1.outlined.polished.png",
+  "width": 192,
+  "height": 224,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 17,
+      "x": 16,
+      "y": 106,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

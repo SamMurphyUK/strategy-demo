@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/US/us_tank_sherman_seed1.outlined.polished.png",
+  "width": 144,
+  "height": 96,
+  "stamps": [
+    {
+      "emblem": "us_star_and_bars",
+      "size": 13,
+      "x": 57,
+      "y": 57,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

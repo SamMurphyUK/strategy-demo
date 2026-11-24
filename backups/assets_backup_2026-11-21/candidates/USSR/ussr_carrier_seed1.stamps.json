@@ -1,0 +1,27 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_carrier_seed1.outlined.polished.png",
+  "width": 512,
+  "height": 144,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 31,
+      "x": 153,
+      "y": 101,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    },
+    {
+      "emblem": "ussr_red_star",
+      "size": 17,
+      "x": 271,
+      "y": 50,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

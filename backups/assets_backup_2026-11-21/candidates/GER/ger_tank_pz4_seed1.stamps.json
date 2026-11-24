@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/GER/ger_tank_pz4_seed1.outlined.polished.png",
+  "width": 192,
+  "height": 96,
+  "stamps": [
+    {
+      "emblem": "ger_balkenkreuz",
+      "size": 23,
+      "x": 67,
+      "y": 30,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}

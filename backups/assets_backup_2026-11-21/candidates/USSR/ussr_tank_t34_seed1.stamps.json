@@ -1,0 +1,18 @@
+{
+  "kind": "unit-stamps",
+  "version": 1,
+  "source": "assets/candidates/USSR/ussr_tank_t34_seed1.outlined.polished.png",
+  "width": 192,
+  "height": 96,
+  "stamps": [
+    {
+      "emblem": "ussr_red_star",
+      "size": 17,
+      "x": 94,
+      "y": 25,
+      "flip": false,
+      "turn": false,
+      "onlyOnSprite": true
+    }
+  ]
+}
