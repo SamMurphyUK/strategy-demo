@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionStub, MovementValidator } from "../../../src/engine";
+import { GameSession, MovementValidator } from "../../../src/engine";
 import { RegionUnitDisplay } from "../../../src/engine/presentation/region_unit_display";
 import { concealNeutralGarrison } from "../../../src/ui/map/neutralGarrison";
 import { TestStateBuilder } from "../helpers/test_state_builder";
 
 describe("Finnish sea zone and naval targets", () => {
   it("keeps Sea Zone 11 as sea, lets ships leave, and refuses a tank", () => {
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.initializeDemo(1);
     const state = session.state;
     const zone = state.regions["Sea Zone 11"];

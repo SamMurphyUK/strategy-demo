@@ -25,6 +25,16 @@ describe("core/test_victory", () => {
     victory = new VictoryEngine(state);
   });
 
+  it("test_no_capitals_is_not_a_win", () => {
+    delete state.regions.red_capital;
+    delete state.regions.blue_capital;
+    state.regions.field = Region.fromDict({
+      id: "field", name: "Field", type: "land", ipc_value: 1, owner_faction_id: "red",
+    });
+    expect(victory.checkVictory()).toEqual([]);
+    expect(state.game_over).toBe(false);
+  });
+
   it("test_no_victory_initially", () => {
     const events = victory.checkVictory();
     expect(events.length).toBe(0);

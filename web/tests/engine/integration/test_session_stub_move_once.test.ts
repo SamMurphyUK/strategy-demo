@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { type GameSessionStub, MovementValidator, Ruleset } from "../../../src/engine";
+import { type GameSession, MovementValidator, Ruleset } from "../../../src/engine";
 import { campaignSession } from "../campaign_session";
 
-function findAlliesInfantryMovePair(s: GameSessionStub): { from: string; to: string } | null {
+function findAlliesInfantryMovePair(s: GameSession): { from: string; to: string } | null {
   const validator = new MovementValidator();
   for (const regionId of Object.keys(s.state.region_units)) {
     if (s.state.movableStackCount(s.state.current_faction_id, regionId, "infantry") <= 0) {
@@ -20,7 +20,7 @@ function findAlliesInfantryMovePair(s: GameSessionStub): { from: string; to: str
 }
 
 describe("integration/test_session_stub_move_once", () => {
-  let session: GameSessionStub;
+  let session: GameSession;
 
   beforeEach(() => {
     session = campaignSession();

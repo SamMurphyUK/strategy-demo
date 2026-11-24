@@ -1,4 +1,4 @@
-import type { CanonicalEvent, StubStateSnapshot } from "../engine/session/game_session_stub";
+import type { CanonicalEvent, StubStateSnapshot } from "../engine/session/game_session";
 import type { Dict } from "../engine/model/types";
 import type { CampaignLaunchConfig } from "../engine/types/ruleset";
 

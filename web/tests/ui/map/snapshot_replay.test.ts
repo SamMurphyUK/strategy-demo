@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GameState } from "../../../src/engine/model/game_state";
 import { cancel_phase_order } from "../../../src/engine/movement/phase_orders";
-import { GameSessionStub } from "../../../src/engine/session/game_session_stub";
+import { GameSession } from "../../../src/engine/session/game_session";
 import type { Dict } from "../../../src/engine/model/types";
 
 function territory(id: string, type: "land" | "sea", neighbors: string[]): Dict {
@@ -24,8 +24,8 @@ function territory(id: string, type: "land" | "sea", neighbors: string[]): Dict 
   };
 }
 
-function boot(): GameSessionStub {
-  const session = new GameSessionStub();
+function boot(): GameSession {
+  const session = new GameSession();
   session.initializeFromMap(
     {
       version: 2,
@@ -50,7 +50,7 @@ function boot(): GameSessionStub {
   return session;
 }
 
-function endPhase(session: GameSessionStub, commandId: string): void {
+function endPhase(session: GameSession, commandId: string): void {
   const result = session.applyCommand({
     command_id: commandId,
     player_id: "ger",
@@ -61,7 +61,7 @@ function endPhase(session: GameSessionStub, commandId: string): void {
 }
 
 function move(
-  session: GameSessionStub,
+  session: GameSession,
   commandId: string,
   from: string,
   to: string,
@@ -97,7 +97,7 @@ function shipRegion(state: GameState): string {
   return "";
 }
 
-function enterCombatMove(session: GameSessionStub): void {
+function enterCombatMove(session: GameSession): void {
   endPhase(session, "to_combat_move");
   expect(session.state.current_phase).toBe("combat_move");
 }

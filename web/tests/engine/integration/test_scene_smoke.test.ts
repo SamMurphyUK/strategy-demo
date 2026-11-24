@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Dict, GameSceneController, GameSessionStub } from "../../../src/engine";
+import { type Dict, GameSceneController, GameSession } from "../../../src/engine";
 import { campaignSession } from "../campaign_session";
 
 function regionHasInfantry(snap: Dict, regionId: string): boolean {
@@ -16,7 +16,7 @@ function regionHasInfantry(snap: Dict, regionId: string): boolean {
   return false;
 }
 
-function firstAlliesFactoryRegion(stub: GameSessionStub): string {
+function firstAlliesFactoryRegion(stub: GameSession): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
     if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
@@ -30,7 +30,7 @@ describe("integration/test_scene_smoke", () => {
   it("test_headless_scene_smoke_flow", () => {
     const scene = new GameSceneController(campaignSession());
     expect(scene.session).not.toBeNull();
-    expect(scene.session instanceof GameSessionStub).toBe(true);
+    expect(scene.session instanceof GameSession).toBe(true);
 
     const stub = scene.session;
     const regionId = firstAlliesFactoryRegion(stub);

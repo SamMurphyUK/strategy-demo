@@ -4,7 +4,7 @@ import {
   cheapestCasualties,
   type Dict,
   firingRanks,
-  GameSessionStub,
+  GameSession,
   GameState,
   loadJson,
   PCG,
@@ -300,7 +300,7 @@ describe("core/test_battle", () => {
 });
 
 describe("session battle commands", () => {
-  function demoInCombat(): { s: GameSessionStub; send: (type: string, payload?: Dict) => ReturnType<GameSessionStub["applyCommand"]> } {
+  function demoInCombat(): { s: GameSession; send: (type: string, payload?: Dict) => ReturnType<GameSession["applyCommand"]> } {
     const s = campaignSession();
     let n = 0;
     const send = (type: string, payload: Dict = {}) =>

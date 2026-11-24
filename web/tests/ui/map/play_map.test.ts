@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { prepareSavedMap, territoryIncome } from "../../../src/content/game_scene_session_builder";
-import { GameSessionStub } from "../../../src/engine/session/game_session_stub";
+import { GameSession } from "../../../src/engine/session/game_session";
 import type { Dict } from "../../../src/engine/model/types";
 import type { MapVersion } from "../../../src/ui/map/editor/mapVersions";
 import { choiceForStoredId, demoPlayChoice, playChoiceFromVersion, readStoredPlayId } from "../../../src/ui/map/session/play_map";
@@ -66,7 +66,7 @@ describe("playing a saved map", () => {
       { region_id: "Germany", faction_id: "ger", unit_type_id: "infantry", count: 3 },
     ]);
 
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.initializeFromMap(ready, 7);
     expect(session.state.getFactionIpc("ger")).toBe(14);
     expect(session.state.getFactionIpc("uk")).toBe(8);

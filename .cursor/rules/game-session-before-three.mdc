@@ -1,16 +1,14 @@
 ---
-description: Before a Three.js viewport port, ask whether GameSession is wired as the live campaign session
+description: Before a Three.js viewport port, ask whether the viewport should use React Three Fiber
 alwaysApply: true
 ---
 
-# GameSession before Three.js
+# React Three Fiber before a Three.js viewport
 
-If the user asks to start, plan, or begin a Three.js map/battle viewport port, stop and ask these first, as questions:
+The campaign, host, and arena play `GameSession` in `web/src/engine/session/game_session.ts`.
 
-**Have we wired `GameSession` into the campaign (replacing `GameSessionStub` as the live session) yet?**
+If the user asks to start, plan, or begin a Three.js map/battle viewport port, stop and ask this first, as a question:
 
 **Should this viewport use React Three Fiber (R3F)?** The HUD is already React. Declarative JSX is usually easier to reason about and refactor here than large imperative vanilla Three.js files. Do not start a vanilla Three.js tree unless they choose that.
 
-Do not start Three.js work until they answer. If GameSession is still unwired, leave the 2D map and battle in place and treat session wiring as the prior job.
-
-The campaign, host, and arena still play `GameSessionStub`. `GameSession` stays unwired unless the user asks to wire it. A Three.js swap does not replace that work.
+Do not start Three.js work until they answer.

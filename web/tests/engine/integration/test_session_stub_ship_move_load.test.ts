@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionStub, MovementValidator, type Ruleset } from "../../../src/engine";
+import { GameSession, MovementValidator, type Ruleset } from "../../../src/engine";
 
-function firstAlliesFactoryRegion(stub: GameSessionStub): string {
+function firstAlliesFactoryRegion(stub: GameSession): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
     if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
@@ -11,7 +11,7 @@ function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   return "";
 }
 
-function seaZoneAdjacentTo(stub: GameSessionStub, regionId: string): string {
+function seaZoneAdjacentTo(stub: GameSession, regionId: string): string {
   for (const neighbor of stub.state.getAdjacentRegions(regionId)) {
     const r = stub.state.regions[String(neighbor)];
     if (r != null && r.isSeaRegion()) {
@@ -21,7 +21,7 @@ function seaZoneAdjacentTo(stub: GameSessionStub, regionId: string): string {
   return "";
 }
 
-function firstTransportInRegion(stub: GameSessionStub, regionId: string): string {
+function firstTransportInRegion(stub: GameSession, regionId: string): string {
   for (const entry of stub.state.getUnitsInRegion(regionId)) {
     if ("instance_id" in entry) {
       return String(entry.instance_id);
@@ -30,7 +30,7 @@ function firstTransportInRegion(stub: GameSessionStub, regionId: string): string
   return "";
 }
 
-function reachableSeaTwoAway(stub: GameSessionStub, start: string): string {
+function reachableSeaTwoAway(stub: GameSession, start: string): string {
   const validator = new MovementValidator();
   const legal = validator.getLegalDestinationsForInstance(
     firstTransportInRegion(stub, start),
@@ -47,7 +47,7 @@ function reachableSeaTwoAway(stub: GameSessionStub, start: string): string {
 }
 
 /** Placement finishes in mobilize. The new ship sails on that faction's next movement phase. */
-function reachMovementPhase(stub: GameSessionStub, faction: string): boolean {
+function reachMovementPhase(stub: GameSession, faction: string): boolean {
   for (let i = 0; i < 48; i++) {
     const phase = stub.state.current_phase;
     if (stub.state.current_faction_id === faction && (phase === "combat_move" || phase === "noncombat_move")) {
@@ -68,7 +68,7 @@ function reachMovementPhase(stub: GameSessionStub, faction: string): boolean {
 }
 
 function landSeaWithTransport(
-  stub: GameSessionStub,
+  stub: GameSession,
   faction: string,
 ): { land: string; sea: string; transport_id: string } | null {
   for (const rid of Object.keys(stub.state.regions)) {
@@ -93,7 +93,7 @@ function landSeaWithTransport(
 
 describe("integration/test_session_stub_ship_move_load", () => {
   it("test_transport_instance_can_move_two_sea_zones", (ctx) => {
-    const stub = new GameSessionStub();
+    const stub = new GameSession();
     stub.initializeDemo(12345);
     stub.applyCommand({
       command_id: "buy_transport",
@@ -150,7 +150,7 @@ describe("integration/test_session_stub_ship_move_load", () => {
   });
 
   it("test_load_infantry_onto_adjacent_transport", (ctx) => {
-    const stub = new GameSessionStub();
+    const stub = new GameSession();
     stub.initializeDemo(12345);
     for (let i = 0; i < 1; i++) {
       stub.applyCommand({ command_id: `ep_${i}`, player_id: stub.state.current_faction_id, type: "end_phase", payload: {} });

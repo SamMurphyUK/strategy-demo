@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Dict, GameSessionStub } from "../../../src/engine";
+import { type Dict, GameSession } from "../../../src/engine";
 
 function hasEvent(events: Dict[], typeName: string): boolean {
   return events.some((e) => String(e.type ?? "") === typeName);
@@ -17,7 +17,7 @@ function totalUnits(snapshot: Dict): number {
 
 describe("integration/test_purchase_staging", () => {
   it("test_purchase_updates_pending_without_placing_units", () => {
-    const demoStub = new GameSessionStub();
+    const demoStub = new GameSession();
     demoStub.initializeDemo(12345);
     const before = demoStub.getState();
     const unitsBefore = totalUnits(before);

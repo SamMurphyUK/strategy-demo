@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { GameEventType } from "../engine/model/event";
 import { deepCopy, type Dict } from "../engine/model/types";
 import { advanceGlobalRound, VICTORY_CITIES, globalObjectivePay } from "../engine/rules/optional/global1940Evaluator";
-import { GameSessionStub } from "../engine/session/game_session_stub";
+import { GameSession } from "../engine/session/game_session";
 import { launchForScenario, type ScenarioId } from "../engine/types/ruleset";
 import { plannerSeed } from "./planAITurn";
 import { planTurn } from "./planTurn";
@@ -129,7 +129,7 @@ function global1940Map(): Dict {
   return deepCopy(cachedGlobalMap);
 }
 
-function factionsWithUnits(session: GameSessionStub): string[] {
+function factionsWithUnits(session: GameSession): string[] {
   const found = new Set<string>();
   for (const entries of Object.values(session.state.region_units)) {
     for (const entry of entries ?? []) {
@@ -168,7 +168,7 @@ function battleRow(battles: Record<string, FactionBattles>, factionId: string, t
 }
 
 function recordBattles(
-  session: GameSessionStub,
+  session: GameSession,
   battles: Record<string, FactionBattles>,
   attacker: string,
   defenders: ReadonlyMap<string, string>,
@@ -209,12 +209,12 @@ function recordBattles(
   }
 }
 
-function teamOf(session: GameSessionStub, factionId: string): "axis" | "allies" | "" {
+function teamOf(session: GameSession, factionId: string): "axis" | "allies" | "" {
   const team = session.state.factions[factionId]?.team ?? "";
   return team === "axis" || team === "allies" ? team : "";
 }
 
-function unitValue(session: GameSessionStub, factionId: string, friendly: boolean): number {
+function unitValue(session: GameSession, factionId: string, friendly: boolean): number {
   let total = 0;
   for (const entries of Object.values(session.state.region_units)) {
     for (const entry of entries ?? []) {
@@ -235,7 +235,7 @@ function noteIndustry(io: Record<string, FactionIndustry>, factionId: string): F
   return row;
 }
 
-function spendOf(session: GameSessionStub, payload: Record<string, unknown>): number {
+function spendOf(session: GameSession, payload: Record<string, unknown>): number {
   let total = 0;
   const purchases: unknown[] = Array.isArray(payload.purchases) ? payload.purchases : [];
   for (const line of purchases) {
@@ -264,7 +264,7 @@ function spendOf(session: GameSessionStub, payload: Record<string, unknown>): nu
   return total;
 }
 
-function winReason(session: GameSessionStub, explicit: string): ScenarioGame["winReason"] {
+function winReason(session: GameSession, explicit: string): ScenarioGame["winReason"] {
   const state = session.state;
   if (!state.game_over || state.winner_faction_id === "") {
     return "";
@@ -282,7 +282,7 @@ function winReason(session: GameSessionStub, explicit: string): ScenarioGame["wi
   return held ? "capital_capture" : "victory_cities";
 }
 
-function objectives(session: GameSessionStub): { completed: number; possible: number } {
+function objectives(session: GameSession): { completed: number; possible: number } {
   const state = session.state;
   if (!state.rulesetConfig.nationalObjectivesAndNeutrals) {
     return { completed: 0, possible: 0 };
@@ -299,7 +299,7 @@ function objectives(session: GameSessionStub): { completed: number; possible: nu
   return { completed, possible: NAMED_OBJECTIVES + state.nationalObjectives.length };
 }
 
-function blocOwners(session: GameSessionStub): Map<string, string> {
+function blocOwners(session: GameSession): Map<string, string> {
   const owners = new Map<string, string>();
   for (const bloc of session.state.neutralBlocs) {
     for (const id of bloc.members) {
@@ -311,7 +311,7 @@ function blocOwners(session: GameSessionStub): Map<string, string> {
 
 /** 1942 uses the live demo map. 1940 uses the copied map whose powers own that land. */
 export function playScenarioMatch(request: ScenarioRequest): ScenarioGame {
-  const session = new GameSessionStub();
+  const session = new GameSession();
   if (request.scenario === "SCENARIO_GLOBAL_1940") {
     session.initializeFromMap(global1940Map(), request.seed);
   } else {

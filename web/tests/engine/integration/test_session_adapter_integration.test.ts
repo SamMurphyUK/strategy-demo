@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Dict, GameSceneController, GameSessionAdapter, GameSessionStub } from "../../../src/engine";
+import { type Dict, GameSceneController, GameSessionAdapter, GameSession } from "../../../src/engine";
 import { campaignSession } from "../campaign_session";
 
 function regionHasInfantry(snap: Dict, regionId: string): boolean {
@@ -16,7 +16,7 @@ function regionHasInfantry(snap: Dict, regionId: string): boolean {
   return false;
 }
 
-function firstAlliesFactoryRegion(session: GameSessionStub): string {
+function firstAlliesFactoryRegion(session: GameSession): string {
   for (const rid of Object.keys(session.state.regions)) {
     const r = session.state.regions[rid];
     if (r.owner_faction_id === session.state.current_faction_id && r.has_factory) {
@@ -28,7 +28,7 @@ function firstAlliesFactoryRegion(session: GameSessionStub): string {
 
 describe("integration/test_session_adapter_integration", () => {
   it("test_adapter_wraps_stub_commands", () => {
-    const demoStub = new GameSessionStub();
+    const demoStub = new GameSession();
     demoStub.initializeDemo(99);
     const adapter = GameSessionAdapter.fromSession(demoStub);
     const res = adapter.applyCommand({
@@ -45,7 +45,7 @@ describe("integration/test_session_adapter_integration", () => {
   it("test_game_scene_smoke_purchase_mobilize_place", () => {
     const scene = new GameSceneController(campaignSession());
     expect(scene.session, "GameScene should have a session").not.toBeNull();
-    expect(scene.session instanceof GameSessionStub).toBe(true);
+    expect(scene.session instanceof GameSession).toBe(true);
 
     scene.onSpawnInfantryPressed();
     expect(String(scene.session.state.current_phase)).toBe("purchase");

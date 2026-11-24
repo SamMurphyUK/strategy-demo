@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Faction, GameSessionStub, GameState, Region, Unit } from "../src/engine";
+import { Faction, GameSession, GameState, Region, Unit } from "../src/engine";
 import { combatCandidates } from "../src/ai/combatMoveGen";
 import { planAITurn } from "../src/ai/planAITurn";
 import { planPurchase } from "../src/ai/purchasePlanner";
@@ -81,7 +81,7 @@ function loadedBesideHostile(state: GameState): boolean {
 
 describe("planner acceptance", () => {
   it("keeps 20 turns legal, funded, and clear of stranded air and loaded transports", () => {
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.bindArena(camp(), 11);
     const ruleset = new Ruleset();
     const validator = new MovementValidator();

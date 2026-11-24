@@ -1,29 +1,113 @@
+import {
+  buildFactionsData,
+  buildMapData,
+  buildSetupData,
+  NEWMAP_PATH,
+  RULES_PATH,
+  UNITS_PATH,
+} from "../../content/game_scene_session_builder";
 import { AmphibiousEngine } from "../amphibious/amphibious";
-import { CombatEngine } from "../combat/combat";
+import { type Battle, CombatEngine } from "../combat/combat";
+import { loadJson } from "../content/res";
 import { EconomyEngine } from "../economy/economy";
 import { Command, CommandType } from "../model/command";
-import { GameEvent, GameEventType, type GameEventDict } from "../model/event";
+import { GameEvent, GameEventType } from "../model/event";
 import { GameState, type StateSnapshot } from "../model/game_state";
-import type { Dict } from "../model/types";
+import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
 import { endCombatMoveGate, retractUnlandableFlights } from "../movement/combat_move_gate";
 import { applyPatrolOrders } from "../rules/optional/airAndNavalRaiding";
 import { assaultError, unloadError } from "../transport/cargo_rules";
-import { TransportLoadValidator } from "../transport/transport_load_validator";
+import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
+import { purchaseUnitCap } from "../placement/productionCap";
+import { factoryPrice, factoryRoom, isFactoryKind } from "../placement/factoryRules";
+import { RegionUnitDisplay } from "../presentation/region_unit_display";
 import { PCG, type PcgSeed } from "../rng/pcg";
-import { processEndPhase, processEndTurn, startTurn } from "../turn/phase_controllers";
+import { Ruleset } from "../rules/ruleset";
+import { standDownPatrols } from "../rules/optional/airAndNavalRaiding";
+import { buyResearch, rollResearchPhase, type ResearchOrder } from "../rules/optional/techTree";
+import { commitPurchaseRepairs, planPurchaseRepairs, runIndustrialBombing, runInterdiction, type FacilityTarget } from "../rules/optional/bombingResolver";
+import { classifyUnit } from "../types/ruleset";
+import { TransportLoadValidator } from "../transport/transport_load_validator";
+import { processEndPhase, processEndTurn, purchaseResult, startTurn } from "../turn/phase_controllers";
 import { TurnEngine } from "../turn/turn_engine";
-import { type CommandError, CommandValidator } from "../validation/command_validator";
+import { CommandValidator } from "../validation/command_validator";
+import { EventSchemaValidator } from "../validation/event_schema_validator";
+import type { ValidationResult } from "../validation/validation_types";
 import { VictoryEngine } from "../victory/victory";
 import { loadFactions, loadMap, loadSetup, loadUnits } from "./session_loaders";
 
-export interface CommandResult {
+export const UNIT_COSTS: Record<string, number> = {
+  infantry: 3,
+  artillery: 4,
+  tank: 6,
+  transport: 7,
+  battleship: 20,
+};
+
+/** Canonical stub event: underscores stripped from event_id and type. */
+export interface CanonicalEvent {
+  event_id: string;
+  sequence: number;
+  type: string;
+  payload: Dict;
+  source_command_id: string;
+  timestamp: number;
+}
+
+export interface StubResult {
   result_type: "ok" | "error";
-  error?: CommandError;
-  events: GameEventDict[];
-  new_state: StateSnapshot;
+  error?: { code: string; message: string };
+  events: CanonicalEvent[];
+  /** Board after this command. The campaign still reads `session.state`; core tests read this. */
+  new_state: StubStateSnapshot;
+}
+
+/** A command result before the live snapshot is attached. */
+type CommandOutcome = Omit<StubResult, "new_state">;
+
+export interface StubStateSnapshot extends StateSnapshot {
+  gameover: boolean;
+  cost_table: Record<string, number>;
+  applied_event_ids: string[];
+}
+
+function unixNow(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+/** Keys that would let a client advance the host's dice. Never copied onto a broadcast snapshot. */
+const HIDDEN_RNG_KEYS = new Set(["rng", "rng_state", "pcg", "prng"]);
+
+/** Deep copy with the PRNG cursor removed. Bigints cannot ride along in the JSON broadcast. */
+export function redactClientSnapshot<T>(value: T): T {
+  return stripHiddenRng(value) as T;
+}
+
+function stripHiddenRng(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripHiddenRng(item));
+  }
+  if (typeof value === "object" && value !== null) {
+    const source = value as Dict;
+    const copy: Dict = {};
+    for (const key of Object.keys(source)) {
+      if (HIDDEN_RNG_KEYS.has(key)) {
+        continue;
+      }
+      const child = stripHiddenRng(source[key]);
+      if (child !== undefined) {
+        copy[key] = child;
+      }
+    }
+    return copy;
+  }
+  return value;
 }
 
 export class GameSession {
@@ -37,13 +121,51 @@ export class GameSession {
   placement!: PlacementEngine;
   victory!: VictoryEngine;
   amphibious!: AmphibiousEngine;
+  ruleset: Ruleset | null = null;
 
-  private _events: GameEvent[] = [];
+  debug = false;
+
+  private _events: CanonicalEvent[] = [];
   private _seq = 0;
+  private _appliedEventIds: Record<string, boolean> = {};
+  private _commandResults: Record<string, CommandOutcome> = {};
+  private _demoSeed = 12345;
+  private _fixedTimestamp = 0;
 
-  // -------------------------------------------------------------------
-  // FACTORY
-  // -------------------------------------------------------------------
+  initializeDemo(seed = 12345): void {
+    this.initializeFromMap(loadJson(NEWMAP_PATH), seed);
+  }
+
+  /**
+   * Arena boot. The board is already built. Wires the engines and starts on purchase
+   * for the first faction in `turn_order`.
+   */
+  bindArena(state: GameState, seed = 1): void {
+    this._demoSeed = seed;
+    this._fixedTimestamp = 1680000000;
+    this._events = [];
+    this._appliedEventIds = {};
+    this._commandResults = {};
+    this.state = state;
+    this.rng = PCG.fromSeed({ state: seed, sequence: 1 });
+    this._seq = 0;
+    this.ruleset = new Ruleset();
+    this.ruleset.syncFromState(state);
+    this.validator = new CommandValidator(state);
+    this.turnEngine = new TurnEngine(state);
+    this.economy = new EconomyEngine(state);
+    this.movement = new MovementEngine(state);
+    this.combat = new CombatEngine(state, this.rng);
+    this.placement = new PlacementEngine(state);
+    this.victory = new VictoryEngine(state);
+    this.amphibious = new AmphibiousEngine(state);
+    this.recordEvents(this.syncSeq(startTurn(this.turnEngine)), "");
+  }
+
+  /**
+   * Boot from already-built dicts. The minimal-map tests use this; the campaign uses
+   * `initializeDemo` / `initializeFromMap`.
+   */
   static create(
     mapData: Dict,
     unitsData: Dict,
@@ -52,14 +174,28 @@ export class GameSession {
     rulesData: Dict,
     rngSeed: PcgSeed,
   ): GameSession {
-    const s = new GameSession();
-    s.initSession(mapData, unitsData, factionsData, setupData, rulesData, rngSeed);
-    return s;
+    const session = new GameSession();
+    const seedState = Number(rngSeed.state);
+    session._demoSeed = Number.isFinite(seedState) ? seedState : 12345;
+    session._fixedTimestamp = 1680000000;
+    session.initSession(mapData, unitsData, factionsData, setupData, rulesData, rngSeed);
+    return session;
   }
 
-  // -------------------------------------------------------------------
-  // INITIALIZATION
-  // -------------------------------------------------------------------
+  /** Same boot as initializeDemo, against a map JSON other than the live demomap01.json. */
+  initializeFromMap(mapJson: Dict, seed = 12345): void {
+    this._demoSeed = seed;
+    this._fixedTimestamp = 1680000000;
+    this.initSession(
+      buildMapData(mapJson),
+      loadJson(UNITS_PATH),
+      buildFactionsData(mapJson),
+      buildSetupData(mapJson),
+      loadJson(RULES_PATH),
+      { state: seed, sequence: 1 },
+    );
+  }
+
   private initSession(
     mapData: Dict,
     unitsData: Dict,
@@ -70,13 +206,15 @@ export class GameSession {
   ): void {
     this.state = new GameState();
     this.rng = PCG.fromSeed(rngSeed);
+    this._seq = Math.trunc(Number(rngSeed.sequence ?? 1)) - 1;
 
     loadUnits(this.state, unitsData);
     loadFactions(this.state, factionsData);
     loadMap(this.state, mapData);
     loadSetup(this.state, setupData);
-
     this.state.rules = rulesData;
+    this.ruleset = new Ruleset();
+    this.ruleset.syncFromState(this.state);
 
     this.validator = new CommandValidator(this.state);
     this.turnEngine = new TurnEngine(this.state);
@@ -87,51 +225,163 @@ export class GameSession {
     this.victory = new VictoryEngine(this.state);
     this.amphibious = new AmphibiousEngine(this.state);
 
-    this.append(this.syncSeq(startTurn(this.turnEngine)));
+    this.recordEvents(this.syncSeq(startTurn(this.turnEngine)), "");
   }
 
-  // -------------------------------------------------------------------
-  // COMMAND APPLICATION
-  // -------------------------------------------------------------------
-  applyCommand(cmdDict: Dict): CommandResult {
-    const cmd = Command.fromDict(cmdDict);
-
-    if (!this.validator.validate(cmd)) {
-      return {
-        result_type: "error",
-        error: this.validator.getError(),
-        events: [],
-        new_state: this.state.toSnapshot(),
-      };
+  applyCommand(cmdDict: Dict): StubResult {
+    const commandId = String(cmdDict.command_id ?? "");
+    if (commandId !== "" && commandId in this._commandResults) {
+      return this.withState(deepCopy(this._commandResults[commandId]));
     }
 
-    let events: GameEvent[] = [];
-    const sync = (evts: GameEvent[]) => this.syncSeq(evts);
+    const typeStr = String(cmdDict.type ?? "").toLowerCase();
+    const result = typeStr === "collect_income" ? this.applyCollectIncome(cmdDict) : this.applyGameCommand(cmdDict);
+
+    if (commandId !== "") {
+      this._commandResults[commandId] = deepCopy(result);
+    }
+    return this.withState(result);
+  }
+
+  /** Attach the live snapshot. Cached command replays store events only. */
+  private withState(result: CommandOutcome): StubResult {
+    return { ...result, new_state: this.getState() };
+  }
+
+  private applyGameCommand(cmdDict: Dict): CommandOutcome {
+    const cmd = Command.fromDict(cmdDict);
+    if (!this.validator.validate(cmd)) {
+      return { result_type: "error", error: this.validator.getError(), events: [] };
+    }
+
+    let events: Array<GameEvent | Dict> = [];
+    const sourceId = String(cmdDict.command_id ?? "");
 
     switch (cmd.type) {
-      case CommandType.PURCHASE_UNITS:
-        events = this.syncSeq(this.economy.processPurchase(cmd));
+      case CommandType.PURCHASE_UNITS: {
+        const repairLines = this.repairLines(cmd);
+        if (Array.isArray(cmd.payload.repairs) && cmd.payload.repairs.some((entry) => !isDict(entry))) {
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: "Nothing to repair." }, events: [] };
+        }
+        if (cmd.payload.stand_down_patrols === true) {
+          const stood = standDownPatrols(this.state, cmd.player_id);
+          if (stood != null) {
+            return { result_type: "error", error: { code: "PURCHASE_FAILED", message: stood }, events: [] };
+          }
+          if (repairLines.length === 0 && this.purchaseLines(cmd).length === 0 && this.researchOrders(cmd).length === 0) {
+            events = [];
+            break;
+          }
+        }
+        const researchOrders = this.researchOrders(cmd);
+        const pendingBefore = [...(this.state.researchPending[cmd.player_id] ?? [])];
+        const researchError = researchOrders.length > 0 ? buyResearch(this.state, cmd.player_id, researchOrders) : null;
+        if (researchError != null) {
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: researchError }, events: [] };
+        }
+        const researchSpend = researchOrders.reduce((sum, order) => sum + order.count, 0) * 5;
+        const refundResearch = () => {
+          if (researchSpend <= 0) {
+            return;
+          }
+          this.state.modifyIpc(cmd.player_id, researchSpend);
+          if (pendingBefore.length === 0) {
+            delete this.state.researchPending[cmd.player_id];
+          } else {
+            this.state.researchPending[cmd.player_id] = pendingBefore;
+          }
+        };
+        const planned = repairLines.length > 0 ? planPurchaseRepairs(this.state, cmd.player_id, repairLines) : null;
+        if (planned != null && "error" in planned) {
+          refundResearch();
+          return { result_type: "error", error: { code: "PURCHASE_FAILED", message: planned.error }, events: [] };
+        }
+        const unitLines = this.purchaseLines(cmd);
+        if (unitLines.length === 0 && planned == null && researchSpend > 0) {
+          events = [];
+          break;
+        }
+        if (planned != null && !("error" in planned) && unitLines.length === 0) {
+          commitPurchaseRepairs(this.state, cmd.player_id, planned);
+          this._seq += 1;
+          events = this.syncSeq([
+            GameEvent.create(
+              GameEventType.INCOME_COLLECTED,
+              {
+                faction_id: cmd.player_id,
+                amount: -planned.spend,
+                new_total: this.state.getFactionIpc(cmd.player_id),
+                reason: "purchase_repair",
+              },
+              this._seq,
+            ),
+          ]);
+          break;
+        }
+        if (planned != null && !("error" in planned) && planned.spend > 0) {
+          this.state.modifyIpc(cmd.player_id, -planned.spend);
+        }
+        const affordError = this.validatePurchaseAffordability(cmd);
+        if (affordError) {
+          if (planned != null && !("error" in planned) && planned.spend > 0) {
+            this.state.modifyIpc(cmd.player_id, planned.spend);
+          }
+          refundResearch();
+          return affordError;
+        }
+        if (planned != null && !("error" in planned)) {
+          for (const line of planned.lines) {
+            const left = Math.max(0, Math.trunc(this.state.repairTokens[line.regionId] ?? 0)) - line.spend;
+            if (left <= 0) {
+              delete this.state.repairTokens[line.regionId];
+            } else {
+              this.state.repairTokens[line.regionId] = left;
+            }
+          }
+        }
+        const existingPending: PurchaseLine[] = deepCopy(this.state.pending_purchases[cmd.player_id] ?? []);
+        const purchase = purchaseResult(this.economy.processPurchase(cmd));
+        if (!purchase.success) {
+          if (planned != null && !("error" in planned)) {
+            this.state.modifyIpc(cmd.player_id, planned.spend);
+            for (const line of planned.lines) {
+              this.state.repairTokens[line.regionId] = (this.state.repairTokens[line.regionId] ?? 0) + line.spend;
+            }
+          }
+          refundResearch();
+          return this.purchaseFailureResult(purchase, sourceId);
+        }
+        let newLines: Dict[] = cmd.payload.purchases ?? [];
+        if (newLines.length === 0) {
+          newLines = cmd.payload.units ?? [];
+        }
+        this.applyMergedPending(cmd.player_id, existingPending, newLines);
+        events = this.syncSeq(purchase.events);
         break;
+      }
 
-      case CommandType.MOVE_UNITS:
+      case CommandType.PLACE_UNITS: {
+        const placementError = this.validatePlacementCommand(cmd);
+        if (placementError) {
+          return placementError;
+        }
+        events = this.syncSeq(this.placement.processPlacement(cmd));
+        break;
+      }
+
+      case CommandType.MOVE_UNITS: {
+        const moveError = this.validateMoveCommand(cmd);
+        if (moveError) {
+          return moveError;
+        }
         events = this.syncSeq(applyRecordedMove(this.state, cmd, this.movement));
         break;
+      }
 
       case CommandType.LOAD_TRANSPORT: {
-        const load = new TransportLoadValidator().validateLoad(
-          String(cmd.payload.transport_instance_id ?? ""),
-          String(cmd.payload.from_region_id ?? ""),
-          cmd.payload.units ?? [],
-          cmd.player_id,
-          this.state,
-        );
-        if (!load.ok) {
-          return {
-            result_type: "error",
-            error: { code: "LOAD_INVALID", message: load.errors[0]?.message ?? "Cannot load units onto transport" },
-            events: [],
-            new_state: this.state.toSnapshot(),
-          };
+        const loadError = this.validateLoadCommand(cmd);
+        if (loadError) {
+          return loadError;
         }
         events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
@@ -146,12 +396,7 @@ export class GameSession {
           cmd.payload.units ?? [],
         );
         if (unload != null) {
-          return {
-            result_type: "error",
-            error: { code: "UNLOAD_INVALID", message: unload },
-            events: [],
-            new_state: this.state.toSnapshot(),
-          };
+          return this.loadError(unload, "UNLOAD_INVALID");
         }
         events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
@@ -166,47 +411,54 @@ export class GameSession {
           String(cmd.payload.target_region_id ?? ""),
         );
         if (assault != null) {
-          return {
-            result_type: "error",
-            error: { code: "AMPHIBIOUS_INVALID", message: assault },
-            events: [],
-            new_state: this.state.toSnapshot(),
-          };
+          return this.loadError(assault, "AMPHIBIOUS_INVALID");
         }
         events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
         break;
       }
 
-      case CommandType.PLACE_UNITS:
-        events = this.syncSeq(this.placement.processPlacement(cmd));
+      case CommandType.STRATEGIC_BOMB: {
+        const bombError = this.validateStrategicBomb(cmd);
+        if (bombError) {
+          return bombError;
+        }
+        const raid = this.processStrategicBomb(cmd);
+        if (!Array.isArray(raid)) {
+          return raid;
+        }
+        events = this.syncSeq(raid);
         break;
+      }
 
       case CommandType.END_PHASE: {
         if (this.state.current_phase === "combat_move") {
           retractUnlandableFlights(this.state);
           const gate = endCombatMoveGate(this.state);
           if (!gate.advance) {
-            return {
-              result_type: "error",
-              error: { code: gate.code, message: gate.warning },
-              events: [],
-              new_state: this.state.toSnapshot(),
-            };
+            return { result_type: "error", error: { code: gate.code, message: gate.warning }, events: [] };
           }
+        }
+        let forfeitEvents: GameEvent[] = [];
+        if (this.state.current_phase === "mobilize") {
+          forfeitEvents = this.forfeitPendingAtMobilizeEnd(cmd.player_id);
+        }
+        if (this.state.current_phase === "purchase") {
+          rollResearchPhase(this.state, cmd.player_id, () => this.d6());
         }
         if (this.state.current_phase === "noncombat_move") {
           applyPatrolOrders(this.state, cmd.player_id, cmd.payload);
         }
-        events = processEndPhase(
+        const endEvents = processEndPhase(
           this.state.current_phase,
           this.state,
           this.turnEngine,
           this.amphibious,
           this.combat,
           this.placement,
-          sync,
-          () => this.rng.rollD6(),
+          (evts) => this.syncSeq(evts),
+          () => this.d6(),
         );
+        events = [...forfeitEvents, ...endEvents];
         break;
       }
 
@@ -217,7 +469,6 @@ export class GameSession {
             result_type: "error",
             error: { code: "ORDER_NOT_FOUND", message: "No pending order matches order_id or index" },
             events: [],
-            new_state: this.state.toSnapshot(),
           };
         }
         const index = this.state.phase_orders.findIndex((item) => item.id === order.id);
@@ -242,52 +493,114 @@ export class GameSession {
       }
 
       case CommandType.END_TURN:
-        events = processEndTurn(
-          cmd.player_id,
-          this.state.current_phase,
-          this.state,
-          this.economy,
-          this.victory,
-          this.turnEngine,
-          sync,
-        );
-        break;
+        return this.applyEndTurn(cmd.player_id, sourceId);
 
       case CommandType.START_BATTLE:
       case CommandType.BATTLE_ROLL:
       case CommandType.BATTLE_CASUALTIES:
       case CommandType.BATTLE_RETREAT: {
         const battle = this.combat.applyBattleCommand(cmd.type, cmd.player_id, cmd.payload);
-        if (battle != null && !battle.ok) {
-          return { result_type: "error", error: battle.error, events: [], new_state: this.state.toSnapshot() };
+        if (battle == null || !battle.ok) {
+          return {
+            result_type: "error",
+            error: battle && !battle.ok ? battle.error : { code: "UNSUPPORTED", message: cmd.type },
+            events: [],
+          };
         }
-        events = this.syncSeq(battle?.ok ? battle.events : []);
+        events = this.syncSeq(battle.events);
         break;
       }
+
+      default:
+        return {
+          result_type: "error",
+          error: { code: "UNSUPPORTED", message: "Command not supported in demo stub" },
+          events: [],
+        };
     }
 
-    this.append(events);
+    const canonical = this.recordEvents(events, sourceId);
+    return { result_type: "ok", events: canonical };
+  }
 
+  /**
+   * Income, victory, then `turnEngine.endTurn`. The log still names the power that plays next.
+   */
+  applyEndTurn(playerId: string, commandId: string): CommandOutcome {
+    const factions = this.state.turn_order.length > 0 ? this.state.turn_order : ["ussr", "ger", "uk", "jap", "usa"];
+    const current = playerId.toLowerCase();
+    if (!factions.includes(current)) {
+      return {
+        result_type: "error",
+        error: { code: "INVALID_FACTION", message: `Unknown faction: ${playerId}` },
+        events: [],
+      };
+    }
+
+    const events = processEndTurn(
+      current,
+      this.state.current_phase,
+      this.state,
+      this.economy,
+      this.victory,
+      this.turnEngine,
+      (evts) => this.syncSeq(evts),
+    );
+    for (const event of events) {
+      if (event.type === GameEventType.TURN_ENDED) {
+        event.payload.next_faction_id = this.state.current_faction_id;
+        event.payload.new_turn_number = this.state.turn_number;
+        event.payload.new_round = this.state.game_round;
+      }
+    }
+    return { result_type: "ok", events: this.recordEvents(events, commandId) };
+  }
+
+  private applyCollectIncome(cmdDict: Dict): CommandOutcome {
+    const cmd = Command.fromDict(cmdDict);
+    if (cmd.player_id !== this.state.current_faction_id) {
+      return { result_type: "error", error: { code: "OUT_OF_TURN", message: "Not your turn" }, events: [] };
+    }
+    const events = this.syncSeq(this.economy.collectIncome(cmd.player_id));
+    const canonical = this.recordEvents(events, String(cmdDict.command_id ?? ""));
+    return { result_type: "ok", events: canonical };
+  }
+
+  getState(): StubStateSnapshot {
+    const snap = this.state.toSnapshot();
     return {
-      result_type: "ok",
-      events: events.map((e) => e.toDict()),
-      new_state: this.state.toSnapshot(),
+      ...snap,
+      gameover: snap.game_over ?? false,
+      cost_table: this.getCostTable(),
+      applied_event_ids: Object.keys(this._appliedEventIds),
     };
   }
 
-  // -------------------------------------------------------------------
-  // QUERY HELPERS
-  // -------------------------------------------------------------------
-  getState(): StateSnapshot {
-    return this.state.toSnapshot();
+  /**
+   * Board the host may broadcast. Cargo and staged orders are included.
+   * The seeded PRNG stays on this session and is stripped here.
+   */
+  clientSnapshot(): StubStateSnapshot {
+    return redactClientSnapshot(this.getState());
   }
 
-  getEventsSince(seq: number): GameEventDict[] {
-    return this._events.filter((e) => e.sequence > seq).map((e) => e.toDict());
+  getCostTable(): Record<string, number> {
+    const table: Record<string, number> = {};
+    for (const utid of Object.keys(this.state.unit_types)) {
+      const ut = this.state.unit_types[utid];
+      if (ut) {
+        table[utid] = ut.cost;
+      }
+    }
+    return table;
   }
 
-  getLegalCommands(player: string): string[] {
-    if (player !== this.state.current_faction_id) {
+  getDemoSeed(): number {
+    return this._demoSeed;
+  }
+
+  getLegalCommands(playerId: string): string[] {
+    if (playerId !== this.state.current_faction_id) {
       return [];
     }
     switch (this.state.current_phase) {
@@ -296,23 +609,116 @@ export class GameSession {
       case "combat_move":
         return ["move_units", "load_transport", "unload_transport", "designate_amphibious", "cancel_phase_order", "end_phase"];
       case "combat":
-        return [];
+        return this.legalCombatCommands();
       case "noncombat_move":
         return ["move_units", "load_transport", "unload_transport", "cancel_phase_order", "end_phase"];
       case "mobilize":
         return ["place_units", "end_phase"];
       case "collect_income":
-        return ["end_turn"];
+        return ["end_turn", "collect_income"];
     }
     return [];
   }
 
-  // -------------------------------------------------------------------
-  // INTERNAL HELPERS
-  // -------------------------------------------------------------------
-  private syncSeq(events: GameEvent[]): GameEvent[] {
+  private legalCombatCommands(): string[] {
+    const battle = this.state.active_battle;
+    if (battle == null) {
+      const pending = this.combat.identifyBattles(this.state.current_faction_id).length > 0;
+      return pending ? ["start_battle", "strategic_bomb", "end_phase"] : ["strategic_bomb", "end_phase"];
+    }
+    switch (battle.stage) {
+      case "awaiting_roll":
+        return ["battle_roll"];
+      case "awaiting_casualties":
+        return ["battle_casualties"];
+      case "awaiting_decision":
+        return this.combat.legalRetreats().length > 0 ? ["battle_roll", "battle_retreat"] : ["battle_roll"];
+    }
+    return [];
+  }
+
+  getLegalRetreats(): string[] {
+    return this.combat.legalRetreats();
+  }
+
+  static validateEventShape(evt: Dict): boolean {
+    if (!EventSchemaValidator.validateEvent(evt)) {
+      return false;
+    }
+    const required = ["event_id", "sequence", "type", "payload", "source_command_id", "timestamp"];
+    for (const key of required) {
+      if (!(key in evt)) {
+        return false;
+      }
+    }
+    return typeof evt.type === "string" && isDict(evt.payload);
+  }
+
+  createEvent(evtType: string, payload: Dict, sourceCommandId = ""): CanonicalEvent {
+    this._seq += 1;
+    return {
+      event_id: `e${String(this._seq).padStart(5, "0")}`,
+      sequence: this._seq,
+      type: this.normalizeEventType(evtType),
+      payload,
+      source_command_id: sourceCommandId,
+      timestamp: this._fixedTimestamp > 0 ? this._fixedTimestamp : unixNow(),
+    };
+  }
+
+  /** Drops events whose event_id was already applied, which hides engine sequence collisions. */
+  private recordEvents(events: Array<GameEvent | Dict>, sourceCommandId: string): CanonicalEvent[] {
+    const canonical: CanonicalEvent[] = [];
+    for (const raw of events) {
+      let evtDict: Dict;
+      if (raw instanceof GameEvent) {
+        evtDict = this.gameEventToCanonical(raw, sourceCommandId);
+      } else if (isDict(raw)) {
+        evtDict = deepCopy(raw);
+        if (!("source_command_id" in evtDict)) {
+          evtDict.source_command_id = sourceCommandId;
+        }
+        evtDict.type = this.normalizeEventType(String(evtDict.type ?? ""));
+        if (!("timestamp" in evtDict)) {
+          evtDict.timestamp = this._fixedTimestamp;
+        }
+      } else {
+        continue;
+      }
+
+      if (!GameSession.validateEventShape(evtDict)) {
+        continue;
+      }
+
+      const eid = String(evtDict.event_id ?? "");
+      if (eid in this._appliedEventIds) {
+        continue;
+      }
+      this._appliedEventIds[eid] = true;
+      this._events.push(evtDict as CanonicalEvent);
+      canonical.push(evtDict as CanonicalEvent);
+    }
+    return canonical;
+  }
+
+  private gameEventToCanonical(evt: GameEvent, sourceCommandId: string): CanonicalEvent {
+    return {
+      event_id: String(evt.event_id).replaceAll("_", ""),
+      sequence: evt.sequence,
+      type: this.normalizeEventType(GameEvent.typeToString(evt.type)),
+      payload: deepCopy(evt.payload),
+      source_command_id: sourceCommandId,
+      timestamp: this._fixedTimestamp > 0 ? this._fixedTimestamp : unixNow(),
+    };
+  }
+
+  private normalizeEventType(typeName: string): string {
+    return String(typeName).toLowerCase().replaceAll("_", "");
+  }
+
+  private syncSeq<T extends GameEvent | Dict>(events: T[]): T[] {
     for (const e of events) {
-      if (e.sequence > this._seq) {
+      if (e instanceof GameEvent && e.sequence > this._seq) {
         this._seq = e.sequence;
       }
     }
@@ -326,7 +732,477 @@ export class GameSession {
     return events;
   }
 
-  private append(events: GameEvent[]): void {
-    this._events.push(...events);
+  private validatePurchaseAffordability(cmd: Command): CommandOutcome | null {
+    let purchases: Dict[] = cmd.payload.purchases ?? [];
+    if (purchases.length === 0) {
+      purchases = cmd.payload.units ?? [];
+    }
+    let totalCost = 0;
+    let unitCount = 0;
+    for (const purchase of purchases) {
+      const utid = String(purchase.unit_type_id ?? "");
+      const count = Math.trunc(Number(purchase.count ?? 1));
+      if (!isFactoryKind(utid)) {
+        unitCount += Math.max(0, count);
+      }
+      let cost = isFactoryKind(utid) ? factoryPrice(this.state, utid) : Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
+      if (cost === 0) {
+        const ut = this.state.unit_types[utid];
+        if (ut) {
+          cost = ut.cost;
+        }
+      }
+      if (cost === 0) {
+        return {
+          result_type: "error",
+          error: { code: "UNKNOWN_UNIT", message: `Unknown unit type: ${utid}` },
+          events: [],
+        };
+      }
+      totalCost += cost * count;
+    }
+
+    const reserved: Record<string, number> = {};
+    for (const line of this.state.pending_purchases[cmd.player_id] ?? []) {
+      const id = String(line.unit_type_id ?? "");
+      if (isFactoryKind(id)) {
+        reserved[id] = (reserved[id] ?? 0) + Math.max(0, Math.trunc(Number(line.count ?? 0)));
+      }
+    }
+    for (const purchase of purchases) {
+      const id = String(purchase.unit_type_id ?? "");
+      if (!isFactoryKind(id)) {
+        continue;
+      }
+      const count = Math.max(0, Math.trunc(Number(purchase.count ?? 1)));
+      if (count > factoryRoom(this.state, cmd.player_id, id, reserved)) {
+        const failEvt = this.createEvent(
+          "purchase_failed",
+          { faction_id: cmd.player_id, reason: "factory_site" },
+          String(cmd.command_id),
+        );
+        const recorded = this.recordEvents([failEvt], String(cmd.command_id));
+        return {
+          result_type: "error",
+          error: { code: "PURCHASE_FAILED", message: "factory_site" },
+          events: recorded,
+        };
+      }
+      reserved[id] = (reserved[id] ?? 0) + count;
+    }
+
+    const cap = purchaseUnitCap(this.state, cmd.player_id);
+    const already = (this.state.pending_purchases[cmd.player_id] ?? []).reduce(
+      (sum, line) => sum + Math.max(0, Math.trunc(Number(line.count ?? 0))),
+      0,
+    );
+    if (already + unitCount > cap) {
+      const failEvt = this.createEvent(
+        "purchase_failed",
+        { faction_id: cmd.player_id, reason: "production_cap" },
+        String(cmd.command_id),
+      );
+      const recorded = this.recordEvents([failEvt], String(cmd.command_id));
+      return {
+        result_type: "error",
+        error: { code: "PURCHASE_FAILED", message: "production_cap" },
+        events: recorded,
+      };
+    }
+    if (totalCost > (this.state.ipc[cmd.player_id] ?? 0)) {
+      const failEvt = this.createEvent(
+        "purchase_failed",
+        { faction_id: cmd.player_id, reason: "insufficient_ipc" },
+        String(cmd.command_id),
+      );
+      const recorded = this.recordEvents([failEvt], String(cmd.command_id));
+      return {
+        result_type: "error",
+        error: { code: "PURCHASE_FAILED", message: "insufficient_ipc" },
+        events: recorded,
+      };
+    }
+    return null;
+  }
+
+  private purchaseFailureResult(
+    purchase: { error_code: string; error_message: string; events: GameEvent[] },
+    sourceCommandId: string,
+  ): CommandOutcome {
+    const rawEvents = this.syncSeq(purchase.events);
+    const canonical = this.recordEvents(rawEvents, sourceCommandId);
+    return {
+      result_type: "error",
+      error: { code: purchase.error_code, message: purchase.error_message },
+      events: canonical,
+    };
+  }
+
+  private applyMergedPending(factionId: string, existing: PurchaseLine[], newLines: Dict[]): void {
+    const merged: Record<string, number> = {};
+    for (const line of [...existing, ...newLines]) {
+      const utid = String(line.unit_type_id ?? "");
+      merged[utid] = (merged[utid] ?? 0) + Math.trunc(Number(line.count ?? 0));
+    }
+    const result: PurchaseLine[] = [];
+    for (const utid of Object.keys(merged)) {
+      if (merged[utid] > 0) {
+        result.push({ unit_type_id: utid, count: merged[utid] });
+      }
+    }
+    this.state.pending_purchases[factionId] = result;
+  }
+
+  private validatePlacementCommand(cmd: Command): CommandOutcome | null {
+    const placements: Dict[] = cmd.payload.placements ?? [];
+    const factionId = cmd.player_id;
+    const pending = this.state.pending_purchases[factionId] ?? [];
+    const pendingCounts: Record<string, number> = {};
+    for (const line of pending) {
+      const utid = String(line.unit_type_id ?? "");
+      pendingCounts[utid] = (pendingCounts[utid] ?? 0) + Math.trunc(Number(line.count ?? 0));
+    }
+
+    for (const p of placements) {
+      const regionId = String(p.region_id ?? "");
+      for (const u of (p.units ?? []) as Dict[]) {
+        const unitTypeId = String(u.unit_type_id ?? "");
+        const count = Math.trunc(Number(u.count ?? 1));
+        if (!this.ruleset!.canMobilizeUnitAt(unitTypeId, regionId, factionId, this.state)) {
+          return this.placementError(`Cannot mobilize ${unitTypeId} at ${regionId}`);
+        }
+        const have = pendingCounts[unitTypeId] ?? 0;
+        if (have < count) {
+          return this.placementError(`Not enough pending ${unitTypeId} (have ${have}, need ${count})`);
+        }
+        pendingCounts[unitTypeId] = have - count;
+      }
+    }
+    return null;
+  }
+
+  private placementError(message: string): CommandOutcome {
+    return { result_type: "error", error: { code: "PLACEMENT_INVALID", message }, events: [] };
+  }
+
+  private forfeitPendingAtMobilizeEnd(factionId: string): GameEvent[] {
+    const pending = this.state.pending_purchases[factionId] ?? [];
+    if (pending.length === 0) {
+      return [];
+    }
+
+    let ipcLost = 0;
+    for (const p of pending) {
+      const utid = String(p.unit_type_id ?? "");
+      const count = Math.trunc(Number(p.count ?? 1));
+      let cost = isFactoryKind(utid) ? factoryPrice(this.state, utid) : Math.trunc(Number(UNIT_COSTS[utid] ?? 0));
+      if (cost === 0) {
+        const ut = this.state.unit_types[utid];
+        if (ut) {
+          cost = ut.cost;
+        }
+      }
+      ipcLost += cost * count;
+    }
+
+    this.state.pending_purchases[factionId] = [];
+    this._seq += 1;
+    return [
+      GameEvent.create(
+        GameEventType.PLACEMENT_FORFEITED,
+        {
+          faction_id: factionId,
+          reason: "unplaced_at_mobilize_end",
+          forfeited_units: pending,
+          ipc_lost: ipcLost,
+        },
+        this._seq,
+      ),
+    ];
+  }
+
+  getLegalMobilizeRegions(factionId: string, unitTypeId: string): string[] {
+    return this.ruleset!.getLegalMobilizeRegions(factionId, unitTypeId, this.state);
+  }
+
+  getLegalMoveDestinations(fromRegion: string, unitTypeId: string, factionId: string, instanceId = ""): string[] {
+    const validator = new MovementValidator();
+    if (instanceId !== "") {
+      return validator.getLegalDestinationsForInstance(instanceId, factionId, this.state, this.ruleset!);
+    }
+    return validator.getLegalDestinationsForStack(fromRegion, unitTypeId, factionId, this.state, this.ruleset!);
+  }
+
+  findTransportForLoad(fromRegion: string, seaRegion: string, unitTypeId: string, factionId: string): string {
+    return new TransportLoadValidator().findTransportForLoad(fromRegion, seaRegion, unitTypeId, factionId, this.state);
+  }
+
+  getLegalLoadDestinations(fromRegion: string, unitTypeId: string, factionId: string): string[] {
+    return new TransportLoadValidator().getLegalLoadDestinations(fromRegion, unitTypeId, factionId, this.state);
+  }
+
+  getLegalUnloadDestinations(transportInstanceId: string, factionId: string): string[] {
+    return new TransportLoadValidator().getLegalUnloadDestinations(transportInstanceId, factionId, this.state);
+  }
+
+  private validateMoveCommand(cmd: Command): CommandOutcome | null {
+    if (!["combat_move", "noncombat_move"].includes(this.state.current_phase)) {
+      return this.moveError("Not in a movement phase");
+    }
+    const validator = new MovementValidator();
+    for (const move of (cmd.payload.moves ?? []) as unknown[]) {
+      if (!isDict(move)) {
+        continue;
+      }
+      const fromRegion = String(move.from_region_id ?? "");
+      const toRegion = String(move.to_region_id ?? "");
+      for (const unitEntry of (move.units ?? []) as unknown[]) {
+        if (!isDict(unitEntry)) {
+          continue;
+        }
+        const instanceId = String(unitEntry.instance_id ?? "");
+        let result: ValidationResult;
+        if (instanceId !== "") {
+          result = validator.validateInstanceMove(
+            fromRegion,
+            toRegion,
+            instanceId,
+            cmd.player_id,
+            this.state,
+            this.ruleset!,
+          );
+        } else {
+          result = validator.validateStackMove(
+            fromRegion,
+            toRegion,
+            String(unitEntry.unit_type_id ?? ""),
+            cmd.player_id,
+            Math.trunc(Number(unitEntry.count ?? 1)),
+            this.state,
+            this.ruleset!,
+          );
+        }
+        if (!result.ok && result.errors.length > 0) {
+          return this.moveError(String(result.errors[0].message), String(result.errors[0].code));
+        }
+      }
+    }
+    return null;
+  }
+
+  private validateLoadCommand(cmd: Command): CommandOutcome | null {
+    if (!["combat_move", "noncombat_move"].includes(this.state.current_phase)) {
+      return this.loadError("Not in a movement phase");
+    }
+    const transportId = String(cmd.payload.transport_instance_id ?? "");
+    const fromRegion = String(cmd.payload.from_region_id ?? "");
+    const units: unknown[] = cmd.payload.units ?? [];
+    const result = new TransportLoadValidator().validateLoad(transportId, fromRegion, units, cmd.player_id, this.state);
+    if (!result.ok && result.errors.length > 0) {
+      return this.loadError(String(result.errors[0].message), String(result.errors[0].code));
+    }
+    return null;
+  }
+
+  private loadError(message: string, code = "LOAD_INVALID"): CommandOutcome {
+    return { result_type: "error", error: { code, message }, events: [] };
+  }
+
+  private moveError(message: string, code = "MOVE_INVALID"): CommandOutcome {
+    return { result_type: "error", error: { code, message }, events: [] };
+  }
+
+  getPendingBattles(factionId: string): Battle[] {
+    if (this.combat == null) {
+      return [];
+    }
+    return this.combat.identifyBattles(factionId);
+  }
+
+  private validateStrategicBomb(cmd: Command): CommandOutcome | null {
+    if (this.state.current_phase !== "combat") {
+      return this.bombError("Strategic bombing only in combat phase");
+    }
+    const regionId = String(cmd.payload.region_id ?? "");
+    if (regionId === "") {
+      return this.bombError("Missing target region");
+    }
+    if (this.state.rulesetConfig.facilitiesAndPatrols) {
+      return this.validateFacilityRaid(cmd, regionId);
+    }
+    if (this.ruleset == null) {
+      this.ruleset = new Ruleset();
+      this.ruleset.syncFromState(this.state);
+    }
+    if (!this.ruleset.isValidBombTarget(regionId, cmd.player_id, this.state)) {
+      return this.bombError("Region is not a valid bombing target");
+    }
+    if (RegionUnitDisplay.bombUnitCount(this.state, regionId, cmd.player_id) <= 0) {
+      return this.bombError(`No strategic bombers available at ${regionId}`);
+    }
+    return null;
+  }
+
+  private validateFacilityRaid(cmd: Command, regionId: string): CommandOutcome | null {
+    const region = this.state.regions[regionId];
+    const owner = region?.owner_faction_id ?? "";
+    if (region == null || owner === "" || this.state.sameTeam(owner, cmd.player_id)) {
+      return this.bombError("Region is not a valid bombing target");
+    }
+    const facility = String(cmd.payload.facility ?? "");
+    if (facility === "airbase" || facility === "harbor" || facility === "depot") {
+      if (facility === "airbase" && !region.airbase) {
+        return this.bombError("No airbase");
+      }
+      if (facility === "harbor" && !region.harbor) {
+        return this.bombError("No harbor");
+      }
+      if (facility === "depot" && !region.forward_depot) {
+        return this.bombError("No depot");
+      }
+      if (this.raidCount(regionId, cmd.player_id, "TACTICAL_BOMBER") <= 0) {
+        return this.bombError("No tactical bombers");
+      }
+      return null;
+    }
+    if (!region.major_factory) {
+      return this.bombError("Region is not a major factory");
+    }
+    if (this.raidCount(regionId, cmd.player_id, "HEAVY_BOMBER") <= 0) {
+      return this.bombError("No heavy bombers");
+    }
+    return null;
+  }
+
+  private raidCount(regionId: string, factionId: string, kind: "HEAVY_BOMBER" | "TACTICAL_BOMBER"): number {
+    let total = 0;
+    for (const entry of this.state.region_units[regionId] ?? []) {
+      if (String(entry.faction_id ?? "") !== factionId || entry.instance_id) {
+        continue;
+      }
+      if (classifyUnit(String(entry.unit_type_id ?? "")) !== kind) {
+        continue;
+      }
+      total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+    }
+    return total;
+  }
+
+  /** Damage uses `(nextInt() % 6) + 1` like CombatEngine, and is reported as negative income. */
+  private processStrategicBomb(cmd: Command): GameEvent[] | CommandOutcome {
+    const regionId = String(cmd.payload.region_id ?? "");
+    if (this.state.rulesetConfig.facilitiesAndPatrols) {
+      return this.processFacilityRaid(cmd, regionId);
+    }
+    const owner = this.state.getRegionOwner(regionId);
+    const damage = this.d6();
+    if (owner !== "") {
+      this.state.modifyIpc(owner, -damage);
+    }
+    this.removeOneStrategicBomber(regionId, cmd.player_id);
+    this._seq += 1;
+    return [
+      GameEvent.create(
+        GameEventType.INCOME_COLLECTED,
+        { faction_id: owner, amount: -damage, reason: "strategic_bomb", region_id: regionId },
+        this._seq,
+      ),
+    ];
+  }
+
+  private processFacilityRaid(cmd: Command, regionId: string): GameEvent[] | CommandOutcome {
+    const facility = String(cmd.payload.facility ?? "");
+    const roll = () => this.d6();
+    if (facility === "airbase" || facility === "harbor" || facility === "depot") {
+      const raid = runInterdiction(this.state, cmd.player_id, regionId, facility as FacilityTarget, roll);
+      if ("error" in raid) {
+        return this.bombError(raid.error);
+      }
+      this._seq += 1;
+      return [
+        GameEvent.create(
+          GameEventType.INCOME_COLLECTED,
+          { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "tactical_interdiction", region_id: regionId },
+          this._seq,
+        ),
+      ];
+    }
+    const raid = runIndustrialBombing(this.state, cmd.player_id, regionId, Math.trunc(Number(cmd.payload.escorts ?? 0)), roll);
+    if ("error" in raid) {
+      return this.bombError(raid.error);
+    }
+    this._seq += 1;
+    return [
+      GameEvent.create(
+        GameEventType.INCOME_COLLECTED,
+        { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "strategic_bomb", region_id: regionId },
+        this._seq,
+      ),
+    ];
+  }
+
+  private purchaseLines(cmd: Command): Dict[] {
+    const purchases: unknown[] = Array.isArray(cmd.payload.purchases) ? cmd.payload.purchases : [];
+    if (purchases.length > 0) {
+      return purchases.filter(isDict);
+    }
+    const units: unknown[] = Array.isArray(cmd.payload.units) ? cmd.payload.units : [];
+    return units.filter(isDict);
+  }
+
+  private researchOrders(cmd: Command): ResearchOrder[] {
+    const lines: unknown[] = Array.isArray(cmd.payload.research) ? cmd.payload.research : [];
+    const orders: ResearchOrder[] = [];
+    for (const entry of lines) {
+      if (!isDict(entry)) {
+        continue;
+      }
+      orders.push({ tech: String(entry.tech ?? ""), count: Math.trunc(Number(entry.count ?? 1)) });
+    }
+    return orders;
+  }
+
+  private repairLines(cmd: Command): { regionId: string; tokens: number }[] {
+    const repairs: unknown[] = Array.isArray(cmd.payload.repairs) ? cmd.payload.repairs : [];
+    const lines: { regionId: string; tokens: number }[] = [];
+    for (const entry of repairs) {
+      if (!isDict(entry)) {
+        continue;
+      }
+      lines.push({ regionId: String(entry.region_id ?? ""), tokens: Math.trunc(Number(entry.tokens ?? 0)) });
+    }
+    return lines;
+  }
+
+  private d6(): number {
+    return this.rng ? (this.rng.nextInt() % 6) + 1 : 1;
+  }
+
+  private removeOneStrategicBomber(regionId: string, factionId: string): void {
+    const units = this.state.region_units[regionId] ?? [];
+    for (let i = units.length - 1; i >= 0; i--) {
+      const entry = units[i];
+      if (String(entry.faction_id ?? "") !== factionId) {
+        continue;
+      }
+      if (!RegionUnitDisplay.isStrategicBomber(this.state, String(entry.unit_type_id ?? ""))) {
+        continue;
+      }
+      if ("instance_id" in entry) {
+        units.splice(i, 1);
+        return;
+      }
+      const count = Math.trunc(Number(entry.count ?? 0));
+      if (count <= 1) {
+        units.splice(i, 1);
+      } else {
+        entry.count = count - 1;
+      }
+      return;
+    }
+  }
+
+  private bombError(message: string, code = "BOMB_INVALID"): CommandOutcome {
+    return { result_type: "error", error: { code, message }, events: [] };
   }
 }

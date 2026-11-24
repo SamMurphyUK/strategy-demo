@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { factionName } from "./event_text";
 import { MultiplayerSession, roomIdFromSearch, type ClientStatus } from "../../../multiplayer/multiplayer_client";
 import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
-import type { CanonicalEvent } from "../../../engine/session/game_session_stub";
+import type { CanonicalEvent } from "../../../engine/session/game_session";
 import type { Dict } from "../../../engine/model/types";
-import type { StubResult } from "../../../engine/session/game_session_stub";
+import type { StubResult } from "../../../engine/session/game_session";
 import { type GameSessionHandle, useGameSession } from "./use_game_session";
 
 const BATTLE_COMMANDS = new Set(["start_battle", "battle_roll", "battle_casualties", "battle_retreat"]);

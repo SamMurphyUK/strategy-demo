@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { expect, it } from "vitest";
 import type { GameState } from "../../../src/engine/model/game_state";
 import { cancel_phase_order } from "../../../src/engine/movement/phase_orders";
-import { GameSessionStub } from "../../../src/engine/session/game_session_stub";
+import { GameSession } from "../../../src/engine/session/game_session";
 import type { Dict } from "../../../src/engine/model/types";
 import { finishUnitDrag } from "../../../src/ui/map/moveDrag";
 import { PendingOrders } from "../../../src/ui/map/panels/PendingOrders";
@@ -28,8 +28,8 @@ function doc(): { createElement(tag: string): DomEl; body: { appendChild(node: u
   return (globalThis as unknown as { document: ReturnType<typeof doc> }).document;
 }
 
-function boot(infantryOnA = 3): GameSessionStub {
-  const session = new GameSessionStub();
+function boot(infantryOnA = 3): GameSession {
+  const session = new GameSession();
   session.initializeFromMap(
     {
       version: 2,
@@ -74,7 +74,7 @@ function territory(id: string, type: "land" | "sea", neighbors: string[]): Dict 
   };
 }
 
-function enterCombatMove(session: GameSessionStub): void {
+function enterCombatMove(session: GameSession): void {
   const result = session.applyCommand({
     command_id: "to_combat_move",
     player_id: session.state.current_faction_id,
@@ -86,7 +86,7 @@ function enterCombatMove(session: GameSessionStub): void {
 }
 
 function sendMove(
-  session: GameSessionStub,
+  session: GameSession,
   commandId: string,
   from: string,
   entry: { unit_type_id: string; instance_id?: string },
@@ -138,7 +138,7 @@ function buttonNamed(root: DomEl, name: string): DomEl {
 }
 
 function DropSurface(props: {
-  session: GameSessionStub;
+  session: GameSession;
   from: string;
   unitType: string;
   target: string;
@@ -197,7 +197,7 @@ function DropSurface(props: {
   );
 }
 
-function OrdersBox(props: { session: GameSessionStub; onCancelled(): void }) {
+function OrdersBox(props: { session: GameSession; onCancelled(): void }) {
   const [, setTick] = useState(0);
   const game = {
     session: props.session,

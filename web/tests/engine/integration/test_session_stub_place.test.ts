@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { type GameSessionStub } from "../../../src/engine";
+import { type GameSession } from "../../../src/engine";
 import { campaignSession } from "../campaign_session";
 
-function advanceToMobilize(s: GameSessionStub): void {
+function advanceToMobilize(s: GameSession): void {
   for (let i = 0; i < 4; i++) {
     s.applyCommand({ command_id: `adv_${i}`, player_id: s.state.current_faction_id, type: "end_phase", payload: {} });
   }
   expect(s.state.current_phase).toBe("mobilize");
 }
 
-function firstAlliesFactoryRegion(s: GameSessionStub): string {
+function firstAlliesFactoryRegion(s: GameSession): string {
   for (const rid of Object.keys(s.state.regions)) {
     const r = s.state.regions[rid];
     if (r.owner_faction_id === s.state.current_faction_id && r.has_factory) {
@@ -19,7 +19,7 @@ function firstAlliesFactoryRegion(s: GameSessionStub): string {
   return "region_1";
 }
 
-function infantryCountInRegion(s: GameSessionStub, regionId: string): number {
+function infantryCountInRegion(s: GameSession, regionId: string): number {
   let total = 0;
   for (const u of s.state.getUnitsInRegion(regionId)) {
     if (String(u.unit_type_id ?? "") === "infantry") {
@@ -30,7 +30,7 @@ function infantryCountInRegion(s: GameSessionStub, regionId: string): number {
 }
 
 describe("integration/test_session_stub_place", () => {
-  let demoStub: GameSessionStub;
+  let demoStub: GameSession;
 
   beforeEach(() => {
     demoStub = campaignSession();

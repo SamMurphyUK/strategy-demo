@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket as HostSocket } from "ws";
-import { GameSessionStub } from "../engine/session/game_session_stub";
+import { GameSession } from "../engine/session/game_session";
 import { type Dict, isDict } from "../engine/model/types";
 import { normalizeLaunch, type CampaignLaunchConfig } from "../engine/types/ruleset";
 import {
@@ -42,11 +42,11 @@ type SubmitOutcome =
   | { kind: "reject"; code: string; message: string };
 
 /**
- * One room, one authoritative `GameSessionStub`.
+ * One room, one authoritative `GameSession`.
  * Seat tokens are checked before a command is allowed to touch the session.
  */
 export class Room {
-  readonly session: GameSessionStub;
+  readonly session: GameSession;
   seq = 0;
   private readonly seats: Seat[];
   private readonly accepted = new Map<string, SyncBody>();
@@ -54,7 +54,7 @@ export class Room {
 
   constructor(
     readonly id: string,
-    session: GameSessionStub,
+    session: GameSession,
     seats: Seat[],
   ) {
     this.session = session;
@@ -141,7 +141,7 @@ export class Room {
 
   /**
    * Rejects a command that is out of turn or from a seat that does not own
-   * `command.player_id` before `GameSessionStub.applyCommand`.
+   * `command.player_id` before `GameSession.applyCommand`.
    */
   submit(playerToken: string, command: unknown): SubmitOutcome {
     if (!isDict(command) || String(command.type ?? "").trim() === "") {
@@ -199,7 +199,7 @@ export class MultiplayerHost {
     if (this.rooms.has(id)) {
       throw new Error(`Room ${id} already exists`);
     }
-    const session = new GameSessionStub();
+    const session = new GameSession();
     if (options.map) {
       session.initializeFromMap(options.map, options.seed ?? 12345);
     } else {
@@ -246,7 +246,7 @@ export class MultiplayerHost {
     if (existing) {
       return existing;
     }
-    const session = new GameSessionStub();
+    const session = new GameSession();
     if (options?.map) {
       session.initializeFromMap(options.map, options.seed ?? 12345);
     } else {

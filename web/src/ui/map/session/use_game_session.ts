@@ -5,11 +5,11 @@ import { repairMovementLedger } from "../../../engine/movement/phase_orders";
 import { mustPlaceMessage } from "../../../engine/placement/unplaced";
 import type { Dict } from "../../../engine/model/types";
 import {
-  GameSessionStub,
+  GameSession,
   type CanonicalEvent,
   type StubResult,
   type StubStateSnapshot,
-} from "../../../engine/session/game_session_stub";
+} from "../../../engine/session/game_session";
 import { applyAuthoritativeSnapshot } from "../../../multiplayer/multiplayer_client";
 import { describeEvent, unitName } from "./event_text";
 import { type PlayChoice, demoPlayChoice, initialPlayChoice, rememberPlayId } from "./play_map";
@@ -25,7 +25,7 @@ export interface LogEntry {
 }
 
 export interface GameSessionHandle {
-  session: GameSessionStub;
+  session: GameSession;
   /** Bumped after every command so components re-read the live state. */
   version: number;
   seed: number;
@@ -55,8 +55,8 @@ export interface GameSessionHandle {
 
 const MAX_LOG = 200;
 
-function createSession(seed: number, map: Dict | null): GameSessionStub {
-  const s = new GameSessionStub();
+function createSession(seed: number, map: Dict | null): GameSession {
+  const s = new GameSession();
   if (map) {
     s.initializeFromMap(map, seed);
   } else {
@@ -74,7 +74,7 @@ export function useGameSession(initialSeed = 12345): GameSessionHandle {
   const [choice, setChoice] = useState<PlayChoice>(opened.current);
   const choiceRef = useRef(choice);
   choiceRef.current = choice;
-  const sessionRef = useRef<GameSessionStub | null>(null);
+  const sessionRef = useRef<GameSession | null>(null);
   if (sessionRef.current === null) {
     sessionRef.current = createSession(initialSeed, opened.current.map);
   }

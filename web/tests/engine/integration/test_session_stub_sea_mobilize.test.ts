@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionStub } from "../../../src/engine";
+import { GameSession } from "../../../src/engine";
 
-function firstAlliesFactoryRegion(stub: GameSessionStub): string {
+function firstAlliesFactoryRegion(stub: GameSession): string {
   for (const rid of Object.keys(stub.state.regions)) {
     const r = stub.state.regions[rid];
     if (r.owner_faction_id === stub.state.current_faction_id && r.has_factory) {
@@ -11,7 +11,7 @@ function firstAlliesFactoryRegion(stub: GameSessionStub): string {
   return "";
 }
 
-function seaZoneAdjacentTo(stub: GameSessionStub, regionId: string): string {
+function seaZoneAdjacentTo(stub: GameSession, regionId: string): string {
   for (const neighbor of stub.state.getAdjacentRegions(regionId)) {
     const r = stub.state.regions[String(neighbor)];
     if (r != null && r.isSeaRegion()) {
@@ -21,8 +21,8 @@ function seaZoneAdjacentTo(stub: GameSessionStub, regionId: string): string {
   return "";
 }
 
-function buyTransportAndAdvance(): GameSessionStub {
-  const stub = new GameSessionStub();
+function buyTransportAndAdvance(): GameSession {
+  const stub = new GameSession();
   stub.initializeDemo(12345);
   stub.applyCommand({
     command_id: "buy_transport",

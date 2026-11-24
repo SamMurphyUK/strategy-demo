@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { type Dict, EventSchemaValidator, GameSessionStub } from "../../../src/engine";
+import { type Dict, EventSchemaValidator, GameSession } from "../../../src/engine";
 
 function hasEventType(events: Dict[], typeName: string): boolean {
   return events.some((evt) => String(evt.type ?? "") === typeName);
 }
 
-function advanceToMobilize(s: GameSessionStub): void {
+function advanceToMobilize(s: GameSession): void {
   for (let i = 0; i < 4; i++) {
     s.applyCommand({
       command_id: `adv_${s.getDemoSeed()}_${i}`,
@@ -17,7 +17,7 @@ function advanceToMobilize(s: GameSessionStub): void {
   expect(s.state.current_phase).toBe("mobilize");
 }
 
-function axisFactoryRegion(s: GameSessionStub): string {
+function axisFactoryRegion(s: GameSession): string {
   for (const rid of Object.keys(s.state.regions)) {
     const r = s.state.regions[rid];
     if (r.has_factory && r.owner_faction_id !== s.state.current_faction_id) {
@@ -28,10 +28,10 @@ function axisFactoryRegion(s: GameSessionStub): string {
 }
 
 describe("integration/test_session_stub_rules", () => {
-  let demoStub: GameSessionStub;
+  let demoStub: GameSession;
 
   beforeEach(() => {
-    demoStub = new GameSessionStub();
+    demoStub = new GameSession();
     demoStub.initializeDemo(12345);
   });
 
@@ -134,16 +134,16 @@ describe("integration/test_session_stub_rules", () => {
     });
     for (const evt of res["events"]) {
       expect(EventSchemaValidator.validateEvent(evt)).toBe(true);
-      expect(GameSessionStub.validateEventShape(evt)).toBe(true);
+      expect(GameSession.validateEventShape(evt)).toBe(true);
       expect(String(evt["event_id"]) === "").toBe(false);
       expect(String(evt["source_command_id"]) === "").toBe(false);
     }
   });
 
   it("test_deterministic_with_same_seed", () => {
-    const a = new GameSessionStub();
+    const a = new GameSession();
     a.initializeDemo(777);
-    const b = new GameSessionStub();
+    const b = new GameSession();
     b.initializeDemo(777);
     const cmd = {
       command_id: "d1",

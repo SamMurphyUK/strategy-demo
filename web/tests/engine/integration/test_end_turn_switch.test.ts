@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionStub } from "../../../src/engine";
+import { GameSession } from "../../../src/engine";
 
 describe("integration/test_end_turn_switch", () => {
   it("test_end_turn_switches_faction_and_resets_phase", () => {
-    const demoStub = new GameSessionStub();
+    const demoStub = new GameSession();
     demoStub.initializeDemo(12345);
     for (let i = 0; i < 5; i++) {
       demoStub.applyCommand({ command_id: `turn_ep_${i}`, player_id: demoStub.state.current_faction_id, type: "end_phase", payload: {} });

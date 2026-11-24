@@ -1,6 +1,6 @@
 import type { GameState } from "../engine/model/game_state";
 import type { MoveOrder } from "../engine/movement/phase_orders";
-import type { CanonicalEvent, GameSessionStub, StubStateSnapshot } from "../engine/session/game_session_stub";
+import type { CanonicalEvent, GameSession, StubStateSnapshot } from "../engine/session/game_session";
 import type { Dict } from "../engine/model/types";
 import type { CampaignLaunchConfig } from "../engine/types/ruleset";
 import { normalizeLaunch } from "../engine/types/ruleset";
@@ -154,7 +154,7 @@ function cloneData<T>(value: T): T {
 }
 
 /** Copy the host board onto a live session. The client's dice cursor is left untouched. */
-export function applyAuthoritativeSnapshot(session: GameSessionStub, snapshot: StubStateSnapshot): void {
+export function applyAuthoritativeSnapshot(session: GameSession, snapshot: StubStateSnapshot): void {
   const state = session.state;
   state.game_round = snapshot.game_round;
   state.current_faction_id = snapshot.turn_info.current_faction_id;

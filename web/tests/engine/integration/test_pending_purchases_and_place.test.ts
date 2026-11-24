@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { type GameSessionStub } from "../../../src/engine";
+import { type GameSession } from "../../../src/engine";
 import { campaignSession } from "../campaign_session";
 
-function firstAlliesFactoryRegion(session: GameSessionStub): string {
+function firstAlliesFactoryRegion(session: GameSession): string {
   for (const rid of Object.keys(session.state.regions)) {
     const r = session.state.regions[rid];
     if (r.owner_faction_id === session.state.current_faction_id && r.has_factory) {

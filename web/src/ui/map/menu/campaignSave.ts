@@ -1,7 +1,7 @@
 // A campaign in progress, kept in this browser or handed around as JSON.
 import type { Dict } from "../../../engine/model/types";
 import { isDict } from "../../../engine/model/types";
-import type { StubStateSnapshot } from "../../../engine/session/game_session_stub";
+import type { StubStateSnapshot } from "../../../engine/session/game_session";
 import type { CampaignLaunchConfig } from "../../../engine/types/ruleset";
 import { normalizeLaunch } from "../../../engine/types/ruleset";
 

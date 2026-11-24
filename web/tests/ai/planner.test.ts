@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Faction, GameSessionStub, GameState, Region, Unit } from "../../src/engine";
+import { Faction, GameSession, GameState, Region, Unit } from "../../src/engine";
 import { playArenaGame, summarizeArena } from "../../src/ai/arenaMatch";
 import { planTurn } from "../../src/ai/planTurn";
 import { AI_DIFFICULTY_PROFILES, FACTION_PERSONAS, personaFor } from "../../src/ai/types/aiTypes";
@@ -57,7 +57,7 @@ describe("hybrid planner", () => {
   });
 
   it("attacks a weak tile and holds against a stack it cannot trade", () => {
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.bindArena(duel(6, 1), 4);
     const attack = planTurn(session.state, { difficulty: "EASY", seed: 4 });
     expect(attack.commands.some((command) => command.type === "move_units")).toBe(true);

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { GameSessionStub } from "../../../src/engine";
+import { GameSession } from "../../../src/engine";
 
 describe("integration/test_session_stub_purchase", () => {
-  let demoStub: GameSessionStub;
+  let demoStub: GameSession;
 
   beforeEach(() => {
-    demoStub = new GameSessionStub();
+    demoStub = new GameSession();
     demoStub.initializeDemo(12345);
   });
 
@@ -20,7 +20,7 @@ describe("integration/test_session_stub_purchase", () => {
     expect(res["result_type"]).toBe("ok");
     expect(res["events"].length).toBeGreaterThan(0);
     expect(res["events"][0]["type"]).toBe("unitspurchased");
-    expect(GameSessionStub.validateEventShape(res["events"][0])).toBe(true);
+    expect(GameSession.validateEventShape(res["events"][0])).toBe(true);
     expect(demoStub.getState()["ipc"][demoStub.state.current_faction_id]).toBe(initialIpc - 3);
   });
 });

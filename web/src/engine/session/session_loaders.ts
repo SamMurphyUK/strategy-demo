@@ -1,4 +1,4 @@
-// _load_units / _load_factions / _load_map / _load_setup, shared by game_session.gd and GameSessionStub.gd.
+// _load_units / _load_factions / _load_map / _load_setup, shared by game_session.gd and GameSession.gd.
 import { Faction } from "../model/faction";
 import type { GameState } from "../model/game_state";
 import { Region } from "../model/region";

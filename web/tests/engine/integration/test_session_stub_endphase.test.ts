@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { GameSessionStub } from "../../../src/engine";
+import { GameSession } from "../../../src/engine";
 
-function advanceToMobilize(s: GameSessionStub): void {
+function advanceToMobilize(s: GameSession): void {
   for (let i = 0; i < 4; i++) {
     s.applyCommand({ command_id: `adv_${i}`, player_id: s.state.current_faction_id, type: "end_phase", payload: {} });
   }
@@ -9,10 +9,10 @@ function advanceToMobilize(s: GameSessionStub): void {
 }
 
 describe("integration/test_session_stub_endphase", () => {
-  let demoStub: GameSessionStub;
+  let demoStub: GameSession;
 
   beforeEach(() => {
-    demoStub = new GameSessionStub();
+    demoStub = new GameSession();
     demoStub.initializeDemo(12345);
   });
 

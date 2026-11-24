@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Faction, GameSessionStub, GameState, Region, Unit } from "../engine";
+import { Faction, GameSession, GameState, Region, Unit } from "../engine";
 import { evaluateSeaZoneEscortSafety } from "./escortSafety";
 import { planImmediateFerry, planStagingFerry } from "./ferryPlanner";
 import { campaignRuleFlags, shouldRunEvaluator } from "./ruleFlags";
@@ -68,7 +68,7 @@ describe("escort math and campaign flags", () => {
     const assault = planImmediateFerry(state, "usa", []);
     expect(staged.loads.length).toBeGreaterThan(0);
     expect(assault.assaults).toEqual([]);
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.bindArena(state, 2);
     state.current_phase = "noncombat_move";
     state.current_faction_id = "usa";

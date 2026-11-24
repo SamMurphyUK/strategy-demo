@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EventSchemaValidator, GameSessionFactory, GameSessionStub } from "../../../src/engine";
+import { EventSchemaValidator, GameSessionFactory, GameSession } from "../../../src/engine";
 
 const SCHEMA_PATH = "res://docs/event_schema.json";
 
@@ -34,7 +34,7 @@ describe("integration/test_event_schema", () => {
   });
 
   it("test_stub_emitted_events_match_schema", () => {
-    const stub = new GameSessionStub();
+    const stub = new GameSession();
     stub.initializeDemo(12345);
     const res = stub.applyCommand({
       command_id: "schema_cmd",

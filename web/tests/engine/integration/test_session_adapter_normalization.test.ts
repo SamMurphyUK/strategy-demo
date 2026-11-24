@@ -5,7 +5,7 @@ import {
   GameEvent,
   GameEventType,
   GameSessionAdapter,
-  GameSessionStub,
+  GameSession,
 } from "../../../src/engine";
 
 function assertNormalized(evt: Dict, expectedSource: string): void {
@@ -18,7 +18,7 @@ function assertNormalized(evt: Dict, expectedSource: string): void {
 
 describe("integration/test_session_adapter_normalization", () => {
   it("test_normalizes_stub_event", () => {
-    const demoStub = new GameSessionStub();
+    const demoStub = new GameSession();
     demoStub.initializeDemo(42);
     const adapter = GameSessionAdapter.fromSession(demoStub);
     const res = adapter.applyCommand({

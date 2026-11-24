@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GameSessionStub, GameState, Region, Ruleset } from "../../../src/engine";
+import { GameSession, GameState, Region, Ruleset } from "../../../src/engine";
 import {
   factoryBlockReason,
   factoryPrice,
@@ -59,7 +59,7 @@ describe("factory purchases", () => {
   });
 
   it("buys a minor and places it on an open territory", () => {
-    const session = new GameSessionStub();
+    const session = new GameSession();
     session.initializeDemo(12345);
     const faction = session.state.current_faction_id;
     session.state.ipc[faction] = 40;

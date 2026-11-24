@@ -1,6 +1,6 @@
 import { GameEvent } from "../model/event";
 import { type Dict, deepCopy, isDict } from "../model/types";
-import { GameSessionStub } from "./game_session_stub";
+import { GameSession } from "./game_session";
 
 export interface SessionLike {
   applyCommand(cmd: Dict): Dict;
@@ -57,7 +57,7 @@ export class GameSessionAdapter {
   }
 
   static validateEventShape(evt: Dict): boolean {
-    return GameSessionStub.validateEventShape(evt);
+    return GameSession.validateEventShape(evt);
   }
 
   /** Identity for every type the adapter currently knows. */

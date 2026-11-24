@@ -1,5 +1,5 @@
 import { Faction, GameState, Region, Unit } from "../engine";
-import { GameSessionStub } from "../engine/session/game_session_stub";
+import { GameSession } from "../engine/session/game_session";
 import { planTurn } from "./planTurn";
 import type { AIDifficulty } from "./types/aiTypes";
 
@@ -76,7 +76,7 @@ export function arenaBoard(): GameState {
 }
 
 export function playArenaGame(seed: number, v2: AIDifficulty = "NORMAL", v1: AIDifficulty = "EASY"): ArenaGame {
-  const session = new GameSessionStub();
+  const session = new GameSession();
   session.bindArena(arenaBoard(), seed);
   const botV2 = session.state.turn_order[0] ?? "red";
   const botV1 = session.state.turn_order[1] ?? "blue";

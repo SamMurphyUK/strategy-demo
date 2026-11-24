@@ -91,7 +91,7 @@ describe("core/test_full_turn", () => {
 
     let hasBattle = false;
     for (const e of result.events) {
-      if (String(e.type ?? "") === "battle_started") {
+      if (String(e.type ?? "") === "battlestarted") {
         hasBattle = true;
         break;
       }

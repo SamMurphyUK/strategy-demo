@@ -3,7 +3,7 @@
 // region stack list are plain view state the playground can render.
 import type { Dict } from "../model/types";
 import { GameSessionFactory, SessionMode } from "../session/game_session_factory";
-import type { GameSessionStub } from "../session/game_session_stub";
+import type { GameSession } from "../session/game_session";
 import { godotCapitalize } from "./godot_string";
 
 export const InspectorViewMode = { REGION: "region", COMBAT: "combat" } as const;
@@ -76,7 +76,7 @@ export class MapSelection {
 }
 
 export class GameSceneController {
-  readonly session: GameSessionStub;
+  readonly session: GameSession;
   readonly mapRoot: MapSelection;
   readonly regionInspectorPanel = new RegionInspectorState();
   regionStackRows: string[] = [];
@@ -84,7 +84,7 @@ export class GameSceneController {
   readonly log: string[] = [];
   private commandCounter = 0;
 
-  constructor(session: GameSessionStub = GameSessionFactory.create(SessionMode.STUB)) {
+  constructor(session: GameSession = GameSessionFactory.create(SessionMode.STUB)) {
     this.session = session;
     this.mapRoot = new MapSelection((regionId) => this.onRegionSelected(regionId));
     this.refreshAll();

@@ -8,8 +8,8 @@ import {
 } from "../../content/game_scene_session_builder";
 import { loadJson } from "../content/res";
 import { GameSession } from "./game_session";
-import { GameSessionStub } from "./game_session_stub";
 
+/** Kept so older call sites compile. Both values boot the same session. */
 export const SessionMode = {
   STUB: "stub",
   FULL: "full",
@@ -33,16 +33,10 @@ export function createSessionFromNewmap(): GameSession {
 }
 
 export class GameSessionFactory {
-  static create(mode: typeof SessionMode.STUB): GameSessionStub;
-  static create(mode: typeof SessionMode.FULL): GameSession;
-  static create(mode?: SessionModeValue): GameSessionStub | GameSession;
-  static create(mode: SessionModeValue = DEFAULT_MODE): GameSessionStub | GameSession {
-    if (mode === SessionMode.FULL) {
-      return createSessionFromNewmap();
-    }
-    const stub = new GameSessionStub();
-    stub.initializeDemo(12345);
-    return stub;
+  static create(_mode: SessionModeValue = DEFAULT_MODE): GameSession {
+    const session = new GameSession();
+    session.initializeDemo(12345);
+    return session;
   }
 
   static loadJson = loadJson;

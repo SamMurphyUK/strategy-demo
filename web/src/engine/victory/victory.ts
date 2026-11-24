@@ -32,11 +32,15 @@ export class VictoryEngine {
         ),
       ];
     }
+    const capitals = Object.keys(state.regions).filter((rid) => state.regions[rid].is_capital);
+    if (capitals.length === 0) {
+      return [];
+    }
     for (const faction of Object.keys(state.factions)) {
       let controlsAll = true;
-      for (const rid of Object.keys(state.regions)) {
+      for (const rid of capitals) {
         const r = state.regions[rid];
-        if (r.is_capital && !state.sameTeam(r.owner_faction_id, faction)) {
+        if (!state.sameTeam(r.owner_faction_id, faction)) {
           controlsAll = false;
           break;
         }

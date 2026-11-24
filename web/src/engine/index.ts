@@ -64,10 +64,9 @@ export {
   type ScenarioId,
   type TerrainType,
 } from "./types/ruleset";
-export { type CommandResult, GameSession } from "./session/game_session";
+export { type CanonicalEvent, GameSession, type StubResult } from "./session/game_session";
 export { GameSessionAdapter, type SessionLike } from "./session/game_session_adapter";
 export { createSessionFromNewmap, GameSessionFactory, SessionMode } from "./session/game_session_factory";
-export { type CanonicalEvent, GameSessionStub, type StubResult } from "./session/game_session_stub";
 export { TransportLoadValidator } from "./transport/transport_load_validator";
 export { PHASES, TurnEngine, type TurnPhase } from "./turn/turn_engine";
 export { CommandValidator, PHASE_COMMANDS } from "./validation/command_validator";
@@ -87,16 +86,9 @@ export {
 export { VictoryEngine } from "./victory/victory";
 
 import type { Dict } from "./model/types";
-import type { CommandResult, GameSession } from "./session/game_session";
-import type { GameSessionStub, StubResult } from "./session/game_session_stub";
+import type { GameSession, StubResult } from "./session/game_session";
 
-/**
- * Public session boundary from ENGINE_PORT_PLAN.md:
- * `applyCommand(cmd) -> { result_type, error?, events, new_state }` for GameSession,
- * and `{ result_type, error?, events }` with canonical events for the demo stub.
- */
-export function applyCommand(session: GameSession, cmd: Dict): CommandResult;
-export function applyCommand(session: GameSessionStub, cmd: Dict): StubResult;
-export function applyCommand(session: GameSession | GameSessionStub, cmd: Dict): CommandResult | StubResult {
+/** `applyCommand(cmd) -> { result_type, error?, events, new_state }`. */
+export function applyCommand(session: GameSession, cmd: Dict): StubResult {
   return session.applyCommand(cmd);
 }
