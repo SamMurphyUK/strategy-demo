@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Legacy Godot
 
-The playable game and its tests are `web/`. Treat `scenes/`, `scripts/`, and `addons/gut` as the previous client.
+The playable game and its tests are `web/`. Everything under `legacy/godot/` (`scenes/`, `scripts/`, `core/`, `addons/gut`) is the previous client.
 
 If a `.gd` file must change:
 

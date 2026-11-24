@@ -25,10 +25,10 @@ from shapely.plotting import plot_polygon
 from shapely.validation import make_valid
 from svgpathtools import Line, parse_path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 SRC = Path(r"C:\Users\sammu\Downloads\ne_110m_land_FINAL_03.svg")
-DST = ROOT / "map_warped.svg"
-PREVIEW = ROOT / "preview_comparison.png"
+DST = ROOT / "art" / "loose" / "svg" / "map_warped.svg"
+PREVIEW = ROOT / "art" / "loose" / "png" / "preview_comparison.png"
 
 # Fraction of the normalized 0..1 box. 8e-5 is about 32 px² on an 800×504 map.
 MIN_ISLAND_AREA = 8e-5

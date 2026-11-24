@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
-    // Map JSON, unit data and art are read from the Godot project one level up.
+    // Map JSON, unit data and loose art are read from the repo root one level up.
     fs: { allow: [".."] },
   },
   build: {

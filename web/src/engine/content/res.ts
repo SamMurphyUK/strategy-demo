@@ -1,4 +1,4 @@
-// `res://` paths resolve to the Godot project's own JSON so both engines read one copy of the data.
+// `res://` paths resolve to the shared JSON at the repo root, so there is one copy of the data.
 import eventSchema from "../../../../docs/event_schema.json";
 import demoMap01 from "../../../../demomap01.json";
 import dataFactions from "../../../../data/factions.json";

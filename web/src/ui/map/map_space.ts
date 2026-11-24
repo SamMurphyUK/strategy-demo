@@ -1,5 +1,5 @@
 // World space for the map is the land SVG's viewBox (800 x 504). demomap01.json was authored over
-// texture/test.jpg (3000 x 2139, centred on the origin), so its coordinates are projected into world
+// art/loose/png/texture/test.jpg (3000 x 2139, centred on the origin), so its coordinates are projected into world
 // space when the UI loads it. The engine keeps reading the file untouched; it only needs adjacency.
 import type { Dict } from "../../engine/model/types";
 

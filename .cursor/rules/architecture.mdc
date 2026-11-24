@@ -13,6 +13,7 @@ New work lands in `web/`. From that directory, `npm test` runs Vitest and `npm r
 - The campaign, host, and arena play `GameSession` (`web/src/engine/session/game_session.ts`).
 - Tests live in `web/tests/**/*.test.ts`. Do not delete or loosen an existing test to make a change pass.
 - `data/`, `demomap01.json`, and `docs/event_schema.json` are the shared content the engine loads. Do not fork a second copy.
-- `scenes/`, `scripts/`, `core/`, and `addons/gut` are the previous Godot game. Do not add features there.
+- `legacy/godot/` is the previous Godot game (`scenes/`, `scripts/`, `core/`, `addons/gut`, `project.godot`). Do not add features there. It no longer opens in place: Godot needs the shared content and `art/loose/png/` copied beside it.
+- Loose source art lives in `art/loose/svg/` and `art/loose/png/`. Runtime art stays in `web/public/assets/`.
 - Do not implement unit `special` rules (blitz, submerge, shore bombardment, artillery boost) unless a Vitest specifies them.
 - A Godot file that must be touched still follows the old decoupling: no `get_node` or `$` to distant nodes, and no EventBus for gameplay.

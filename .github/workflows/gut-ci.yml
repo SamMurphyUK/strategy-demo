@@ -22,12 +22,19 @@ jobs:
       - name: Verify Godot
         run: godot --version
 
+      # The Godot project lives in legacy/godot. Its res:// content is the shared
+      # copy at the repo root, staged beside it for this run only.
+      - name: Stage shared content
+        run: |
+          cp -r data docs demomap01.json legacy/godot/
+          cp -r art/loose/png/. legacy/godot/
+
       - name: Import project
-        run: godot --headless --import --path . --quit
+        run: godot --headless --import --path legacy/godot --quit
 
       - name: Run GUT integration tests
         run: |
-          godot --headless --path . -s addons/gut/gut_cmdln.gd \
+          godot --headless --path legacy/godot -s addons/gut/gut_cmdln.gd \
             -gdir=res://tests/integration \
             -gexit \
             -ginclude_subdirs \
@@ -35,7 +42,7 @@ jobs:
 
       - name: Run demo smoke (seed 12345)
         run: |
-          godot --headless --path . -s res://scripts/demo_smoke_runner.gd \
+          godot --headless --path legacy/godot -s res://scripts/demo_smoke_runner.gd \
             -- --seed=12345 --output=/tmp/smoke_result.json \
             2>&1 | tee smoke.log
           cat /tmp/smoke_result.json

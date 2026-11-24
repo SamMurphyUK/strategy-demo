@@ -24,15 +24,21 @@ npm run build     # vite build
 | `web/src/engine` | Rules, state, commands, RNG. No React, DOM, canvas, or Web Audio. |
 | `web/src/ui` | Campaign map and battle screen. Displays state and sends commands. |
 | `web/tests` | Vitest. Engine ports live under `web/tests/engine`. Map and UI tests live under `web/tests/ui`. |
-| `data/`, `demomap01.json`, `docs/event_schema.json` | Shared content the engine still loads. One copy. |
+| `data/`, `demomap01.json`, `docs/event_schema.json` | Shared content the engine loads. One copy. |
+| `web/public/assets` | Runtime art. `units/vector/` holds the traced SVGs; `units/frames/` and `units/rigs/` hold the PNGs. |
+| `art/loose/svg`, `art/loose/png` | Loose source art: map warps, reference images, and the old Godot textures. |
+| `scripts/` | Python map tools. |
+| `legacy/godot` | The previous Godot game. Frozen. |
 
-The map plays `GameSessionStub`. Godot scenes, scripts, and GUT under `scenes/`, `scripts/`, `tests/`, and `addons/gut/` are the previous game. Do not add features there.
+The campaign, host, and arena play `GameSession` (`web/src/engine/session/game_session.ts`).
+
+`legacy/godot/` holds the Godot project, scenes, scripts, and GUT. Do not add features there. Its `res://` content is the shared copy at the repo root, so the project opens only after `data/`, `docs/`, `demomap01.json`, and the contents of `art/loose/png/` are copied beside `project.godot`. The tag `v0.9-2d-canvas-archive` is the last commit where it opens in place.
 
 ## CI
 
 Pull requests and pushes to `main` run `.github/workflows/web-ci.yml`: `npm test` and `npm run build` in `web/`.
 
-GUT (`.github/workflows/gut-ci.yml`) stays available as a manual workflow. It is not part of day-to-day development.
+GUT (`.github/workflows/gut-ci.yml`) stays available as a manual workflow. It stages the shared content into `legacy/godot/` before it runs. It is not part of day-to-day development.
 
 ## Related docs
 
@@ -45,7 +51,7 @@ GUT (`.github/workflows/gut-ci.yml`) stays available as a manual workflow. It is
 
 # Game invariants
 
-This section is the authoritative contract for **`web/src/engine`**. The TypeScript uses the same field names as the Godot `core/` it was ported from. Snippets below are that shared shape.
+This section is the authoritative contract for **`web/src/engine`**. The TypeScript uses the same field names as the Godot `core/` it was ported from (now `legacy/godot/core/`). Snippets below are that shared shape.
 
 UI in `web/src/ui` may stage a purchase or a drag, and must commit through a session command. It must not write `GameState` on its own.
 
@@ -55,7 +61,7 @@ UI in `web/src/ui` may stage a purchase or a drag, and must commit through a ses
 |-------|------|------------|
 | **Engine (law)** | `web/src/engine` | Follow every invariant below |
 | **Web UI** | `web/src/ui` | May stage input; the session is authoritative on confirm |
-| **Legacy Godot** | `scenes/`, `scripts/`, `core/` | Not the development path |
+| **Legacy Godot** | `legacy/godot/` | Not the development path |
 | **Policy** | `DEBUG_RULES.md` | Logging only |
 
 **Game type:** Turn-based, region-control, IPC economy, unit purchase, movement, combat, mobilization/placement.

@@ -1,11 +1,14 @@
-// Resolves Godot `res://` texture paths to URLs Vite serves from the project folder.
-// This is the only module that knows the art lives in the Godot tree.
+// Resolves `res://texture/...` paths to URLs Vite serves from the loose art folder.
+// This is the only module that knows the old Godot textures live in `art/loose/png/texture`.
 import { resolveUnitArtPath } from "./unit_art";
 
-const PROJECT_PREFIX = "../../../../";
+const PROJECT_PREFIX = "../../../../art/loose/png/";
 
 const TEXTURES = import.meta.glob(
-  ["../../../../texture/*.{jpg,jpeg,png,webp}", "../../../../texture/units/{us,ger,neutral}/*.png"],
+  [
+    "../../../../art/loose/png/texture/*.{jpg,jpeg,png,webp}",
+    "../../../../art/loose/png/texture/units/{us,ger,neutral}/*.png",
+  ],
   { eager: true, query: "?url", import: "default" },
 ) as Record<string, string>;
 

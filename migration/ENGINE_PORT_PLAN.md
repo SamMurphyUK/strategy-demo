@@ -2,7 +2,7 @@
 
 This is the record of the port. It is not the backlog.
 
-Ongoing work is the Vite app and the Vitest suite in `web/`. Run `npm test` and `npm run build` from `web/`. The engine now lives at `web/src/engine`, and the tests at `web/tests`. Godot scenes and GUT stay in the tree as the previous game.
+Ongoing work is the Vite app and the Vitest suite in `web/`. Run `npm test` and `npm run build` from `web/`. The engine now lives at `web/src/engine`, and the tests at `web/tests`. Godot scenes and GUT stay in the tree as the previous game, under `legacy/godot/`; every `core/`, `rules/`, `scripts/`, `scenes/`, `tests/`, and `addons/` path below is relative to that folder. Since this plan was written, `GameSessionStub` became the only session and was renamed `GameSession`.
 
 The original instruction follows.
 

@@ -1,6 +1,8 @@
 # Demo session
 
-The demo you run is the Vite app: from `web/`, `npm run dev`. Rules checks are `npm test`. The notes below describe the stub the map still plays (`web/src/engine/session/game_session_stub.ts`). Godot `GameScene` is the previous client.
+The demo you run is the Vite app: from `web/`, `npm run dev`. Rules checks are `npm test`. The campaign plays `GameSession` (`web/src/engine/session/game_session.ts`), which is the former stub under its final name; the demo rules below still describe it.
+
+Everything from "Overview" down is the record of the previous Godot client, now in `legacy/godot/`. The class names, `res://` paths, and commands are the Godot ones. Run the commands from `legacy/godot/` after copying `data/`, `docs/`, `demomap01.json`, and the contents of `art/loose/png/` beside `project.godot`.
 
 ## Overview
 
