@@ -14,6 +14,7 @@ import {
 } from "../../../src/ui/map/coastRelief";
 import {
   applyShoreLifts,
+  cliffSweepEdges,
   coastTuneSortOrigin,
   effectiveCliffLift,
   parseCoastTune,
@@ -26,7 +27,7 @@ import {
   SHIPPED_COAST_TUNE,
   sortLandRegionsByProximity,
 } from "../../../src/ui/map/coastTune";
-import type { MultiPolygon } from "../../../src/ui/map/regionClip";
+import { pointInMultiPolygon, type MultiPolygon } from "../../../src/ui/map/regionClip";
 import type { SurfSample } from "../../../src/ui/map/coastRelief";
 
 describe("coast tune defaults", () => {
@@ -125,6 +126,55 @@ describe("cliff height overrides", () => {
     applyShoreLifts(runs, [west, east], { east: 0.3 });
     expect(runs[0][0].lift).toBe(0.3);
     expect(runs[0][1].lift).toBe(1);
+  });
+});
+
+describe("cliff sweep", () => {
+  it("runs every edge left to right and leaves the upright ones out", () => {
+    const square: MultiPolygon = [[[[0, 0], [10, 0], [10, 10], [0, 10]]]];
+    expect(Array.from(cliffSweepEdges(square))).toEqual([0, 0, 10, 0, 0, 10, 10, 10]);
+  });
+
+  it("covers what a silhouette stamped on every step of the drop covers", () => {
+    // A notched coast with a lake, and an island shorter than the drop.
+    const land: MultiPolygon = [
+      [
+        [[0, 0], [20, 0], [26, 6], [26, 20], [14, 20], [14, 12], [6, 12], [0, 18]],
+        [[4, 3], [10, 3], [10, 8], [4, 8]],
+      ],
+      [[[30, 2], [34, 2], [32, 5]]],
+    ];
+    const drop = 4;
+    const edges = cliffSweepEdges(land);
+    const onFace = (x: number, y: number): boolean => {
+      for (let i = 0; i < edges.length; i += 4) {
+        if (x < edges[i] || x > edges[i + 2]) {
+          continue;
+        }
+        const top = edges[i + 1] + ((edges[i + 3] - edges[i + 1]) * (x - edges[i])) / (edges[i + 2] - edges[i]);
+        if (y >= top && y <= top + drop) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const onLand = (x: number, y: number) => pointInMultiPolygon({ x, y }, land);
+    let faceOnly = 0;
+    for (let x = -1.63; x < 36; x += 1) {
+      for (let y = -1.79; y < 26; y += 0.5) {
+        let stamped = false;
+        for (let step = 0; step <= 256 && !stamped; step += 1) {
+          stamped = onLand(x, y - (drop * step) / 256);
+        }
+        const ends = onLand(x, y) || onLand(x, y - drop);
+        expect(ends || onFace(x, y), `at ${x}, ${y}`).toBe(stamped);
+        if (stamped && !ends) {
+          faceOnly += 1;
+        }
+      }
+    }
+    // The island is shorter than the drop, so part of its cliff is in neither silhouette.
+    expect(faceOnly).toBeGreaterThan(0);
   });
 });
 

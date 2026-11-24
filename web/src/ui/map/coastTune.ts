@@ -354,6 +354,29 @@ export function planCliffStamps(
   return stamps;
 }
 
+/**
+ * The edges a straight drop sweeps, four numbers each: left x, left y, right x, right y.
+ * Every edge runs left to right, so the faces built under them all wind the same way and one
+ * non-zero fill is their union. An upright edge sweeps nothing and is left out.
+ */
+export function cliffSweepEdges(polygons: MultiPolygon): Float64Array {
+  const out: number[] = [];
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (let i = 0; i < ring.length; i += 1) {
+        const [ax, ay] = ring[i];
+        const [bx, by] = ring[(i + 1) % ring.length];
+        if (ax < bx) {
+          out.push(ax, ay, bx, by);
+        } else if (bx < ax) {
+          out.push(bx, by, ax, ay);
+        }
+      }
+    }
+  }
+  return Float64Array.from(out);
+}
+
 /** Longest side of the landmass under `point`, or null when the point is at sea. */
 export function landmassSpanAt(land: MultiPolygon, point: { x: number; y: number }): number | null {
   for (const poly of land) {

@@ -2,15 +2,24 @@
 
 export interface DrawFlags {
   anims: boolean;
+  cliffs: boolean;
+  /** The old cliff: the land silhouette filled once for every pixel of the drop. Slow while zooming. */
+  stamp: boolean;
   shore: boolean;
   figures: boolean;
+  /** Zoomed figures are copies of one picture for each kind. Off, every figure is its own SVG node. */
+  sheet: boolean;
   arrows: boolean;
 }
 
 export interface DrawSample {
   fps: number;
+  /** The slowest frame in the last window. A zoom shows here before it shows in the average. */
+  worstMs: number;
   frameMs: number;
   paintMs: number;
+  /** Base map, cliffs, and the copy into the held picture. The canvas settles its queued drawing on that copy. */
+  landMs: number;
   shoreMs: number;
   figureMs: number;
   arrowMs: number;
@@ -20,27 +29,25 @@ export interface DrawSample {
   px: string;
 }
 
+export type PaintTimes = Pick<DrawSample, "paintMs" | "landMs" | "shoreMs" | "figureMs" | "arrowMs">;
+
+const NO_PAINT: PaintTimes = { paintMs: 0, landMs: 0, shoreMs: 0, figureMs: 0, arrowMs: 0 };
+
 const EMPTY: DrawSample = {
   fps: 0,
+  worstMs: 0,
   frameMs: 0,
-  paintMs: 0,
-  shoreMs: 0,
-  figureMs: 0,
-  arrowMs: 0,
+  ...NO_PAINT,
   idleMs: 0,
   lod: 0,
   zoom: 1,
   px: "",
 };
 
-let flags: DrawFlags = { anims: true, shore: true, figures: true, arrows: true };
+let flags: DrawFlags = { anims: true, cliffs: true, stamp: false, shore: true, figures: true, sheet: true, arrows: true };
 let sample: DrawSample = EMPTY;
-let paint: Pick<DrawSample, "paintMs" | "shoreMs" | "figureMs" | "arrowMs"> = {
-  paintMs: 0,
-  shoreMs: 0,
-  figureMs: 0,
-  arrowMs: 0,
-};
+/** The slowest paint since the panel last read. One slow frame in a zoom is the number that matters. */
+let paint: PaintTimes = NO_PAINT;
 let idleMs = 0;
 
 const flagListeners = new Set<() => void>();
@@ -72,16 +79,21 @@ export function subscribeDrawSample(listener: () => void): () => void {
   return () => sampleListeners.delete(listener);
 }
 
-export function notePaint(next: Pick<DrawSample, "paintMs" | "shoreMs" | "figureMs" | "arrowMs">): void {
-  paint = next;
+export function notePaint(next: PaintTimes): void {
+  if (next.paintMs >= paint.paintMs) {
+    paint = next;
+  }
 }
 
 export function noteIdle(ms: number): void {
-  idleMs = ms;
+  idleMs = Math.max(idleMs, ms);
 }
 
 /** The Z panel reads this. It does not belong in the map paint's dependency list. */
-export function publishDrawSample(next: Pick<DrawSample, "fps" | "frameMs" | "lod" | "zoom" | "px">): void {
-  sample = { ...next, ...paint, idleMs };
+export function publishDrawSample(next: Pick<DrawSample, "fps" | "worstMs" | "frameMs" | "lod" | "zoom" | "px">): void {
+  // A window with paints shows its slowest one. A still camera keeps the last paint on the panel.
+  sample = { ...sample, ...next, ...(paint.paintMs > 0 ? paint : null), idleMs };
+  paint = NO_PAINT;
+  idleMs = 0;
   sampleListeners.forEach((listener) => listener());
 }

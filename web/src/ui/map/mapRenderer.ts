@@ -76,10 +76,13 @@ import {
   ARROW_INK,
 } from "./operationalArrows";
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
+import { getDrawFlags } from "./renderDebug";
+import { landMaskAt } from "./landMask";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
 import { buildSurfCoast, cliffLift, ringSpan, surfLocalPx, type SurfSample, type SurfTune } from "./coastRelief";
 import {
   applyShoreLifts,
+  cliffSweepEdges,
   planCliffStamps,
   SHIPPED_CLIFF_LIP,
   surfTuneFromCoast,
@@ -90,6 +93,7 @@ import { ringsOf, type Pt } from "./mapBakeMath";
 import polygonClipping from "polygon-clipping";
 import { pointInMultiPolygon, type MultiPolygon } from "./regionClip";
 import type { ShoreVeil } from "../../art/fieldVehicleStage";
+import type { ShoreStencil } from "./figureSheet";
 import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
 import { drawHoldCircles } from "./shipHold";
 import {
@@ -266,7 +270,9 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     ctx.translate(dx, 0);
     ctx.lineJoin = "round";
     ctx.drawImage(baked.canvas, bounds.x - bleed, bounds.y, bounds.w + bleed * 2, bounds.h);
-    drawTiltedCliffs(ctx, s, bleed);
+    if (getDrawFlags().cliffs) {
+      drawTiltedCliffs(ctx, s, bleed);
+    }
     drawDynamicTerrain(ctx, s, px, dx);
   }
   setWorldTransform(ctx, view, dpr);
@@ -311,48 +317,86 @@ function strokeLandSilhouette(ctx: CanvasRenderingContext2D, s: TerrainScene): v
   }
 }
 
+/** The face between a group's coast and the same coast `dy` lower: one four-sided piece under every edge. */
+function cliffSweepPath(group: CliffGroup, dy: number): Path2D {
+  if (group.sweep?.dy === dy) {
+    return group.sweep.path;
+  }
+  const path = new Path2D();
+  const edges = group.edges;
+  // A fill closes each piece itself. `closePath` on a path this long is slow enough to drop a frame.
+  for (let i = 0; i < edges.length; i += 4) {
+    path.moveTo(edges[i], edges[i + 1]);
+    path.lineTo(edges[i + 2], edges[i + 3]);
+    path.lineTo(edges[i + 2], edges[i + 3] + dy);
+    path.lineTo(edges[i], edges[i + 1] + dy);
+  }
+  group.sweep = { dy, path };
+  return path;
+}
+
 /**
  * Southern cliff under the land. A single downward copy leaves a water gap under any island
- * shorter than the drop, so the silhouette is stamped every device pixel from the coast down
- * to the lip. The baked land is put back on top. One taupe face; no second darker extrude.
+ * shorter than the drop, so the face is the whole silhouette swept from the coast down to the lip.
+ * The baked land is put back on top. One taupe face; no second darker extrude.
+ *
+ * The sweep is three fills: the lowered silhouette with its rim, the faces under every edge, and
+ * the silhouette in place. Filling the silhouette once for each pixel of the drop draws the same
+ * picture and costs a coastline fill per pixel, which stalls a zoom.
  */
 function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed: number): void {
   const landRegions = landRegionsOf(s);
   if (!s.land && landRegions.length === 0) {
     return;
   }
-  const { sy } = projectionScales(s.view.k);
-  const step = 1 / (s.dpr * sy);
   ctx.fillStyle = MILITARY.taupe;
   ctx.strokeStyle = MILITARY.charcoal;
   ctx.lineWidth = CLIFF_RIM;
   ctx.lineJoin = "miter";
-  const stamp = (path: Path2D | null, dy: number) => {
-    const steps = Math.max(1, Math.min(120, Math.ceil(dy / step)));
+  const lip = cliffLip(s.view.k, getCoastTune().cliffLip);
+  if (s.land && getDrawFlags().stamp) {
+    // The picture the sweep replaced. One coastline fill per device pixel of the drop.
+    const { sy } = projectionScales(s.view.k);
+    const step = 1 / (s.dpr * sy);
+    for (const group of cliffGroups(s)) {
+      const dy = lip * group.lift;
+      const steps = Math.max(1, Math.min(120, Math.ceil(dy / step)));
+      for (let i = steps; i >= 0; i--) {
+        ctx.save();
+        ctx.translate(0, (dy * i) / steps);
+        ctx.fill(group.path, "evenodd");
+        if (i === steps) {
+          ctx.stroke(group.path);
+        }
+        ctx.restore();
+      }
+    }
+  } else if (s.land) {
+    for (const group of cliffGroups(s)) {
+      const dy = lip * group.lift;
+      ctx.save();
+      ctx.translate(0, dy);
+      ctx.fill(group.path, "evenodd");
+      ctx.stroke(group.path);
+      ctx.restore();
+      if (dy > 0) {
+        ctx.fill(cliffSweepPath(group, dy), "nonzero");
+      }
+      ctx.fill(group.path, "evenodd");
+    }
+  } else {
+    // Rough cutters, before the land outline has loaded. Few shapes, and only for a moment.
+    const { sy } = projectionScales(s.view.k);
+    const steps = Math.max(1, Math.min(120, Math.ceil(lip * s.dpr * sy)));
     for (let i = steps; i >= 0; i--) {
       ctx.save();
-      ctx.translate(0, (dy * i) / steps);
-      if (path) {
-        ctx.fill(path, "evenodd");
-        if (i === steps) {
-          ctx.stroke(path);
-        }
-      } else {
-        fillLandSilhouette(ctx, s);
-        if (i === steps) {
-          strokeLandSilhouette(ctx, s);
-        }
+      ctx.translate(0, (lip * i) / steps);
+      fillLandSilhouette(ctx, s);
+      if (i === steps) {
+        strokeLandSilhouette(ctx, s);
       }
       ctx.restore();
     }
-  };
-  const lip = cliffLip(s.view.k, getCoastTune().cliffLip);
-  if (s.land) {
-    for (const group of cliffGroups(s)) {
-      stamp(group.path, lip * group.lift);
-    }
-  } else {
-    stamp(null, lip);
   }
 
   ctx.save();
@@ -382,6 +426,10 @@ const surfCoasts = new WeakMap<object, { key: string; runs: SurfSample[][] }>();
 interface CliffGroup {
   lift: number;
   path: Path2D;
+  /** The coast edges a drop sweeps. See `cliffSweepEdges`. */
+  edges: Float64Array;
+  /** The swept faces for the last drop drawn. Past the tilt's end the drop no longer changes with zoom. */
+  sweep: { dy: number; path: Path2D } | null;
 }
 
 const cliffGroupCache = new WeakMap<object, { key: string; groups: CliffGroup[] }>();
@@ -453,15 +501,14 @@ function polygonsPath(polygons: MultiPolygon): Path2D {
 }
 
 /** One path per polygon when a union fails, so a shared border cannot cancel the fill. */
-function pathsForStamp(polygons: MultiPolygon, territory: boolean): Path2D[] {
+function shapesForStamp(polygons: MultiPolygon, territory: boolean): MultiPolygon[] {
   if (!territory || polygons.length <= 1) {
-    return [polygonsPath(polygons)];
+    return [polygons];
   }
   try {
-    const unioned = polygonClipping.union(polygons[0], ...polygons.slice(1));
-    return [polygonsPath(unioned)];
+    return [polygonClipping.union(polygons[0], ...polygons.slice(1))];
   } catch {
-    return polygons.map((polygon) => polygonsPath([polygon]));
+    return polygons.map((polygon) => [polygon]);
   }
 }
 
@@ -482,7 +529,12 @@ function cliffGroups(scene: TerrainScene): CliffGroup[] {
     return hit.groups;
   }
   const groups = planCliffStamps(land.polygons, regions, tune.cliffOverrides).flatMap((stamp) =>
-    pathsForStamp(stamp.polygons, stamp.territory).map((path) => ({ lift: stamp.lift, path })),
+    shapesForStamp(stamp.polygons, stamp.territory).map((shape) => ({
+      lift: stamp.lift,
+      path: polygonsPath(shape),
+      edges: cliffSweepEdges(shape),
+      sweep: null,
+    })),
   );
   cliffGroupCache.set(land, { key, groups });
   return groups;
@@ -654,6 +706,19 @@ export function shoreVeilFor(scene: TerrainScene): ShoreVeil | null {
     path: scene.land.pathData,
     alpha: SEA_LAND_ALPHA,
     transforms: scene.copies.map((dx) => landScreenTransform(scene.view, dx)),
+  };
+}
+
+/** The same land as `shoreVeilFor`, for the figure sheet: a path and one world-to-screen scale for each copy. */
+export function shoreStencilFor(scene: TerrainScene): ShoreStencil | null {
+  if (!scene.land) {
+    return null;
+  }
+  const { sx, sy } = projectionScales(scene.view.k);
+  return {
+    path: scene.land.masterLandPath,
+    alpha: SEA_LAND_ALPHA,
+    copies: scene.copies.map((dx) => ({ sx, sy, e: -(scene.view.x - dx) * sx, f: -scene.view.y * sy })),
   };
 }
 
@@ -1210,7 +1275,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             aim: facing(layout.region.id, entry.faction_id),
             vectorKey: `${layout.region.id}|${layout.copyDx}|${counter.slot.key}`,
             landAt: scene.land
-              ? (sx, sy) => isLandAt(scene.land!, screenToWorld(copyView, { x: sx, y: sy }))
+              ? (sx, sy) => landMaskAt(scene.land!, screenToWorld(copyView, { x: sx, y: sy }))
               : undefined,
           });
         },

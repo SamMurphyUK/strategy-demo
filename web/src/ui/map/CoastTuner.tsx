@@ -81,11 +81,11 @@ function DrawReadout() {
     <>
       <h2>Draw</h2>
       <p className="draw-readout">
-        {fps} fps · {frame} ms
+        {fps} fps · {frame} ms · worst {ready ? sample.worstMs.toFixed(0) : "–"} ms
       </p>
       <p className="muted">
-        paint {sample.paintMs.toFixed(1)} · shore {sample.shoreMs.toFixed(1)} · figures {sample.figureMs.toFixed(1)} · arrows{" "}
-        {sample.arrowMs.toFixed(1)} · idle {sample.idleMs.toFixed(1)}
+        paint {sample.paintMs.toFixed(1)} · land {sample.landMs.toFixed(1)} · shore {sample.shoreMs.toFixed(1)} · figures{" "}
+        {sample.figureMs.toFixed(1)} · arrows {sample.arrowMs.toFixed(1)} · idle {sample.idleMs.toFixed(1)}
       </p>
       <p className="muted">
         {LOD_NAME[sample.lod] ?? sample.lod} · zoom {sample.zoom.toFixed(2)}
@@ -93,8 +93,11 @@ function DrawReadout() {
       </p>
       <div className="draw-flags">
         {row("anims", "Anims", "Idle figure frames. The picture stays on the last frame.")}
+        {row("cliffs", "Cliffs", "The cliff face under the coast. One swept face for each lift.")}
+        {row("stamp", "Stamp", "The old cliff, filled once for every pixel of the drop. This is the slow zoom.")}
         {row("shore", "Shore", "The blurred shoreline. The land stays.")}
         {row("figures", "Figures", "Tokens, upright sprites, and the vector stage.")}
+        {row("sheet", "Sheet", "Zoomed figures are copies of one picture for each kind. Off, every figure is its own SVG node.")}
         {row("arrows", "Arrows", "Move arrows, battle marks, and the hover stroke.")}
       </div>
     </>
@@ -119,23 +122,26 @@ export function CoastTuner({ regions, land, viewCenter }: Props) {
     setAnchorId((anchor) => anchor ?? selected[0]);
   }, [selected]);
 
+  // A landmass is measured once. The list is sorted again as the camera moves, and that part is cheap.
+  const spans = useMemo(
+    () => regions.filter((region) => region.type === "land").map((region) => ({ region, span: regionSpan(region, land) })),
+    [regions, land],
+  );
+
   const rows = useMemo(() => {
-    const spots = regions
-      .filter((region) => region.type === "land")
-      .map((region) => {
-        const span = regionSpan(region, land);
-        const over = tune.cliffOverrides[region.id];
-        return {
-          id: region.id,
-          x: region.anchor.x,
-          y: region.anchor.y,
-          lift: effectiveCliffLift(span, region.id, tune.cliffOverrides),
-          overridden: typeof over === "number" && Number.isFinite(over),
-        };
-      });
+    const spots = spans.map(({ region, span }) => {
+      const over = tune.cliffOverrides[region.id];
+      return {
+        id: region.id,
+        x: region.anchor.x,
+        y: region.anchor.y,
+        lift: effectiveCliffLift(span, region.id, tune.cliffOverrides),
+        overridden: typeof over === "number" && Number.isFinite(over),
+      };
+    });
     const origin = coastTuneSortOrigin(spots, viewCenter, anchorId);
     return sortLandRegionsByProximity(spots, origin);
-  }, [regions, land, tune, viewCenter.x, viewCenter.y, anchorId]);
+  }, [spans, tune, viewCenter.x, viewCenter.y, anchorId]);
 
   const chosen = selected.flatMap((id) => {
     const row = rows.find((item) => item.id === id);

@@ -18,6 +18,7 @@ import {
   drawMoveGuide,
   drawOperationalArrows,
   drawTerrain,
+  shoreStencilFor,
   shoreVeilFor,
   type EditorOverlay,
   type GameOverlay,
@@ -39,6 +40,7 @@ import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleSta
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
+import { stampFigures, takeFigureSheetDirty } from "./figureSheet";
 import { getDrawFlags, noteIdle, notePaint, publishDrawSample, subscribeDrawFlags } from "./renderDebug";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
@@ -261,6 +263,12 @@ const WHEEL_STEP = 40;
 const ZOOM_EPSILON = 0.0005;
 /** After the glide stops, wait this long before upgrading the coast bitmap. */
 const BAKE_SETTLE_MS = 120;
+/** The menu drift, in map units. The same figure-eight the camera used to walk. */
+const MENU_DRIFT_X = 36;
+const MENU_DRIFT_Y = 18;
+/** Painted past the screen so that drift can slide the picture. It covers the drift up to a zoom of about 6. */
+const MENU_MARGIN_X = 220;
+const MENU_MARGIN_Y = 110;
 
 /** Text fields keep their keys. A range slider is not one of them, so Z still closes the tuner. */
 function isTextField(target: EventTarget | null): boolean {
@@ -305,6 +313,9 @@ export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const slideRef = useRef<HTMLDivElement>(null);
+  /** The menu picture with its color filter already applied, so the drift does not filter again. */
+  const menuPlate = useRef<HTMLCanvasElement | null>(null);
   const referenceRef = useRef<HTMLImageElement | null>(null);
   const arrowRef = useRef<HTMLCanvasElement>(null);
   const vectorRef = useRef<SVGSVGElement>(null);
@@ -386,7 +397,7 @@ export function MapView(props: MapViewProps) {
     settledAt: Number.NEGATIVE_INFINITY,
     bakeTimer: 0,
   });
-  const [, setBakeTick] = useState(0);
+  const [bakeTick, setBakeTick] = useState(0);
   const stopWheelZoom = () => {
     const zoom = wheelZoom.current;
     zoom.generation += 1;
@@ -445,9 +456,16 @@ export function MapView(props: MapViewProps) {
   // The game world wraps sideways: the base map is blitted once per visible copy, and units and shields are
   // laid out for each. The editor edits a single copy, so its coordinates stay true.
   const wrap = !editor;
-  const copies = visibleCopies(view, size.w, bounds, wrap);
+  // The menu paints a margin around the fitted camera and slides that picture. The camera itself stays put.
+  const menuScales = projectionScales(view.k);
+  const paintView: View = props.menuBackdrop
+    ? { k: view.k, x: view.x - MENU_MARGIN_X / menuScales.sx, y: view.y - MENU_MARGIN_Y / menuScales.sy }
+    : view;
+  const paintW = size.w + (props.menuBackdrop ? MENU_MARGIN_X * 2 : 0);
+  const paintH = size.h + (props.menuBackdrop ? MENU_MARGIN_Y * 2 : 0);
+  const copies = visibleCopies(paintView, paintW, bounds, wrap);
   const layouts = copies.flatMap((dx) =>
-    layoutRegions(geometry.regions, props.stacks, { ...view, x: view.x - dx }, unitScale, {
+    layoutRegions(geometry.regions, props.stacks, { ...paintView, x: paintView.x - dx }, unitScale, {
       slotsFor,
       categories: props.unitCategories,
       copyDx: dx,
@@ -504,13 +522,42 @@ export function MapView(props: MapViewProps) {
   }, []);
 
   // Fit until the user takes over, including once the land mask arrives and changes the bounds.
+  // The title screen starts from the fitted board, then the drift below takes it.
   useEffect(() => {
-    if (props.menuBackdrop) {
-      return;
-    }
-    if (size.w > 0 && !userMoved.current) {
+    if (size.w > 0 && (props.menuBackdrop || !userMoved.current)) {
       setView(fitView(bounds, size.w, size.h));
     }
+  }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
+
+  // The menu keeps the live map moving: a slow figure-eight, sliding the painted margin.
+  useEffect(() => {
+    const slide = slideRef.current;
+    if (!props.menuBackdrop || size.w === 0) {
+      if (slide) {
+        slide.style.transform = "";
+      }
+      return;
+    }
+    const { sx, sy } = projectionScales(fitView(bounds, size.w, size.h).k);
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = (now - t0) / 1000;
+      const node = slideRef.current;
+      if (node) {
+        const x = -Math.sin(t * 0.07) * MENU_DRIFT_X * sx;
+        const y = -Math.sin(t * 0.05) * MENU_DRIFT_Y * sy;
+        node.style.transform = `translate(${x}px, ${y}px)`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (slideRef.current) {
+        slideRef.current.style.transform = "";
+      }
+    };
   }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
 
   useEffect(() => {
@@ -615,9 +662,11 @@ export function MapView(props: MapViewProps) {
   const paintCampaignVectors = (dpr: number, cssW: number, cssH: number, fade: number, scene: TerrainScene | null) => {
     const frame = takeCampaignFigures();
     const stage = vectorStage.current;
+    // The sheet stamps one shared picture for each kind. Off, every figure is its own SVG node.
+    const sheet = getDrawFlags().sheet;
     if (stage && cssW > 0 && cssH > 0) {
-      stage.setShoreVeil(scene ? shoreVeilFor(scene) : null);
-      stage.sync({ cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1 }, frame.vectors, null);
+      stage.setShoreVeil(scene && !sheet ? shoreVeilFor(scene) : null);
+      stage.sync({ cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1 }, sheet ? [] : frame.vectors, null);
       if (vectorRef.current) {
         vectorRef.current.style.opacity = fade < 1 ? String(Math.max(0, fade)) : "";
       }
@@ -636,6 +685,9 @@ export function MapView(props: MapViewProps) {
     cctx.setTransform(1, 0, 0, 1, 0, 0);
     cctx.clearRect(0, 0, chrome.width, chrome.height);
     cctx.globalAlpha = Math.max(0, Math.min(1, fade));
+    if (sheet) {
+      stampFigures(cctx, frame.vectors, dpr, scene ? shoreStencilFor(scene) : null);
+    }
     for (const paint of frame.chrome) {
       paint(cctx);
     }
@@ -653,9 +705,19 @@ export function MapView(props: MapViewProps) {
     }
     let frames = 0;
     let windowStart = performance.now();
+    let lastFrame = windowStart;
+    // The slowest frame stays on the panel for three seconds, so a zoom can be read after it ends.
+    let worst = 0;
+    let worstAt = 0;
     let raf = 0;
-    const step = () => {
+    const step = (now: number) => {
       frames += 1;
+      const gap = now - lastFrame;
+      lastFrame = now;
+      if (gap >= worst || now - worstAt > 3000) {
+        worst = gap;
+        worstAt = now;
+      }
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
@@ -665,6 +727,7 @@ export function MapView(props: MapViewProps) {
       const canvas = canvasRef.current;
       publishDrawSample({
         fps: span > 0 ? (frames * 1000) / span : 0,
+        worstMs: worst,
         frameMs: frames > 0 ? span / frames : 0,
         lod: lodHold.current,
         zoom: live.current.view.k,
@@ -690,13 +753,14 @@ export function MapView(props: MapViewProps) {
       return;
     }
     const dpr = window.devicePixelRatio || 1;
-    const pixelW = Math.round(size.w * dpr);
-    const pixelH = Math.round(size.h * dpr);
+    const pixelW = Math.round(paintW * dpr);
+    const pixelH = Math.round(paintH * dpr);
     if (canvas.width !== pixelW || canvas.height !== pixelH) {
       canvas.width = pixelW;
       canvas.height = pixelH;
     }
     const paintStarted = performance.now();
+    let landMs = 0;
     let shoreMs = 0;
     let figureMs = 0;
     let arrowMs = 0;
@@ -707,7 +771,7 @@ export function MapView(props: MapViewProps) {
     const holdResolution = glide.active || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
     const baked = bakeRef.current!.bake.ensure(
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
-      view.k * dpr,
+      paintView.k * dpr,
       holdResolution,
     );
     const moveTone = props.movement?.phase === "noncombat_move" ? "move" : "attack";
@@ -720,10 +784,10 @@ export function MapView(props: MapViewProps) {
       baked,
       bounds,
       copies,
-      width: size.w,
-      height: size.h,
+      width: paintW,
+      height: paintH,
       dpr,
-      view,
+      view: paintView,
       land,
       regions: geometry.regions,
       paths,
@@ -762,11 +826,11 @@ export function MapView(props: MapViewProps) {
     const surfTime = performance.now() / 1000;
     const refImg = referenceRef.current;
     if (refImg && props.frame && refImg.complete && refImg.naturalWidth > 0) {
-      const { sx, sy } = projectionScales(view.k);
+      const { sx, sy } = projectionScales(paintView.k);
       const xs = dpr * sx;
       const ys = dpr * sy;
       ctx.save();
-      ctx.setTransform(xs, 0, 0, ys, -view.x * xs, -view.y * ys);
+      ctx.setTransform(xs, 0, 0, ys, -paintView.x * xs, -paintView.y * ys);
       ctx.globalAlpha = 0.4;
       ctx.drawImage(refImg, props.frame.x, props.frame.y, props.frame.w, props.frame.h);
       ctx.restore();
@@ -823,22 +887,23 @@ export function MapView(props: MapViewProps) {
         holdCtx.drawImage(canvas, 0, 0);
       }
     }
+    landMs = performance.now() - paintStarted - shoreMs;
     if (drawFlags.figures) {
       const figuresStarted = performance.now();
       if (editor) {
         beginCampaignFigures();
         drawEditorUnits(ctx, scene, overlay);
         drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
-        paintCampaignVectors(dpr, size.w, size.h, 0, scene);
+        paintCampaignVectors(dpr, paintW, paintH, 0, scene);
       } else {
         beginCampaignFigures();
         drawGameOverlay(ctx, scene, overlay);
-        paintCampaignVectors(dpr, size.w, size.h, unitFade, scene);
+        paintCampaignVectors(dpr, paintW, paintH, unitFade, scene);
       }
       figureMs = performance.now() - figuresStarted;
     } else {
       beginCampaignFigures();
-      paintCampaignVectors(dpr, size.w, size.h, 0, null);
+      paintCampaignVectors(dpr, paintW, paintH, 0, null);
       if (editor) {
         drawEditorOverlay(ctx, scene, { ...editor.overlay, regions: geometry.regions, paths: cutterPaths });
       }
@@ -860,7 +925,7 @@ export function MapView(props: MapViewProps) {
             ? drawOperationalArrows(arrowCtx, scene, movement.phase, movement.orders, movement.regionIds, layouts)
             : [];
         if (gesture?.moved) {
-          const from = guideOriginScreen(gesture.originWorld, gesture.pointer, view, bounds, true);
+          const from = guideOriginScreen(gesture.originWorld, gesture.pointer, paintView, bounds, true);
           drawMoveGuide(arrowCtx, dpr, from, gesture.pointer, factionPalette(gesture.entry.faction_id).ring);
         }
         if (movement && planned.some((arrow) => arrow.battle)) {
@@ -880,7 +945,30 @@ export function MapView(props: MapViewProps) {
       }
       arrowMs = performance.now() - arrowsStarted;
     }
-    notePaint({ paintMs: performance.now() - paintStarted, shoreMs, figureMs, arrowMs });
+    if (props.menuBackdrop) {
+      // The menu color filter would rerun on every slide. It is drawn into the picture once instead.
+      const dusk = document.querySelector(".campaign")?.getAttribute("data-look") === "dusk";
+      let plate = menuPlate.current;
+      if (!plate) {
+        plate = document.createElement("canvas");
+        menuPlate.current = plate;
+      }
+      if (plate.width !== canvas.width || plate.height !== canvas.height) {
+        plate.width = canvas.width;
+        plate.height = canvas.height;
+      }
+      const plateCtx = plate.getContext("2d");
+      if (plateCtx) {
+        plateCtx.setTransform(1, 0, 0, 1, 0, 0);
+        plateCtx.filter = dusk ? "saturate(0.75) contrast(0.85) brightness(0.55)" : "contrast(0.72) brightness(0.55)";
+        plateCtx.drawImage(canvas, 0, 0);
+        plateCtx.filter = "none";
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.filter = "none";
+        ctx.drawImage(plate, 0, 0);
+      }
+    }
+    notePaint({ paintMs: performance.now() - paintStarted, landMs, shoreMs, figureMs, arrowMs });
   }, [
     size.w,
     size.h,
@@ -912,7 +1000,9 @@ export function MapView(props: MapViewProps) {
     split,
     hoverStack,
     props.suspended,
+    props.menuBackdrop,
     drawFlags,
+    bakeTick,
   ]);
 
   // At the token zoom the picture is still. At the tactical zoom, redraw figures only when an idle frame changes.
@@ -935,10 +1025,12 @@ export function MapView(props: MapViewProps) {
         lastQuick = quick;
         lastInfantry = infantry;
       }
+      // A figure was waiting on its picture and the file has arrived.
+      const arrived = flags.figures && flags.sheet && settled && takeFigureSheetDirty();
       if (warningId !== "") {
         refreshArrowsRef.current();
       }
-      if (!frameChanged) {
+      if (!frameChanged && !arrived) {
         return;
       }
       const canvas = canvasRef.current;
@@ -953,7 +1045,7 @@ export function MapView(props: MapViewProps) {
       const idleStarted = performance.now();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(hold, 0, 0);
-      if (settled && frameChanged) {
+      if (settled) {
         const scars = (live.current.props.relief?.scars ?? []).flatMap((scar) => {
           const region = frame.scene.regions.find((item) => item.id === scar.regionId);
           if (!region || region.type !== "land") {
@@ -965,7 +1057,7 @@ export function MapView(props: MapViewProps) {
         beginCampaignFigures();
         drawGameOverlay(ctx, { ...frame.scene, scars }, {
           ...frame.overlay,
-          idleTime: now,
+          idleTime: frameChanged ? now : frame.overlay.idleTime,
         });
         paintCampaignVectors(
           frame.scene.dpr,
@@ -1836,10 +1928,19 @@ export function MapView(props: MapViewProps) {
 
   return (
     <div className="map-wrap" ref={wrapRef}>
+      <div
+        ref={slideRef}
+        className={props.menuBackdrop ? "map-slide menu-drift" : "map-slide"}
+        style={
+          props.menuBackdrop
+            ? { left: -MENU_MARGIN_X, top: -MENU_MARGIN_Y, width: paintW, height: paintH }
+            : undefined
+        }
+      >
       <canvas
         ref={canvasRef}
         className="map-canvas"
-        style={{ width: size.w, height: size.h }}
+        style={{ width: paintW, height: paintH }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1854,8 +1955,9 @@ export function MapView(props: MapViewProps) {
         }}
       />
       <svg ref={vectorRef} className="map-vectors" aria-hidden="true" />
-      <canvas ref={chromeRef} className="map-figure-chrome" style={{ width: size.w, height: size.h }} />
-      <canvas ref={arrowRef} className="map-arrows" style={{ width: size.w, height: size.h }} />
+      <canvas ref={chromeRef} className="map-figure-chrome" style={{ width: paintW, height: paintH }} />
+      <canvas ref={arrowRef} className="map-arrows" style={{ width: paintW, height: paintH }} />
+      </div>
       <div className="map-controls">
         <button
           type="button"

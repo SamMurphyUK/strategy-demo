@@ -358,6 +358,15 @@
     background: #4e5463;
   }
 
+  & .map-slide {
+    position: absolute;
+    inset: 0;
+  }
+
+  & .map-slide.menu-drift {
+    inset: auto;
+  }
+
   & .map-canvas {
     position: absolute;
     inset: 0;
@@ -1428,6 +1437,12 @@
 
 .campaign.menu-open .map-canvas {
   filter: contrast(0.72) brightness(0.55);
+}
+
+/* The drift slides this canvas. The filter is already in the picture, so it does not run per frame. */
+.campaign.menu-open .map-slide .map-canvas,
+.campaign.menu-open[data-look="dusk"] .map-slide .map-canvas {
+  filter: none;
 }
 
 .campaign.menu-open .map-wrap {
