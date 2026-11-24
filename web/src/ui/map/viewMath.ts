@@ -104,6 +104,29 @@ export function panView(view: View, dxPx: number, dyPx: number): View {
   return { ...view, x: view.x - dxPx / sx, y: view.y - dyPx / sy };
 }
 
+/**
+ * Where to `drawImage` a terrain hold captured at `from` so it lines up with `to`.
+ * Placement is in device pixels: a pan of N CSS pixels moves the bitmap by `N * dpr`.
+ */
+export function terrainHoldPlacement(
+  from: View,
+  to: View,
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+): { dx: number; dy: number; dw: number; dh: number } {
+  const fromScale = projectionScales(from.k);
+  const toScale = projectionScales(to.k);
+  const sxFrom = fromScale.sx === 0 ? 1 : fromScale.sx;
+  const syFrom = fromScale.sy === 0 ? 1 : fromScale.sy;
+  return {
+    dx: (from.x - to.x) * toScale.sx * dpr,
+    dy: (from.y - to.y) * toScale.sy * dpr,
+    dw: cssWidth * dpr * (toScale.sx / sxFrom),
+    dh: cssHeight * dpr * (toScale.sy / syFrom),
+  };
+}
+
 /** `factor` > 1 zooms in. The world point under `screenPoint` stays put. */
 export function zoomAt(view: View, screenPoint: Vec2, factor: number, fitK: number, dpr = 1): View {
   const k = Math.min(Math.max(view.k * factor, fitK * MIN_ZOOM_FACTOR), maxZoomK(fitK, dpr));

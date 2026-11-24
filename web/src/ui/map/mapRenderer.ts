@@ -147,6 +147,8 @@ export interface TerrainScene {
   unitFade?: number;
   /** World points stamps must stay clear of, per land region. Hubs and unit slots. */
   stampAvoid?: Readonly<Record<string, readonly Vec2[]>>;
+  /** Skip cliff fills. The pan/zoom interacting paint blits a held picture instead. */
+  skipCliffs?: boolean;
 }
 
 export interface PlacedCounter {
@@ -270,7 +272,7 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     ctx.translate(dx, 0);
     ctx.lineJoin = "round";
     ctx.drawImage(baked.canvas, bounds.x - bleed, bounds.y, bounds.w + bleed * 2, bounds.h);
-    if (getDrawFlags().cliffs) {
+    if (getDrawFlags().cliffs && !s.skipCliffs) {
       drawTiltedCliffs(ctx, s, bleed);
     }
     drawDynamicTerrain(ctx, s, px, dx);

@@ -67,6 +67,7 @@ import {
   wrapView,
   wrapWorldX,
   zoomAt,
+  terrainHoldPlacement,
 } from "./viewMath";
 import { lodForZoom, type MapLod, SPRITE_FADE_MS, UPRIGHT_HIT_PX } from "./zoomLod";
 
@@ -398,6 +399,30 @@ export function MapView(props: MapViewProps) {
     bakeTimer: 0,
   });
   const [bakeTick, setBakeTick] = useState(0);
+  const [tunerCenter, setTunerCenter] = useState({ x: 0, y: 0 });
+  const panGlide = useRef({ next: null as View | null, raf: 0, dirty: false });
+  const terrainHoldView = useRef<View | null>(null);
+  const needsBakeSettle = useRef(false);
+  const abortBakeSettle = () => {
+    const zoom = wheelZoom.current;
+    window.clearTimeout(zoom.bakeTimer);
+    zoom.bakeTimer = 0;
+  };
+  const flushPanView = (): View | null => {
+    const pan = panGlide.current;
+    if (pan.raf !== 0) {
+      cancelAnimationFrame(pan.raf);
+      pan.raf = 0;
+    }
+    if (!pan.dirty || !pan.next) {
+      return null;
+    }
+    pan.dirty = false;
+    const next = pan.next;
+    pan.next = null;
+    setView(next);
+    return next;
+  };
   const stopWheelZoom = () => {
     const zoom = wheelZoom.current;
     zoom.generation += 1;
@@ -406,8 +431,7 @@ export function MapView(props: MapViewProps) {
     }
     zoom.raf = 0;
     zoom.active = false;
-    window.clearTimeout(zoom.bakeTimer);
-    zoom.bakeTimer = 0;
+    abortBakeSettle();
     zoom.settledAt = Number.NEGATIVE_INFINITY;
   };
   const drag = useRef<Drag | null>(null);
@@ -508,6 +532,42 @@ export function MapView(props: MapViewProps) {
   // Handlers read the latest values through this ref, so listeners are attached once.
   const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach });
   live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach };
+  const commitTunerCenter = (nextView?: View) => {
+    const { view: current, size: canvas } = live.current;
+    const used = nextView ?? current;
+    if (canvas.w <= 0 || canvas.h <= 0) {
+      return;
+    }
+    setTunerCenter(viewCenter(used, canvas.w, canvas.h));
+  };
+  const scheduleBakeSettle = () => {
+    const zoom = wheelZoom.current;
+    window.clearTimeout(zoom.bakeTimer);
+    if (!needsBakeSettle.current || zoom.active) {
+      zoom.bakeTimer = 0;
+      return;
+    }
+    if (drag.current?.kind === "pan" && drag.current.moved) {
+      zoom.bakeTimer = 0;
+      return;
+    }
+    const generation = zoom.generation;
+    zoom.bakeTimer = window.setTimeout(() => {
+      const latest = wheelZoom.current;
+      if (latest.generation !== generation || latest.active) {
+        return;
+      }
+      if (drag.current?.kind === "pan" && drag.current.moved) {
+        return;
+      }
+      latest.bakeTimer = 0;
+      latest.settledAt = Number.NEGATIVE_INFINITY;
+      commitTunerCenter();
+      setBakeTick((n) => n + 1);
+    }, BAKE_SETTLE_MS);
+  };
+  const bakeSettleRef = useRef({ abort: abortBakeSettle, schedule: scheduleBakeSettle });
+  bakeSettleRef.current = { abort: abortBakeSettle, schedule: scheduleBakeSettle };
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -743,6 +803,19 @@ export function MapView(props: MapViewProps) {
   }, [tuneOpen]);
 
   useEffect(() => {
+    if (!tuneOpen) {
+      return;
+    }
+    if (wheelZoom.current.active) {
+      return;
+    }
+    if (drag.current?.kind === "pan" && drag.current.moved) {
+      return;
+    }
+    commitTunerCenter();
+  }, [tuneOpen, size.w, size.h]);
+
+  useEffect(() => {
     if (props.suspended) {
       spritesSettled.current = false;
       return;
@@ -768,7 +841,9 @@ export function MapView(props: MapViewProps) {
     ctx.imageSmoothingQuality = "low";
     // The cached base map. A wheel glide keeps the current sheet; geometry and ownership still rebuild.
     const glide = wheelZoom.current;
-    const holdResolution = glide.active || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
+    const panLive = drag.current?.kind === "pan" && drag.current.moved;
+    const holdResolution =
+      glide.active || glide.bakeTimer !== 0 || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
     const baked = bakeRef.current!.bake.ensure(
       { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
       paintView.k * dpr,
@@ -822,10 +897,31 @@ export function MapView(props: MapViewProps) {
             ];
           }),
     };
-    drawTerrain(ctx, scene);
+    const hold = terrainHold.current;
+    const holdView = terrainHoldView.current;
+    const holdOk =
+      !!hold &&
+      holdView !== null &&
+      hold.width === canvas.width &&
+      hold.height === canvas.height;
+    const interacting =
+      !editor &&
+      !props.menuBackdrop &&
+      holdOk &&
+      (panLive || glide.active || glide.bakeTimer !== 0);
+    if (interacting && hold && holdView) {
+      needsBakeSettle.current = true;
+      drawTerrain(ctx, { ...scene, skipCliffs: true });
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const blit = terrainHoldPlacement(holdView, paintView, paintW, paintH, dpr);
+      ctx.drawImage(hold, blit.dx, blit.dy, blit.dw, blit.dh);
+    } else {
+      needsBakeSettle.current = false;
+      drawTerrain(ctx, scene);
+    }
     const surfTime = performance.now() / 1000;
     const refImg = referenceRef.current;
-    if (refImg && props.frame && refImg.complete && refImg.naturalWidth > 0) {
+    if (!interacting && refImg && props.frame && refImg.complete && refImg.naturalWidth > 0) {
       const { sx, sy } = projectionScales(paintView.k);
       const xs = dpr * sx;
       const ys = dpr * sy;
@@ -866,26 +962,27 @@ export function MapView(props: MapViewProps) {
         warningRegionId: props.warningRegionId ?? "",
       };
     }
-    if (drawFlags.shore) {
+    if (!interacting && drawFlags.shore) {
       const shoreStarted = performance.now();
       drawCoastSurf(ctx, scene, surfTime);
       shoreMs = performance.now() - shoreStarted;
     }
-    if (!editor) {
-      let hold = terrainHold.current;
-      if (!hold) {
-        hold = document.createElement("canvas");
-        terrainHold.current = hold;
+    if (!editor && !interacting) {
+      let nextHold = terrainHold.current;
+      if (!nextHold) {
+        nextHold = document.createElement("canvas");
+        terrainHold.current = nextHold;
       }
-      if (hold.width !== canvas.width || hold.height !== canvas.height) {
-        hold.width = canvas.width;
-        hold.height = canvas.height;
+      if (nextHold.width !== canvas.width || nextHold.height !== canvas.height) {
+        nextHold.width = canvas.width;
+        nextHold.height = canvas.height;
       }
-      const holdCtx = hold.getContext("2d");
+      const holdCtx = nextHold.getContext("2d");
       if (holdCtx) {
         holdCtx.setTransform(1, 0, 0, 1, 0, 0);
         holdCtx.drawImage(canvas, 0, 0);
       }
+      terrainHoldView.current = { ...paintView };
     }
     landMs = performance.now() - paintStarted - shoreMs;
     if (drawFlags.figures) {
@@ -1010,7 +1107,13 @@ export function MapView(props: MapViewProps) {
     let lastQuick = -1;
     let lastInfantry = -1;
     const tick = () => {
-      if (document.hidden || cameraLock.current || drag.current || wheelZoom.current.active) {
+      if (
+        document.hidden ||
+        cameraLock.current ||
+        drag.current ||
+        wheelZoom.current.active ||
+        wheelZoom.current.bakeTimer !== 0
+      ) {
         return;
       }
       const frame = spriteFrame.current;
@@ -1177,8 +1280,8 @@ export function MapView(props: MapViewProps) {
       const minK = fitK * MIN_ZOOM_FACTOR;
       const maxK = maxZoomK(fitK, dpr);
       const baseK = zoom.active ? zoom.targetK : view.k;
-      window.clearTimeout(zoom.bakeTimer);
-      zoom.bakeTimer = 0;
+      bakeSettleRef.current.abort();
+      needsBakeSettle.current = true;
       zoom.targetK = Math.min(maxK, Math.max(minK, baseK * wheelZoomFactor(e.deltaY, e.deltaMode)));
       zoom.anchorScreen = p;
       zoom.anchorWorld = screenToWorld(view, p);
@@ -1213,17 +1316,7 @@ export function MapView(props: MapViewProps) {
           state.active = false;
           state.raf = 0;
           state.settledAt = performance.now();
-          window.clearTimeout(state.bakeTimer);
-          const settledGeneration = state.generation;
-          state.bakeTimer = window.setTimeout(() => {
-            const latest = wheelZoom.current;
-            if (latest.generation !== settledGeneration || latest.active) {
-              return;
-            }
-            // The quiet window is over, so the next paint may rebuild the coast sheet.
-            latest.settledAt = Number.NEGATIVE_INFINITY;
-            setBakeTick((n) => n + 1);
-          }, BAKE_SETTLE_MS);
+          bakeSettleRef.current.schedule();
           return;
         }
         state.raf = requestAnimationFrame(step);
@@ -1240,6 +1333,11 @@ export function MapView(props: MapViewProps) {
       }
       zoom.raf = 0;
       window.clearTimeout(zoom.bakeTimer);
+      const pan = panGlide.current;
+      if (pan.raf !== 0) {
+        cancelAnimationFrame(pan.raf);
+        pan.raf = 0;
+      }
     };
   }, []);
 
@@ -1418,9 +1516,11 @@ export function MapView(props: MapViewProps) {
         drag.current = { kind: "unit" };
       } else {
         drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
+        abortBakeSettle();
       }
     } else {
       drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, view: v, moved: false };
+      abortBakeSettle();
     }
     capturePointer(e.pointerId);
   };
@@ -1544,8 +1644,25 @@ export function MapView(props: MapViewProps) {
       }
       d.moved = true;
       userMoved.current = true;
+      needsBakeSettle.current = true;
+      abortBakeSettle();
       const panned = panView(d.view, dx, dy);
-      setView(live.current.wrap ? wrapView(panned, live.current.size.w, live.current.bounds) : panned);
+      const next = live.current.wrap ? wrapView(panned, live.current.size.w, live.current.bounds) : panned;
+      const pan = panGlide.current;
+      pan.next = next;
+      pan.dirty = true;
+      if (pan.raf === 0) {
+        pan.raf = requestAnimationFrame(() => {
+          pan.raf = 0;
+          if (!pan.dirty || !pan.next) {
+            return;
+          }
+          pan.dirty = false;
+          const viewNow = pan.next;
+          pan.next = null;
+          setView(viewNow);
+        });
+      }
       return;
     }
     if (p.editor) {
@@ -1651,6 +1768,19 @@ export function MapView(props: MapViewProps) {
         legal: g.legal,
       });
       return;
+    }
+    if (d.kind === "pan") {
+      const flushed = flushPanView();
+      if (d.moved) {
+        commitTunerCenter(flushed ?? undefined);
+        scheduleBakeSettle();
+        suppressClick.current = true;
+        setTimeout(() => {
+          suppressClick.current = false;
+        }, 0);
+        return;
+      }
+      scheduleBakeSettle();
     }
     if (d.moved) {
       suppressClick.current = true;
@@ -1837,7 +1967,12 @@ export function MapView(props: MapViewProps) {
           return;
         }
         e.preventDefault();
-        setTuneOpen((open) => !open);
+        setTuneOpen((open) => {
+          if (!open) {
+            commitTunerCenter();
+          }
+          return !open;
+        });
         return;
       }
       if (e.key === "Escape") {
@@ -1964,13 +2099,15 @@ export function MapView(props: MapViewProps) {
           onClick={() => {
             stopWheelZoom();
             userMoved.current = false;
-            setView(fitView(bounds, size.w, size.h));
+            const fitted = fitView(bounds, size.w, size.h);
+            setView(fitted);
+            commitTunerCenter(fitted);
           }}
         >
           Fit map
         </button>
       </div>
-      {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={viewCenter(view, size.w, size.h)} />}
+      {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={tunerCenter} />}
       {props.children}
       {mapLod === 2 && hoverChip && (
         <div className="unit-hover-label" style={{ left: hoverChip.x, top: hoverChip.y }}>
