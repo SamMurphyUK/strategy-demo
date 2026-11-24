@@ -1,21 +1,29 @@
 // Camera maths for the 3D board. Pure: no Three.js, no DOM.
 //
-// The camera is described the way the 2D map describes it: a world point in the middle of the
-// viewport and `k`, the screen pixels one world unit covers there. Map world space is x right and
-// y down. The scene puts the board on the plane z = 0 with y pointing up, so a map point (x, y)
-// sits at (x, -y, 0).
+// The board is seen through an orthographic camera that tips back as the zoom rises. The tip is the
+// one the 2D map already draws: `projectionScales` squashes world y by `sy / sx`, and a camera
+// pitched by `acos(sy / sx)` squashes the ground plane by exactly that. So the top of the land
+// (the plane z = 0) lands on the same screen pixels as the 2D `View`, and every painter written
+// for that view (tokens, sprites, badges, arrows) lines up on the 3D board without a second
+// projection.
+//
+// Map world space is x right and y down. The scene has y pointing up, so a map point (x, y) sits
+// at (x, -y, 0).
+//
+// The water lies `SEA_DROP` below the land. The sea layer is pushed straight back along the camera
+// ray, by `seaShift` in y, so a point drawn on it also lands where the 2D view puts it. The cliff
+// between the two is the only thing on screen that the flat map does not have.
+import { viewCenter, viewFor } from "../map/combatCamera";
 import type { Rect, Vec2 } from "../map/geometry";
-import { MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR } from "../map/viewMath";
+import { fitView, maxZoomK, MIN_ZOOM_FACTOR, projectionScales, type View, wrapWorldX } from "../map/viewMath";
 
-/** Vertical field of view. Narrow, so the flat view reads close to the printed map. */
-export const BOARD_FOV_DEG = 30;
-/** Tip toward eye level at full zoom. Zero is straight down. */
-export const MAX_PITCH_DEG = 55;
-/** Zoom, as a multiple of the fitted view, where the camera starts to tip and where it has finished. */
-export const TILT_START = 1.4;
-export const TILT_FULL = 5;
-/** Height of the land above the water, in world units. */
-export const LAND_HEIGHT = 1.5;
+/**
+ * How far the water sits below the top of the land, in world units. At full tilt the cliff shows
+ * about 3.7 units of face, the depth the 2D map paints its cliff lip to.
+ */
+export const SEA_DROP = 7;
+/** Distance from the camera to the point it looks at. Orthographic, so this only has to clear the scene. */
+export const CAMERA_DISTANCE = 1500;
 
 export interface BoardCamera {
   center: Vec2;
@@ -28,57 +36,86 @@ export interface BoardPose {
   target: [number, number, number];
   /** Radians from straight down. */
   pitch: number;
-  distance: number;
+  /** Half the width and half the height of the orthographic frustum, in world units. */
+  halfWidth: number;
+  halfHeight: number;
 }
 
-/** A map point in scene coordinates, on the water plane. */
+/** A map point in scene coordinates, on the land plane. */
 export function toScene(p: Vec2): [number, number, number] {
   return [p.x, -p.y, 0];
 }
 
-/** The `k` at which `bounds` fills the viewport, straight down. */
+/** The `k` at which `bounds` fills the viewport. The same number the 2D map fits to. */
 export function fitBoardK(bounds: Rect, width: number, height: number, padding = 16): number {
-  const w = Math.max(1, width - padding * 2);
-  const h = Math.max(1, height - padding * 2);
-  return Math.min(w / Math.max(bounds.w, 1e-6), h / Math.max(bounds.h, 1e-6));
+  return fitView(bounds, width, height, padding).k;
 }
 
-export function clampBoardK(k: number, fitK: number): number {
+/** Zoom limits of the 2D map: the same floor, and the same ceiling the baked sheet sets. */
+export function clampBoardK(k: number, fitK: number, dpr = 1): number {
   const fit = fitK > 0 ? fitK : 1;
-  return Math.min(Math.max(k, fit * MIN_ZOOM_FACTOR), fit * MAX_ZOOM_FACTOR);
+  return Math.min(Math.max(k, fit * MIN_ZOOM_FACTOR), maxZoomK(fit, dpr));
 }
 
-/** Camera tip for a zoom: flat up to `TILT_START` times the fitted view, eased to full at `TILT_FULL`. */
-export function pitchFor(k: number, fitK: number): number {
-  const zoom = fitK > 0 ? k / fitK : 1;
-  const t = Math.min(1, Math.max(0, (zoom - TILT_START) / (TILT_FULL - TILT_START)));
-  const eased = t * t * (3 - 2 * t);
-  return (eased * MAX_PITCH_DEG * Math.PI) / 180;
+/** Camera tip for a zoom, in radians from straight down. It follows the 2D map's foreshortening. */
+export function pitchFor(k: number): number {
+  const { sx, sy } = projectionScales(k);
+  if (!(sx > 0)) {
+    return 0;
+  }
+  return Math.acos(Math.min(1, Math.max(0, sy / sx)));
 }
 
-/** Distance from the target at which one world unit covers `k` pixels across the screen. */
-export function cameraDistance(k: number, viewportHeight: number): number {
-  const half = Math.tan((BOARD_FOV_DEG * Math.PI) / 360);
-  return Math.max(1, viewportHeight) / (2 * half * Math.max(k, 1e-6));
+/** How far the sea layer slides north so it stays on the camera ray through the land plane. */
+export function seaShift(k: number, drop = SEA_DROP): number {
+  return drop * Math.tan(pitchFor(k));
 }
 
-/** Where the camera sits and what it looks at. It tips back toward the south, so north stays up. */
-export function boardPose(camera: BoardCamera, fitK: number, viewportHeight: number): BoardPose {
-  const pitch = pitchFor(camera.k, fitK);
-  const distance = cameraDistance(camera.k, viewportHeight);
+/** The 2D view this camera shows on the land plane. */
+export function boardView(camera: BoardCamera, width: number, height: number): View {
+  return viewFor(camera.center, camera.k, Math.max(1, width), Math.max(1, height));
+}
+
+/** The camera for a 2D view: the world point in the middle of the viewport, and the zoom. */
+export function cameraOf(view: View, width: number, height: number): BoardCamera {
+  return { center: viewCenter(view, Math.max(1, width), Math.max(1, height)), k: view.k };
+}
+
+/** Where the camera sits and what it looks at. It backs off toward the south, so north stays up. */
+export function boardPose(camera: BoardCamera, width: number, height: number): BoardPose {
+  const pitch = pitchFor(camera.k);
   const target = toScene(camera.center);
+  const k = Math.max(camera.k, 1e-6);
   return {
-    position: [target[0], target[1] - Math.sin(pitch) * distance, Math.cos(pitch) * distance],
+    position: [target[0], target[1] - Math.sin(pitch) * CAMERA_DISTANCE, Math.cos(pitch) * CAMERA_DISTANCE],
     target,
     pitch,
-    distance,
+    halfWidth: Math.max(1, width) / (2 * k),
+    halfHeight: Math.max(1, height) / (2 * k),
   };
 }
 
-/** Keeps the middle of the viewport on the board. */
-export function clampCenter(center: Vec2, bounds: Rect): Vec2 {
+/**
+ * Where a scene point lands on screen, in CSS pixels from the top-left corner. The pure twin of
+ * the Three.js camera, so tests can hold the two projections together.
+ */
+export function projectScenePoint(
+  camera: BoardCamera,
+  width: number,
+  height: number,
+  point: readonly [number, number, number],
+): Vec2 {
+  const pitch = pitchFor(camera.k);
+  const dx = point[0] - camera.center.x;
+  const dy = point[1] + camera.center.y;
+  const up = dy * Math.cos(pitch) + point[2] * Math.sin(pitch);
+  return { x: width / 2 + dx * camera.k, y: height / 2 - up * camera.k };
+}
+
+/** Keeps the middle of the viewport on the board. A wrapped world folds x; y is held inside the sheet. */
+export function holdCenter(center: Vec2, bounds: Rect, wrap: boolean): Vec2 {
   return {
-    x: Math.min(Math.max(center.x, bounds.x), bounds.x + bounds.w),
+    x: wrap ? wrapWorldX(center.x, bounds) : Math.min(Math.max(center.x, bounds.x), bounds.x + bounds.w),
     y: Math.min(Math.max(center.y, bounds.y), bounds.y + bounds.h),
   };
 }

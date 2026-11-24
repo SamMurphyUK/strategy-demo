@@ -149,6 +149,11 @@ export interface TerrainScene {
   stampAvoid?: Readonly<Record<string, readonly Vec2[]>>;
   /** Skip cliff fills. The pan/zoom interacting paint blits a held picture instead. */
   skipCliffs?: boolean;
+  /**
+   * The ground is drawn by a board layer under this canvas (see boardLayer.ts). The canvas is
+   * cleared, and the base map, cliffs, and terrain stamps are left out.
+   */
+  backdrop?: boolean;
 }
 
 export interface PlacedCounter {
@@ -261,8 +266,12 @@ function setScreenTransform(ctx: CanvasRenderingContext2D, dpr: number): void {
 export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): void {
   const { view, dpr, baked, bounds } = s;
   setScreenTransform(ctx, dpr);
-  ctx.fillStyle = oceanBackdrop();
-  ctx.fillRect(0, 0, s.width, s.height);
+  if (s.backdrop) {
+    ctx.clearRect(0, 0, s.width, s.height);
+  } else {
+    ctx.fillStyle = oceanBackdrop();
+    ctx.fillRect(0, 0, s.width, s.height);
+  }
 
   const px = 1 / view.k;
   // Adjacent copies overlap by under a pixel, so bilinear edges leave no hairline between them.
@@ -271,9 +280,11 @@ export function drawTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene): voi
     setWorldTransform(ctx, view, dpr);
     ctx.translate(dx, 0);
     ctx.lineJoin = "round";
-    ctx.drawImage(baked.canvas, bounds.x - bleed, bounds.y, bounds.w + bleed * 2, bounds.h);
-    if (getDrawFlags().cliffs && !s.skipCliffs) {
-      drawTiltedCliffs(ctx, s, bleed);
+    if (!s.backdrop) {
+      ctx.drawImage(baked.canvas, bounds.x - bleed, bounds.y, bounds.w + bleed * 2, bounds.h);
+      if (getDrawFlags().cliffs && !s.skipCliffs) {
+        drawTiltedCliffs(ctx, s, bleed);
+      }
     }
     drawDynamicTerrain(ctx, s, px, dx);
   }
@@ -952,7 +963,9 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
     }
   }
 
-  drawPixelStamps(ctx, s, dx);
+  if (!s.backdrop) {
+    drawPixelStamps(ctx, s, dx);
+  }
 
   drawFrontlines(ctx, s.frontlines ?? []);
   drawBattleScars(ctx, s.scars ?? [], px, (s.unitFade ?? 0) <= 0);

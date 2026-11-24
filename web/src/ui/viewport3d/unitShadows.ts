@@ -1,0 +1,106 @@
+// The shadow each counter and figure drops on the board. Pure.
+//
+// A flat counter gets a disc slid a little away from the sun, enough to lift it off the sheet at
+// any zoom. An upright figure gets an ellipse that stretches away from the sun, and an aircraft's
+// falls further off, because it is not standing on the ground. Everything is in scene
+// coordinates: x east, y north.
+import type { BoardFrame } from "../map/boardLayer";
+import { screenToWorld } from "../map/viewMath";
+import { shadowReach, type SunState } from "./sun";
+
+/** Most shadows one frame draws. More counters than this are on screen only at absurd zooms. */
+export const MAX_UNIT_SHADOWS = 2048;
+/** How far a counter's shadow slides, in screen pixels, at the least. */
+const MIN_SLIDE_PX = 1.6;
+/** The direction shadows fall when the sun is down between days. */
+const REST_DIR = { x: 0.5, y: -0.866 } as const;
+
+export interface GroundEllipse {
+  /** Centre, in scene coordinates. */
+  x: number;
+  y: number;
+  /** Half-length along `angle`, and half-width across it. */
+  a: number;
+  b: number;
+  /** Direction of the long axis, in radians from scene x. */
+  angle: number;
+}
+
+/** The unit direction shadows fall along the ground. */
+export function shadowDirection(sun: SunState): { x: number; y: number } {
+  const flat = Math.hypot(sun.dir[0], sun.dir[1]);
+  if (flat < 1e-4 || sun.direct <= 0) {
+    return REST_DIR;
+  }
+  return { x: -sun.dir[0] / flat, y: -sun.dir[1] / flat };
+}
+
+/**
+ * The shadow of one unit. `x` and `y` are its foot in scene coordinates, `radius` is half a token in
+ * world units, `fade` is 0 for a counter and 1 for an upright figure, and `k` is pixels per unit.
+ */
+export function unitShadow(
+  x: number,
+  y: number,
+  radius: number,
+  airborne: boolean,
+  fade: number,
+  sun: SunState,
+  k: number,
+): GroundEllipse {
+  const dir = shadowDirection(sun);
+  const reach = sun.direct > 0 ? Math.min(shadowReach(sun), 1.2) : 0.5;
+  const f = Math.min(1, Math.max(0, fade));
+  // A counter: a disc, slid.
+  const slide = Math.max(0.12 * radius * reach, MIN_SLIDE_PX / Math.max(k, 1e-6));
+  // A figure: an ellipse from the foot, thrown along the ground.
+  const thrown = radius * 0.9 * reach;
+  const lift = airborne ? radius * 1.1 : 0;
+  const offset = slide + (thrown / 2 + lift - slide) * f;
+  const size = airborne ? 1 - 0.2 * f : 1;
+  return {
+    x: x + dir.x * offset,
+    y: y + dir.y * offset,
+    a: (radius * 1.03 + (radius * 0.9 + thrown / 2 - radius * 1.03) * f) * size,
+    b: (radius * 1.03 + (radius * 0.6 - radius * 1.03) * f) * size,
+    angle: Math.atan2(dir.y, dir.x),
+  };
+}
+
+/**
+ * Writes one matrix per counter in the frame into `out` (sixteen numbers each, column-major), for a
+ * quad that spans -1 to 1. Returns how many were written.
+ */
+export function writeUnitShadows(out: Float32Array, frame: BoardFrame, sun: SunState, z: number): number {
+  const k = frame.view.k;
+  const radius = frame.tokenPx / 2 / Math.max(k, 1e-6);
+  const limit = Math.min(MAX_UNIT_SHADOWS, Math.floor(out.length / 16));
+  let count = 0;
+  for (const layout of frame.layouts) {
+    for (const counter of layout.counters) {
+      if (count >= limit) {
+        return count;
+      }
+      if (counter.x < -80 || counter.y < -80 || counter.x > frame.width + 80 || counter.y > frame.height + 80) {
+        continue;
+      }
+      const world = screenToWorld(frame.view, counter);
+      const shadow = unitShadow(world.x, -world.y, radius, counter.domain === "air", frame.unitFade, sun, k);
+      const c = Math.cos(shadow.angle);
+      const s = Math.sin(shadow.angle);
+      const m = count * 16;
+      out.fill(0, m, m + 16);
+      out[m] = c * shadow.a;
+      out[m + 1] = s * shadow.a;
+      out[m + 4] = -s * shadow.b;
+      out[m + 5] = c * shadow.b;
+      out[m + 10] = 1;
+      out[m + 12] = shadow.x;
+      out[m + 13] = shadow.y;
+      out[m + 14] = z;
+      out[m + 15] = 1;
+      count += 1;
+    }
+  }
+  return count;
+}

@@ -397,6 +397,25 @@
     z-index: 3;
   }
 
+  /* The 3D board. It draws the ground and lays the 2D canvases over it, so those stop showing
+     themselves. They still take the pointer. */
+  & .board-3d {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  & .map-slide.board-ground .board-3d {
+    visibility: visible;
+  }
+
+  & .map-slide.board-ground > .map-canvas,
+  & .map-slide.board-ground > .map-figure-chrome,
+  & .map-slide.board-ground > .map-arrows {
+    opacity: 0;
+  }
+
   & .map-error {
     position: absolute;
     bottom: 12px;

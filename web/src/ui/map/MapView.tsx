@@ -28,7 +28,8 @@ import {
   TOKEN_PX,
 } from "./mapRenderer";
 import type { OperationalOrder } from "./operationalArrows";
-import { BAKE_PAINT, TerrainBake } from "./mapBake";
+import { BAKE_PAINT, type Baked, TerrainBake } from "./mapBake";
+import type { BoardLayer } from "./boardLayer";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
@@ -207,6 +208,21 @@ export interface MapViewProps {
   referenceImage?: string | null;
   /** Camera frame for a blank board. Absent frames the land mask. */
   frame?: Rect | null;
+  /** A board drawn under the canvases (the 3D viewport). It takes the ground; this view keeps the rest. */
+  board?: BoardLayer | null;
+}
+
+let blankBake: Baked | null = null;
+
+/** Stands in for the base map while a board layer draws the ground. Nothing reads its pixels. */
+function unusedBake(): Baked {
+  if (!blankBake) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    blankBake = { canvas, scale: 1 };
+  }
+  return blankBake;
 }
 
 /** A press shorter than this is a click. Panning starts at 5px so a camera drag never selects a region. */
@@ -844,11 +860,16 @@ export function MapView(props: MapViewProps) {
     const panLive = drag.current?.kind === "pan" && drag.current.moved;
     const holdResolution =
       glide.active || glide.bakeTimer !== 0 || performance.now() - glide.settledAt < BAKE_SETTLE_MS;
-    const baked = bakeRef.current!.bake.ensure(
-      { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
-      paintView.k * dpr,
-      holdResolution,
-    );
+    // A board layer draws the ground. This canvas then carries the washes and the counters only.
+    const board = editor ? null : (props.board ?? null);
+    const boardGround = board?.active === true;
+    const baked = boardGround
+      ? unusedBake()
+      : bakeRef.current!.bake.ensure(
+          { bounds, land, regions: geometry.regions, paths, shapes: clipped, exact, owners: props.owners },
+          paintView.k * dpr,
+          holdResolution,
+        );
     const moveTone = props.movement?.phase === "noncombat_move" ? "move" : "attack";
     const dragHighlight: HighlightMode | null = gesture?.moved
       ? { kind: "move", from: gesture.regionId, legal: gesture.legal, hover: waypointRegion.current, tone: moveTone }
@@ -884,7 +905,8 @@ export function MapView(props: MapViewProps) {
                 .map((region) => [region.id, [region.anchor, facilityAnchorOf(region), ...slotsFor(region)]]),
             )
           : undefined,
-      scars: editor
+      backdrop: boardGround,
+      scars: editor || boardGround
         ? []
         : (props.relief?.scars ?? []).flatMap((scar) => {
             const region = geometry.regions.find((item) => item.id === scar.regionId);
@@ -906,6 +928,7 @@ export function MapView(props: MapViewProps) {
       hold.height === canvas.height;
     const interacting =
       !editor &&
+      !boardGround &&
       !props.menuBackdrop &&
       holdOk &&
       (panLive || glide.active || glide.bakeTimer !== 0);
@@ -962,7 +985,7 @@ export function MapView(props: MapViewProps) {
         warningRegionId: props.warningRegionId ?? "",
       };
     }
-    if (!interacting && drawFlags.shore) {
+    if (!interacting && !boardGround && drawFlags.shore) {
       const shoreStarted = performance.now();
       drawCoastSurf(ctx, scene, surfTime);
       shoreMs = performance.now() - shoreStarted;
@@ -980,6 +1003,8 @@ export function MapView(props: MapViewProps) {
       const holdCtx = nextHold.getContext("2d");
       if (holdCtx) {
         holdCtx.setTransform(1, 0, 0, 1, 0, 0);
+        // Over a board layer this canvas is mostly clear, so the last picture has to go first.
+        holdCtx.clearRect(0, 0, nextHold.width, nextHold.height);
         holdCtx.drawImage(canvas, 0, 0);
       }
       terrainHoldView.current = { ...paintView };
@@ -1042,7 +1067,7 @@ export function MapView(props: MapViewProps) {
       }
       arrowMs = performance.now() - arrowsStarted;
     }
-    if (props.menuBackdrop) {
+    if (props.menuBackdrop && !boardGround) {
       // The menu color filter would rerun on every slide. It is drawn into the picture once instead.
       const dusk = document.querySelector(".campaign")?.getAttribute("data-look") === "dusk";
       let plate = menuPlate.current;
@@ -1065,8 +1090,24 @@ export function MapView(props: MapViewProps) {
         ctx.drawImage(plate, 0, 0);
       }
     }
+    if (board) {
+      board.frame({
+        view: paintView,
+        width: paintW,
+        height: paintH,
+        dpr,
+        fitK,
+        maxK: maxZoomK(fitK, dpr),
+        copies,
+        layouts,
+        tokenPx: TOKEN_PX * unitScale,
+        unitFade,
+        layers: [canvas, chromeRef.current, arrowRef.current].filter((layer): layer is HTMLCanvasElement => layer != null),
+      });
+    }
     notePaint({ paintMs: performance.now() - paintStarted, landMs, shoreMs, figureMs, arrowMs });
   }, [
+    props.board?.active,
     size.w,
     size.h,
     view.x,
@@ -1147,9 +1188,10 @@ export function MapView(props: MapViewProps) {
       }
       const idleStarted = performance.now();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(hold, 0, 0);
       if (settled) {
-        const scars = (live.current.props.relief?.scars ?? []).flatMap((scar) => {
+        const scars = (frame.scene.backdrop ? [] : (live.current.props.relief?.scars ?? [])).flatMap((scar) => {
           const region = frame.scene.regions.find((item) => item.id === scar.regionId);
           if (!region || region.type !== "land") {
             return [];
@@ -1171,6 +1213,7 @@ export function MapView(props: MapViewProps) {
         );
         noteIdle(performance.now() - idleStarted);
       }
+      live.current.props.board?.touch();
     };
     const id = window.setInterval(tick, 125);
     return () => window.clearInterval(id);
@@ -1541,6 +1584,7 @@ export function MapView(props: MapViewProps) {
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, arrows.width, arrows.height);
+    live.current.props.board?.touch();
     if (!getDrawFlags().arrows) {
       return;
     }
@@ -2065,13 +2109,14 @@ export function MapView(props: MapViewProps) {
     <div className="map-wrap" ref={wrapRef}>
       <div
         ref={slideRef}
-        className={props.menuBackdrop ? "map-slide menu-drift" : "map-slide"}
+        className={`map-slide${props.menuBackdrop ? " menu-drift" : ""}${!editor && props.board?.active ? " board-ground" : ""}`}
         style={
           props.menuBackdrop
             ? { left: -MENU_MARGIN_X, top: -MENU_MARGIN_Y, width: paintW, height: paintH }
             : undefined
         }
       >
+      {!editor && props.board?.node}
       <canvas
         ref={canvasRef}
         className="map-canvas"
