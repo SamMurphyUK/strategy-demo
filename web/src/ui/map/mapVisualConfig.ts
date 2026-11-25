@@ -140,6 +140,27 @@ export interface MapVisualConfig {
   plinthBrassIntensity: number;
   /** A figure's shadow falls on bases only and leaves the ground clean. */
   shadowOnBasesOnly: boolean;
+
+  // --- The pixel chart: faux-pixel cartography on the plain 3D board. ---
+
+  /** The land and the sea are drawn as a chart of square texels that stay fixed to the board. */
+  enableFauxPixelMap: boolean;
+  /** Texels to a world unit at the closest zoom. The grid coarsens by halves as the camera rises. */
+  pixelTexelDensity: number;
+  /** How hard a slope is lit or shaded. 0 is a flat chart. */
+  pixelHillshadeContrast: number;
+  /** Flat tones on each side of level ground: this many of shade, and this many of light. */
+  pixelShadowSteps: number;
+  /** How far the 4×4 ordered dither mixes two neighbouring tones. 0 is hard bands. */
+  pixelDitherStrength: number;
+  /** Saturation of the chart's land palette. 1 is the palette as it is listed. */
+  pixelPaletteSaturation: number;
+  /** Depth bands on the sea, from the shelf to the open ocean. */
+  seaContourSteps: number;
+  /** Strength of the one-texel ochre rim where the land meets the sea. */
+  coastRimIntensity: number;
+  /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
+  regionalPaletteDetail: boolean;
 }
 
 export type VisualKey = keyof MapVisualConfig;
@@ -206,11 +227,36 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   plinthRoughness: 0.55,
   plinthBrassIntensity: 0.8,
   shadowOnBasesOnly: false,
+  enableFauxPixelMap: true,
+  pixelTexelDensity: 2.5,
+  pixelHillshadeContrast: 1.4,
+  pixelShadowSteps: 3,
+  pixelDitherStrength: 0.7,
+  pixelPaletteSaturation: 1,
+  seaContourSteps: 4,
+  coastRimIntensity: 0.9,
+  regionalPaletteDetail: true,
+});
+
+/**
+ * The pixel chart as a printed sheet: the light held high in the north, white enough to leave the
+ * palette as listed, and nothing laid over the texels: no sky on the sea, no glow, no paper grain.
+ */
+export const PIXEL_CHART_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
+  ...DEFAULT_VISUALS,
+  enableFauxPixelMap: true,
+  regionalPaletteDetail: true,
+  sunCycle: "static-noon",
+  bloomWeight: "off",
+  filmGrainWeight: "off",
+  envReflectionWeight: "off",
 });
 
 /** Solid faction land, full borders, the banded frontline, hover marks, and the full lens. */
 export const SOLID_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   ...DEFAULT_VISUALS,
+  // The printed faction sheet, not the chart.
+  enableFauxPixelMap: false,
   factionWashClose: 1,
   factionWashFar: 1,
   terrainGrainStrength: 0,
@@ -255,6 +301,7 @@ export const PLAIN_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
 
 export const VISUAL_PRESETS = {
   shogun: DEFAULT_VISUALS,
+  "faux-pixel-cartography": PIXEL_CHART_VISUALS,
   solid: SOLID_VISUALS,
   plain: PLAIN_VISUALS,
 } as const;
@@ -299,6 +346,13 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   plinthRimWidth: [0.06, 0.4],
   plinthRoughness: [0, 1],
   plinthBrassIntensity: [0, 1],
+  pixelTexelDensity: [0.75, 6],
+  pixelHillshadeContrast: [0, 3],
+  pixelShadowSteps: [1, 6],
+  pixelDitherStrength: [0, 1],
+  pixelPaletteSaturation: [0, 1.5],
+  seaContourSteps: [2, 6],
+  coastRimIntensity: [0, 1],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];
@@ -629,6 +683,64 @@ export function plinthLook(config: Readonly<MapVisualConfig>): PlinthLook | null
     sheen: 0.62 * (1 - rough) ** 0.8,
     sheenArc: 0.35 + 1.25 * rough,
     brass: config.plinthBrassIntensity,
+  };
+}
+
+// --- The pixel chart. ---------------------------------------------------------------------------
+
+/** How much of a zoom step the texel grid follows. 1 would hold a texel at one size on screen. */
+export const PIXIE_ZOOM_FOLLOW = 0.8;
+/** A texel is never smaller than this on screen at the closest zoom, in CSS pixels. */
+export const PIXIE_MIN_TEXEL_PX = 1.5;
+/** The grid never coarsens past this many halvings. */
+const PIXIE_OCTAVES = 6;
+
+export interface PixieLook {
+  /** Texels to a world unit on the coarse grid, and on the grid nested inside it. */
+  coarse: number;
+  fine: number;
+  /** Share of the coarse texels that have split into four fine ones. */
+  share: number;
+  dither: number;
+  contrast: number;
+  /** Whole tones of shade and of light. */
+  steps: number;
+  saturation: number;
+  /** Whole depth bands on the sea. */
+  seaSteps: number;
+  rim: number;
+  regional: boolean;
+}
+
+/**
+ * The pixel chart at a zoom, or null with it off. `k` is screen pixels per world unit and `maxK`
+ * the closest zoom.
+ *
+ * The grid is fixed to the board, so a texel never slides under the camera. Its density halves
+ * each time the camera has risen far enough, and between two densities the coarse texels split
+ * into four a few at a time, so the change is a dissolve and not a jump. The finer grid's lines
+ * all lie on the coarser grid's, so nothing moves when a texel splits.
+ */
+export function pixieLook(config: Readonly<MapVisualConfig>, k: number, maxK: number): PixieLook | null {
+  if (!config.enableFauxPixelMap) {
+    return null;
+  }
+  const top = Math.max(maxK, 1e-6);
+  const density = Math.min(config.pixelTexelDensity, top / PIXIE_MIN_TEXEL_PX);
+  const level = Math.max(-PIXIE_OCTAVES, PIXIE_ZOOM_FOLLOW * Math.log2(Math.min(1, Math.max(k, 1e-6) / top)));
+  const octave = Math.floor(level);
+  const coarse = density * 2 ** octave;
+  return {
+    coarse,
+    fine: coarse * 2,
+    share: smooth((level - octave - 0.35) / 0.3),
+    dither: config.pixelDitherStrength,
+    contrast: config.pixelHillshadeContrast,
+    steps: Math.max(1, Math.round(config.pixelShadowSteps)),
+    saturation: config.pixelPaletteSaturation,
+    seaSteps: Math.max(2, Math.round(config.seaContourSteps)),
+    rim: config.coastRimIntensity,
+    regional: config.regionalPaletteDetail,
   };
 }
 

@@ -596,6 +596,20 @@ export function BoardLookPanel() {
           </button>
         </div>
 
+        <h3>Pixel chart</h3>
+        <p className="muted">
+          The land and the sea as square texels fixed to the board. On, it takes the place of the printed colours, the grain, and the painted rivers and roads, and draws its own. The wash sliders under Shogun set how much faction colour lies over it.
+        </p>
+        <Flag name="enableFauxPixelMap" label="Pixel chart" title="The land and the sea as a chart of square texels fixed to the board" />
+        <Num name="pixelTexelDensity" label="Texels" title="Texels to a world unit at the closest zoom. The grid coarsens by halves as the camera rises." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="pixelHillshadeContrast" label="Hillshade" title="How hard a slope is lit or shaded. 0 is a flat chart." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="pixelShadowSteps" label="Tones" title="Flat tones of shade, and of light, either side of level ground. A whole number." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="pixelDitherStrength" label="Dither" title="How far the 4 by 4 ordered dither mixes two neighbouring tones. 0 is hard bands." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="pixelPaletteSaturation" label="Saturation" title="Saturation of the chart's land palette. 1 is the palette as listed." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="seaContourSteps" label="Sea bands" title="Depth bands on the sea, from the shelf to the open ocean. A whole number." off={!mapVisuals.enableFauxPixelMap} />
+        <Num name="coastRimIntensity" label="Coast rim" title="Strength of the one-texel ochre rim where the land meets the sea" off={!mapVisuals.enableFauxPixelMap} />
+        <Flag name="regionalPaletteDetail" label="Climate palettes" title="Each territory takes the palette of its climate: temperate, boreal, arid, or tropical. Off, the whole land is one temperate ramp." />
+
         <h3>Mountains</h3>
         <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />
         <Flag name="enableScatteredRocks" label="Loose rock models" title="Loose peak and boulder models along the world's ranges" />
@@ -660,6 +674,7 @@ export function BoardLookPanel() {
             }}
           >
             <option value="shogun">Shogun</option>
+            <option value="faux-pixel-cartography">Pixel chart</option>
             <option value="solid">Solid</option>
             <option value="plain">Plain</option>
             {visualPresetOf(mapVisuals) === "custom" ? <option value="custom">Custom</option> : null}

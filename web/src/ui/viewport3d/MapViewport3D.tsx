@@ -11,23 +11,29 @@
 // Until the land has loaded and the first board frame is up, and whenever WebGL is not to be had,
 // MapView draws its own 2D ground and nothing is lost.
 import { Canvas } from "@react-three/fiber";
-import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { BoardFrame, BoardLayer } from "../map/boardLayer";
+import { landColor } from "../map/boardTune";
+import { getBoardTune } from "../map/boardTuneStore";
 import { facilitiesOf, facilityAnchorOf, type Rect, type RegionShape, type Vec2 } from "../map/geometry";
 import { buildRegionPaths } from "../map/hitTest";
 import { landMaskAt } from "../map/landMask";
 import { bakeTerrain } from "../map/mapBake";
 import { ownersSignature } from "../map/mapBakeMath";
+import { mapVisuals, subscribeVisuals } from "../map/mapVisualConfig";
 import { MapView, type MapViewProps } from "../map/MapView";
 import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regionClip";
 import { battleScarDescriptors } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { wrapWorldX } from "../map/viewMath";
-import { type BattleScar, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
+import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
 import { BOARD_BAKE_SCALE, coastMaskCanvas } from "./boardTextures";
 import { planRoads, riverLines } from "./groundSheet";
 import { buildReliefPatch, RELIEF_ZONES } from "./mountainRelief";
+import { buildCoastField } from "./pixieSheet";
+import { climateZoneCanvas, regionIdCanvas } from "./pixieTextures";
 import { planProps, townSites } from "./propPlan";
+import { factionCanvas } from "./shogun/shogunSheets";
 import type { BoardLook } from "./sun";
 
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
@@ -49,6 +55,11 @@ function boxOf(shape: MultiPolygon): Rect {
     }
   }
   return x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 0, h: 0 };
+}
+
+/** Whether the pixel chart is switched on. The one visual setting React is told about here. */
+function chartSwitch(): boolean {
+  return mapVisuals.enableFauxPixelMap;
 }
 
 function inBox(p: Vec2, box: Rect): boolean {
@@ -132,6 +143,29 @@ export default function MapViewport3D(props: MapViewProps) {
     [land, geometry, paths, clipped, owners],
   );
   const mask = useMemo(() => (land ? coastMaskCanvas(land, land.viewBox) : null), [land]);
+
+  // The pixel chart's sheets (see pixieSheet.ts), made once for a map and only while the chart is
+  // switched on. The switch is the one setting this component reads: it is on or off, and the
+  // chart's numbers go to the shaders without a render.
+  const chartOn = useSyncExternalStore(subscribeVisuals, chartSwitch, chartSwitch);
+  const chartCoast = useMemo(
+    () => (land && chartOn ? buildCoastField((p) => landMaskAt(land, p), land.viewBox) : null),
+    [land, chartOn],
+  );
+  const chartIds = useMemo(() => (land && chartOn ? regionIdCanvas(land.viewBox, geometry.regions, paths) : null), [land, geometry, paths, chartOn]);
+  const chartZones = useMemo(() => (land && chartOn ? climateZoneCanvas(land.viewBox, geometry.regions, paths) : null), [land, geometry, paths, chartOn]);
+  // Whose land is whose, flat, in the colours the baked sheet uses. Painted again when a territory changes hands.
+  const chartFaction = useMemo(() => {
+    if (!land || !chartOn) {
+      return null;
+    }
+    const shapes = clipped ?? new Map(geometry.regions.map((region) => [region.id, roughShape(region)] as const));
+    return factionCanvas(land.viewBox, geometry.regions, shapes, ownersRef.current, (owner) => landColor(owner, getBoardTune()));
+  }, [land, geometry, clipped, owners, chartOn]);
+  const pixie = useMemo<BoardPixie | null>(
+    () => (chartCoast && chartIds && chartZones && chartFaction ? { coast: chartCoast, ids: chartIds, zones: chartZones, faction: chartFaction } : null),
+    [chartCoast, chartIds, chartZones, chartFaction],
+  );
 
   const slotsOf = (region: RegionShape): Vec2[] => effectiveUnitSlots(region, clipped?.get(region.id) ?? roughShape(region));
 
@@ -313,6 +347,7 @@ export default function MapViewport3D(props: MapViewProps) {
           dim={props.menuBackdrop === true}
           still={still}
           table={table}
+          pixie={pixie}
         />
       </Canvas>
     </BoardBoundary>

@@ -6,6 +6,7 @@
 // one are two flat tones the way they are in the sprites.
 import * as THREE from "three";
 import { MILITARY } from "../theme/militaryPalette";
+import { PIXIE_COAST_REACH, PIXIE_HEIGHT_TOP, PIXIE_INK, PIXIE_LAND, PIXIE_SEA, PIXIE_SHELF_WIDTH, unitRgb } from "./pixieSheet";
 
 export type Rgb = [number, number, number];
 
@@ -280,6 +281,86 @@ export function groundUniforms(): GroundUniforms {
 /** The furthest the ground sheet can tell, in world units. The same number as GROUND_REACH in groundSheet.ts. */
 const LINE_REACH = "2.5";
 
+// --- The pixel chart ----------------------------------------------------------------------------
+//
+// A material built with `PIXIE` draws the land or the sea as square texels fixed to the board
+// (see pixieSheet.ts, and pixieLook in mapVisualConfig.ts). With the define absent none of this
+// is in the shader. The numbers are uniforms, so a slider costs a frame; the palette is constant.
+
+export interface PixieUniforms {
+  /** Texels to a world unit on the coarse grid and on the fine one, the share of coarse texels split into four, and the dither. */
+  uPixGrid: { value: THREE.Vector4 };
+  /** Hillshade contrast, tones each side of level, the palette's saturation, and the coastal rim. */
+  uPixShade: { value: THREE.Vector4 };
+  /** Depth bands, the shelf's width and the coast field's reach in world units, and 1 while each territory wears its climate. */
+  uPixSea: { value: THREE.Vector4 };
+  /** Rivers, roads, the faction wash, and the border ink: each a strength from 0 to 1. */
+  uPixLines: { value: THREE.Vector4 };
+  /** Relief and ground cover (see buildPixieSheet). */
+  uPixSheet: { value: THREE.Texture | null };
+  /** The share of each climate zone at a point (see climateZoneCanvas). */
+  uPixZone: { value: THREE.Texture | null };
+  /** Each territory's id (see regionIdCanvas). */
+  uPixIds: { value: THREE.Texture | null };
+  /** Each territory's faction colour, flat. */
+  uPixFaction: { value: THREE.Texture | null };
+  /** The signed distance to the coast (see buildCoastField). */
+  uPixCoast: { value: THREE.Texture | null };
+}
+
+export function pixieUniforms(): PixieUniforms {
+  return {
+    uPixGrid: { value: new THREE.Vector4(1, 2, 0, 0.7) },
+    uPixShade: { value: new THREE.Vector4(1.4, 3, 1, 0.9) },
+    uPixSea: { value: new THREE.Vector4(4, PIXIE_SHELF_WIDTH, PIXIE_COAST_REACH, 1) },
+    uPixLines: { value: new THREE.Vector4(1, 0, 0.2, 1) },
+    uPixSheet: { value: null },
+    uPixZone: { value: null },
+    uPixIds: { value: null },
+    uPixFaction: { value: null },
+    uPixCoast: { value: null },
+  };
+}
+
+function glslColor(hex: string): string {
+  return `vec3(${unitRgb(hex)
+    .map((channel) => channel.toFixed(4))
+    .join(", ")})`;
+}
+
+/** The texel grid, the ordered dither, and the chart's colours. It needs `hash21` from NOISE before it. */
+const PIXEL = /* glsl */ `
+uniform vec4 uPixGrid;
+const vec3 PIX_LAND[20] = vec3[20](${PIXIE_LAND.flat().map(glslColor).join(", ")});
+const vec3 PIX_SEA[4] = vec3[4](${PIXIE_SEA.map(glslColor).join(", ")});
+const vec3 PIX_UMBER = ${glslColor(PIXIE_INK.umber)};
+const vec3 PIX_FLOOR = ${glslColor(PIXIE_INK.floor)};
+const vec3 PIX_CHALK = ${glslColor(PIXIE_INK.chalk)};
+const vec3 PIX_SNOW = ${glslColor(PIXIE_INK.snow)};
+const vec3 PIX_SNOW_SHADE = ${glslColor(PIXIE_INK.snowShade)};
+const vec3 PIX_RIM = ${glslColor(PIXIE_INK.rim)};
+const vec3 PIX_RIM_RUST = ${glslColor(PIXIE_INK.rimRust)};
+const vec3 PIX_RIVER = ${glslColor(PIXIE_INK.river)};
+const vec3 PIX_ROAD = ${glslColor(PIXIE_INK.road)};
+const vec3 PIX_INK = ${glslColor(PIXIE_INK.border)};
+const vec3 PIX_SEAM = ${glslColor(PIXIE_INK.seam)};
+// The 4 by 4 Bayer threshold of a texel, 0 to 15 sixteenths. The same sum as bayer4 in pixieSheet.ts.
+float bayer2(vec2 a) {
+  a = mod(floor(a), 2.0);
+  return fract(a.x * 0.5 + a.y * 0.75);
+}
+float bayer4(vec2 a) {
+  return bayer2(0.5 * a) * 0.25 + bayer2(a);
+}
+// The texel a point of the board lies in: its index in xy, and the texels to a world unit in z.
+// The grid is fixed to the board. Between two densities the coarse texels split into four, a few
+// at a time, and every line of the fine grid lies on a line of the coarse one.
+vec3 pixTexel(vec2 p) {
+  float density = mix(uPixGrid.x, uPixGrid.y, step(hash21(floor(p * uPixGrid.x) + 0.5), uPixGrid.z));
+  return vec3(floor(p * density), density);
+}
+`;
+
 /**
  * The top of the land: the baked sheet, under the sun.
  *
@@ -290,14 +371,26 @@ const LINE_REACH = "2.5";
  * lifted by `uMountain`, and the lifted ground goes from the territory's colour through slate and
  * rock to snow. Where a range's height is 0 it draws exactly what the flat land draws, so the two
  * join with no seam.
+ *
+ * `PIXIE` replaces all of that colour with the pixel chart: the land is read at the middle of a
+ * texel fixed to the board, coloured from the chart's palette by its climate, its cover, and its
+ * height, and shaded in flat steps by the slope of the relief sheet. The grain, the painted
+ * rivers and roads, and the range's own rock and snow are left out of the shader while it is on.
  */
-export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms = groundUniforms(), relief = false): THREE.ShaderMaterial {
+export function landTopMaterial(
+  shared: SharedUniforms,
+  ground: GroundUniforms = groundUniforms(),
+  relief = false,
+  pixie: PixieUniforms = pixieUniforms(),
+): THREE.ShaderMaterial {
   const material = new THREE.ShaderMaterial({
     defines: relief ? { RELIEF: 1 } : {},
     uniforms: {
       ...lightUniforms(shared),
       ...sunUniforms(shared),
       ...ground,
+      ...pixie,
+      uMask: shared.uMask,
       uBake: shared.uBake,
       uBounds: shared.uBounds,
       uMountain: shared.uMountain,
@@ -349,6 +442,12 @@ export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms =
       }
     `,
     fragmentShader: /* glsl */ `
+      #ifdef PIXIE
+      // The chart draws its own ground, rivers, and roads.
+      #undef SURFACE
+      #undef RIVERS
+      #undef ROADS
+      #endif
       ${NOISE}
       ${LIGHT}
       ${SUN_FRAGMENT}
@@ -356,6 +455,30 @@ export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms =
       uniform float uBias;
       varying vec2 vUv;
       varying vec2 vScene;
+      #ifdef PIXIE
+      ${SHEET}
+      ${PIXEL}
+      uniform sampler2D uPixSheet;
+      uniform sampler2D uPixZone;
+      uniform sampler2D uPixIds;
+      uniform sampler2D uPixFaction;
+      uniform sampler2D uMask;
+      uniform sampler2D uGround;
+      uniform vec4 uPixShade;
+      uniform vec4 uPixSea;
+      uniform vec4 uPixLines;
+      // Height of the ground at a map point, in world units: the ranges of the relief sheet, cut
+      // into ridges, on lowlands that roll a little.
+      float pixHeight(vec2 m) {
+        float range = textureLod(uPixSheet, sheetUv(m), 0.0).r * ${PIXIE_HEIGHT_TOP.toFixed(1)};
+        float ridged = 1.0 - abs(vnoise(m * 0.8 + 5.3) * 2.0 - 1.0);
+        return range * (0.6 + 0.75 * ridged) + (fbm(m * 0.16) - 0.5) * 0.9 + (vnoise(m * 0.55 + 17.0) - 0.5) * 0.3;
+      }
+      // 1 on land, 0 on water.
+      float pixLand(vec2 m) {
+        return textureLod(uMask, sheetUv(m), 0.0).r;
+      }
+      #endif
       #if defined(RELIEF) || defined(RIVERS) || defined(ROADS)
       uniform float uPixel;
       #endif
@@ -389,15 +512,113 @@ export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms =
       uniform vec3 uRoadWarm;
       #endif
       void main() {
-        vec3 c = texture2D(uBake, vUv, uBias).rgb;
         // The surface's facing, in scene space. Flat land looks straight up.
         vec3 n = vec3(0.0, 0.0, 1.0);
+        // Where the cloud's shadow is read. The chart reads it at the middle of a texel.
+        vec2 sceneAt = vScene;
+        #ifdef PIXIE
+        // The texel this piece of land lies in, and the map point at its middle. Everything below
+        // is read there, so a texel is one flat colour and it never slides under the camera.
+        vec2 mapAt = vec2(vUv.x * uBounds.z + uBounds.x, (1.0 - vUv.y) * uBounds.w + uBounds.y);
+        vec3 grid = pixTexel(mapAt);
+        vec2 cell = grid.xy;
+        float e = 1.0 / grid.z;
+        vec2 m = (cell + 0.5) * e;
+        sceneAt += vec2(m.x - mapAt.x, mapAt.y - m.y);
+        vec2 uv = sheetUv(m);
+        float bay = bayer4(cell) + 0.03125;
+        float spread = (bay - 0.5) * uPixGrid.w;
+
+        // The ground cover is read a little off its place, so the boxes of the biome table do
+        // not show as straight lines. The height is read where it is.
+        vec2 warp = (vec2(vnoise(m * 0.06 + 3.7), vnoise(m * 0.06 + 41.3)) - 0.5) * 12.0
+          + (vec2(vnoise(m * 0.019 + 71.1), vnoise(m * 0.019 + 13.9)) - 0.5) * 26.0;
+        vec4 field = textureLod(uPixSheet, sheetUv(m + warp), 0.0);
+        vec4 here = textureLod(uPixSheet, uv, 0.0);
+
+        // The climate zone. Where two zones meet, the dither picks between them by their shares.
+        int zone = 0;
+        if (uPixSea.w > 0.5) {
+          vec3 zones = textureLod(uPixZone, sheetUv(m + warp * 0.35), 0.0).rgb;
+          float pick = 0.5 + spread;
+          zone = pick < zones.r ? 0 : (pick < zones.r + zones.g ? 1 : (pick < zones.r + zones.g + zones.b ? 2 : 3));
+        }
+
+        // The tone inside the zone's ramp: dry ground, meadow, or forest by how green the place
+        // is, then upland and crest by its height. The dither carries one tone into the next.
+        float h0 = pixHeight(m);
+        float lush = field.g + (fbm(m * 0.21 + 11.0) - 0.5) * 0.5;
+        int tone = int(clamp(floor(lush * 3.0 + spread * 0.9), 0.0, 2.0));
+        float high = h0 + spread * 0.6;
+        if (high > 2.5) {
+          tone = 4;
+        } else if (high > 1.05) {
+          tone = 3;
+        }
+        vec3 c = PIX_LAND[zone * 5 + tone];
+        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uPixShade.z);
+
+        // Whose land it is: a wash of the faction's colour over the ground. Land nobody holds is left as it lies.
+        vec3 ids = textureLod(uPixIds, uv, 0.0).rgb;
+        vec3 faction = textureLod(uPixFaction, uv, 0.0).rgb;
+        float owned = step(0.001, ids.r + ids.g) * step(ids.b, 0.5);
+        c = mix(c, faction, uPixLines.z * owned);
+
+        // Snow: on the summits that carry it, and scattered over the cold north.
+        // The cold ground is patched by a broad drift, so the snow line is no line of latitude. An ice sheet is whole.
+        float cold = field.b * (0.5 + 1.1 * fbm(m * 0.045 + 23.0));
+        float frost = max(max(here.a, cold) + spread * 0.18 + (vnoise(m * 0.33 + 9.0) - 0.5) * 0.12, smoothstep(0.8, 0.95, field.b));
+        float snowy = step(0.56, frost);
+        c = mix(c, PIX_SNOW, snowy);
+
+        // Hillshade. The slope is taken across the texel's four neighbours, and the light on it
+        // is cut into flat tones: umber on the side turned from the sun, chalk on the side turned to it.
+        vec2 grad = vec2(pixHeight(m + vec2(e, 0.0)) - pixHeight(m - vec2(e, 0.0)), pixHeight(m + vec2(0.0, e)) - pixHeight(m - vec2(0.0, e))) / (2.0 * e);
+        // Map y runs down the sheet and the sun's runs up it.
+        vec2 sunward = normalize(vec2(uSunDir.x, -uSunDir.y) + vec2(1e-4));
+        float lean = clamp(-dot(grad, sunward) * uPixShade.x, -1.0, 1.0);
+        float level = clamp(floor(lean * uPixShade.y + 0.5 + spread * 0.5) / uPixShade.y, -1.0, 1.0);
+        if (level < 0.0) {
+          c = mix(c, mix(PIX_UMBER, PIX_SNOW_SHADE, snowy), -level * 0.72);
+        } else {
+          c = mix(c, mix(PIX_CHALK, vec3(1.0), snowy), level * 0.38);
+        }
+
+        // The coast: a texel that is on the water's edge, or has a neighbour that is.
+        float landNear = min(min(pixLand(m + vec2(e, 0.0)), pixLand(m - vec2(e, 0.0))), min(pixLand(m + vec2(0.0, e)), pixLand(m - vec2(0.0, e))));
+        float rim = 1.0 - step(0.5, min(pixLand(m), landNear));
+        if (rim < 0.5) {
+          // A border is where the texel to the east or the south belongs to someone else. It is
+          // heavier between two factions than inside one.
+          vec2 eastAt = m + vec2(e, 0.0);
+          vec2 southAt = m + vec2(0.0, e);
+          vec3 east = textureLod(uPixIds, sheetUv(eastAt), 0.0).rgb;
+          vec3 south = textureLod(uPixIds, sheetUv(southAt), 0.0).rgb;
+          bool onEast = any(greaterThan(abs(east.rg - ids.rg), vec2(0.002)));
+          bool onSouth = any(greaterThan(abs(south.rg - ids.rg), vec2(0.002)));
+          if (onEast || onSouth) {
+            vec3 theirs = textureLod(uPixFaction, sheetUv(onEast ? eastAt : southAt), 0.0).rgb;
+            float frontier = step(0.04, distance(theirs, faction));
+            c = mix(c, PIX_INK, uPixLines.w * mix(0.4, 0.82, frontier));
+          }
+          // A road and a river are each one texel wide: the texels whose middle is within half a texel of the line.
+          vec4 lines = textureLod(uGround, uv, 0.0);
+          float within = min(0.5 * e, 2.3);
+          float roadAway = length((lines.ba * 255.0 - 128.0) * (${LINE_REACH} / 127.0));
+          float riverAway = length((lines.rg * 255.0 - 128.0) * (${LINE_REACH} / 127.0));
+          c = mix(c, PIX_ROAD, uPixLines.y * 0.7 * step(roadAway, within));
+          c = mix(c, PIX_RIVER, uPixLines.x * step(riverAway, within));
+        }
+        c = mix(c, mix(PIX_RIM, PIX_RIM_RUST, step(0.8, bay)), rim * uPixShade.w);
+        #else
+        vec3 c = texture2D(uBake, vUv, uBias).rgb;
+        #endif
         #ifdef SURFACE
         // A printed sheet under flock: a little of the colour comes out.
         c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uSurface.w);
         #endif
 
-        #ifdef RELIEF
+        #if defined(RELIEF) && !defined(PIXIE)
         // The range is low, so its slopes are read steeper than they are for the light.
         n = normalize(vec3(-vSlope * 2.4, 1.0));
         float foot = smoothstep(0.02, 0.3, vRise);
@@ -473,7 +694,7 @@ export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms =
         #endif
 
         c *= lit(dot(n, uSunDir));
-        c *= 1.0 - cloudShade(vScene);
+        c *= 1.0 - cloudShade(sceneAt);
         // Alpha carries the light that reaches the ground, for the pieces painted over it (see gradeMaterial).
         float reach = 1.0;
         float lightShare = 1.0;
@@ -497,9 +718,13 @@ export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms =
         // The land is paper white at most, so the grain never glows.
         c = min(c, vec3(1.0));
         #endif
-        #ifdef RELIEF
+        #if defined(RELIEF) && !defined(PIXIE)
         // Snow on a face turned to the sun goes past white, and the glow spreads from it.
         c *= 1.0 + uSnowLook.x * snow * smoothstep(-0.02, 0.16, facing) * lightShare * uDirect;
+        #endif
+        #ifdef PIXIE
+        // Shade stops at warm slate umber. Nothing on the chart goes to black, so a dark piece still reads on it.
+        c = max(c, PIX_FLOOR);
         #endif
         gl_FragColor = vec4(c, reach);
       }
@@ -603,11 +828,20 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
  * The sea. It lies below the land and is slid north by `uShift`, so the sheet drawn on it lands
  * where the 2D view puts it (see boardCamera.ts). The cliff's foot is the coast moved south by the
  * same amount, and the surf and the cliff's shadow are measured from there.
+ *
+ * `PIXIE` draws it as the pixel chart's sea: read at the middle of a texel fixed to the board,
+ * and coloured in flat depth bands by the distance to the coast, which is read from a field made
+ * once for the map (see buildCoastField). The dashes, the surf, and the glints are drawn on the
+ * same texels.
  */
-export function waterMaterial(shared: SharedUniforms, drop: number): THREE.ShaderMaterial {
+export function waterMaterial(shared: SharedUniforms, drop: number, pixie: PixieUniforms = pixieUniforms()): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
       ...lightUniforms(shared),
+      uPixGrid: pixie.uPixGrid,
+      uPixSea: pixie.uPixSea,
+      uPixIds: pixie.uPixIds,
+      uPixCoast: pixie.uPixCoast,
       uBake: shared.uBake,
       uMask: shared.uMask,
       uBounds: shared.uBounds,
@@ -673,18 +907,51 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
       uniform vec3 uTable;
       uniform vec3 uNeat;
       varying vec2 vScene;
+      #ifdef PIXIE
+      ${PIXEL}
+      uniform sampler2D uPixCoast;
+      uniform sampler2D uPixIds;
+      uniform vec4 uPixSea;
+      #endif
       void main() {
+        #ifdef PIXIE
+        // The texel this piece of water lies in. Everything below is read at its middle.
+        vec3 grid = pixTexel(vScene);
+        float e = 1.0 / grid.z;
+        vec2 at = (grid.xy + 0.5) * e;
+        float bay = bayer4(grid.xy) + 0.03125;
+        #else
+        vec2 at = vScene;
+        #endif
         // The map point this piece of water shows, and the same point measured from the cliff's foot.
-        vec2 m = vec2(vScene.x, uShift - vScene.y);
+        vec2 m = vec2(at.x, uShift - at.y);
         vec2 foot = m - vec2(0.0, uShift);
+        #ifdef PIXIE
+        // Depth by the distance to the coast, in flat bands: pale on the shelf, steel teal in the
+        // open ocean. The contours wander a little out at sea, and the dither carries one band into the next.
+        float away = (textureLod(uPixCoast, sheetUv(foot), 0.0).r * 255.0 - 128.0) / 127.0 * uPixSea.z;
+        away += (fbm(foot * 0.07 + 2.0) - 0.5) * 7.0 * smoothstep(1.0, 8.0, away);
+        float deep = pow(clamp(away / uPixSea.y, 0.0, 1.0), 0.7);
+        float band = clamp(floor(deep * uPixSea.x + (bay - 0.5) * uPixGrid.w * 0.9), 0.0, uPixSea.x - 1.0) / max(uPixSea.x - 1.0, 1.0);
+        vec3 c = band < 0.3333 ? mix(PIX_SEA[0], PIX_SEA[1], band * 3.0) : (band < 0.6667 ? mix(PIX_SEA[1], PIX_SEA[2], band * 3.0 - 1.0) : mix(PIX_SEA[2], PIX_SEA[3], band * 3.0 - 2.0));
+        // A seam is where the texel to the east or the south lies in another sea zone.
+        vec3 ids = textureLod(uPixIds, sheetUv(m), 0.0).rgb;
+        vec3 east = textureLod(uPixIds, sheetUv(m + vec2(e, 0.0)), 0.0).rgb;
+        vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, e)), 0.0).rgb;
+        float seam = step(0.5, ids.b) * max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)));
+        c = mix(c, PIX_SEAM, seam * 0.55);
+        #else
         vec3 c = texture2D(uBake, sheetUv(m), uBias).rgb;
+        #endif
         vec3 mask = texture2D(uMask, sheetUv(foot)).rgb;
         float shore = clamp(mask.b * 2.0, 0.0, 1.0);
         float edge = mask.g;
 
         // A slow swell, then drifting dashes on the open sea.
         float swell = fbm(m * 0.05 + vec2(uTime * 0.03, uTime * 0.011));
+        #ifndef PIXIE
         c += (swell - 0.5) * 0.05 * uWater;
+        #endif
         float row = floor(m.y / 1.4);
         float rowSeed = hash21(vec2(row, 7.0));
         float along = m.x * 0.55 + uTime * (0.12 + 0.2 * rowSeed) + rowSeed * 40.0;
@@ -723,13 +990,16 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         float h0 = seaHeight(p);
         vec2 slope = vec2(seaHeight(p + vec2(0.3, 0.0)) - h0, seaHeight(p + vec2(0.0, 0.3)) - h0) / 0.3;
         vec3 n = normalize(vec3(-slope * 0.3, 1.0));
-        vec2 off = (vScene - uEye.xy) * uEye.zw;
+        vec2 off = (at - uEye.xy) * uEye.zw;
         vec3 eye = normalize(uToEye - vec3(off.x * 0.6, off.y * 0.3, 0.0));
         vec3 r = reflect(-eye, n);
         // A slope turned from the eye mirrors the pale haze low in the sky. A flat one mirrors the zenith.
         vec3 sky = textureLod(uSky, vec3(r.x, r.z, -r.y), 1.5).rgb;
         float calm = 1.0 - shore * 0.7;
+        #ifndef PIXIE
+        // The chart keeps its depth bands flat. It takes the sun's patch below and leaves the sky off.
         c = mix(c, sky, uSheen.x * calm * (0.55 + 0.45 * smoothstep(0.0, 0.35, 1.0 - dot(n, eye))));
+        #endif
         // The sun's patch: a warm wash, and inside it short dashes of light that come and go, drawn
         // the way the sea's own dashes are. Most of the patch stays water.
         float glare = pow(max(dot(r, uSunDir), 0.0), 26.0) * calm * uDirect * (1.0 - shade);
@@ -750,7 +1020,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         c += uSunColor * step(0.9978, glint) * 0.14 * uWater * uDirect * (1.0 - shade);
 
         c *= lit(uSunDir.z);
-        c *= 1.0 - cloudShade(vScene);
+        c *= 1.0 - cloudShade(at);
 
         // Past the top and bottom of the sheet the board ends and the table shows.
         float past = max(uBounds.y - m.y, m.y - (uBounds.y + uBounds.w));

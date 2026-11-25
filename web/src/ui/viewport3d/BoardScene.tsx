@@ -32,6 +32,7 @@ import {
   mapVisuals,
   mountainLook,
   outlineLook,
+  pixieLook,
   riverLook,
   roadLook,
   skySheen,
@@ -54,6 +55,7 @@ import {
   mountainCasterMaterial,
   OUTLINE_SLOTS,
   OVERLAY_SLOTS,
+  pixieUniforms,
   propCasterMaterial,
   propMaterial,
   propShadowMaterial,
@@ -66,6 +68,8 @@ import {
 import { clearTexture, dataSheetTexture, grainTexture, overlayTexture, sheetTexture } from "./boardTextures";
 import { buildCoverSheet, buildGroundSheet, grainTile } from "./groundSheet";
 import { reliefBuffers, type ReliefPatch, sampleReliefFields } from "./mountainRelief";
+import { buildPixieSheet, type CoastField, PIXIE_INK, PIXIE_SHELF_WIDTH } from "./pixieSheet";
+import { idSheetTexture } from "./pixieTextures";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
@@ -121,6 +125,23 @@ export interface BoardSceneProps {
    * and groundSheet.ts). Absent, the land is a flat slab with the loose peaks on it.
    */
   table?: BoardTable | null;
+  /**
+   * What the pixel chart reads (see pixieSheet.ts). Absent, the chart is not drawn, whatever the
+   * settings say. The Shogun boards never draw it.
+   */
+  pixie?: BoardPixie | null;
+}
+
+/** The sheets of the pixel chart that are made for a map, before the board draws. */
+export interface BoardPixie {
+  /** The signed distance to the coast. */
+  coast: CoastField;
+  /** Each territory and sea zone filled with its id. */
+  ids: HTMLCanvasElement;
+  /** The share of each climate zone. */
+  zones: HTMLCanvasElement;
+  /** Each territory filled with its faction's colour. */
+  faction: HTMLCanvasElement;
 }
 
 /** What the plain 3D board lays on its land. Lines are map points. */
@@ -167,6 +188,11 @@ const SNOW_GLOW = 1.1;
 const ROCK_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(["peak", "rock"]);
 /** The camera's steepest tip, in radians: the sea shows the most sky from here. */
 const FULL_TILT = 0.55;
+/** Share of the Shogun faction wash the pixel chart lays over its ground. The chart's own colours stay in charge. */
+const PIXIE_WASH = 0.45;
+/** The cliff's four colours, in the order they are swapped for the chart's. */
+const CLIFF_INKS = ["uRockHigh", "uRockLow", "uRockWet", "uRockLip"] as const;
+const PIXIE_CLIFF = [PIXIE_INK.cliffHigh, PIXIE_INK.cliffLow, PIXIE_INK.cliffWet, PIXIE_INK.cliffLip].map(rgbOf);
 const SELECT_INK = rgbOf(PIGMENT.select);
 const HOVER_INK = rgbOf(PIGMENT.hover);
 
@@ -174,6 +200,8 @@ interface Kit {
   shared: ReturnType<typeof sharedUniforms>;
   /** The grain, the rivers, and the roads, as the land, the ranges, and the cliff read them. */
   ground: ReturnType<typeof groundUniforms>;
+  /** The pixel chart's numbers and sheets, as the land, the ranges, and the sea read them. */
+  pixie: ReturnType<typeof pixieUniforms>;
   landTop: THREE.ShaderMaterial;
   /** The land's material once more, for the sculpted ranges. */
   mountain: THREE.ShaderMaterial;
@@ -196,15 +224,17 @@ interface Kit {
 function createKit(): Kit {
   const shared = sharedUniforms();
   const ground = groundUniforms();
+  const pixie = pixieUniforms();
   const prop = propMaterial(shared);
   return {
     shared,
     ground,
-    landTop: landTopMaterial(shared, ground),
-    mountain: landTopMaterial(shared, ground, true),
+    pixie,
+    landTop: landTopMaterial(shared, ground, false, pixie),
+    mountain: landTopMaterial(shared, ground, true, pixie),
     mountainCaster: mountainCasterMaterial(shared),
     cliff: cliffMaterial(shared, SEA_DROP, ground),
-    water: waterMaterial(shared, SEA_DROP),
+    water: waterMaterial(shared, SEA_DROP, pixie),
     prop,
     propShadow: propShadowMaterial(shared),
     unitShadow: unitShadowMaterial(),
@@ -697,6 +727,50 @@ export function BoardScene(props: BoardSceneProps) {
     (old) => old.dispose(),
     [mask],
   );
+  // The pixel chart's sheets. Each is a texture only while the chart has it to read.
+  const chartInputs = shogunSheets ? null : (props.pixie ?? null);
+  const coastField = chartInputs?.coast ?? null;
+  const idCanvas = chartInputs?.ids ?? null;
+  const zoneCanvas = chartInputs?.zones ?? null;
+  const factionSheet = chartInputs?.faction ?? null;
+  const coastTexture = useDisposable(
+    () => (coastField ? dataSheetTexture(coastField.data, coastField.size, coastField.size, 1) : null),
+    (old) => old?.dispose(),
+    [coastField],
+  );
+  const idTexture = useDisposable(
+    () => (idCanvas ? idSheetTexture(idCanvas) : null),
+    (old) => old?.dispose(),
+    [idCanvas],
+  );
+  const zoneTexture = useDisposable(
+    () => (zoneCanvas ? sheetTexture(zoneCanvas, false) : null),
+    (old) => old?.dispose(),
+    [zoneCanvas],
+  );
+  const factionTexture = useDisposable(
+    () => (factionSheet ? sheetTexture(factionSheet, false) : null),
+    (old) => old?.dispose(),
+    [factionSheet],
+  );
+  kit.pixie.uPixCoast.value = coastTexture;
+  kit.pixie.uPixIds.value = idTexture;
+  kit.pixie.uPixZone.value = zoneTexture;
+  kit.pixie.uPixFaction.value = factionTexture;
+  const chartReady = coastTexture !== null && idTexture !== null && zoneTexture !== null && factionTexture !== null;
+  /** The chart's relief sheet, made the first frame the chart is drawn, and whether the cliff wears the chart's colours. */
+  const chartSheet = useRef<THREE.DataTexture | null>(null);
+  const chartCliff = useRef(false);
+  const cliffInks = useMemo(() => CLIFF_INKS.map((name) => (kit.cliff.uniforms[name].value as THREE.Vector3).clone()), [kit]);
+  // The relief sheet holds the table's ranges, so a new table drops it.
+  useEffect(
+    () => () => {
+      chartSheet.current?.dispose();
+      chartSheet.current = null;
+      kit.pixie.uPixSheet.value = null;
+    },
+    [table, bounds, kit],
+  );
   kit.shared.uBake.value = bakeTexture;
   kit.shared.uMask.value = maskTexture;
   kit.shared.uBounds.value.set(bounds.x, bounds.y, bounds.w, bounds.h);
@@ -737,7 +811,7 @@ export function BoardScene(props: BoardSceneProps) {
   useEffect(() => {
     clock.current.dirty = true;
     invalidate();
-  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still, shogunTextures, table]);
+  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still, shogunTextures, table, coastTexture, idTexture, zoneTexture, factionTexture]);
 
   useEffect(() => {
     if (!shogunTextures) {
@@ -931,7 +1005,35 @@ export function BoardScene(props: BoardSceneProps) {
       setDefine(material, "RIVERS", rivers ? 1 : null);
       setDefine(material, "ROADS", roads ? 1 : null);
     }
-    setDefine(kit.cliff, "SURFACE", grain ? 1 : null);
+
+    // The pixel chart: the land and the sea as texels fixed to the board. Off, it is in no shader
+    // and its relief sheet is dropped. Its numbers go straight to the uniforms.
+    const chart = table && chartReady && !shogunNow ? pixieLook(mapVisuals, frame.view.k, frame.maxK) : null;
+    const chartNow = kit.pixie;
+    if (chart) {
+      if (!chartSheet.current) {
+        const sheet = buildPixieSheet(live.current.bounds, table?.patches ?? NO_PATCHES);
+        chartSheet.current = dataSheetTexture(sheet.data, sheet.width, sheet.height, 4);
+        chartNow.uPixSheet.value = chartSheet.current;
+      }
+      chartNow.uPixGrid.value.set(chart.coarse, chart.fine, chart.share, chart.dither);
+      chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
+      chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH, coastField?.reach ?? 1, chart.regional ? 1 : 0);
+      chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
+    } else if (chartSheet.current) {
+      chartSheet.current.dispose();
+      chartSheet.current = null;
+      chartNow.uPixSheet.value = null;
+    }
+    for (const material of [kit.landTop, kit.mountain, kit.water]) {
+      setDefine(material, "PIXIE", chart ? 1 : null);
+    }
+    // The cliff under the chart's ochre rim is cut from the same ochre, and carries no grain.
+    if ((chart !== null) !== chartCliff.current) {
+      chartCliff.current = chart !== null;
+      CLIFF_INKS.forEach((name, i) => (kit.cliff.uniforms[name].value as THREE.Vector3).copy(chart ? PIXIE_CLIFF[i] : cliffInks[i]));
+    }
+    setDefine(kit.cliff, "SURFACE", grain && !chart ? 1 : null);
 
     // The camera is the 2D view, tipped (see boardCamera.ts).
     const pose = boardPose(cameraOf(frame.view, frame.width, frame.height), frame.width, frame.height);
