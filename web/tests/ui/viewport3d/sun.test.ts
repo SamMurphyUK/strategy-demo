@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_SHARE, litFactor, shadowReach, SUN_CYCLE_S, sunAt } from "../../../src/ui/viewport3d/sun";
+import { DAY_SHARE, HELD_SUN_LIMIT, litFactor, shadowReach, SUN_CYCLE_S, sunAt, sunAtAzimuth } from "../../../src/ui/viewport3d/sun";
 
 const DAY = SUN_CYCLE_S * DAY_SHARE;
 
@@ -67,6 +67,18 @@ describe("board sun", () => {
     expect(sunAt(10, "field", true)).toEqual(sunAt(200, "field", true));
     // Dusk is the lower light.
     expect(sunAt(0, "dusk").dir[2]).toBeLessThan(sunAt(0, "field", true).dir[2]);
+  });
+
+  it("holds the sun at an azimuth on the same arc, with the direct light on", () => {
+    const noon = sunAtAzimuth(0);
+    sunAt(DAY * 0.5).dir.forEach((value, i) => expect(noon.dir[i]).toBeCloseTo(value, 9));
+    const east = sunAtAzimuth(40);
+    expect(Math.atan2(east.dir[0], east.dir[1]) * (180 / Math.PI)).toBeCloseTo(40, 6);
+    expect(east.direct).toBe(1);
+    // Past the limit the sun stops at the limit.
+    expect(sunAtAzimuth(90)).toEqual(sunAtAzimuth(HELD_SUN_LIMIT));
+    expect(sunAtAzimuth(-90).direct).toBe(1);
+    expect(sunAtAzimuth(10, "dusk")).toEqual(sunAt(0, "dusk"));
   });
 
   it("caps how far a shadow can reach", () => {

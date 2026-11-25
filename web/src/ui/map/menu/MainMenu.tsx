@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSyncExternalStore } from "react";
 import { sfxMuted, subscribeSfx, toggleSfx } from "../../../audio/sound_manager";
+import { BOARD_VIEW_LABEL, BOARD_VIEWS, type BoardView } from "../boardView";
 import type { MapVersion } from "../editor/mapVersions";
 import { demoPlayChoice, playChoiceFromVersion, type PlayChoice } from "../session/play_map";
 import type { RoomControls } from "../session/use_campaign_session";
@@ -20,6 +21,9 @@ export function MainMenu({
   volume,
   look,
   draft,
+  board,
+  onBoard,
+  onOpenBoard,
   onOpenCampaign,
   onNewCampaign,
   onResume,
@@ -33,6 +37,12 @@ export function MainMenu({
   volume: number;
   look: "field" | "dusk";
   draft: CampaignDraft;
+  /** The board the campaign is drawn on. */
+  board: BoardView;
+  /** Switch boards and stay in the menu. */
+  onBoard(view: BoardView): void;
+  /** Switch boards and close the menu onto the game on the glass. */
+  onOpenBoard(view: BoardView): void;
   onOpenCampaign(): void;
   onNewCampaign(choice: PlayChoice, seed: number, launch?: CampaignLaunchConfig): void;
   onResume(save: CampaignSave): void;
@@ -96,6 +106,12 @@ export function MainMenu({
           </button>
           <button type="button" onClick={() => window.location.assign("/?bake=1")}>
             Sprite editor
+          </button>
+          <button type="button" title="The master 3D board: raised land, sea zones, and a disc for each force" onClick={() => onOpenBoard("vanilla")}>
+            Vanilla
+          </button>
+          <button type="button" title="The vanilla board with the Shogun II art pass" onClick={() => onOpenBoard("shogun")}>
+            Shogun
           </button>
           <button type="button" onClick={() => setPage("settings")}>
             Settings
@@ -187,6 +203,13 @@ export function MainMenu({
             <button type="button" className={look === "dusk" ? "active" : ""} onClick={() => onLook("dusk")}>
               Dusk
             </button>
+          </div>
+          <div className="main-menu-seats" role="group" aria-label="Board">
+            {BOARD_VIEWS.map((view) => (
+              <button key={view} type="button" className={board === view ? "active" : ""} onClick={() => onBoard(view)}>
+                {BOARD_VIEW_LABEL[view]}
+              </button>
+            ))}
           </div>
           <button type="button" onClick={() => setPage("home")}>
             Back

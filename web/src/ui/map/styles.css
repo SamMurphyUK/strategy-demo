@@ -631,6 +631,32 @@
     margin-top: 10px;
   }
 
+  /* The Shogun board's corner buttons and its Visuals / Art Tuning drawer. */
+  & .art-tune-controls {
+    display: flex;
+    gap: 6px;
+  }
+
+  & .art-tune select {
+    grid-column: 2 / 4;
+    min-width: 0;
+  }
+
+  & .art-tune-flag {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 5px 0;
+    color: var(--parchment);
+    font: 11px/1.2 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  & .art-tune-flag input {
+    accent-color: var(--gold);
+  }
+
   & .muted {
     color: var(--ink-soft);
   }

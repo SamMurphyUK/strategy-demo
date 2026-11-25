@@ -95,6 +95,21 @@ export function sunAt(seconds: number, look: BoardLook = "field", still = false)
   return dayLight(phase / DAY_SHARE);
 }
 
+/** How far east or west of north a held sun can stand, in degrees. Inside the lit part of the day. */
+export const HELD_SUN_LIMIT = 50;
+
+/**
+ * The daylight with the sun held at an azimuth, in degrees east of north. It is the same arc the
+ * moving sun follows, so a held sun at 0 is noon and one at either limit is a long warm shadow.
+ */
+export function sunAtAzimuth(azimuthDeg: number, look: BoardLook = "field"): SunState {
+  if (look === "dusk") {
+    return DUSK;
+  }
+  const azimuth = Math.min(HELD_SUN_LIMIT, Math.max(-HELD_SUN_LIMIT, azimuthDeg));
+  return dayLight((62 - azimuth) / 124);
+}
+
 /**
  * Light on a surface facing `normalDotSun` toward the sun, as a multiplier on its colour. A face
  * square to the noon sun comes out near 1, so the flat top of the land keeps its printed colour.

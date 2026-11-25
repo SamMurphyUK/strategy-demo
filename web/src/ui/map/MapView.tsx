@@ -212,6 +212,8 @@ export interface MapViewProps {
   frame?: Rect | null;
   /** A board drawn under the canvases (the 3D viewport). It takes the ground; this view keeps the rest. */
   board?: BoardLayer | null;
+  /** True when the current faction moving into the region is an attack. The Shogun board tints its drop mark by it. */
+  isHostileTarget?(regionId: string): boolean;
 }
 
 let blankBake: Baked | null = null;

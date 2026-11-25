@@ -28,6 +28,7 @@ import { boardFrame } from "./editor/blankMap";
 import { editorToMapJson, startingStacks } from "./editor/editorModel";
 import { useMapEditor } from "./editor/useMapEditor";
 import { duskChrome, factionChrome } from "./factionChrome";
+import { type BoardView, boardViewOf, boardViewSearch } from "./boardView";
 import { buildMapGeometry, type HighlightMode, type StackEntry, stackKey } from "./geometry";
 import { committedMoves, peelHeld, type HeldMove } from "./combatRedirect";
 import { projectMapJson } from "./map_space";
@@ -134,6 +135,17 @@ function facingStacksFrom(state: { region_units: Record<string, { faction_id?: s
 
 /** The React Three Fiber board, behind `?view=3d`. Loaded on demand so Three.js stays out of the 2D bundle. */
 const MapViewport3D = lazy(() => import("../viewport3d/MapViewport3D"));
+/** The master copy of the first React Three Fiber board, behind `?view=vanilla` and the menu's Vanilla. */
+const MapViewportVanilla = lazy(() => import("../viewport3d/vanilla/MapViewportVanilla"));
+/** Vanilla with the Shogun II art pass, behind `?view=shogun` and the menu's Shogun. */
+const MapViewportShogun = lazy(() => import("../viewport3d/shogun/MapViewportShogun"));
+
+const BOARD_VIEWPORTS = {
+  "2d": MapView,
+  "3d": MapViewport3D,
+  vanilla: MapViewportVanilla,
+  shogun: MapViewportShogun,
+} as const;
 
 export function App() {
   const { game, room, online, isMyTurn, battleFeed } = useCampaignSession();
@@ -167,7 +179,17 @@ export function App() {
   const artQuery = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const spriteEditor = artQuery.get("bake") === "1";
   const fieldTest = artQuery.get("field") === "1";
-  const view3d = artQuery.get("view") === "3d";
+  const [boardView, setBoardView] = useState<BoardView>(() => boardViewOf(artQuery.get("view")));
+  const chooseBoard = useCallback((view: BoardView) => {
+    setBoardView(view);
+    try {
+      // Keep the address in step, so a reload opens the same board.
+      const { pathname, search, hash } = window.location;
+      window.history.replaceState(window.history.state, "", `${pathname}${boardViewSearch(search, view)}${hash}`);
+    } catch {
+      // The board still changes for this visit.
+    }
+  }, []);
   const [menuOpen, setMenuOpen] = useState(!(spriteEditor || fieldTest));
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [draft, setDraft] = useState<CampaignDraft>({
@@ -202,7 +224,7 @@ export function App() {
   const saves = useMemo(() => readCampaignSaves(), [saveTick]);
   const board = editing ? boardFrame(editor.map) : null;
   // The map editor draws on the 2D canvas, so it keeps the 2D map.
-  const Viewport = view3d && !editing ? MapViewport3D : MapView;
+  const Viewport = editing ? MapView : BOARD_VIEWPORTS[boardView];
 
   const stashSave = useCallback((): CampaignSave => {
     return {
@@ -1147,6 +1169,12 @@ export function App() {
           warningRegionId={warningSea}
           editor={editing ? editor.binding : undefined}
           bindCamera={bindCamera}
+          isHostileTarget={(regionId) =>
+            phase === "combat_move" &&
+            (state.regions[regionId]?.isSeaRegion()
+              ? state.holdsEnemyNavalUnit(regionId, faction)
+              : state.isRegionHostileTo(regionId, faction))
+          }
           menuBackdrop={menuOpen}
           referenceImage={editing ? editor.referenceUrl : null}
           frame={board}
@@ -1230,6 +1258,12 @@ export function App() {
           volume={volume}
           look={look}
           draft={draft}
+          board={boardView}
+          onBoard={chooseBoard}
+          onOpenBoard={(view) => {
+            chooseBoard(view);
+            setMenuOpen(false);
+          }}
           onOpenCampaign={() => setCampaignOpen(true)}
           onVolume={(value) => {
             setVolume(value);

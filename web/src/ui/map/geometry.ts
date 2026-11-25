@@ -117,6 +117,8 @@ export interface RegionShape {
   unitSlots?: Vec2[];
   /** A capital (`metadata.victory`): its IPC shield carries an emblem. */
   capital?: boolean;
+  /** `metadata.land_cover` in upper case (FOREST, MOUNTAIN, DESERT, SNOW, URBAN). Absent is open ground. */
+  landCover?: string;
   points: Vec2[];
   /** The other islands of a multi-island territory (`extra_polygons`). Absent for an ordinary region. */
   extra?: Vec2[][];
@@ -193,6 +195,7 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
     const facilityAt = land ? pointFromPair(meta.facility_anchor) : null;
     const airAt = pointFromPair(meta.air_anchor);
     const slots = pointsFromPairs(meta.unit_slots, unitSlotMax(!land));
+    const cover = land ? String(meta.land_cover ?? "").trim().toUpperCase() : "";
     regions.push({
       id,
       type,
@@ -207,6 +210,7 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
       airAnchorSet: airAt !== null,
       ...(slots.length > 0 ? { unitSlots: slots } : {}),
       capital: Boolean(meta.victory ?? false),
+      ...(cover !== "" ? { landCover: cover } : {}),
       points,
       ...(extra.length > 0 ? { extra } : {}),
       bounds,
