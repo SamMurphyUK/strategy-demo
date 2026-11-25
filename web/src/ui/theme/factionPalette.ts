@@ -55,8 +55,8 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     key: "GER",
     name: "Germany",
     side: "axis",
-    primary: "#8C7C79", // feldgrau
-    ring: "#4E5463", // steel
+    primary: "#7F90A8", // slate, lifted and cooled so it parts from forest green
+    ring: "#5E6E88", // steel
     fill: "#F9F8F6", // art
     ink: "#000000", // art
   },

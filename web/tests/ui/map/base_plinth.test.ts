@@ -67,7 +67,12 @@ describe("the turned base", () => {
   it("draws the wall, the top, the ring, and the faction's field, from the outside in", () => {
     const { ctx, calls } = recorder();
     drawBasePlinth(ctx, LOOK, SHAPE);
-    const fills = calls.filter((call) => call.op === "fill");
+    const all = calls.filter((call) => call.op === "fill");
+    // A soft contact shadow comes first: two faint black ellipses, wider than the base.
+    const shadows = all.filter((call) => call.fill === "#000000");
+    expect(shadows).toHaveLength(2);
+    expect(shadows.every((call) => call.alpha > 0 && call.alpha < 1 && call.args[2] > SHAPE.rx)).toBe(true);
+    const fills = all.filter((call) => call.fill !== "#000000");
     expect(fills.map((call) => call.fill)).toEqual([PLINTH_EBONY, PLINTH_WALNUT, plinthRingColor(SHAPE.color, LOOK.brass), SHAPE.color]);
     // The wall is the top face moved down the screen.
     expect(fills[0].args[1]).toBeGreaterThan(fills[1].args[1]);
@@ -87,7 +92,7 @@ describe("the turned base", () => {
     const { ctx, calls } = recorder();
     drawBasePlinth(ctx, LOOK, SHAPE);
     const parts = plinthParts(SHAPE, LOOK);
-    for (const call of calls) {
+    for (const call of calls.filter((item) => item.fill !== "#000000")) {
       expect(call.args[2]).toBeLessThanOrEqual(SHAPE.rx);
       expect(call.args[3]).toBeLessThanOrEqual(SHAPE.ry);
       expect(call.args[0]).toBe(SHAPE.x);
@@ -123,10 +128,10 @@ describe("the turned base", () => {
     };
     const satin = strokes(0.5);
     const matt = strokes(1);
-    // Two bevel lines always, and the highlight on top of them while there is any gloss.
-    expect(matt.length).toBe(2);
-    expect(satin.length).toBe(3);
-    const highlight = satin[2];
+    // Always: two bevel lines, the light outer edge, the faction ring, and the light inner edge. The highlight comes last, while there is any gloss.
+    expect(matt.length).toBe(5);
+    expect(satin.length).toBe(6);
+    const highlight = satin[5];
     expect(highlight.alpha).toBeGreaterThan(0);
     expect(highlight.alpha).toBeLessThan(1);
     // It lies on the rim, between the edge and the ring.
@@ -134,7 +139,7 @@ describe("the turned base", () => {
     expect(highlight.args[2]).toBeLessThan(SHAPE.rx);
     expect(highlight.args[2]).toBeGreaterThan(parts.ring.rx);
     // Glossier is brighter and shorter.
-    const polished = strokes(0.1)[2];
+    const polished = strokes(0.1)[5];
     expect(polished.alpha).toBeGreaterThan(highlight.alpha);
     expect(polished.args[6] - polished.args[5]).toBeLessThan(highlight.args[6] - highlight.args[5]);
   });

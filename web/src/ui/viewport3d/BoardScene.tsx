@@ -79,7 +79,7 @@ import { slabGeometry } from "./regionMeshes";
 import { buildSkyEnvironment } from "./skyEnv";
 import { type BoardLook, shadowLight, shadowReach, sunFor } from "./sun";
 import { fitSunShadow } from "./sunShadow";
-import { shadowDirection, MAX_UNIT_SHADOWS, writeUnitShadows } from "./unitShadows";
+import { shadowDirection, MAX_UNIT_SHADOWS, writeUnitClearings, writeUnitShadows } from "./unitShadows";
 import { boardAnimates, boardDetail } from "./zoomDetail";
 
 /** What MapView last painted, and how to ask the board for a frame. Mutable; never React state. */
@@ -1020,6 +1020,7 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
       chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH, coastField?.reach ?? 1, chart.regional ? 1 : 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
+      chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
     } else if (chartSheet.current) {
       chartSheet.current.dispose();
       chartSheet.current = null;

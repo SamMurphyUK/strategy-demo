@@ -85,6 +85,43 @@ export function contactShadow(x: number, y: number, radius: number, fade: number
   };
 }
 
+/** Most unit clearings the terrain shader reads. Past this the nearest to the screen's middle are kept. */
+export const MAX_UNIT_CLEARINGS = 96;
+/** How far past a base's radius the chart's dither and slope shade are fully eased, and where they are back in full. */
+export const CLEARING_REACH = 1.5;
+
+/**
+ * Where each unit stands, as map x, map y (down the sheet), and the radius of its base, in world
+ * units. The terrain shader eases its dither and slope shade down around these so a figure never
+ * sits on noise. Writes into `out` (one x, y, r triple per slot) and returns how many.
+ */
+export function writeUnitClearings(out: Float32Array, frame: BoardFrame): number {
+  const k = Math.max(frame.view.k, 1e-6);
+  const radius = frame.tokenPx / 2 / k;
+  const limit = Math.min(MAX_UNIT_CLEARINGS, Math.floor(out.length / 3));
+  const middle = { x: frame.width / 2, y: frame.height / 2 };
+  const seen: { x: number; y: number; d: number }[] = [];
+  for (const layout of frame.layouts) {
+    for (const counter of layout.counters) {
+      if (counter.x < -80 || counter.y < -80 || counter.x > frame.width + 80 || counter.y > frame.height + 80) {
+        continue;
+      }
+      seen.push({ x: counter.x, y: counter.y, d: Math.hypot(counter.x - middle.x, counter.y - middle.y) });
+    }
+  }
+  if (seen.length > limit) {
+    seen.sort((a, b) => a.d - b.d);
+  }
+  const count = Math.min(limit, seen.length);
+  for (let i = 0; i < count; i += 1) {
+    const world = screenToWorld(frame.view, seen[i]);
+    out[i * 3] = world.x;
+    out[i * 3 + 1] = world.y;
+    out[i * 3 + 2] = radius;
+  }
+  return count;
+}
+
 /**
  * Writes one matrix per counter in the frame into `out` (sixteen numbers each, column-major), for a
  * quad that spans -1 to 1. Returns how many were written. With `contact` set the figures cast

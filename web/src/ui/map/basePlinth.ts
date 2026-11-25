@@ -47,7 +47,9 @@ export function mixHex(a: string, b: string, t: number): string {
 export const PLINTH_EBONY = mixHex(MILITARY.charcoal, "#000000", 0.42);
 export const PLINTH_WALNUT = mixHex(MILITARY.charcoal, MILITARY.brown, 0.22);
 export const PLINTH_BEVEL = mixHex(MILITARY.brown, MILITARY.tan, 0.35);
-export const PLINTH_BRASS = mixHex(MILITARY.brass, MILITARY.cream, 0.18);
+/** The pale line round a base's outer and inner rim. Light enough to part it from dark ground. */
+export const PLINTH_EDGE = mixHex(PLINTH_BEVEL, MILITARY.cream, 0.45);
+export const PLINTH_BRASS =mixHex(MILITARY.brass, MILITARY.cream, 0.18);
 
 /** The colour of the inner ring: the faction's own at 0, brass at 1. */
 export function plinthRingColor(faction: string, brass: number): string {
@@ -80,6 +82,17 @@ export function drawBasePlinth(ctx: PlinthContext, look: PlinthLook, shape: Plin
   const parts = plinthParts(shape, look);
   const full = Math.PI * 2;
   ctx.save();
+  // A soft contact shadow: two dark ellipses, wide and faint then close and firmer, so the base sits on the ground.
+  ctx.fillStyle = "#000000";
+  ctx.globalAlpha = 0.14;
+  ctx.beginPath();
+  ctx.ellipse(x, y + parts.wall + ry * 0.2, rx * 1.28, ry * 1.4, 0, 0, full);
+  ctx.fill();
+  ctx.globalAlpha = 0.22;
+  ctx.beginPath();
+  ctx.ellipse(x, y + parts.wall + ry * 0.1, rx * 1.12, ry * 1.18, 0, 0, full);
+  ctx.fill();
+  ctx.globalAlpha = 1;
   // The wall of the disc, seen below its top face.
   ctx.beginPath();
   ctx.ellipse(x, y + parts.wall, rx, ry, 0, 0, full);
@@ -103,11 +116,34 @@ export function drawBasePlinth(ctx: PlinthContext, look: PlinthLook, shape: Plin
   ctx.globalAlpha = 0.7;
   ctx.stroke();
   ctx.globalAlpha = 1;
+  // A light edge all the way round the outside, so the dark base parts from dark ground.
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, full);
+  ctx.strokeStyle = PLINTH_EDGE;
+  ctx.globalAlpha = 0.85;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // The faction's ring, just inside the rim.
+  const band = Math.max(1, rx * 0.07);
+  ctx.beginPath();
+  ctx.ellipse(x, y, Math.max(0.5, (rx + parts.ring.rx) / 2), Math.max(0.5, (ry + parts.ring.ry) / 2), 0, 0, full);
+  ctx.lineWidth = band;
+  ctx.strokeStyle = shape.color;
+  ctx.stroke();
   // The ring let into the wood, and the faction's colour inside it.
   ctx.beginPath();
   ctx.ellipse(x, y, parts.ring.rx, parts.ring.ry, 0, 0, full);
   ctx.fillStyle = plinthRingColor(shape.color, look.brass);
   ctx.fill();
+  // A light line round the inside of the ring where it meets the field.
+  ctx.beginPath();
+  ctx.ellipse(x, y, parts.ring.rx, parts.ring.ry, 0, 0, full);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = PLINTH_EDGE;
+  ctx.globalAlpha = 0.6;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
   ctx.beginPath();
   ctx.ellipse(x, y, parts.field.rx, parts.field.ry, 0, 0, full);
   ctx.fillStyle = shape.color;

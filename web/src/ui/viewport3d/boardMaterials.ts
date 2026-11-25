@@ -6,6 +6,7 @@
 // one are two flat tones the way they are in the sprites.
 import * as THREE from "three";
 import { MILITARY } from "../theme/militaryPalette";
+import { CLEARING_REACH } from "./unitShadows";
 import { PIXIE_COAST_REACH, PIXIE_HEIGHT_TOP, PIXIE_INK, PIXIE_LAND, PIXIE_SEA, PIXIE_SHELF_WIDTH, unitRgb } from "./pixieSheet";
 
 export type Rgb = [number, number, number];
@@ -306,7 +307,15 @@ export interface PixieUniforms {
   uPixFaction: { value: THREE.Texture | null };
   /** The signed distance to the coast (see buildCoastField). */
   uPixCoast: { value: THREE.Texture | null };
+  /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
+  uPixUnits: { value: Float32Array };
+  uPixUnitN: { value: number };
 }
+
+/** Slots in the terrain shader's unit list. The same number as MAX_UNIT_CLEARINGS in unitShadows.ts. */
+export const PIXIE_UNIT_SLOTS = 96;
+/** Where the dither and the slope shade stand under a unit: a share of what they are elsewhere. */
+const PIXIE_CLEAR_LEVEL = 0.18;
 
 export function pixieUniforms(): PixieUniforms {
   return {
@@ -319,6 +328,8 @@ export function pixieUniforms(): PixieUniforms {
     uPixIds: { value: null },
     uPixFaction: { value: null },
     uPixCoast: { value: null },
+    uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
+    uPixUnitN: { value: 0 },
   };
 }
 
@@ -331,6 +342,24 @@ function glslColor(hex: string): string {
 /** The texel grid, the ordered dither, and the chart's colours. It needs `hash21` from NOISE before it. */
 const PIXEL = /* glsl */ `
 uniform vec4 uPixGrid;
+uniform vec3 uPixUnits[${PIXIE_UNIT_SLOTS}];
+uniform float uPixUnitN;
+// 1 at a unit's base and out to its edge, easing to 0 at ${CLEARING_REACH} times the base's radius. Where it is 1 the
+// dither and the slope shade stand at a fraction of their strength, so a figure never sits on noise.
+float pixClearing(vec2 p) {
+  float near = 0.0;
+  for (int i = 0; i < ${PIXIE_UNIT_SLOTS}; i++) {
+    if (float(i) >= uPixUnitN) {
+      break;
+    }
+    vec3 u = uPixUnits[i];
+    near = max(near, 1.0 - smoothstep(u.z * 0.8, u.z * ${CLEARING_REACH.toFixed(2)}, distance(p, u.xy)));
+  }
+  return near;
+}
+float pixCalm(vec2 p) {
+  return mix(1.0, ${PIXIE_CLEAR_LEVEL.toFixed(2)}, pixClearing(p));
+}
 const vec3 PIX_LAND[20] = vec3[20](${PIXIE_LAND.flat().map(glslColor).join(", ")});
 const vec3 PIX_SEA[4] = vec3[4](${PIXIE_SEA.map(glslColor).join(", ")});
 const vec3 PIX_UMBER = ${glslColor(PIXIE_INK.umber)};
@@ -527,7 +556,9 @@ export function landTopMaterial(
         sceneAt += vec2(m.x - mapAt.x, mapAt.y - m.y);
         vec2 uv = sheetUv(m);
         float bay = bayer4(cell) + 0.03125;
-        float spread = (bay - 0.5) * uPixGrid.w;
+        // Under and around a unit the dither and the slope shade ease down, so the figure reads on quiet ground.
+        float calm = pixCalm(m);
+        float spread = (bay - 0.5) * uPixGrid.w * calm;
 
         // The ground cover is read a little off its place, so the boxes of the biome table do
         // not show as straight lines. The height is read where it is.
@@ -578,10 +609,12 @@ export function landTopMaterial(
         vec2 sunward = normalize(vec2(uSunDir.x, -uSunDir.y) + vec2(1e-4));
         float lean = clamp(-dot(grad, sunward) * uPixShade.x, -1.0, 1.0);
         float level = clamp(floor(lean * uPixShade.y + 0.5 + spread * 0.5) / uPixShade.y, -1.0, 1.0);
+        // The band between the darkest shade and the brightest light is held narrow, so a figure's own darks and lights stand clear of it.
+        level *= calm;
         if (level < 0.0) {
-          c = mix(c, mix(PIX_UMBER, PIX_SNOW_SHADE, snowy), -level * 0.72);
+          c = mix(c, mix(PIX_UMBER, PIX_SNOW_SHADE, snowy), -level * 0.52);
         } else {
-          c = mix(c, mix(PIX_CHALK, vec3(1.0), snowy), level * 0.38);
+          c = mix(c, mix(PIX_CHALK, vec3(1.0), snowy), level * 0.28);
         }
 
         // The coast: a texel that is on the water's edge, or has a neighbour that is.
