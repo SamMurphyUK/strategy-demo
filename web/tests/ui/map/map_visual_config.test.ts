@@ -1,21 +1,30 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  aoLook,
   applyVisuals,
+  BLOOM_THRESHOLD,
+  bloomLook,
   bokehShare,
   DEFAULT_VISUALS,
   factionWash,
   friendlyBorderInk,
   frontlineInk,
   getVisualRev,
+  grainAmount,
   mapVisuals,
+  outlineLook,
   parseVisuals,
+  PLAIN_VISUALS,
   resetVisuals,
   setVisual,
+  shadowMapSize,
+  skySheen,
   SOLID_VISUALS,
   subscribeVisuals,
   VISUAL_PRESETS,
   visualPresetJson,
   visualPresetOf,
+  wantsFigureCards,
 } from "../../../src/ui/map/mapVisualConfig";
 
 afterEach(() => {
@@ -96,6 +105,85 @@ describe("parsing a preset", () => {
       expect(visualPresetOf(VISUAL_PRESETS[name])).toBe(name);
     }
     expect(visualPresetOf({ ...DEFAULT_VISUALS, smokeOpacity: 0.1 })).toBe("custom");
+  });
+});
+
+describe("light and lens", () => {
+  it("ships the shade, the shadows, and the sky at medium, and the glow and the grain low", () => {
+    expect(DEFAULT_VISUALS.aoWeight).toBe("medium");
+    expect(DEFAULT_VISUALS.bloomWeight).toBe("low");
+    expect(DEFAULT_VISUALS.filmGrainWeight).toBe("low");
+    expect(DEFAULT_VISUALS.outlineMode).toBe("units-only");
+    expect(DEFAULT_VISUALS.shadowQuality).toBe("medium");
+    expect(DEFAULT_VISUALS.envReflectionWeight).toBe("medium");
+    expect(DEFAULT_VISUALS.sunCycle).toBe("animated");
+  });
+
+  it("turns every one of them off for the plain board", () => {
+    expect(aoLook(PLAIN_VISUALS.aoWeight)).toBeNull();
+    expect(bloomLook(PLAIN_VISUALS.bloomWeight)).toBeNull();
+    expect(grainAmount(PLAIN_VISUALS.filmGrainWeight, 0)).toBe(0);
+    expect(outlineLook(PLAIN_VISUALS.outlineMode)).toEqual({ line: 0, wash: 0 });
+    expect(shadowMapSize(PLAIN_VISUALS.shadowQuality)).toBe(0);
+    expect(skySheen(PLAIN_VISUALS.envReflectionWeight)).toBe(0);
+    expect(wantsFigureCards(PLAIN_VISUALS)).toEqual({ shadows: false, outline: false });
+  });
+
+  it("has no work for a weight that is off, and more for each step up", () => {
+    expect(aoLook("off")).toBeNull();
+    expect(bloomLook("off")).toBeNull();
+    const weights = ["low", "medium", "high"] as const;
+    for (let i = 1; i < weights.length; i++) {
+      expect(aoLook(weights[i])!.strength).toBeGreaterThan(aoLook(weights[i - 1])!.strength);
+      expect(aoLook(weights[i])!.samples).toBeGreaterThan(aoLook(weights[i - 1])!.samples);
+      expect(bloomLook(weights[i])!.strength).toBeGreaterThan(bloomLook(weights[i - 1])!.strength);
+      expect(shadowMapSize(weights[i])).toBe(shadowMapSize(weights[i - 1]) * 2);
+      expect(skySheen(weights[i])).toBeGreaterThan(skySheen(weights[i - 1]));
+      expect(grainAmount(weights[i], 0)).toBeGreaterThan(grainAmount(weights[i - 1], 0));
+    }
+    expect(shadowMapSize("low")).toBe(1024);
+    expect(shadowMapSize("medium")).toBe(2048);
+  });
+
+  it("glows only above paper white", () => {
+    expect(BLOOM_THRESHOLD).toBeCloseTo(1.05, 6);
+  });
+
+  it("grains the strategic sheet more than the table, and never by much", () => {
+    for (const weight of ["low", "medium", "high"] as const) {
+      expect(grainAmount(weight, 0)).toBeGreaterThan(grainAmount(weight, 1));
+      expect(grainAmount(weight, 1)).toBeGreaterThan(0);
+      expect(grainAmount(weight, 0)).toBeLessThan(0.08);
+    }
+  });
+
+  it("draws a line, a wash, both, or nothing round a stack", () => {
+    expect(outlineLook("units-only")).toEqual({ line: 1, wash: 0 });
+    expect(outlineLook("watercolor-only")).toEqual({ line: 0, wash: 1 });
+    expect(outlineLook("both")).toEqual({ line: 1, wash: 1 });
+    expect(outlineLook("off")).toEqual({ line: 0, wash: 0 });
+  });
+
+  it("asks for the figures' own canvas only when something reads it", () => {
+    expect(wantsFigureCards(DEFAULT_VISUALS)).toEqual({ shadows: true, outline: true });
+    expect(wantsFigureCards({ ...DEFAULT_VISUALS, shadowQuality: "off" }).shadows).toBe(false);
+    // No sun, no cast shadows.
+    expect(wantsFigureCards({ ...DEFAULT_VISUALS, sunCycle: "off" }).shadows).toBe(false);
+    expect(wantsFigureCards({ ...DEFAULT_VISUALS, outlineMode: "off" }).outline).toBe(false);
+  });
+
+  it("reads an unknown weight as the base's", () => {
+    const parsed = parseVisuals({ aoWeight: "ultra", outlineMode: "glow", sunCycle: "midnight", shadowQuality: "high" });
+    expect(parsed.aoWeight).toBe(DEFAULT_VISUALS.aoWeight);
+    expect(parsed.outlineMode).toBe(DEFAULT_VISUALS.outlineMode);
+    expect(parsed.sunCycle).toBe(DEFAULT_VISUALS.sunCycle);
+    expect(parsed.shadowQuality).toBe("high");
+  });
+
+  it("leaves the highlight rule alone, so a territory is never marked by an idle pointer", () => {
+    for (const mode of ["units-only", "watercolor-only", "both", "off"] as const) {
+      expect(parseVisuals({ outlineMode: mode }).highlightMode).toBe("click-and-drag");
+    }
   });
 });
 

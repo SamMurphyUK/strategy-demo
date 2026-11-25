@@ -110,6 +110,51 @@ export function sunAtAzimuth(azimuthDeg: number, look: BoardLook = "field"): Sun
   return dayLight((62 - azimuth) / 124);
 }
 
+export type SunCycleMode = "animated" | "static-noon" | "static-golden" | "off";
+
+/** The held sun of the golden setting: the west end of the arc, late in the afternoon. */
+export const GOLDEN_AZIMUTH = -HELD_SUN_LIMIT;
+
+/**
+ * The light for a sun setting. `animated` is the moving day, or the sun held at `held` degrees
+ * when a board holds it. The two static settings stand on the same arc. `off` is the even light
+ * between days: no direct light, and nothing casts.
+ */
+export function sunFor(
+  cycle: SunCycleMode,
+  seconds: number,
+  look: BoardLook = "field",
+  still = false,
+  held: number | null = null,
+): SunState {
+  if (cycle === "off") {
+    const rest = sunAtAzimuth(0, look);
+    return { ...rest, direct: 0, shadow: 0 };
+  }
+  if (cycle === "static-noon") {
+    return sunAtAzimuth(0, look);
+  }
+  if (cycle === "static-golden") {
+    return sunAtAzimuth(GOLDEN_AZIMUTH, look);
+  }
+  return held === null ? sunAt(seconds, look, still) : sunAtAzimuth(held, look);
+}
+
+/**
+ * The direction cast shadows are thrown from: the sun's bearing, lifted until a shadow is no
+ * longer than `cap` times the height of what casts it. A dawn sun would lay a forest's shadows
+ * across the whole territory.
+ */
+export function shadowLight(sun: SunState, cap = 1): Triple {
+  const flat = Math.hypot(sun.dir[0], sun.dir[1]);
+  if (flat < 1e-6) {
+    return [0, 0, 1];
+  }
+  const reach = Math.min(cap, flat / Math.max(sun.dir[2], 1e-3));
+  const length = Math.hypot(reach, 1);
+  return [(sun.dir[0] / flat) * (reach / length), (sun.dir[1] / flat) * (reach / length), 1 / length];
+}
+
 /**
  * Light on a surface facing `normalDotSun` toward the sun, as a multiplier on its colour. A face
  * square to the noon sun comes out near 1, so the flat top of the land keeps its printed colour.

@@ -6,25 +6,50 @@
 // Three.js. Nothing here sets React state inside a frame. The loop runs on demand: a painted frame
 // from MapView asks for one, and while something on the board moves (water, smoke, the sun) the
 // loop keeps itself going, drawing at most thirty times a second.
+//
+// The light and the lens (see mapVisualConfig.ts) are read here each frame. The sun's shadow map
+// is a second picture of the board, taken from the sun before the board itself is drawn; the
+// shade, the glow, the outline, and the grain belong to the finishing passes in postStack.ts.
+// Each one that is off is not drawn, not allocated, and not in any shader.
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import type { BoardFrame } from "../map/boardLayer";
+import type { BoardFrame, FigureCards } from "../map/boardLayer";
+import { stackOfFigure } from "../map/figureCards";
 import type { Rect } from "../map/geometry";
 import type { MultiPolygon } from "../map/regionClip";
 import { gradeSaturation, gradeWarm, tunedBoard } from "../map/boardTune";
 import { getBoardTune } from "../map/boardTuneStore";
-import { factionWash, friendlyBorderInk, frontlineInk, mapVisuals, subscribeVisuals } from "../map/mapVisualConfig";
+import {
+  aoLook,
+  BLOOM_THRESHOLD,
+  bloomLook,
+  factionWash,
+  friendlyBorderInk,
+  frontlineInk,
+  grainAmount,
+  mapVisuals,
+  outlineLook,
+  shadowMapSize,
+  skySheen,
+  subscribeVisuals,
+} from "../map/mapVisualConfig";
 import { getDrawFlags } from "../map/renderDebug";
 import type { CraterMark } from "../map/terrainRelief";
+import { projectionScales, screenToWorld } from "../map/viewMath";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
 import {
+  cardCasterMaterial,
+  cliffCasterMaterial,
   cliffMaterial,
   craterMaterial,
   landTopMaterial,
+  OUTLINE_SLOTS,
   OVERLAY_SLOTS,
+  propCasterMaterial,
   propMaterial,
   propShadowMaterial,
+  setDefine,
   sharedUniforms,
   smokeMaterial,
   unitShadowMaterial,
@@ -32,12 +57,14 @@ import {
 } from "./boardMaterials";
 import { clearTexture, overlayTexture, sheetTexture } from "./boardTextures";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
-import { rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
-import { PostStack } from "./postStack";
+import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
+import { type FrameEffects, PostStack } from "./postStack";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
 import { slabGeometry } from "./regionMeshes";
-import { type BoardLook, shadowReach, sunAt, sunAtAzimuth } from "./sun";
+import { buildSkyEnvironment } from "./skyEnv";
+import { type BoardLook, shadowLight, shadowReach, sunFor } from "./sun";
+import { fitSunShadow } from "./sunShadow";
 import { shadowDirection, MAX_UNIT_SHADOWS, writeUnitShadows } from "./unitShadows";
 import { boardAnimates, boardDetail } from "./zoomDetail";
 
@@ -97,6 +124,26 @@ const CRATER_LIFT = 0.02;
 const UNIT_SHADOW_LIFT = 0.04;
 const PUFFS = { battle: 9, minor: 5, chimney: 5 } as const;
 
+/** The layer only the sun's shadow camera draws. The board camera draws layer 0 and never sees it. */
+const CASTER_LAYER = 1;
+/**
+ * A cast shadow is never longer than this share of the height of what casts it. The cliff is the
+ * tallest thing on the board, and a longer shadow than this puts a narrow sea wholly in the dark.
+ */
+const CAST_REACH = 0.8;
+/** Taller than any tree, peak, building, or figure, in world units. The shadow camera clears it. */
+const CASTER_TOP = 16;
+/** Most standing figures that cast in one frame. */
+const MAX_FIGURE_CARDS = 1024;
+/** What a full cast shadow multiplies the ground by: cooler than the light, and not black. */
+const CAST_TINT: readonly [number, number, number] = [0.64, 0.66, 0.79];
+/** How bright an ember is while the glow is on. Above 1 it is hot enough to spread. */
+const EMBER_GLOW = 2.4;
+/** The camera's steepest tip, in radians: the sea shows the most sky from here. */
+const FULL_TILT = 0.55;
+const SELECT_INK = rgbOf(PIGMENT.select);
+const HOVER_INK = rgbOf(PIGMENT.hover);
+
 interface Kit {
   shared: ReturnType<typeof sharedUniforms>;
   landTop: THREE.ShaderMaterial;
@@ -107,27 +154,206 @@ interface Kit {
   unitShadow: THREE.ShaderMaterial;
   crater: THREE.ShaderMaterial;
   smoke: THREE.ShaderMaterial;
+  /** The same shapes as the sun sees them: depth only, drawn into the shadow map. */
+  cliffCaster: THREE.ShaderMaterial;
+  propCaster: THREE.ShaderMaterial;
+  cardCaster: THREE.ShaderMaterial;
+  /** The top of the land casts on nothing: it is the ground the shadows fall on. */
+  noCaster: THREE.Material;
 }
 
 function createKit(): Kit {
   const shared = sharedUniforms();
+  const prop = propMaterial(shared);
   return {
     shared,
     landTop: landTopMaterial(shared),
     cliff: cliffMaterial(shared, SEA_DROP),
     water: waterMaterial(shared, SEA_DROP),
-    prop: propMaterial(shared),
+    prop,
     propShadow: propShadowMaterial(shared),
     unitShadow: unitShadowMaterial(),
     crater: craterMaterial(shared),
     smoke: smokeMaterial(shared),
+    cliffCaster: cliffCasterMaterial(),
+    propCaster: propCasterMaterial(prop.uniforms.uGrow),
+    cardCaster: cardCasterMaterial(),
+    noCaster: new THREE.MeshBasicMaterial({ visible: false }),
   };
 }
 
 function disposeKit(kit: Kit): void {
-  for (const material of [kit.landTop, kit.cliff, kit.water, kit.prop, kit.propShadow, kit.unitShadow, kit.crater, kit.smoke]) {
+  for (const material of [
+    kit.landTop,
+    kit.cliff,
+    kit.water,
+    kit.prop,
+    kit.propShadow,
+    kit.unitShadow,
+    kit.crater,
+    kit.smoke,
+    kit.cliffCaster,
+    kit.propCaster,
+    kit.cardCaster,
+    kit.noCaster,
+  ]) {
     material.dispose();
   }
+}
+
+/** The sun's shadow map: a depth texture read through a comparing sampler, so the hardware filters each tap. */
+function sunTarget(size: number): THREE.WebGLRenderTarget {
+  const target = new THREE.WebGLRenderTarget(size, size, {
+    depthBuffer: true,
+    stencilBuffer: false,
+    colorSpace: THREE.NoColorSpace,
+    // Nothing is drawn to the colour; one byte a texel is the least it can be.
+    format: THREE.RedFormat,
+  });
+  const depth = new THREE.DepthTexture(size, size, THREE.UnsignedIntType);
+  depth.format = THREE.DepthFormat;
+  depth.compareFunction = THREE.LessEqualCompare;
+  depth.minFilter = THREE.LinearFilter;
+  depth.magFilter = THREE.LinearFilter;
+  target.depthTexture = depth;
+  return target;
+}
+
+/** A figure canvas as a texture. Its alpha is all that is read. */
+function figureTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+interface CanvasSlot {
+  texture: THREE.CanvasTexture;
+  canvas: HTMLCanvasElement;
+  width: number;
+  height: number;
+  paint: number;
+}
+
+/** The texture for a canvas the map repaints: made again when the canvas changes size, sent again when it is repainted. */
+function canvasSlot(slot: CanvasSlot | null, canvas: HTMLCanvasElement, paint: number): CanvasSlot {
+  if (!slot || slot.canvas !== canvas || slot.width !== canvas.width || slot.height !== canvas.height) {
+    slot?.texture.dispose();
+    return { texture: figureTexture(canvas), canvas, width: canvas.width, height: canvas.height, paint };
+  }
+  if (slot.paint !== paint) {
+    slot.texture.needsUpdate = true;
+    slot.paint = paint;
+  }
+  return slot;
+}
+
+/**
+ * Everything the sun's shadow pass owns: its camera, its map, and the cards the standing figures
+ * cast from. The map and the textures are made when the shadows are switched on and dropped when
+ * they are switched off.
+ */
+interface SunRig {
+  camera: THREE.OrthographicCamera;
+  target: THREE.WebGLRenderTarget | null;
+  cards: THREE.Mesh<THREE.InstancedBufferGeometry>;
+  foot: THREE.InstancedBufferAttribute;
+  box: THREE.InstancedBufferAttribute;
+  sheet: THREE.InstancedBufferAttribute;
+  mask: CanvasSlot | null;
+  /** The paint the cards were last laid out for. */
+  paint: number;
+  kinds: Map<string, number>;
+}
+
+function createSunRig(material: THREE.Material): SunRig {
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.5, 100);
+  camera.layers.set(CASTER_LAYER);
+  camera.up.set(0, 0, 1);
+  const quad = new THREE.PlaneGeometry(1, 1);
+  quad.translate(0.5, 0.5, 0);
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.index = quad.index;
+  geometry.setAttribute("position", quad.getAttribute("position"));
+  const attribute = (size: number) => {
+    const made = new THREE.InstancedBufferAttribute(new Float32Array(MAX_FIGURE_CARDS * size), size);
+    made.setUsage(THREE.DynamicDrawUsage);
+    return made;
+  };
+  const foot = attribute(3);
+  const box = attribute(4);
+  const sheet = attribute(4);
+  geometry.setAttribute("aFoot", foot);
+  geometry.setAttribute("aBox", box);
+  geometry.setAttribute("aSheet", sheet);
+  geometry.instanceCount = 0;
+  const cards = new THREE.Mesh(geometry, material);
+  cards.frustumCulled = false;
+  cards.layers.set(CASTER_LAYER);
+  cards.visible = false;
+  return { camera, target: null, cards, foot, box, sheet, mask: null, paint: -1, kinds: new Map() };
+}
+
+function disposeSunRig(rig: SunRig): void {
+  rig.target?.depthTexture?.dispose();
+  rig.target?.dispose();
+  rig.mask?.texture.dispose();
+  rig.cards.geometry.dispose();
+}
+
+const SEA_KIND = 1;
+const AIR_KIND = 2;
+
+/**
+ * Lays one card for each standing figure: where its feet are on the board, how far its picture
+ * reaches from them, and where that picture is on the figure canvas. A ship stands on the water,
+ * and an aircraft is lifted off the ground, so its shadow falls clear of it.
+ */
+function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number): number {
+  rig.kinds.clear();
+  for (const layout of frame.layouts) {
+    const sea = layout.region.type === "sea" ? SEA_KIND : 0;
+    for (const counter of layout.counters) {
+      rig.kinds.set(`${layout.region.id}|${layout.copyDx}|${counter.slot.key}`, sea | (counter.domain === "air" ? AIR_KIND : 0));
+    }
+  }
+  const dpr = frame.dpr > 0 ? frame.dpr : 1;
+  // Device pixels for each world unit across the screen. Height is measured with the same rule:
+  // a figure is drawn facing the screen, so a pixel up its picture is a pixel of its height.
+  const perUnit = Math.max(projectionScales(frame.view.k).sx * dpr, 1e-6);
+  const lift = (frame.tokenPx / 2 / Math.max(frame.view.k, 1e-6)) * 1.1;
+  const scale = figures.maskScale;
+  const foot = rig.foot.array as Float32Array;
+  const box = rig.box.array as Float32Array;
+  const sheet = rig.sheet.array as Float32Array;
+  let count = 0;
+  for (const card of figures.cards) {
+    if (count >= MAX_FIGURE_CARDS) {
+      break;
+    }
+    const world = screenToWorld(frame.view, { x: card.feetX / dpr, y: card.feetY / dpr });
+    const kind = rig.kinds.get(stackOfFigure(card.id)) ?? 0;
+    const sea = (kind & SEA_KIND) !== 0;
+    foot[count * 3] = world.x;
+    foot[count * 3 + 1] = -world.y + (sea ? shift : 0);
+    foot[count * 3 + 2] = (sea ? -SEA_DROP : 0) + ((kind & AIR_KIND) !== 0 ? lift : 0);
+    box[count * 4] = (card.left - card.feetX) / perUnit;
+    box[count * 4 + 1] = (card.feetY - (card.top + card.h)) / perUnit;
+    box[count * 4 + 2] = card.w / perUnit;
+    box[count * 4 + 3] = card.h / perUnit;
+    sheet[count * 4] = (card.left * scale) / mask.width;
+    sheet[count * 4 + 1] = 1 - ((card.top + card.h) * scale) / mask.height;
+    sheet[count * 4 + 2] = ((card.left + card.w) * scale) / mask.width;
+    sheet[count * 4 + 3] = 1 - (card.top * scale) / mask.height;
+    count += 1;
+  }
+  rig.foot.needsUpdate = true;
+  rig.box.needsUpdate = true;
+  rig.sheet.needsUpdate = true;
+  return count;
 }
 
 /** Builds Three.js objects for a render and disposes them when they are replaced or unmounted. */
@@ -164,12 +390,16 @@ function PropField({ kind, instances, kit }: PropFieldProps) {
         mesh.renderOrder = order;
         return mesh;
       };
-      return { geometry, prop: make(kit.prop, 0, true), shadow: make(kit.propShadow, 1, false) };
+      // The same instances once more, for the sun's shadow map only.
+      const caster = make(kit.propCaster, 0, false);
+      caster.layers.set(CASTER_LAYER);
+      return { geometry, prop: make(kit.prop, 0, true), shadow: make(kit.propShadow, 1, false), caster };
     },
     (old) => {
       old.geometry.dispose();
       old.prop.dispose();
       old.shadow.dispose();
+      old.caster.dispose();
     },
     [kind, instances, kit],
   );
@@ -177,6 +407,7 @@ function PropField({ kind, instances, kit }: PropFieldProps) {
     <>
       <primitive object={field.prop} />
       <primitive object={field.shadow} />
+      <primitive object={field.caster} />
     </>
   );
 }
@@ -292,8 +523,27 @@ export function BoardScene(props: BoardSceneProps) {
     uniforms.uShadowAlpha = source.uShadowAlpha;
     uniforms.uBounds = source.uBounds;
     uniforms.uMask = source.uMask;
+    uniforms.uSunMap = source.uSunMap;
+    uniforms.uSunMatrix = source.uSunMatrix;
+    uniforms.uSunTexel = source.uSunTexel;
+    uniforms.uSunTint = source.uSunTint;
     return uniforms;
   }, [kit]);
+  const rig = useDisposable(() => createSunRig(kit.cardCaster), disposeSunRig, [kit]);
+  const slabCaster = useMemo(() => [kit.noCaster, kit.cliffCaster], [kit]);
+  /** The sky the sea mirrors, and the canvas of the marked stacks. Both exist only while they are used. */
+  const sky = useRef<THREE.WebGLRenderTarget | null>(null);
+  const outlineMap = useRef<CanvasSlot | null>(null);
+  const sunMatrix = useMemo(() => new THREE.Matrix4(), []);
+  useEffect(
+    () => () => {
+      sky.current?.dispose();
+      sky.current = null;
+      outlineMap.current?.texture.dispose();
+      outlineMap.current = null;
+    },
+    [],
+  );
   const shogunLand = useDisposable(
     () => landMaterial(shogunShared),
     (old) => old.dispose(),
@@ -385,11 +635,17 @@ export function BoardScene(props: BoardSceneProps) {
     kit.water.uniforms.uWaveTint.value.copy(rgbOf(SHOGUN.seaShelf));
     kit.water.uniforms.uTable.value.copy(rgbOf(SHOGUN.beyond));
     kit.water.uniforms.uNeat.value.copy(rgbOf(SHOGUN.foam));
-    return subscribeVisuals(() => {
-      clock.current.dirty = true;
-      invalidate();
-    });
-  }, [shogunTextures, kit, invalidate]);
+  }, [shogunTextures, kit]);
+
+  // The light and the lens are read on every board, so every board redraws when a setting moves.
+  useEffect(
+    () =>
+      subscribeVisuals(() => {
+        clock.current.dirty = true;
+        invalidate();
+      }),
+    [invalidate],
+  );
 
   useEffect(() => {
     store.invalidate = () => invalidate();
@@ -437,7 +693,8 @@ export function BoardScene(props: BoardSceneProps) {
 
     const seconds = still ? OPENING_SECONDS : OPENING_SECONDS + (now - state.start) / 1000;
     const shogun = shogunTextures !== null;
-    const sun = shogun && !mapVisuals.sunSweep ? sunAtAzimuth(mapVisuals.sunAzimuth, look) : sunAt(seconds, look, still);
+    // The Shogun board can hold its moving sun at an azimuth. The static settings win over that.
+    const sun = sunFor(mapVisuals.sunCycle, seconds, look, still, shogun && !mapVisuals.sunSweep ? mapVisuals.sunAzimuth : null);
     const { shared } = kit;
     shared.uTime.value = seconds;
     shared.uStepTime.value = Math.floor(seconds * 12) / 12;
@@ -450,7 +707,42 @@ export function BoardScene(props: BoardSceneProps) {
     // Kept short: a forest's long shadows read as hatching across the territory.
     const reach = Math.min(shadowReach(sun), PROP_SHADOW_REACH);
     shared.uShadowVec.value.set(fall.x * reach, fall.y * reach);
-    shared.uShadowAlpha.value = sun.shadow * detail.relief;
+
+    // The sun's shadow map. With it on, the cliff, the props, and the figures cast for real, and
+    // the flattened stand-ins they used to cast with are put away.
+    const mapSize = shadowMapSize(mapVisuals.shadowQuality);
+    const sunMap = mapSize > 0;
+    const cast = sunMap ? sun.direct * detail.relief : 0;
+    const casting = cast > 0.004;
+    shared.uShadowAlpha.value = sunMap ? 0 : sun.shadow * detail.relief;
+    const kernel = sunMap ? (mapSize >= 4096 ? 2 : 1) : null;
+    setDefine(kit.landTop, "SUN_SHADOW", kernel);
+    setDefine(shogunLand, "SUN_SHADOW", kernel);
+    setDefine(kit.water, "SUN_SHADOW", kernel);
+    setDefine(kit.prop, "SUN_SHADOW", kernel);
+    setDefine(post.grade, "SUN_SHADOW", kernel);
+    if (!sunMap && rig.target) {
+      rig.target.depthTexture?.dispose();
+      rig.target.dispose();
+      rig.target = null;
+      rig.mask?.texture.dispose();
+      rig.mask = null;
+      shared.uSunMap.value = null;
+    } else if (sunMap && (!rig.target || rig.target.width !== mapSize)) {
+      rig.target?.depthTexture?.dispose();
+      rig.target?.dispose();
+      rig.target = sunTarget(mapSize);
+      shared.uSunMap.value = rig.target.depthTexture;
+      // A map that was never drawn has no texture behind it, and every shader that reads it then
+      // draws nothing at all. From altitude nothing casts, so the first pass may be a long way off.
+      gl.setRenderTarget(rig.target);
+      gl.clear(false, true, false);
+      gl.setRenderTarget(null);
+    }
+    // A full shadow is the ground with the sun taken off it: cooler, and a third darker.
+    const depth = cast * (sun.direct > 0 ? sun.shadow / (0.3 * sun.direct) : 0);
+    shared.uSunTint.value.set(1 - (1 - CAST_TINT[0]) * depth, 1 - (1 - CAST_TINT[1]) * depth, 1 - (1 - CAST_TINT[2]) * depth);
+    post.grade.uniforms.uSunTint.value.copy(shared.uSunTint.value);
 
     // The camera is the 2D view, tipped (see boardCamera.ts).
     const pose = boardPose(cameraOf(frame.view, frame.width, frame.height), frame.width, frame.height);
@@ -474,6 +766,71 @@ export function BoardScene(props: BoardSceneProps) {
     const bias = 0.7 * detail.flatten;
     kit.water.uniforms.uBias.value = bias;
     kit.landTop.uniforms.uBias.value = bias;
+
+    // The glow needs something hot to spread: an ember under a battle's smoke, or the sun on the sea.
+    const sheen = skySheen(mapVisuals.envReflectionWeight);
+    const glowLook = bloomLook(mapVisuals.bloomWeight);
+    const embers = detail.smoke > 0.01 && live.current.scars.some((scar) => scar.ember);
+    const glitter = sheen > 0 && detail.water > 0.01 && sun.direct > 0.01;
+    const glowing = glowLook !== null && (embers || glitter) && (gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"));
+    kit.smoke.uniforms.uGlow.value = glowing ? EMBER_GLOW : 1;
+
+    // The sky on the sea. The dome is built the first frame the sheen is on.
+    setDefine(kit.water, "SKY_SHEEN", sheen > 0 ? 1 : null);
+    if (sheen > 0) {
+      if (!sky.current) {
+        sky.current = buildSkyEnvironment(gl);
+      }
+      const water = kit.water.uniforms;
+      const tilt = Math.min(1, pose.pitch / FULL_TILT);
+      water.uSky.value = sky.current.texture;
+      // More sky as the camera comes down. From straight above the sea is the chart it was painted as.
+      water.uSheen.value.set(sheen * detail.water * (0.1 + 0.2 * tilt), sheen * detail.water * (glowing ? 1.5 : 0.8));
+      water.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
+      water.uEye.value.set(pose.target[0], pose.target[1] + shift, 1 / pose.halfWidth, cosPitch / pose.halfHeight);
+    } else if (sky.current) {
+      sky.current.dispose();
+      sky.current = null;
+      kit.water.uniforms.uSky.value = null;
+    }
+
+    // The shadow camera stands toward the sun and frames the ground in view, and nothing more.
+    if (casting && rig.target) {
+      const light = shadowLight(sun, CAST_REACH);
+      const fit = fitSunShadow(
+        light,
+        {
+          centerX: pose.target[0],
+          centerY: pose.target[1],
+          halfWidth: pose.halfWidth,
+          halfDepth: pose.halfHeight / cosPitch,
+          seaDrop: SEA_DROP,
+          seaShift: shift,
+          top: CASTER_TOP,
+        },
+        mapSize,
+      );
+      const eye = rig.camera;
+      eye.left = -fit.halfWidth;
+      eye.right = fit.halfWidth;
+      eye.top = fit.halfHeight;
+      eye.bottom = -fit.halfHeight;
+      eye.near = fit.near;
+      eye.far = fit.far;
+      eye.position.set(fit.position[0], fit.position[1], fit.position[2]);
+      eye.up.set(0, 0, 1);
+      eye.lookAt(fit.target[0], fit.target[1], fit.target[2]);
+      eye.updateProjectionMatrix();
+      eye.updateMatrixWorld();
+      // Clip space runs -1 to 1; the map is read 0 to 1.
+      sunMatrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+      shared.uSunMatrix.value.copy(sunMatrix).multiply(eye.projectionMatrix).multiply(eye.matrixWorldInverse);
+      const texel = Math.max(fit.texelX, fit.texelY);
+      shared.uSunTexel.value.set(1 / mapSize, 1 / mapSize, (0.05 + texel * 1.5) / (fit.far - fit.near), 0.14 + texel * 2);
+      // The figures' cards stand square to the sun, so a low sun from the side still throws the whole figure.
+      const flat = Math.hypot(light[0], light[1]) || 1;
+      kit.cardCaster.uniforms.uSide.value.set(light[1] / flat, -light[0] / flat, 0);
+    }
     if (shogun) {
       const land = shogunLand.uniforms;
       land.uFactionAlpha.value = factionWash(raw.closeness, mapVisuals);
@@ -502,8 +859,31 @@ export function BoardScene(props: BoardSceneProps) {
       }
     }
 
-    // A shadow under every counter. Fixed and faint from altitude, cast by the sun close in.
-    unitShadows.count = writeUnitShadows(unitShadows.instanceMatrix.array as Float32Array, frame, sun, UNIT_SHADOW_LIFT);
+    // The standing figures, as cards cut to their own pictures, for the sun to cast.
+    const figures = frame.figures ?? null;
+    let cards = 0;
+    if (casting && figures?.mask && figures.cards.length > 0) {
+      const mask = figures.mask;
+      rig.mask = canvasSlot(rig.mask, mask, store.paint);
+      kit.cardCaster.uniforms.uFigures.value = rig.mask.texture;
+      if (rig.paint !== store.paint) {
+        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift);
+        rig.paint = store.paint;
+      }
+      cards = rig.cards.geometry.instanceCount;
+    } else {
+      rig.paint = -1;
+    }
+    rig.cards.visible = cards > 0;
+    for (const child of board.current.children) {
+      if (child.layers.mask === 1 << CASTER_LAYER) {
+        child.visible = casting && ((child as THREE.Mesh).material !== kit.propCaster || detail.props > 0.001);
+      }
+    }
+
+    // A shadow under every counter. Fixed and faint from altitude, cast by the sun close in. Where
+    // the figures cast their own, what is left under a stack is the dark beneath its base.
+    unitShadows.count = writeUnitShadows(unitShadows.instanceMatrix.array as Float32Array, frame, sun, UNIT_SHADOW_LIFT, cards > 0);
     unitShadows.instanceMatrix.needsUpdate = true;
     const shadow = 0.2 + (sun.shadow - 0.2) * detail.relief * sun.direct;
     kit.unitShadow.uniforms.uAlpha.value = shogun ? shadow * (mapVisuals.contactShadow / 0.32) : shadow;
@@ -543,26 +923,93 @@ export function BoardScene(props: BoardSceneProps) {
     grade.uWarm.value = gradeWarm(raw.focus, look === "dusk", tune);
     grade.uDusk.value = look === "dusk" ? 1 : 0;
     grade.uDim.value = dim ? 1 : 0;
-
-    // The board, once for each copy of the world in view. The water and the unit shadows cover them all.
-    gl.setRenderTarget(post.board);
-    gl.clear(true, true, true);
-    const autoClear = gl.autoClear;
-    gl.autoClear = false;
-    const copies = frame.copies.length > 0 ? frame.copies : [0];
-    copies.forEach((dx, i) => {
-      board.current!.position.x = dx;
-      board.current!.updateMatrixWorld(true);
-      sea.current!.visible = i === 0;
-      once.current!.visible = i === 0;
-      gl.render(scene, camera);
-    });
-    sea.current.visible = true;
-    once.current.visible = true;
     const pixelsPerCss = size.x / Math.max(1, frame.width);
-    post.finish(gl, detail.focus * LENS_RADIUS * pixelsPerCss, look === "dusk" ? detail.vignette * 1.15 : detail.vignette);
-    gl.autoClear = autoClear;
-    gl.setRenderTarget(null);
+
+    // The line round a marked stack: its figures alone, read back in the grade.
+    const lineLook = outlineLook(mapVisuals.outlineMode);
+    const slots = figures?.atlas && lineLook.line + lineLook.wash > 0 ? figures.slots : [];
+    setDefine(post.grade, "OUTLINE", slots.length > 0 ? 1 : null);
+    if (slots.length > 0 && figures?.atlas) {
+      outlineMap.current = canvasSlot(outlineMap.current, figures.atlas, store.paint);
+      grade.uOutMap.value = outlineMap.current.texture;
+      grade.uOutSize.value.set(figures.atlas.width, figures.atlas.height);
+      for (let i = 0; i < OUTLINE_SLOTS; i++) {
+        const slot = slots[i];
+        const picked = slot?.kind === "selected";
+        grade.uOutRect.value[i].set(slot?.x ?? 0, slot?.y ?? 0, slot?.w ?? 0, slot?.h ?? 0);
+        grade.uOutAt.value[i].set(slot?.atlasX ?? 0, slot?.atlasY ?? 0);
+        const ink = picked ? SELECT_INK : HOVER_INK;
+        grade.uOutInk.value[i].set(ink.x, ink.y, ink.z, picked ? 1 : 0.72);
+      }
+      grade.uOutLook.value.set(lineLook.line, lineLook.wash, 1.6 * pixelsPerCss, 7 * pixelsPerCss);
+    } else if (outlineMap.current) {
+      outlineMap.current.texture.dispose();
+      outlineMap.current = null;
+      grade.uOutMap.value = null;
+    }
+
+    // The finishing passes. The shade follows the relief up from nothing, so it costs nothing from altitude.
+    const shadeLook = aoLook(mapVisuals.aoWeight);
+    const shade = shadeLook ? shadeLook.strength * detail.relief : 0;
+    const effects: FrameEffects = {
+      ao:
+        shadeLook && shade > 0.01
+          ? {
+              strength: shade,
+              samples: shadeLook.samples,
+              scale: shadeLook.scale,
+              reach: shadeLook.radius,
+              halfWidth: pose.halfWidth,
+              halfHeight: pose.halfHeight,
+              near: camera.near,
+              far: camera.far,
+            }
+          : null,
+      bloom: glowing && glowLook ? { strength: glowLook.strength, levels: glowLook.levels, threshold: BLOOM_THRESHOLD } : null,
+      grain: grainAmount(mapVisuals.filmGrainWeight, raw.closeness),
+      grainPixel: Math.max(1, Math.round(pixelsPerCss)),
+    };
+    post.configure(effects.ao !== null, effects.bloom !== null);
+
+    const autoClear = gl.autoClear;
+    const copies = frame.copies.length > 0 ? frame.copies : [0];
+    try {
+      gl.autoClear = false;
+      // The sun's picture first: everything that casts, once for each copy of the world in view.
+      if (casting && rig.target) {
+        gl.setRenderTarget(rig.target);
+        gl.clear(false, true, false);
+        copies.forEach((dx, i) => {
+          board.current!.position.x = dx;
+          board.current!.updateMatrixWorld(true);
+          once.current!.visible = i === 0;
+          gl.render(scene, rig.camera);
+        });
+      }
+      // The board, once for each copy of the world in view. The water and the unit shadows cover them all.
+      gl.setRenderTarget(post.board);
+      gl.clear(true, true, true);
+      copies.forEach((dx, i) => {
+        board.current!.position.x = dx;
+        board.current!.updateMatrixWorld(true);
+        sea.current!.visible = i === 0;
+        once.current!.visible = i === 0;
+        gl.render(scene, camera);
+      });
+      sea.current.visible = true;
+      once.current.visible = true;
+      post.finish(gl, detail.focus * LENS_RADIUS * pixelsPerCss, look === "dusk" ? detail.vignette * 1.15 : detail.vignette, effects);
+    } finally {
+      // Whatever went wrong above, the next frame starts from the renderer as it was handed over.
+      if (sea.current) {
+        sea.current.visible = true;
+      }
+      if (once.current) {
+        once.current.visible = true;
+      }
+      gl.autoClear = autoClear;
+      gl.setRenderTarget(null);
+    }
 
     if (moving) {
       invalidate();
@@ -574,9 +1021,12 @@ export function BoardScene(props: BoardSceneProps) {
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />
+        <primitive object={rig.cards} />
       </group>
       <group ref={board}>
         <mesh geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
+        {/* The cliff once more, for the sun's shadow map only. */}
+        <mesh geometry={slab} material={slabCaster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
         <Craters scars={scars} kit={kit} />
         {PROP_KINDS.map((kind) => (plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} /> : null))}
         <Smoke scars={scars} chimneys={plan.chimneys} kit={kit} />

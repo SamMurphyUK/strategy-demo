@@ -3,7 +3,7 @@ import type { BoardFrame } from "../../../src/ui/map/boardLayer";
 import type { RegionLayout } from "../../../src/ui/map/mapRenderer";
 import { screenToWorld } from "../../../src/ui/map/viewMath";
 import { DAY_SHARE, SUN_CYCLE_S, sunAt } from "../../../src/ui/viewport3d/sun";
-import { shadowDirection, unitShadow, writeUnitShadows } from "../../../src/ui/viewport3d/unitShadows";
+import { contactShadow, shadowDirection, unitShadow, writeUnitShadows } from "../../../src/ui/viewport3d/unitShadows";
 
 const MORNING = sunAt(SUN_CYCLE_S * DAY_SHARE * 0.2);
 const NIGHT = sunAt(SUN_CYCLE_S * DAY_SHARE + 2);
@@ -86,6 +86,28 @@ describe("unit shadows", () => {
     expect(out[14]).toBeCloseTo(0.04, 6);
     expect(out[15]).toBe(1);
     // Column lengths are the ellipse's two radii.
+    expect(Math.hypot(out[0], out[1])).toBeCloseTo(expected.a, 4);
+    expect(Math.hypot(out[4], out[5])).toBeCloseTo(expected.b, 4);
+  });
+
+  it("leaves only the dark under the base when the figures cast their own shadows", () => {
+    // A counter keeps its disc.
+    expect(contactShadow(3, -4, 5, 0, MORNING, 4)).toEqual(unitShadow(3, -4, 5, false, 0, MORNING, 4));
+    // Standing figures: a base wider than it is deep, level with the screen, and close under the feet.
+    const base = contactShadow(3, -4, 5, 1, MORNING, 4);
+    expect(base.a).toBeGreaterThan(base.b);
+    expect(base.angle).toBe(0);
+    expect(Math.hypot(base.x - 3, base.y + 4)).toBeLessThan(5 * 0.3);
+    // Shorter than the thrown ellipse it replaces: the long shadow is the figure's own now.
+    const thrown = unitShadow(3, -4, 5, false, 1, MORNING, 4);
+    expect(Math.hypot(base.x - 3, base.y + 4)).toBeLessThan(Math.hypot(thrown.x - 3, thrown.y + 4));
+    const frame = frameWith([{ x: 500, y: 300, domain: "air" }], 1);
+    const out = new Float32Array(16);
+    expect(writeUnitShadows(out, frame, MORNING, 0.04, true)).toBe(1);
+    const world = screenToWorld(frame.view, { x: 500, y: 300 });
+    const expected = contactShadow(world.x, -world.y, 32 / 2 / 4, 1, MORNING, 4);
+    expect(out[12]).toBeCloseTo(expected.x, 4);
+    expect(out[13]).toBeCloseTo(expected.y, 4);
     expect(Math.hypot(out[0], out[1])).toBeCloseTo(expected.a, 4);
     expect(Math.hypot(out[4], out[5])).toBeCloseTo(expected.b, 4);
   });

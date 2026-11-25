@@ -165,6 +165,51 @@ function placeFigure(ctx: CanvasRenderingContext2D, box: StampBox, feetY: number
   }
 }
 
+/** One figure as `stampFigures` last drew it: its picture, and the rectangle it filled after the lean. */
+export interface FigureStamp {
+  id: string;
+  plate: HTMLCanvasElement;
+  /** Device pixels from the canvas's top-left corner. */
+  left: number;
+  top: number;
+  w: number;
+  h: number;
+  feetX: number;
+  feetY: number;
+  mirror: boolean;
+  opacity: number;
+}
+
+/**
+ * The figures of `units` that the last `stampFigures` put on the canvas, back to front. A figure
+ * whose picture has not arrived is not in the list. Call it with the same `dpr` and `lean`.
+ */
+export function shownFigureStamps(units: readonly VehicleSvgUnit[], dpr: number, lean = 1): FigureStamp[] {
+  const out: FigureStamp[] = [];
+  for (const unit of units) {
+    const box = figureStampBox(unit, dpr);
+    const part = unit.parts[0];
+    const plate = shown.get(unit.id);
+    if (!box || !part || !plate) {
+      continue;
+    }
+    const feetY = Math.round(unit.y * dpr);
+    out.push({
+      id: unit.id,
+      plate,
+      left: box.left,
+      top: feetY + (box.top - feetY) * lean,
+      w: box.w,
+      h: box.h * lean,
+      feetX: Math.round(unit.x * dpr),
+      feetY,
+      mirror: box.mirror,
+      opacity: part.opacity != null ? part.opacity : 1,
+    });
+  }
+  return out;
+}
+
 export function stampFigures(
   ctx: CanvasRenderingContext2D,
   units: readonly VehicleSvgUnit[],

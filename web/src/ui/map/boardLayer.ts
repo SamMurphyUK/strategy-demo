@@ -8,6 +8,44 @@ import type { ReactNode } from "react";
 import type { RegionLayout } from "./mapRenderer";
 import type { View } from "./viewMath";
 
+/** A standing figure's picture on the frame: device pixels from the top-left corner, after the lean. */
+export interface FigureCard {
+  /** The stack's key and the figure's place in it: `region|copy|slot:index`. */
+  id: string;
+  left: number;
+  top: number;
+  w: number;
+  h: number;
+  /** Where the figure stands. */
+  feetX: number;
+  feetY: number;
+}
+
+/** The rectangle of one marked stack, and where its figures sit on the outline canvas. */
+export interface OutlineSlot {
+  kind: "selected" | "hover";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  atlasX: number;
+  atlasY: number;
+}
+
+/**
+ * The standing figures on canvases of their own, for a board that casts them or lines them. One
+ * object, changed in place each time the figures are stamped; `BoardLayer.touch` says it changed.
+ */
+export interface FigureCards {
+  /** Every figure alone on a clear canvas, at `maskScale` of the frame's device pixels. Null when nothing casts. */
+  mask: HTMLCanvasElement | null;
+  maskScale: number;
+  cards: FigureCard[];
+  /** The figures of the marked stacks, pixel for pixel, each stack in its own rectangle. */
+  atlas: HTMLCanvasElement | null;
+  slots: OutlineSlot[];
+}
+
 /** One painted frame of the 2D map, as the board layer needs it. */
 export interface BoardFrame {
   /** The view the canvases were painted with. Land-plane world points go to screen through this. */
@@ -29,6 +67,8 @@ export interface BoardFrame {
   unitFade: number;
   /** The painted canvases, back to front. */
   layers: readonly HTMLCanvasElement[];
+  /** The standing figures apart from the rest, when the board asked for them (see mapVisualConfig.ts). */
+  figures?: FigureCards | null;
 }
 
 export interface BoardLayer {

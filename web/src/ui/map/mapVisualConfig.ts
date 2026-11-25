@@ -10,6 +10,12 @@
 export type FriendlyBorderStyle = "subtle-dashed" | "solid" | "hidden";
 export type FrontlineStyle = "dual-ink" | "classic" | "hidden";
 export type HighlightRule = "click-and-drag" | "always-hover" | "off";
+/** How much of an effect the board draws. "off" costs nothing: no pass, no buffer, no shader branch. */
+export type EffectWeight = "off" | "low" | "medium" | "high";
+/** What marks a picked-up or pointed-at stack: an ink line round its figures, a pigment wash, both, or nothing. */
+export type OutlineMode = "units-only" | "watercolor-only" | "both" | "off";
+/** The sun: crossing the table, held at noon, held at the warm end of the afternoon, or out. */
+export type SunCycle = "animated" | "static-noon" | "static-golden" | "off";
 
 export interface MapVisualConfig {
   /** Share of the faction colour over the natural ground at the closest zoom. */
@@ -46,6 +52,18 @@ export interface MapVisualConfig {
   unitRim: number;
   /** Opacity of the shadow under a piece. */
   contactShadow: number;
+  /** Shade where a cliff meets the sea and where a mountain or a building meets the ground. */
+  aoWeight: EffectWeight;
+  /** Glow round embers and sun glitter. Nothing at or below paper white glows. */
+  bloomWeight: EffectWeight;
+  /** Paper tooth over the finished picture, strongest at the strategic zoom. */
+  filmGrainWeight: EffectWeight;
+  outlineMode: OutlineMode;
+  /** Shadows cast by cliffs, mountains, buildings, and standing figures. The weight is the map's size. */
+  shadowQuality: EffectWeight;
+  /** Sky on the sea: a sheen on the swell and a glitter path under the sun. */
+  envReflectionWeight: EffectWeight;
+  sunCycle: SunCycle;
 }
 
 export type VisualKey = keyof MapVisualConfig;
@@ -70,6 +88,13 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   sunSweep: true,
   unitRim: 0.5,
   contactShadow: 0.32,
+  aoWeight: "medium",
+  bloomWeight: "low",
+  filmGrainWeight: "low",
+  outlineMode: "units-only",
+  shadowQuality: "medium",
+  envReflectionWeight: "medium",
+  sunCycle: "animated",
 });
 
 /** Solid faction land, full borders, the banded frontline, hover marks, and the full lens. */
@@ -96,6 +121,12 @@ export const PLAIN_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   showCoastalWaves: false,
   enableDoF: false,
   sunSweep: false,
+  aoWeight: "off",
+  bloomWeight: "off",
+  filmGrainWeight: "off",
+  outlineMode: "off",
+  shadowQuality: "off",
+  envReflectionWeight: "off",
 });
 
 export const VISUAL_PRESETS = {
@@ -123,6 +154,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];
 const FRONTLINE_STYLES: readonly FrontlineStyle[] = ["dual-ink", "classic", "hidden"];
 const HIGHLIGHT_RULES: readonly HighlightRule[] = ["click-and-drag", "always-hover", "off"];
+export const EFFECT_WEIGHTS: readonly EffectWeight[] = ["off", "low", "medium", "high"];
+export const OUTLINE_MODES: readonly OutlineMode[] = ["units-only", "watercolor-only", "both", "off"];
+export const SUN_CYCLES: readonly SunCycle[] = ["animated", "static-noon", "static-golden", "off"];
 
 function numberIn(value: unknown, key: string, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -162,6 +196,13 @@ export function parseVisuals(value: unknown, base: Readonly<MapVisualConfig> = D
     sunSweep: flag(raw.sunSweep, base.sunSweep),
     unitRim: numberIn(raw.unitRim, "unitRim", base.unitRim),
     contactShadow: numberIn(raw.contactShadow, "contactShadow", base.contactShadow),
+    aoWeight: oneOf(raw.aoWeight, EFFECT_WEIGHTS, base.aoWeight),
+    bloomWeight: oneOf(raw.bloomWeight, EFFECT_WEIGHTS, base.bloomWeight),
+    filmGrainWeight: oneOf(raw.filmGrainWeight, EFFECT_WEIGHTS, base.filmGrainWeight),
+    outlineMode: oneOf(raw.outlineMode, OUTLINE_MODES, base.outlineMode),
+    shadowQuality: oneOf(raw.shadowQuality, EFFECT_WEIGHTS, base.shadowQuality),
+    envReflectionWeight: oneOf(raw.envReflectionWeight, EFFECT_WEIGHTS, base.envReflectionWeight),
+    sunCycle: oneOf(raw.sunCycle, SUN_CYCLES, base.sunCycle),
   };
 }
 
@@ -213,6 +254,89 @@ export function frontlineInk(style: FrontlineStyle): { dual: number; classic: nu
 /** Lens strength for a zoom's focus share. 0 at altitude, and 0 with the lens off. */
 export function bokehShare(focus: number, config: Readonly<MapVisualConfig>): number {
   return config.enableDoF ? Math.max(0, focus) * config.bokehIntensity : 0;
+}
+
+// --- Light and lens. Each weight is a row of numbers; "off" is null, and the board skips the work. ---
+
+export interface AoLook {
+  /** How dark the deepest crevice goes. 1 is the full ink. */
+  strength: number;
+  /** Depth taps for each pixel. */
+  samples: number;
+  /** Size of the shade buffer against the frame: 0.5 is a quarter of the pixels. */
+  scale: number;
+  /** Reach of the shade, in world units. A cliff is seven tall. */
+  radius: number;
+}
+
+export function aoLook(weight: EffectWeight): AoLook | null {
+  if (weight === "low") {
+    return { strength: 0.45, samples: 6, scale: 0.5, radius: 2 };
+  }
+  if (weight === "medium") {
+    return { strength: 0.62, samples: 10, scale: 0.5, radius: 2.4 };
+  }
+  return weight === "high" ? { strength: 0.8, samples: 16, scale: 1, radius: 2.8 } : null;
+}
+
+export interface BloomLook {
+  /** Share of the glow added back to the picture. */
+  strength: number;
+  /** Halvings of the glow buffer. More spreads it wider. */
+  levels: number;
+}
+
+/** Light above this glows. Paper white is 1, so the land, the sea, and the pieces stay as painted. */
+export const BLOOM_THRESHOLD = 1.05;
+
+export function bloomLook(weight: EffectWeight): BloomLook | null {
+  if (weight === "low") {
+    return { strength: 0.55, levels: 3 };
+  }
+  if (weight === "medium") {
+    return { strength: 0.85, levels: 4 };
+  }
+  return weight === "high" ? { strength: 1.2, levels: 5 } : null;
+}
+
+const GRAIN_AMOUNT: Readonly<Record<EffectWeight, number>> = { off: 0, low: 0.028, medium: 0.046, high: 0.07 };
+
+/**
+ * Depth of the paper tooth, as a share of full brightness. It is deepest over the fitted board,
+ * where the picture is a printed sheet, and eases to two thirds on the table, where it would dirty
+ * the figures.
+ */
+export function grainAmount(weight: EffectWeight, closeness: number): number {
+  const near = smooth(closeness);
+  return GRAIN_AMOUNT[weight] * (1 - near / 3);
+}
+
+/** What the outline pass draws round a stack. Both 0 is no pass. */
+export function outlineLook(mode: OutlineMode): { line: number; wash: number } {
+  return {
+    line: mode === "units-only" || mode === "both" ? 1 : 0,
+    wash: mode === "watercolor-only" || mode === "both" ? 1 : 0,
+  };
+}
+
+const SHADOW_MAP_SIZE: Readonly<Record<EffectWeight, number>> = { off: 0, low: 1024, medium: 2048, high: 4096 };
+
+/** Side of the sun's shadow map, in texels. 0 is no map. */
+export function shadowMapSize(quality: EffectWeight): number {
+  return SHADOW_MAP_SIZE[quality];
+}
+
+const SKY_SHEEN: Readonly<Record<EffectWeight, number>> = { off: 0, low: 0.4, medium: 0.7, high: 1 };
+
+/** Share of the sky the sea shows. 1 is the full sheen. */
+export function skySheen(weight: EffectWeight): number {
+  return SKY_SHEEN[weight];
+}
+
+/** True when the board needs the standing figures on their own canvas: to cast them, or to line them. */
+export function wantsFigureCards(config: Readonly<MapVisualConfig>): { shadows: boolean; outline: boolean } {
+  const look = outlineLook(config.outlineMode);
+  return { shadows: config.shadowQuality !== "off" && config.sunCycle !== "off", outline: look.line + look.wash > 0 };
 }
 
 // --- The store ----------------------------------------------------------------------------------

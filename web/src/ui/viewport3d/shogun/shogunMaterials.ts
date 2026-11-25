@@ -7,6 +7,7 @@
 // Everything a slider can change is a uniform on one of these materials. The frame loop writes
 // them (see MapViewportShogun.tsx), so no setting rebuilds a material, a sheet, or a mesh.
 import * as THREE from "three";
+import { SUN_FRAGMENT, SUN_VERTEX } from "../boardMaterials";
 
 export function rgbOf(hex: string): THREE.Vector3 {
   return new THREE.Vector3(
@@ -70,10 +71,19 @@ export interface ShogunUniforms {
   uMask: { value: THREE.Texture | null };
   /** Share of the faction colour over the ground. */
   uFactionAlpha: { value: number };
+  /** The sun's shadow map and what reads it (see SUN_FRAGMENT in ../boardMaterials.ts). */
+  uSunMap: { value: THREE.Texture | null };
+  uSunMatrix: { value: THREE.Matrix4 };
+  uSunTexel: { value: THREE.Vector4 };
+  uSunTint: { value: THREE.Vector3 };
 }
 
 export function shogunUniforms(): ShogunUniforms {
   return {
+    uSunMap: { value: null },
+    uSunMatrix: { value: new THREE.Matrix4() },
+    uSunTexel: { value: new THREE.Vector4(1 / 2048, 1 / 2048, 0.0005, 0.3) },
+    uSunTint: { value: new THREE.Vector3(1, 1, 1) },
     uTime: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0.3, 0.4, 0.86) },
     uSunColor: { value: new THREE.Vector3(1, 1, 1) },
@@ -195,14 +205,22 @@ export function landMaterial(shared: ShogunUniforms): THREE.ShaderMaterial {
       uFriendly: { value: new THREE.Vector2(0.25, 0) },
       /** Which frontline is drawn: x the two-tone ink line, y the band. */
       uFrontStyle: { value: new THREE.Vector2(1, 0) },
+      uSunMap: shared.uSunMap,
+      uSunMatrix: shared.uSunMatrix,
+      uSunTexel: shared.uSunTexel,
+      uSunTint: shared.uSunTint,
     },
     vertexShader: /* glsl */ `
+      ${SUN_VERTEX}
       varying vec2 vMap;
       varying vec2 vScene;
       void main() {
         vMap = vec2(position.x, -position.y);
         vec4 world = modelMatrix * vec4(position, 1.0);
         vScene = world.xy;
+        #ifdef SUN_SHADOW
+        vSun = (uSunMatrix * world).xyz;
+        #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
@@ -210,6 +228,7 @@ export function landMaterial(shared: ShogunUniforms): THREE.ShaderMaterial {
       ${NOISE}
       ${LIGHT}
       ${SHEET}
+      ${SUN_FRAGMENT}
       uniform sampler2D uTerrain;
       uniform sampler2D uFaction;
       uniform sampler2D uLines;
@@ -278,7 +297,14 @@ export function landMaterial(shared: ShogunUniforms): THREE.ShaderMaterial {
 
         c *= lit(uSunDir.z);
         c *= 1.0 - cloudShade(vScene);
-        gl_FragColor = vec4(c, 1.0);
+        // Alpha carries the light that reaches the ground, for the pieces painted over it.
+        float reach = 1.0;
+        #ifdef SUN_SHADOW
+        float shade = sunShade(vSun);
+        c *= mix(vec3(1.0), uSunTint, shade);
+        reach = 1.0 - shade;
+        #endif
+        gl_FragColor = vec4(c, reach);
       }
     `,
   });

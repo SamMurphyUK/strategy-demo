@@ -44,11 +44,12 @@ import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickU
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
 import { borderPasses, unitLean } from "./boardTune";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
-import { getVisualRev, mapVisuals, subscribeVisuals } from "./mapVisualConfig";
+import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
+import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
-import { stampFigures, takeFigureSheetDirty } from "./figureSheet";
+import { shownFigureStamps, stampFigures, takeFigureSheetDirty } from "./figureSheet";
 import { getDrawFlags, noteIdle, notePaint, publishDrawSample, subscribeDrawFlags } from "./renderDebug";
 import { easeInOutCubic, type MapCamera, viewCenter, viewFor } from "./combatCamera";
 import {
@@ -746,7 +747,20 @@ export function MapView(props: MapViewProps) {
     };
   }, []);
 
-  const paintCampaignVectors = (dpr: number, cssW: number, cssH: number, fade: number, scene: TerrainScene | null) => {
+  /** The standing figures apart from their badges, for a board that casts or outlines them. */
+  const figureCards = useRef<FigureCardPainter | null>(null);
+  if (!figureCards.current) {
+    figureCards.current = createFigureCards();
+  }
+
+  const paintCampaignVectors = (
+    dpr: number,
+    cssW: number,
+    cssH: number,
+    fade: number,
+    scene: TerrainScene | null,
+    marked?: Pick<GameOverlay, "selectedStack" | "hoverStack"> | null,
+  ) => {
     const frame = takeCampaignFigures();
     const stage = vectorStage.current;
     // The sheet stamps one shared picture for each kind. Off, every figure is its own SVG node.
@@ -765,7 +779,9 @@ export function MapView(props: MapViewProps) {
     }
     const chrome = chromeRef.current;
     const cctx = chrome?.getContext("2d");
+    const painter = figureCards.current;
     if (!chrome || !cctx) {
+      painter?.clear();
       return;
     }
     const pixelW = Math.round(cssW * dpr);
@@ -784,6 +800,27 @@ export function MapView(props: MapViewProps) {
       paint(cctx);
     }
     cctx.globalAlpha = 1;
+    // A board that casts the figures, or lines a marked stack, takes them without the badges.
+    const wanted = live.current.props.board?.active ? wantsFigureCards(mapVisuals) : null;
+    if (painter && wanted && sheet && fade > 0 && (wanted.shadows || wanted.outline)) {
+      const picks: StackPick[] = [];
+      if (wanted.outline && marked?.selectedStack) {
+        picks.push({ kind: "selected", regionId: marked.selectedStack.regionId, key: marked.selectedStack.key });
+      }
+      if (wanted.outline && marked?.hoverStack) {
+        picks.push({ kind: "hover", regionId: marked.hoverStack.regionId, key: marked.hoverStack.key, copyDx: marked.hoverStack.copyDx });
+      }
+      painter.paint(shownFigureStamps(frame.vectors, dpr, lean), {
+        width: chrome.width,
+        height: chrome.height,
+        fade,
+        shadows: wanted.shadows,
+        picks,
+        margin: Math.ceil(12 * dpr),
+      });
+    } else {
+      painter?.clear();
+    }
   };
 
   const movementKey = props.movement
@@ -1057,7 +1094,7 @@ export function MapView(props: MapViewProps) {
       } else {
         beginCampaignFigures();
         drawGameOverlay(ctx, scene, overlay);
-        paintCampaignVectors(dpr, paintW, paintH, unitFade, scene);
+        paintCampaignVectors(dpr, paintW, paintH, unitFade, scene, overlay);
       }
       figureMs = performance.now() - figuresStarted;
     } else {
@@ -1142,6 +1179,7 @@ export function MapView(props: MapViewProps) {
         tokenPx: TOKEN_PX * unitScale,
         unitFade,
         layers: [canvas, chromeRef.current, arrowRef.current].filter((layer): layer is HTMLCanvasElement => layer != null),
+        figures: figureCards.current?.cards ?? null,
       });
     }
     notePaint({ paintMs: performance.now() - paintStarted, landMs, shoreMs, figureMs, arrowMs });
@@ -1251,6 +1289,7 @@ export function MapView(props: MapViewProps) {
           frame.scene.height,
           frame.scene.unitFade ?? 1,
           frame.scene,
+          frame.overlay,
         );
         noteIdle(performance.now() - idleStarted);
       }

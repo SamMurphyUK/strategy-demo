@@ -38,10 +38,22 @@ export interface SharedUniforms {
   uBake: { value: THREE.Texture | null };
   /** The sheet: x, y, width, height in world units. */
   uBounds: { value: THREE.Vector4 };
+  /** The sun's shadow map, read only by a material built with `SUN_SHADOW` (see setSunShadow). */
+  uSunMap: { value: THREE.Texture | null };
+  /** Scene point to shadow-map coordinates: x and y across the map, z the depth, all 0 to 1. */
+  uSunMatrix: { value: THREE.Matrix4 };
+  /** One texel of the map across and down, the depth bias, and the normal offset for raised ground. */
+  uSunTexel: { value: THREE.Vector4 };
+  /** What a full shadow multiplies the ground by. White is no shadow. */
+  uSunTint: { value: THREE.Vector3 };
 }
 
 export function sharedUniforms(): SharedUniforms {
   return {
+    uSunMap: { value: null },
+    uSunMatrix: { value: new THREE.Matrix4() },
+    uSunTexel: { value: new THREE.Vector4(1 / 2048, 1 / 2048, 0.0005, 0.3) },
+    uSunTint: { value: new THREE.Vector3(1, 1, 1) },
     uTime: { value: 0 },
     uStepTime: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0.3, 0.4, 0.86) },
@@ -121,26 +133,104 @@ function lightUniforms(shared: SharedUniforms) {
   };
 }
 
+// --- The sun's shadow map -----------------------------------------------------------------------
+//
+// A material that takes cast shadows carries these two blocks behind `SUN_SHADOW`. With the define
+// absent the shader has no map, no matrix, and no taps: it is the shader it was before. The define
+// is 1 for the plain kernel and 2 for the wide one the largest map uses.
+//
+// The map is a depth texture read through a comparing sampler, so each tap is already filtered
+// across four texels by the hardware. The taps are written out one by one: no loop, and an explicit
+// level, so no driver has to guess a gradient.
+
+export const SUN_VERTEX = /* glsl */ `
+#ifdef SUN_SHADOW
+uniform mat4 uSunMatrix;
+varying vec3 vSun;
+#endif
+`;
+
+export const SUN_FRAGMENT = /* glsl */ `
+#ifdef SUN_SHADOW
+uniform highp sampler2DShadow uSunMap;
+uniform vec4 uSunTexel;
+uniform vec3 uSunTint;
+varying vec3 vSun;
+// 0 in the light, 1 in full shadow.
+float sunShade(vec3 at) {
+  float ref = min(at.z - uSunTexel.z, 1.0);
+  vec2 d = uSunTexel.xy * 1.15;
+  float lit = textureLod(uSunMap, vec3(at.xy, ref), 0.0);
+  float ring = textureLod(uSunMap, vec3(at.xy + d, ref), 0.0);
+  ring += textureLod(uSunMap, vec3(at.xy - d, ref), 0.0);
+  ring += textureLod(uSunMap, vec3(at.xy + vec2(d.x, -d.y), ref), 0.0);
+  ring += textureLod(uSunMap, vec3(at.xy + vec2(-d.x, d.y), ref), 0.0);
+  #if SUN_SHADOW > 1
+  vec2 w = uSunTexel.xy * 2.3;
+  float wide = textureLod(uSunMap, vec3(at.xy + vec2(w.x, 0.0), ref), 0.0);
+  wide += textureLod(uSunMap, vec3(at.xy - vec2(w.x, 0.0), ref), 0.0);
+  wide += textureLod(uSunMap, vec3(at.xy + vec2(0.0, w.y), ref), 0.0);
+  wide += textureLod(uSunMap, vec3(at.xy - vec2(0.0, w.y), ref), 0.0);
+  return 1.0 - (lit * 0.24 + ring * 0.12 + wide * 0.07);
+  #else
+  return 1.0 - (lit * 0.36 + ring * 0.16);
+  #endif
+}
+#endif
+`;
+
+function sunUniforms(shared: SharedUniforms) {
+  return {
+    uSunMap: shared.uSunMap,
+    uSunMatrix: shared.uSunMatrix,
+    uSunTexel: shared.uSunTexel,
+    uSunTint: shared.uSunTint,
+  };
+}
+
+/**
+ * Sets or clears a shader define. The program is rebuilt only when the value changes, so calling
+ * this every frame is free.
+ */
+export function setDefine(material: THREE.ShaderMaterial, name: string, value: number | null): void {
+  const defines = (material.defines ??= {});
+  const now = name in defines ? (defines[name] as number) : null;
+  if (now === value) {
+    return;
+  }
+  if (value === null) {
+    delete defines[name];
+  } else {
+    defines[name] = value;
+  }
+  material.needsUpdate = true;
+}
+
 // --- Land ---------------------------------------------------------------------------------------
 
 /** The top of the land: the baked sheet, under the sun. */
 export function landTopMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { ...lightUniforms(shared), uBake: shared.uBake, uBounds: shared.uBounds, uBias: { value: 0 } },
+    uniforms: { ...lightUniforms(shared), ...sunUniforms(shared), uBake: shared.uBake, uBounds: shared.uBounds, uBias: { value: 0 } },
     vertexShader: /* glsl */ `
       ${SHEET}
+      ${SUN_VERTEX}
       varying vec2 vUv;
       varying vec2 vScene;
       void main() {
         vUv = sheetUv(vec2(position.x, -position.y));
         vec4 world = modelMatrix * vec4(position, 1.0);
         vScene = world.xy;
+        #ifdef SUN_SHADOW
+        vSun = (uSunMatrix * world).xyz;
+        #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
     fragmentShader: /* glsl */ `
       ${NOISE}
       ${LIGHT}
+      ${SUN_FRAGMENT}
       uniform sampler2D uBake;
       uniform float uBias;
       varying vec2 vUv;
@@ -149,7 +239,14 @@ export function landTopMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         vec3 c = texture2D(uBake, vUv, uBias).rgb;
         c *= lit(uSunDir.z);
         c *= 1.0 - cloudShade(vScene);
-        gl_FragColor = vec4(c, 1.0);
+        // Alpha carries the light that reaches the ground, for the pieces painted over it (see gradeMaterial).
+        float reach = 1.0;
+        #ifdef SUN_SHADOW
+        float shade = sunShade(vSun);
+        c *= mix(vec3(1.0), uSunTint, shade);
+        reach = 1.0 - shade;
+        #endif
+        gl_FragColor = vec4(c, reach);
       }
     `,
   });
@@ -230,12 +327,25 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
       uWaveTint: { value: blend(MILITARY.spruce, MILITARY.sage, 0.4) },
       uTable: { value: blend(MILITARY.charcoal, MILITARY.brown, 0.22) },
       uNeat: { value: rgbOf(MILITARY.cream) },
+      ...sunUniforms(shared),
+      /** The sky the sea mirrors, read only with `SKY_SHEEN`: a prefiltered cube with y up. */
+      uSky: { value: null },
+      /** Share of the sky laid over the painted sea, and the brightness of the sun's glitter. */
+      uSheen: { value: new THREE.Vector2(0, 0) },
+      /** Unit vector from the board toward the camera. */
+      uToEye: { value: new THREE.Vector3(0, 0, 1) },
+      /** The middle of the view, and one over its half reach each way: the glitter gathers under the sun. */
+      uEye: { value: new THREE.Vector4(0, 0, 1, 1) },
     },
     vertexShader: /* glsl */ `
+      ${SUN_VERTEX}
       varying vec2 vScene;
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
         vScene = world.xy;
+        #ifdef SUN_SHADOW
+        vSun = (uSunMatrix * world).xyz;
+        #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
@@ -243,6 +353,19 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
       ${NOISE}
       ${LIGHT}
       ${SHEET}
+      ${SUN_FRAGMENT}
+      #ifdef SKY_SHEEN
+      uniform samplerCube uSky;
+      uniform vec2 uSheen;
+      uniform vec3 uToEye;
+      uniform vec4 uEye;
+      // Height of the swell at a scene point: two long sets crossing.
+      float seaHeight(vec2 p) {
+        float h = vnoise(p * 0.42 + vec2(uTime * 0.09, uTime * 0.05)) * 0.6;
+        h += vnoise(p * 0.95 - vec2(uTime * 0.13, uTime * 0.04)) * 0.4;
+        return h;
+      }
+      #endif
       uniform sampler2D uBake;
       uniform sampler2D uMask;
       uniform vec2 uShadowVec;
@@ -285,10 +408,45 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         c = mix(c, uFoam, foam * uWater);
 
         // The cliff's shadow on the water, and glints where the sun still reaches.
+        #ifdef SUN_SHADOW
+        float shade = sunShade(vSun);
+        #else
         vec2 toSun = vec2(-uShadowVec.x, uShadowVec.y) * uDrop;
         float shade = max(texture2D(uMask, sheetUv(foot + toSun * 0.5)).g, texture2D(uMask, sheetUv(foot + toSun)).g);
         shade = smoothstep(0.4, 0.6, shade);
+        #endif
+
+        #ifdef SKY_SHEEN
+        // The sky on the swell. The camera is orthographic, so the eye is bent across the view, the
+        // way a real lens would see it, and the sun's light gathers in one patch of the sea, under
+        // the sun, and not evenly over all of it.
+        vec2 p = vec2(m.x, -m.y);
+        float h0 = seaHeight(p);
+        vec2 slope = vec2(seaHeight(p + vec2(0.3, 0.0)) - h0, seaHeight(p + vec2(0.0, 0.3)) - h0) / 0.3;
+        vec3 n = normalize(vec3(-slope * 0.3, 1.0));
+        vec2 off = (vScene - uEye.xy) * uEye.zw;
+        vec3 eye = normalize(uToEye - vec3(off.x * 0.6, off.y * 0.3, 0.0));
+        vec3 r = reflect(-eye, n);
+        // A slope turned from the eye mirrors the pale haze low in the sky. A flat one mirrors the zenith.
+        vec3 sky = textureLod(uSky, vec3(r.x, r.z, -r.y), 1.5).rgb;
+        float calm = 1.0 - shore * 0.7;
+        c = mix(c, sky, uSheen.x * calm * (0.55 + 0.45 * smoothstep(0.0, 0.35, 1.0 - dot(n, eye))));
+        // The sun's patch: a warm wash, and inside it short dashes of light that come and go, drawn
+        // the way the sea's own dashes are. Most of the patch stays water.
+        float glare = pow(max(dot(r, uSunDir), 0.0), 26.0) * calm * uDirect * (1.0 - shade);
+        vec3 sunlit = uSunColor * vec3(1.0, 0.92, 0.76);
+        c += sunlit * glare * uSheen.x * 0.32;
+        vec2 cell = vec2(floor(m.x * 1.9 + floor(m.y * 4.2) * 0.37), floor(m.y * 4.2));
+        float flick = hash21(cell + floor(uTime * 2.5 + hash21(cell.yx) * 3.0) * 17.0);
+        float dashes = step(1.0 - 0.1 * glare * glare, flick) * step(fract(m.y * 4.2), 0.5);
+        c += sunlit * dashes * uSheen.y;
+        #endif
+
+        #ifdef SUN_SHADOW
+        c *= mix(vec3(1.0), uSunTint, shade);
+        #else
         c *= 1.0 - uShadowAlpha * shade;
+        #endif
         float glint = hash21(floor(m * 3.0) + floor(uTime * 2.0) * 13.0);
         c += uSunColor * step(0.9978, glint) * 0.14 * uWater * uDirect * (1.0 - shade);
 
@@ -300,7 +458,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         c = mix(c, uNeat, 0.3 * step(-1.1, past) * step(past, -0.7));
         vec3 table = uTable * (0.92 + 0.12 * vnoise(vec2(m.x * 0.12, m.y * 2.4))) * (0.62 + 0.38 * smoothstep(0.0, 6.0, past));
         c = mix(c, table, step(0.0, past));
-        gl_FragColor = vec4(c, 1.0);
+        gl_FragColor = vec4(c, 1.0 - shade * step(past, 0.0));
       }
     `,
   });
@@ -330,6 +488,7 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
     vertexColors: true,
     uniforms: {
       ...lightUniforms(shared),
+      ...sunUniforms(shared),
       uBake: shared.uBake,
       uBounds: shared.uBounds,
       uGrow: { value: 0 },
@@ -340,6 +499,11 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
       ${LIGHT}
       ${SHEET}
       ${PROP_VERTEX}
+      ${SUN_VERTEX}
+      #ifdef SUN_SHADOW
+      uniform vec4 uSunTexel;
+      varying float vSunFacing;
+      #endif
       uniform sampler2D uBake;
       uniform vec3 uSnow;
       varying vec3 vColor;
@@ -374,20 +538,49 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         // fill from the near side and keep their colour.
         vec3 light = lit(stepped(dot(n, uSunDir) * 0.62 + 0.4)) + vec3(0.2, 0.2, 0.22) * max(-n.y, 0.0) * uRelief;
         vColor = base * light * (1.0 - cloudShade(world.xy));
+        #ifdef SUN_SHADOW
+        // Looked up a little off the face, so a slope does not shade itself in stripes. A face
+        // already turned from the sun is dark by its own light and takes no cast shadow on top.
+        vSun = (uSunMatrix * vec4(world.xyz + n * uSunTexel.w, 1.0)).xyz;
+        vSunFacing = smoothstep(0.04, 0.3, dot(n, uSunDir));
+        #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
     fragmentShader: /* glsl */ `
+      ${SUN_FRAGMENT}
+      #ifdef SUN_SHADOW
+      varying float vSunFacing;
+      #endif
       varying vec3 vColor;
       void main() {
-        gl_FragColor = vec4(vColor, 1.0);
+        vec3 c = vColor;
+        #ifdef SUN_SHADOW
+        c *= mix(vec3(1.0), uSunTint, sunShade(vSun) * vSunFacing);
+        #endif
+        gl_FragColor = vec4(c, 1.0);
       }
     `,
   });
 }
 
+/**
+ * Ordinary alpha blending for the colour, and the frame's own alpha left as it is. The land and
+ * the water write how much sun reaches them there (see gradeMaterial), and a mark or a puff laid
+ * over them must not change it.
+ */
+function keepAlpha<T extends THREE.Material>(material: T): T {
+  material.blending = THREE.CustomBlending;
+  material.blendSrc = THREE.SrcAlphaFactor;
+  material.blendDst = THREE.OneMinusSrcAlphaFactor;
+  material.blendSrcAlpha = THREE.ZeroFactor;
+  material.blendDstAlpha = THREE.OneFactor;
+  return material;
+}
+
 /** Every shadow shares one stencil bit, so two that overlap darken the ground once. */
 function shadowStencil(material: THREE.ShaderMaterial): THREE.ShaderMaterial {
+  keepAlpha(material);
   material.transparent = true;
   material.depthWrite = false;
   material.stencilWrite = true;
@@ -441,6 +634,102 @@ export function propShadowMaterial(shared: SharedUniforms): THREE.ShaderMaterial
   );
 }
 
+// --- What the sun's shadow map is drawn with ----------------------------------------------------
+//
+// The map holds depth only, so these write no colour. Both faces are drawn, and the depth is
+// pushed a little away from the sun along a slope, which keeps a lit face from shading itself.
+
+function caster(material: THREE.ShaderMaterial): THREE.ShaderMaterial {
+  material.colorWrite = false;
+  material.side = THREE.DoubleSide;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = 1.4;
+  material.polygonOffsetUnits = 2;
+  return material;
+}
+
+const CASTER_FRAGMENT = /* glsl */ `
+void main() {
+  gl_FragColor = vec4(1.0);
+}
+`;
+
+/** The cliff, as the sun sees it. */
+export function cliffCasterMaterial(): THREE.ShaderMaterial {
+  return caster(
+    new THREE.ShaderMaterial({
+      vertexShader: /* glsl */ `
+        void main() {
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: CASTER_FRAGMENT,
+    }),
+  );
+}
+
+/** Trees, peaks, and buildings, as the sun sees them. `uGrow` is the prop material's, so they rise together. */
+export function propCasterMaterial(grow: { value: number }): THREE.ShaderMaterial {
+  return caster(
+    new THREE.ShaderMaterial({
+      uniforms: { uGrow: grow },
+      vertexShader: /* glsl */ `
+        ${PROP_VERTEX}
+        void main() {
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(propPoint(), 1.0);
+        }
+      `,
+      fragmentShader: CASTER_FRAGMENT,
+    }),
+  );
+}
+
+/**
+ * Standing figures, as the sun sees them. Each instance is a card on the figure's feet, turned
+ * square to the sun, and cut to the figure's own picture: `uFigures` is the canvas the map
+ * stamped the figures on (see figureCards.ts), and a texel under half opacity casts nothing.
+ *
+ * `aFoot` is the feet in scene coordinates. `aBox` is the picture's rectangle measured from the
+ * feet in world units: across, up, width, height. `aSheet` is the same rectangle on the canvas.
+ */
+export function cardCasterMaterial(): THREE.ShaderMaterial {
+  return caster(
+    new THREE.ShaderMaterial({
+      uniforms: {
+        uFigures: { value: null },
+        /** Level unit vector across the light. The card's width runs along it. */
+        uSide: { value: new THREE.Vector3(1, 0, 0) },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aFoot;
+        attribute vec4 aBox;
+        attribute vec4 aSheet;
+        uniform vec3 uSide;
+        varying vec2 vUv;
+        void main() {
+          float across = aBox.x + position.x * aBox.z;
+          // Nothing of a figure is below its feet. Rows under them fold onto the ground.
+          float up = max(0.0, aBox.y + position.y * aBox.w);
+          vec3 world = aFoot + uSide * across + vec3(0.0, 0.0, up);
+          vUv = mix(aSheet.xy, aSheet.zw, position.xy);
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D uFigures;
+        varying vec2 vUv;
+        void main() {
+          float a = texture2D(uFigures, vUv).a;
+          if (a < 0.5) {
+            discard;
+          }
+          gl_FragColor = vec4(1.0);
+        }
+      `,
+    }),
+  );
+}
+
 /** The shadow under a counter or a figure: an ellipse on the board. One unit quad per instance. */
 export function unitShadowMaterial(): THREE.ShaderMaterial {
   return shadowStencil(
@@ -472,7 +761,7 @@ export function unitShadowMaterial(): THREE.ShaderMaterial {
 
 /** A shell crater: a rim and a pit, on the board. One unit quad per instance. */
 export function craterMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  return keepAlpha(new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     uniforms: {
@@ -505,7 +794,7 @@ export function craterMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         gl_FragColor = vec4(c * lit(uSunDir.z), d < 0.46 ? 0.9 : 0.55);
       }
     `,
-  });
+  }));
 }
 
 /**
@@ -514,7 +803,7 @@ export function craterMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
  * space, and `aPuff` is phase, kind (0 chimney, 1 battle), ember (0 or 1), and a seed.
  */
 export function smokeMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  return keepAlpha(new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     uniforms: {
@@ -525,6 +814,8 @@ export function smokeMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
       uAsh: { value: rgbOf(MILITARY.feldgrau) },
       uSteam: { value: blend(MILITARY.bone, MILITARY.cream, 0.4) },
       uEmber: { value: rgbOf(MILITARY.terracotta) },
+      /** Brightness of an ember. 1 is the painted colour; above it the ember is hot enough to glow (see bloom). */
+      uGlow: { value: 1 },
     },
     vertexShader: /* glsl */ `
       attribute vec3 aOrigin;
@@ -565,6 +856,7 @@ export function smokeMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
       uniform vec3 uAsh;
       uniform vec3 uSteam;
       uniform vec3 uEmber;
+      uniform float uGlow;
       varying vec2 vAt;
       varying vec4 vPuff;
       varying float vAge;
@@ -578,14 +870,14 @@ export function smokeMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         vec3 dark = mix(uAsh, uSoot, vPuff.y);
         vec3 pale = mix(uSteam, uAsh, vPuff.y);
         vec3 c = mix(dark, pale, smoothstep(0.1, 0.8, vAge));
-        c = mix(c, uEmber, vPuff.z * (1.0 - smoothstep(0.0, 0.2, vAge)));
+        c = mix(c, uEmber * uGlow, vPuff.z * (1.0 - smoothstep(0.0, 0.2, vAge)));
         // Two tones: the side toward the light is a step paler.
         c *= 0.9 + 0.18 * step(0.0, dot(vAt, vec2(-0.5, 0.85)));
         float alpha = floor(vFade * 4.0 + 0.5) / 4.0;
         gl_FragColor = vec4(c, alpha * mix(0.62, 0.82, vPuff.y));
       }
     `,
-  });
+  }));
 }
 
 // --- Post ---------------------------------------------------------------------------------------
@@ -600,16 +892,77 @@ void main() {
 
 /** How many 2D canvases the grade pass can lay over the board. */
 export const OVERLAY_SLOTS = 3;
+/** How many stacks the outline can mark at once: the one picked up, and the one under the pointer. */
+export const OUTLINE_SLOTS = 2;
+
+/**
+ * Paper tooth over the finished picture, behind `GRAIN`. Two sizes of it: a fine one a pixel
+ * across, and a fibre a few pixels long. It holds still, the way a print's does, and it bites the
+ * mid tones: paper white and solid ink stay clean. `uGrain` is depth, pixel size, and nothing.
+ */
+const GRAIN = /* glsl */ `
+#ifdef GRAIN
+uniform vec3 uGrain;
+float grainHash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+vec3 grain(vec3 c) {
+  vec2 at = gl_FragCoord.xy / max(uGrain.y, 1.0);
+  float fine = grainHash(floor(at));
+  vec2 cell = at / vec2(3.4, 2.2);
+  vec2 i = floor(cell);
+  vec2 f = fract(cell);
+  f = f * f * (3.0 - 2.0 * f);
+  float fibre = mix(
+    mix(grainHash(i + 17.0), grainHash(i + vec2(18.0, 17.0)), f.x),
+    mix(grainHash(i + vec2(17.0, 18.0)), grainHash(i + 18.0), f.x),
+    f.y
+  );
+  float tooth = (fine - 0.5) * 1.3 + (fibre - 0.5) * 1.1;
+  float tone = dot(c, vec3(0.299, 0.587, 0.114));
+  float take = 0.3 + 0.7 * (1.0 - abs(tone * 2.0 - 1.0));
+  return c + tooth * uGrain.x * take;
+}
+#endif
+`;
 
 /**
  * Grades the board and lays the 2D canvases over it. The board loses a little saturation so the
  * pieces stand off it; the canvases go on untouched. The menu's dim covers both.
+ *
+ * Four things can be built in, each behind its own define, and each absent from the shader when
+ * its define is: `AO` multiplies the board by the shade buffer, `BLOOM` adds the glow buffer,
+ * `SUN_SHADOW` lays the ground's cast shadow over the first canvas, and `OUTLINE` lines the
+ * figures of a stack. With none of them this is the grade as it was.
  */
 export function gradeMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     depthTest: false,
     depthWrite: false,
     uniforms: {
+      uAo: { value: null },
+      /** The colour the deepest shade multiplies the board by: a warm ink, not a grey. */
+      uAoInk: { value: new THREE.Vector3(0.34, 0.29, 0.33) },
+      uBloom: { value: null },
+      /** The glow's colour and strength. */
+      uBloomTint: { value: new THREE.Vector3(1, 0.9, 0.74) },
+      uSunTint: { value: new THREE.Vector3(1, 1, 1) },
+      /** The figures of the marked stacks, alone on a clear canvas. */
+      uOutMap: { value: null },
+      uOutSize: { value: new THREE.Vector2(1, 1) },
+      /** Each stack's rectangle on the frame, from its top-left corner: x, y, width, height. Width 0 is unused. */
+      uOutRect: { value: [new THREE.Vector4(), new THREE.Vector4()] },
+      /** Where each rectangle sits on `uOutMap`. */
+      uOutAt: { value: [new THREE.Vector2(), new THREE.Vector2()] },
+      /** Each line's colour and strength. */
+      uOutInk: { value: [new THREE.Vector4(1, 1, 1, 1), new THREE.Vector4(1, 1, 1, 1)] },
+      /** Line on or off, wash on or off, line width, wash reach: the last two in frame pixels. */
+      uOutLook: { value: new THREE.Vector4(1, 0, 1.5, 6) },
+      /** The dark edge outside the line, which keeps it readable on pale ground. */
+      uOutEdge: { value: new THREE.Vector3(0.23, 0.2, 0.21) },
+      uGrain: { value: new THREE.Vector3(0, 1, 0) },
       uScene: { value: null },
       uLayer0: { value: null },
       uLayer1: { value: null },
@@ -641,6 +994,82 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uniform float uDusk;
       uniform float uDim;
       varying vec2 vUv;
+      #ifdef AO
+      uniform sampler2D uAo;
+      uniform vec3 uAoInk;
+      #endif
+      #ifdef BLOOM
+      uniform sampler2D uBloom;
+      uniform vec3 uBloomTint;
+      #endif
+      #ifdef SUN_SHADOW
+      uniform vec3 uSunTint;
+      #endif
+      ${GRAIN}
+      #ifdef OUTLINE
+      uniform sampler2D uOutMap;
+      uniform vec2 uOutSize;
+      uniform vec4 uOutRect[${OUTLINE_SLOTS}];
+      uniform vec2 uOutAt[${OUTLINE_SLOTS}];
+      uniform vec4 uOutInk[${OUTLINE_SLOTS}];
+      uniform vec4 uOutLook;
+      uniform vec3 uOutEdge;
+      // Opacity of the stack's figures at a point of its rectangle. Every read names its level, so
+      // none of them needs a gradient and all of them can sit behind the rectangle test.
+      float figureAt(vec2 local, vec4 rect, vec2 at) {
+        vec2 p = clamp(local, vec2(0.5), rect.zw - 0.5);
+        return textureLod(uOutMap, vec2(at.x + p.x, uOutSize.y - at.y - p.y) / uOutSize, 0.0).a;
+      }
+      // The eight points of a ring. x is the most opaque of them, y is their mean.
+      vec2 figureRing(vec2 local, vec4 rect, vec2 at, float r) {
+        float d = r * 0.7071;
+        float a = figureAt(local + vec2(r, 0.0), rect, at);
+        float b = figureAt(local - vec2(r, 0.0), rect, at);
+        float e = figureAt(local + vec2(0.0, r), rect, at);
+        float f = figureAt(local - vec2(0.0, r), rect, at);
+        float g = figureAt(local + vec2(d, d), rect, at);
+        float h = figureAt(local - vec2(d, d), rect, at);
+        float i = figureAt(local + vec2(d, -d), rect, at);
+        float j = figureAt(local + vec2(-d, d), rect, at);
+        return vec2(max(max(max(a, b), max(e, f)), max(max(g, h), max(i, j))), (a + b + e + f + g + h + i + j) / 8.0);
+      }
+      float outPaper(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        vec2 s = vec2(127.1, 311.7);
+        float a = fract(sin(dot(i, s)) * 43758.5453);
+        float b = fract(sin(dot(i + vec2(1.0, 0.0), s)) * 43758.5453);
+        float c = fract(sin(dot(i + vec2(0.0, 1.0), s)) * 43758.5453);
+        float d = fract(sin(dot(i + vec2(1.0, 1.0), s)) * 43758.5453);
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      vec3 outline(vec3 c, vec2 frag, vec4 rect, vec2 at, vec4 ink) {
+        vec2 local = frag - rect.xy;
+        if (rect.z < 1.0 || local.x < 0.0 || local.y < 0.0 || local.x > rect.z || local.y > rect.w) {
+          return c;
+        }
+        float self = figureAt(local, rect, at);
+        float outside = 1.0 - smoothstep(0.3, 0.7, self);
+        if (uOutLook.y > 0.5) {
+          // A wash: pigment let out past the figures, pooled at its own edge and broken by the paper.
+          float near = figureRing(local, rect, at, uOutLook.w * 0.45).y;
+          float far = figureRing(local, rect, at, uOutLook.w).y;
+          float spread = near * 0.6 + far * 0.4;
+          float tooth = 0.72 + 0.56 * outPaper(frag / (uOutLook.z * 2.4));
+          float pool = smoothstep(0.02, 0.3, spread) * (1.0 - 0.45 * smoothstep(0.3, 0.8, spread));
+          c = mix(c, ink.rgb, clamp(pool * tooth, 0.0, 1.0) * 0.62 * ink.a * outside);
+        }
+        if (uOutLook.x > 0.5) {
+          // A line the width of a pen stroke, and a hair of dark outside it.
+          float line = smoothstep(0.2, 0.55, figureRing(local, rect, at, uOutLook.z).x);
+          float edge = smoothstep(0.2, 0.55, figureRing(local, rect, at, uOutLook.z * 1.85).x);
+          c = mix(c, uOutEdge, edge * (1.0 - line) * 0.6 * ink.a * outside);
+          c = mix(c, ink.rgb, line * ink.a * outside);
+        }
+        return c;
+      }
+      #endif
       vec4 layer(sampler2D map) {
         if (uExact > 0.5) {
           ivec2 at = ivec2(gl_FragCoord.xy + uLayerShift);
@@ -650,7 +1079,17 @@ export function gradeMaterial(): THREE.ShaderMaterial {
         return texture2D(map, vUv);
       }
       void main() {
-        vec3 c = texture2D(uScene, vUv).rgb;
+        vec4 scene = texture2D(uScene, vUv);
+        vec3 c = scene.rgb;
+        #ifdef BLOOM
+        // With the glow on, the hot marks are brighter than white. Brought back by their own
+        // brightest channel they keep their colour: an ember stays orange and does not clip to white.
+        c /= max(1.0, max(c.r, max(c.g, c.b)));
+        #endif
+        #ifdef AO
+        // Shade in the crevices: under a cliff, at the foot of a mountain, between two roofs.
+        c *= mix(uAoInk, vec3(1.0), texture2D(uAo, vUv).r);
+        #endif
         float grey = dot(c, vec3(0.299, 0.587, 0.114));
         c = mix(vec3(grey), c, uSaturation);
         // Close in, a touch of warmth, the colour of a lamp over a table.
@@ -658,14 +1097,31 @@ export function gradeMaterial(): THREE.ShaderMaterial {
         // The dusk look: thinner colour, harder contrast, a cold cast.
         vec3 dusk = (mix(vec3(grey), c, 0.75) - 0.5) * 1.12 + 0.5;
         c = mix(c, dusk * vec3(0.9, 0.96, 1.07), uDusk);
+        #ifdef BLOOM
+        // The glow goes on under the canvases, so it spreads over the board and never over a piece.
+        c += texture2D(uBloom, vUv).rgb * uBloomTint;
+        #endif
         // The canvases hold premultiplied colour.
         vec4 o = layer(uLayer0) * uOn.x;
+        #ifdef SUN_SHADOW
+        // The first canvas is what lies flat on the board: the washes, the counters, the bases the
+        // figures stand on. A shadow cast across the ground crosses them too.
+        o.rgb *= mix(uSunTint, vec3(1.0), scene.a);
+        #endif
         c = c * (1.0 - o.a) + o.rgb;
         o = layer(uLayer1) * uOn.y;
         c = c * (1.0 - o.a) + o.rgb;
+        #ifdef OUTLINE
+        vec2 frag = vec2(gl_FragCoord.x + uLayerShift.x, uLayerSize.y - gl_FragCoord.y - uLayerShift.y);
+        c = outline(c, frag, uOutRect[1], uOutAt[1], uOutInk[1]);
+        c = outline(c, frag, uOutRect[0], uOutAt[0], uOutInk[0]);
+        #endif
         o = layer(uLayer2) * uOn.z;
         c = c * (1.0 - o.a) + o.rgb;
         c = mix(c, ((c - 0.5) * 0.72 + 0.5) * 0.55, uDim);
+        #ifdef GRAIN
+        c = grain(c);
+        #endif
         gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
       }
     `,
@@ -687,6 +1143,8 @@ export function lensMaterial(): THREE.ShaderMaterial {
       /** Blur radius at the screen's top and bottom edge, in texels. */
       uRadius: { value: 0 },
       uVignette: { value: 0 },
+      /** Paper tooth, with `GRAIN`. Its depth is 0 on the first run, so it goes on once. */
+      uGrain: { value: new THREE.Vector3(0, 1, 0) },
     },
     vertexShader: SCREEN_VERTEX,
     fragmentShader: /* glsl */ `
@@ -695,6 +1153,7 @@ export function lensMaterial(): THREE.ShaderMaterial {
       uniform float uRadius;
       uniform float uVignette;
       varying vec2 vUv;
+      ${GRAIN}
       void main() {
         float away = abs(vUv.y - 0.5) * 2.0;
         float reach = uRadius * smoothstep(0.46, 1.0, away) / 4.0;
@@ -705,7 +1164,174 @@ export function lensMaterial(): THREE.ShaderMaterial {
         c += (texture2D(uSource, vUv + uStep * reach * 4.0).rgb + texture2D(uSource, vUv - uStep * reach * 4.0).rgb) * 0.05;
         vec2 fromCentre = (vUv - 0.5) * vec2(1.1, 1.25);
         c *= 1.0 - uVignette * 0.5 * smoothstep(0.42, 1.0, length(fromCentre) * 1.35);
+        #ifdef GRAIN
+        c = grain(c);
+        #endif
         gl_FragColor = vec4(c, 1.0);
+      }
+    `,
+  });
+}
+
+// --- Shade in the crevices ----------------------------------------------------------------------
+
+/**
+ * Ambient shade from the board's depth. The camera is orthographic, so a pixel's place in view
+ * space is its screen position scaled by the frustum, and its depth as stored. Each pixel looks at
+ * `AO_SAMPLES` neighbours inside `uReach` world units and darkens by how much of them stands above
+ * its own surface: the water under a cliff, the ground at the foot of a mountain, the gap between
+ * two roofs. Flat land and open sea see nothing above them and stay as painted.
+ *
+ * The taps turn by a pattern that repeats every four pixels, and aoBlurMaterial averages four by
+ * four, which removes the pattern exactly.
+ */
+export function aoMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    defines: { AO_SAMPLES: 10 },
+    uniforms: {
+      uDepth: { value: null },
+      /** Half the frustum's width and height, then near and far. */
+      uFrustum: { value: new THREE.Vector4(1, 1, 1, 4000) },
+      /** One texel of the depth buffer. */
+      uDepthTexel: { value: new THREE.Vector2(1, 1) },
+      uReach: { value: 2.4 },
+      uStrength: { value: 0.6 },
+    },
+    vertexShader: SCREEN_VERTEX,
+    fragmentShader: /* glsl */ `
+      uniform highp sampler2D uDepth;
+      uniform vec4 uFrustum;
+      uniform vec2 uDepthTexel;
+      uniform float uReach;
+      uniform float uStrength;
+      varying vec2 vUv;
+      vec3 viewAt(vec2 uv) {
+        float d = textureLod(uDepth, uv, 0.0).r;
+        return vec3((uv * 2.0 - 1.0) * uFrustum.xy, -(uFrustum.z + d * (uFrustum.w - uFrustum.z)));
+      }
+      void main() {
+        vec3 p = viewAt(vUv);
+        // The surface's facing, from whichever neighbour on each axis lies on the same surface.
+        vec3 east = viewAt(vUv + vec2(uDepthTexel.x, 0.0));
+        vec3 west = viewAt(vUv - vec2(uDepthTexel.x, 0.0));
+        vec3 north = viewAt(vUv + vec2(0.0, uDepthTexel.y));
+        vec3 south = viewAt(vUv - vec2(0.0, uDepthTexel.y));
+        vec3 dx = abs(east.z - p.z) < abs(p.z - west.z) ? east - p : p - west;
+        vec3 dy = abs(north.z - p.z) < abs(p.z - south.z) ? north - p : p - south;
+        vec3 n = normalize(cross(dx, dy));
+        vec2 cell = mod(floor(gl_FragCoord.xy), 4.0);
+        float spin = (cell.x * 5.0 + cell.y * 3.0) * 0.3927 + cell.x * cell.y * 1.1;
+        vec2 reach = uReach / (2.0 * uFrustum.xy);
+        float r2 = uReach * uReach;
+        float sum = 0.0;
+        for (int i = 0; i < AO_SAMPLES; i++) {
+          float t = (float(i) + 0.5) / float(AO_SAMPLES);
+          float a = spin + float(i) * 2.399963;
+          vec3 v = viewAt(vUv + vec2(cos(a), sin(a)) * sqrt(t) * reach) - p;
+          float vv = dot(v, v);
+          // Nothing past the reach counts, so the land a cliff's height above the sea casts no shade on it.
+          float near = max(1.0 - vv / r2, 0.0);
+          sum += near * near * max(dot(v, n) - 0.08, 0.0) * inversesqrt(vv + 0.01);
+        }
+        float shade = clamp(sum * 2.6 / float(AO_SAMPLES), 0.0, 1.0);
+        gl_FragColor = vec4(vec3(1.0 - uStrength * shade), 1.0);
+      }
+    `,
+  });
+}
+
+/** Averages the shade four texels by four: four reads, each already the mean of four. */
+export function aoBlurMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    uniforms: { uSource: { value: null }, uTexel: { value: new THREE.Vector2(1, 1) } },
+    vertexShader: SCREEN_VERTEX,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uSource;
+      uniform vec2 uTexel;
+      varying vec2 vUv;
+      void main() {
+        float a = texture2D(uSource, vUv + uTexel * vec2(-1.0, -1.0)).r;
+        a += texture2D(uSource, vUv + uTexel * vec2(1.0, -1.0)).r;
+        a += texture2D(uSource, vUv + uTexel * vec2(-1.0, 1.0)).r;
+        a += texture2D(uSource, vUv + uTexel * vec2(1.0, 1.0)).r;
+        gl_FragColor = vec4(vec3(a * 0.25), 1.0);
+      }
+    `,
+  });
+}
+
+// --- Glow ---------------------------------------------------------------------------------------
+
+/**
+ * One step down the glow chain: the source at half the size, through a five-point filter. The
+ * first step also keeps only what is brighter than `uThreshold`, measured on the brightest
+ * channel so a deep orange ember passes as readily as a white glint. The board is painted at or
+ * under 1, so nothing on it passes unless a shader made it brighter on purpose.
+ */
+export function bloomDownMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    uniforms: {
+      uSource: { value: null },
+      /** One texel of the source. */
+      uTexel: { value: new THREE.Vector2(1, 1) },
+      /** Negative on every step but the first. */
+      uThreshold: { value: -1 },
+    },
+    vertexShader: SCREEN_VERTEX,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uSource;
+      uniform vec2 uTexel;
+      uniform float uThreshold;
+      varying vec2 vUv;
+      vec3 bright(vec2 uv) {
+        vec3 c = texture2D(uSource, uv).rgb;
+        if (uThreshold >= 0.0) {
+          float peak = max(c.r, max(c.g, c.b));
+          c *= max(peak - uThreshold, 0.0) / max(peak, 1e-4);
+        }
+        return c;
+      }
+      void main() {
+        vec3 c = bright(vUv) * 4.0;
+        c += bright(vUv + uTexel);
+        c += bright(vUv - uTexel);
+        c += bright(vUv + vec2(uTexel.x, -uTexel.y));
+        c += bright(vUv + vec2(-uTexel.x, uTexel.y));
+        gl_FragColor = vec4(c / 8.0, 1.0);
+      }
+    `,
+  });
+}
+
+/** One step back up the chain: the smaller level, spread with a tent, added to this level's own. */
+export function bloomUpMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    uniforms: {
+      uSource: { value: null },
+      uOwn: { value: null },
+      /** One texel of the smaller level. */
+      uTexel: { value: new THREE.Vector2(1, 1) },
+    },
+    vertexShader: SCREEN_VERTEX,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uSource;
+      uniform sampler2D uOwn;
+      uniform vec2 uTexel;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(uSource, vUv + uTexel * vec2(-0.75, -0.75)).rgb;
+        c += texture2D(uSource, vUv + uTexel * vec2(0.75, -0.75)).rgb;
+        c += texture2D(uSource, vUv + uTexel * vec2(-0.75, 0.75)).rgb;
+        c += texture2D(uSource, vUv + uTexel * vec2(0.75, 0.75)).rgb;
+        gl_FragColor = vec4(texture2D(uOwn, vUv).rgb + c * 0.25, 1.0);
       }
     `,
   });

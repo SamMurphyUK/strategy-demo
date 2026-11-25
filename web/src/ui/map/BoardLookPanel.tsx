@@ -15,16 +15,22 @@ import {
 import { getBoardTune, resetBoardTune, setBoardTune, subscribeBoardTune } from "./boardTuneStore";
 import {
   applyVisuals,
+  EFFECT_WEIGHTS,
   getVisualRev,
   mapVisuals,
+  OUTLINE_MODES,
   resetVisuals,
   setVisual,
   subscribeVisuals,
+  SUN_CYCLES,
   VISUAL_PRESETS,
   visualPresetOf,
+  type EffectWeight,
   type FrontlineStyle,
   type FriendlyBorderStyle,
   type HighlightRule,
+  type OutlineMode,
+  type SunCycle,
   type VisualPresetName,
 } from "./mapVisualConfig";
 import { getDrawSample, subscribeDrawSample } from "./renderDebug";
@@ -84,6 +90,44 @@ function Fold(props: { title: string; startOpen?: boolean; children: ReactNode }
       <summary>{props.title}</summary>
       {props.children}
     </details>
+  );
+}
+
+const WEIGHT_LABEL: Record<EffectWeight, string> = { off: "Off", low: "Low", medium: "Medium", high: "High" };
+const OUTLINE_LABEL: Record<OutlineMode, string> = {
+  "units-only": "Line",
+  "watercolor-only": "Wash",
+  both: "Line and wash",
+  off: "Off",
+};
+const SUN_LABEL: Record<SunCycle, string> = {
+  animated: "Moving",
+  "static-noon": "Noon",
+  "static-golden": "Golden hour",
+  off: "Off",
+};
+
+/** One of a fixed set of choices, on the same row grid as the sliders. */
+function Choice<T extends string>(props: {
+  label: string;
+  title: string;
+  value: T;
+  options: readonly T[];
+  names: Record<T, string>;
+  onChange(value: T): void;
+}) {
+  return (
+    <label className="coast-slider" title={props.title}>
+      <span>{props.label}</span>
+      <select aria-label={props.title} value={props.value} onChange={(event) => props.onChange(event.target.value as T)}>
+        {props.options.map((option) => (
+          <option key={option} value={option}>
+            {props.names[option]}
+          </option>
+        ))}
+      </select>
+      <span />
+    </label>
   );
 }
 
@@ -352,6 +396,70 @@ export function BoardLookPanel() {
         </label>
         <p className="muted">The lines are the old border between territories. The band is the old wide mark where two factions meet.</p>
       </Fold>
+      <Fold title="Light and lens" startOpen>
+        <p className="muted">
+          The 3D board only. Off means the pass is not drawn at all. The shade, the shadows, and the sea's sheen grow in with the close zoom, like the relief.
+        </p>
+        <Choice
+          label="Sun"
+          title="Sun"
+          value={mapVisuals.sunCycle}
+          options={SUN_CYCLES}
+          names={SUN_LABEL}
+          onChange={(value) => setVisual("sunCycle", value)}
+        />
+        <Choice
+          label="Shadows"
+          title="Cast shadows"
+          value={mapVisuals.shadowQuality}
+          options={EFFECT_WEIGHTS}
+          names={WEIGHT_LABEL}
+          onChange={(value) => setVisual("shadowQuality", value)}
+        />
+        <Choice
+          label="Shade"
+          title="Contact shade"
+          value={mapVisuals.aoWeight}
+          options={EFFECT_WEIGHTS}
+          names={WEIGHT_LABEL}
+          onChange={(value) => setVisual("aoWeight", value)}
+        />
+        <Choice
+          label="Sky"
+          title="Sky on the sea"
+          value={mapVisuals.envReflectionWeight}
+          options={EFFECT_WEIGHTS}
+          names={WEIGHT_LABEL}
+          onChange={(value) => setVisual("envReflectionWeight", value)}
+        />
+        <Choice
+          label="Glow"
+          title="Glow"
+          value={mapVisuals.bloomWeight}
+          options={EFFECT_WEIGHTS}
+          names={WEIGHT_LABEL}
+          onChange={(value) => setVisual("bloomWeight", value)}
+        />
+        <Choice
+          label="Grain"
+          title="Paper grain"
+          value={mapVisuals.filmGrainWeight}
+          options={EFFECT_WEIGHTS}
+          names={WEIGHT_LABEL}
+          onChange={(value) => setVisual("filmGrainWeight", value)}
+        />
+        <Choice
+          label="Outline"
+          title="Marked stack outline"
+          value={mapVisuals.outlineMode}
+          options={OUTLINE_MODES}
+          names={OUTLINE_LABEL}
+          onChange={(value) => setVisual("outlineMode", value)}
+        />
+        <p className="muted">
+          Shadows fall from the cliffs, the terrain, and the figures. The glow spreads from embers and the sun on the sea. The outline marks the stack you picked or point at, as a line, a watercolour wash, or both, and never a territory.
+        </p>
+      </Fold>
       <Fold title="Shogun">
         <p className="muted">The Shogun ground. Wash, grain, borders, and the frontline. The switches above still gate the relief, the water, the smoke, and the trees.</p>
         <label className="coast-slider">
@@ -436,15 +544,21 @@ export function BoardLookPanel() {
         </label>
         <Slider label="Bokeh" min={0} max={1.5} value={mapVisuals.bokehIntensity} onChange={(value) => setVisual("bokehIntensity", value)} />
         <label className="art-tune-flag">
-          <input type="checkbox" checked={mapVisuals.sunSweep} onChange={(event) => setVisual("sunSweep", event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={mapVisuals.sunSweep}
+            disabled={mapVisuals.sunCycle !== "animated"}
+            onChange={(event) => setVisual("sunSweep", event.target.checked)}
+          />
           Sun sweeps through the day
         </label>
         <Slider
           label="Azimuth"
+          title="Where the sun holds while it does not sweep. The Sun setting under Light and lens must be moving."
           min={-50}
           max={50}
           value={mapVisuals.sunAzimuth}
-          disabled={mapVisuals.sunSweep}
+          disabled={mapVisuals.sunSweep || mapVisuals.sunCycle !== "animated"}
           display={`${Math.round(mapVisuals.sunAzimuth)}°`}
           onChange={(value) => setVisual("sunAzimuth", value)}
         />

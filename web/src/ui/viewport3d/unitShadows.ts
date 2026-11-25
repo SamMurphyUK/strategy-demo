@@ -68,10 +68,29 @@ export function unitShadow(
 }
 
 /**
- * Writes one matrix per counter in the frame into `out` (sixteen numbers each, column-major), for a
- * quad that spans -1 to 1. Returns how many were written.
+ * The dark under a stack whose figures cast their own shadows (see sunShadow.ts): the base they
+ * stand on, seen from above, slid a little away from the sun. `fade` is 0 for a counter, which
+ * keeps its disc, and 1 for standing figures. An aircraft's base is on the ground like any other.
  */
-export function writeUnitShadows(out: Float32Array, frame: BoardFrame, sun: SunState, z: number): number {
+export function contactShadow(x: number, y: number, radius: number, fade: number, sun: SunState, k: number): GroundEllipse {
+  const disc = unitShadow(x, y, radius, false, 0, sun, k);
+  const f = Math.min(1, Math.max(0, fade));
+  return {
+    x: disc.x,
+    y: disc.y,
+    a: disc.a + (radius * 1.14 - disc.a) * f,
+    b: disc.b + (radius * 0.7 - disc.b) * f,
+    // The base is wide across the screen, whichever way the sun stands.
+    angle: f >= 1 ? 0 : disc.angle * (1 - f),
+  };
+}
+
+/**
+ * Writes one matrix per counter in the frame into `out` (sixteen numbers each, column-major), for a
+ * quad that spans -1 to 1. Returns how many were written. With `contact` set the figures cast
+ * their own shadows, and each stack gets only the dark under its base.
+ */
+export function writeUnitShadows(out: Float32Array, frame: BoardFrame, sun: SunState, z: number, contact = false): number {
   const k = frame.view.k;
   const radius = frame.tokenPx / 2 / Math.max(k, 1e-6);
   const limit = Math.min(MAX_UNIT_SHADOWS, Math.floor(out.length / 16));
@@ -85,7 +104,9 @@ export function writeUnitShadows(out: Float32Array, frame: BoardFrame, sun: SunS
         continue;
       }
       const world = screenToWorld(frame.view, counter);
-      const shadow = unitShadow(world.x, -world.y, radius, counter.domain === "air", frame.unitFade, sun, k);
+      const shadow = contact
+        ? contactShadow(world.x, -world.y, radius, frame.unitFade, sun, k)
+        : unitShadow(world.x, -world.y, radius, counter.domain === "air", frame.unitFade, sun, k);
       const c = Math.cos(shadow.angle);
       const s = Math.sin(shadow.angle);
       const m = count * 16;
