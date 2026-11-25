@@ -183,7 +183,7 @@ export interface MapVisualConfig {
   seaSheenPops: number;
   /** At sprite zoom the land eases from the pixel chart to a soft posterized wash, so the figures stand out. */
   enableSoftLand: boolean;
-  /** The zoom where the softening starts, and the zoom where it is whole. The sprites arrive at 3.8. */
+  /** The zoom where the softening starts, and the zoom where it is whole. The icon tokens hold the full pixel chart up to 3.8, where the sprites arrive. */
   softLandFrom: number;
   softLandTo: number;
   /** What is left of the dither, the colour, and the light and shade once the land is soft. 1 is as strategic. */
@@ -281,8 +281,8 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaSheenScatter: 0.7,
   seaSheenPops: 0.5,
   enableSoftLand: true,
-  softLandFrom: 2,
-  softLandTo: 3.8,
+  softLandFrom: 3.8,
+  softLandTo: 5.6,
   softLandDither: 0.1,
   softLandSaturation: 0.58,
   softLandValueBand: 0.6,

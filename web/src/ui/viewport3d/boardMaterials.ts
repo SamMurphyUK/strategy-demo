@@ -586,7 +586,8 @@ export function landTopMaterial(
         float softK = 1.0;
         #endif
         float soft = uPixSoft.x * softK;
-        vec2 ms = mix(m, mapAt, soft * 0.9);
+        // The ground is read at the middle of its texel until the land is half soft, so there is no blurred in-between.
+        vec2 ms = mix(m, mapAt, smoothstep(0.5, 1.0, soft) * 0.9);
         float calm = mix(pixCalm(m), 0.5 + 0.5 * pixCalm(m), soft);
         float spread = (bay - 0.5) * uPixGrid.w * calm * mix(1.0, uPixSoft.z, soft);
 
