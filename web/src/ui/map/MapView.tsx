@@ -17,6 +17,9 @@ import {
   drawHoverMark,
   drawMoveGuide,
   drawOperationalArrows,
+  drawClassicBorders,
+  drawClassicFront,
+  drawSeaZoneBorders,
   drawTerrain,
   shoreStencilFor,
   shoreVeilFor,
@@ -29,6 +32,7 @@ import {
 } from "./mapRenderer";
 import type { OperationalOrder } from "./operationalArrows";
 import { BAKE_PAINT, type Baked, TerrainBake } from "./mapBake";
+import { sharedEdges } from "./mapBakeMath";
 import type { BoardLayer } from "./boardLayer";
 import { clipperFor } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
@@ -38,8 +42,9 @@ import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
 import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
-import { unitLean } from "./boardTune";
+import { borderPasses, unitLean } from "./boardTune";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
+import { getVisualRev, mapVisuals, subscribeVisuals } from "./mapVisualConfig";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
@@ -404,6 +409,7 @@ export function MapView(props: MapViewProps) {
   const [tuneOpen, setTuneOpen] = useState(false);
   const coastRev = useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
   const boardRev = useSyncExternalStore(subscribeBoardTune, getBoardTuneRev);
+  const visualRev = useSyncExternalStore(subscribeVisuals, getVisualRev, getVisualRev);
   const figureRev = useSyncExternalStore(subscribeFigureScale, getFigureScaleRev);
   const drawFlags = useSyncExternalStore(subscribeDrawFlags, getDrawFlags);
   const cameraLock = useRef(false);
@@ -901,10 +907,10 @@ export function MapView(props: MapViewProps) {
       exact,
       owners: props.owners,
       highlight: dragHighlight ?? props.highlight,
-      selectedRegionId: props.selectedRegionId,
+      selectedRegionId: board?.ownFront && mapVisuals.highlightMode === "off" ? "" : props.selectedRegionId,
       hoverRegionId: gesture?.moved ? waypointRegion.current : "",
       dim: only === null ? null : only === "land" ? "sea" : "land",
-      frontlines: editor ? [] : (props.relief?.frontlines ?? []),
+      frontlines: editor || board?.ownFront ? [] : (props.relief?.frontlines ?? []),
       lod: mapLod,
       unitFade,
       stampAvoid:
@@ -951,6 +957,27 @@ export function MapView(props: MapViewProps) {
     } else {
       needsBakeSettle.current = false;
       drawTerrain(ctx, scene);
+    }
+    if (board?.ownFront && clipped) {
+      const tune = getBoardTune();
+      const seam = { left: bounds.x, right: bounds.x + bounds.w };
+      if (tune.territoryLines) {
+        const lands = geometry.regions.flatMap((region) => {
+          const shape = region.type === "land" ? clipped.get(region.id) : undefined;
+          return shape ? [shape] : [];
+        });
+        drawClassicBorders(ctx, scene, sharedEdges(lands, seam, 2), borderPasses(tune));
+      }
+      if (tune.enemyBand) {
+        drawClassicFront(ctx, scene, props.relief?.frontlines ?? []);
+      }
+    }
+    if (board?.seaBorders && clipped) {
+      const seas = geometry.regions.flatMap((region) => {
+        const shape = region.type === "sea" ? clipped.get(region.id) : undefined;
+        return shape ? [shape] : [];
+      });
+      drawSeaZoneBorders(ctx, scene, sharedEdges(seas, { left: bounds.x, right: bounds.x + bounds.w }, 2));
     }
     const surfTime = performance.now() / 1000;
     const refImg = referenceRef.current;
@@ -1069,7 +1096,9 @@ export function MapView(props: MapViewProps) {
         if (props.battleIcons && props.battleIcons.length > 0) {
           drawStandingBattleIcons(arrowCtx, scene, props.battleIcons);
         }
-        drawHoverMark(arrowCtx, scene, hoverRef.current);
+        if (!board?.ownFront || mapVisuals.highlightMode === "always-hover") {
+          drawHoverMark(arrowCtx, scene, hoverRef.current);
+        }
         if (props.warningRegionId) {
           const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
           strokeWarningRing(arrowCtx, dpr, layouts, props.warningRegionId, pulse);
@@ -1128,6 +1157,7 @@ export function MapView(props: MapViewProps) {
     tokenArtRev,
     coastRev,
     boardRev,
+    visualRev,
     figureRev,
     unitFade,
     geometry,
@@ -1620,7 +1650,9 @@ export function MapView(props: MapViewProps) {
     if (icons && icons.length > 0) {
       drawStandingBattleIcons(ctx, scene, icons);
     }
-    drawHoverMark(ctx, scene, hoverRef.current);
+    if (live.current.props.board?.ownFront !== true || mapVisuals.highlightMode === "always-hover") {
+      drawHoverMark(ctx, scene, hoverRef.current);
+    }
     if (frame.warningRegionId !== "") {
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
       strokeWarningRing(ctx, scene.dpr, frame.overlay.layouts, frame.warningRegionId, pulse);

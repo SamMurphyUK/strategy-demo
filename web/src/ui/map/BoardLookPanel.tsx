@@ -13,6 +13,20 @@ import {
   type Knob,
 } from "./boardTune";
 import { getBoardTune, resetBoardTune, setBoardTune, subscribeBoardTune } from "./boardTuneStore";
+import {
+  applyVisuals,
+  getVisualRev,
+  mapVisuals,
+  resetVisuals,
+  setVisual,
+  subscribeVisuals,
+  VISUAL_PRESETS,
+  visualPresetOf,
+  type FrontlineStyle,
+  type FriendlyBorderStyle,
+  type HighlightRule,
+  type VisualPresetName,
+} from "./mapVisualConfig";
 import { getDrawSample, subscribeDrawSample } from "./renderDebug";
 
 const FACTIONS: readonly { key: FactionKey; label: string }[] = [
@@ -101,6 +115,7 @@ function KnobRow(props: { label: string; title: string; knob: Knob; onChange(kno
 /** Picture controls for the campaign board. Z opens the panel that holds this. */
 export function BoardLookPanel() {
   const tune = useSyncExternalStore(subscribeBoardTune, getBoardTune, getBoardTune);
+  useSyncExternalStore(subscribeVisuals, getVisualRev, getVisualRev);
   const sample = useSyncExternalStore(subscribeDrawSample, getDrawSample, getDrawSample);
   const zoom = sample.zoom > 0 ? sample.zoom : tune.tilt.end;
   const squash = groundSquash(zoom, tune.tilt);
@@ -322,7 +337,122 @@ export function BoardLookPanel() {
           </select>
           <span className="tune-border" style={{ background: borderPasses(tune)[1]?.color ?? "#4B3D44" }} />
         </label>
-        <p className="muted">Charcoal is the current territory line. Sepia is the previous one.</p>
+        <p className="muted">Charcoal is the current territory line. Sepia is the previous one. On Shogun V2, sepia recolours the ink.</p>
+        <label className="art-tune-flag">
+          <input
+            type="checkbox"
+            checked={tune.territoryLines}
+            onChange={(event) => edit({ territoryLines: event.target.checked })}
+          />
+          Territory lines
+        </label>
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={tune.enemyBand} onChange={(event) => edit({ enemyBand: event.target.checked })} />
+          Enemy band
+        </label>
+        <p className="muted">The lines are the old border between territories. The band is the old wide mark where two factions meet.</p>
+      </Fold>
+      <Fold title="Shogun">
+        <p className="muted">The Shogun ground. Wash, grain, borders, and the frontline. The switches above still gate the relief, the water, the smoke, and the trees.</p>
+        <label className="coast-slider">
+          <span>Preset</span>
+          <select
+            aria-label="Shogun preset"
+            value={visualPresetOf(mapVisuals)}
+            onChange={(event) => {
+              const name = event.target.value as VisualPresetName;
+              if (name in VISUAL_PRESETS) {
+                applyVisuals(VISUAL_PRESETS[name]);
+              }
+            }}
+          >
+            <option value="shogun">Shogun</option>
+            <option value="solid">Solid</option>
+            <option value="plain">Plain</option>
+            {visualPresetOf(mapVisuals) === "custom" ? <option value="custom">Custom</option> : null}
+          </select>
+          <span />
+        </label>
+        <Slider label="Wash near" min={0} max={1} value={mapVisuals.factionWashClose} onChange={(value) => setVisual("factionWashClose", value)} />
+        <Slider label="Wash far" min={0} max={1} value={mapVisuals.factionWashFar} onChange={(value) => setVisual("factionWashFar", value)} />
+        <Slider label="Grain" min={0} max={2} value={mapVisuals.terrainGrainStrength} onChange={(value) => setVisual("terrainGrainStrength", value)} />
+        <label className="coast-slider">
+          <span>Friendly</span>
+          <select
+            aria-label="Friendly border"
+            value={mapVisuals.friendlyBorderStyle}
+            onChange={(event) => setVisual("friendlyBorderStyle", event.target.value as FriendlyBorderStyle)}
+          >
+            <option value="subtle-dashed">Subtle dashed</option>
+            <option value="solid">Solid</option>
+            <option value="hidden">Hidden</option>
+          </select>
+          <span />
+        </label>
+        <label className="coast-slider">
+          <span>Frontline</span>
+          <select
+            aria-label="Frontline"
+            value={mapVisuals.frontlineStyle}
+            onChange={(event) => setVisual("frontlineStyle", event.target.value as FrontlineStyle)}
+          >
+            <option value="dual-ink">Dual ink</option>
+            <option value="classic">Classic band</option>
+            <option value="hidden">Hidden</option>
+          </select>
+          <span />
+        </label>
+        <label className="coast-slider">
+          <span>Highlight</span>
+          <select
+            aria-label="Highlight"
+            value={mapVisuals.highlightMode}
+            onChange={(event) => setVisual("highlightMode", event.target.value as HighlightRule)}
+          >
+            <option value="click-and-drag">Click and drag</option>
+            <option value="always-hover">Always hover</option>
+            <option value="off">Off</option>
+          </select>
+          <span />
+        </label>
+        <Slider label="Watercolour" min={0} max={2} value={mapVisuals.watercolorIntensity} onChange={(value) => setVisual("watercolorIntensity", value)} />
+        <Slider label="Legal hint" min={0} max={1} value={mapVisuals.legalHintStrength} onChange={(value) => setVisual("legalHintStrength", value)} />
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={mapVisuals.showBiomeProps} onChange={(event) => setVisual("showBiomeProps", event.target.checked)} />
+          Trees, mountains, buildings
+        </label>
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={mapVisuals.showBattleSmoke} onChange={(event) => setVisual("showBattleSmoke", event.target.checked)} />
+          Battle and factory smoke
+        </label>
+        <Slider label="Smoke" min={0} max={0.6} value={mapVisuals.smokeOpacity} onChange={(value) => setVisual("smokeOpacity", value)} />
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={mapVisuals.showCoastalWaves} onChange={(event) => setVisual("showCoastalWaves", event.target.checked)} />
+          Coastal waves
+        </label>
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={mapVisuals.enableDoF} onChange={(event) => setVisual("enableDoF", event.target.checked)} />
+          Depth of field
+        </label>
+        <Slider label="Bokeh" min={0} max={1.5} value={mapVisuals.bokehIntensity} onChange={(value) => setVisual("bokehIntensity", value)} />
+        <label className="art-tune-flag">
+          <input type="checkbox" checked={mapVisuals.sunSweep} onChange={(event) => setVisual("sunSweep", event.target.checked)} />
+          Sun sweeps through the day
+        </label>
+        <Slider
+          label="Azimuth"
+          min={-50}
+          max={50}
+          value={mapVisuals.sunAzimuth}
+          disabled={mapVisuals.sunSweep}
+          display={`${Math.round(mapVisuals.sunAzimuth)}°`}
+          onChange={(value) => setVisual("sunAzimuth", value)}
+        />
+        <Slider label="Rim" min={0} max={1} value={mapVisuals.unitRim} onChange={(value) => setVisual("unitRim", value)} />
+        <Slider label="Shadow" min={0} max={0.6} value={mapVisuals.contactShadow} onChange={(value) => setVisual("contactShadow", value)} />
+        <button type="button" onClick={() => resetVisuals()}>
+          Reset shogun
+        </button>
       </Fold>
     </section>
   );

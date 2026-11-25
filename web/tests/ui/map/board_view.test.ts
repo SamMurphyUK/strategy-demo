@@ -13,6 +13,7 @@ describe("which board draws the campaign", () => {
     expect(boardViewOf("vanilla")).toBe("vanilla");
     expect(boardViewOf("shogun")).toBe("shogun");
     expect(boardViewOf(" Shogun ")).toBe("shogun");
+    expect(boardViewOf("shogun2")).toBe("shogun2");
   });
 
   it("labels every board for the menu", () => {
@@ -21,10 +22,12 @@ describe("which board draws the campaign", () => {
     }
     expect(BOARD_VIEW_LABEL.vanilla).toBe("Vanilla");
     expect(BOARD_VIEW_LABEL.shogun).toBe("Shogun");
+    expect(BOARD_VIEW_LABEL.shogun2).toBe("Shogun V2");
   });
 
   it("writes the board into the query and leaves the other keys", () => {
     expect(boardViewSearch("", "shogun")).toBe("?view=shogun");
+    expect(boardViewSearch("", "shogun2")).toBe("?view=shogun2");
     expect(boardViewSearch("?tune=1&view=3d", "vanilla")).toBe("?tune=1&view=vanilla");
     expect(boardViewSearch("?view=3d", "2d")).toBe("");
     expect(boardViewSearch("?tune=1&view=shogun", "2d")).toBe("?tune=1");

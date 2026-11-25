@@ -4,10 +4,11 @@
 //   3d       the diorama: the canvas map's pieces over a React Three Fiber ground.
 //   vanilla  the master copy of the first React Three Fiber board (viewport3d/vanilla).
 //   shogun   a copy of vanilla with the Shogun II art pass (viewport3d/shogun).
+//   shogun2  the diorama's units and play on the Shogun ground (viewport3d/shogun2).
 //
 // The page's `?view=` names one, and the main menu switches between them.
 
-export const BOARD_VIEWS = ["2d", "3d", "vanilla", "shogun"] as const;
+export const BOARD_VIEWS = ["2d", "3d", "vanilla", "shogun", "shogun2"] as const;
 
 export type BoardView = (typeof BOARD_VIEWS)[number];
 
@@ -16,6 +17,7 @@ export const BOARD_VIEW_LABEL: Record<BoardView, string> = {
   "3d": "Diorama",
   vanilla: "Vanilla",
   shogun: "Shogun",
+  shogun2: "Shogun V2",
 };
 
 /** The board a `?view=` value names. Anything else is the 2D map. */

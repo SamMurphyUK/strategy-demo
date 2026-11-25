@@ -63,6 +63,10 @@ export interface BoardTune {
   /** A picked colour wins over the palette for that faction. */
   colors: Partial<Record<FactionKey, string>>;
   borders: BorderSet;
+  /** The old territory ink, charcoal or sepia, over every border two lands share. */
+  territoryLines: boolean;
+  /** The old wide band along a border between factions at war. */
+  enemyBand: boolean;
 }
 
 /** The shipped tip: no squash below 1.15, 15% by 2.2. */
@@ -130,6 +134,8 @@ export function currentTune(): BoardTune {
     palette: "strip",
     colors: {},
     borders: "current",
+    territoryLines: false,
+    enemyBand: false,
   };
 }
 

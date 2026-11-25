@@ -40,4 +40,8 @@ export interface BoardLayer {
   frame(frame: BoardFrame): void;
   /** Called after a partial repaint (an idle sprite frame, the arrow layer): the canvases changed. */
   touch(): void;
+  /** The ground paints the frontline, so the canvas leaves that band off. */
+  ownFront?: boolean;
+  /** The canvas draws the lines between sea zones. The water picture has none of its own. */
+  seaBorders?: boolean;
 }

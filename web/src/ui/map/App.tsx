@@ -139,12 +139,15 @@ const MapViewport3D = lazy(() => import("../viewport3d/MapViewport3D"));
 const MapViewportVanilla = lazy(() => import("../viewport3d/vanilla/MapViewportVanilla"));
 /** Vanilla with the Shogun II art pass, behind `?view=shogun` and the menu's Shogun. */
 const MapViewportShogun = lazy(() => import("../viewport3d/shogun/MapViewportShogun"));
+/** The diorama's units and play on the Shogun ground, behind `?view=shogun2`. */
+const MapViewportShogunV2 = lazy(() => import("../viewport3d/shogun2/MapViewportShogunV2"));
 
 const BOARD_VIEWPORTS = {
   "2d": MapView,
   "3d": MapViewport3D,
   vanilla: MapViewportVanilla,
   shogun: MapViewportShogun,
+  shogun2: MapViewportShogunV2,
 } as const;
 
 export function App() {

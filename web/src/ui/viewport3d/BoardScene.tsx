@@ -14,6 +14,7 @@ import type { Rect } from "../map/geometry";
 import type { MultiPolygon } from "../map/regionClip";
 import { gradeSaturation, gradeWarm, tunedBoard } from "../map/boardTune";
 import { getBoardTune } from "../map/boardTuneStore";
+import { factionWash, friendlyBorderInk, frontlineInk, mapVisuals, subscribeVisuals } from "../map/mapVisualConfig";
 import { getDrawFlags } from "../map/renderDebug";
 import type { CraterMark } from "../map/terrainRelief";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
@@ -30,11 +31,13 @@ import {
   waterMaterial,
 } from "./boardMaterials";
 import { clearTexture, overlayTexture, sheetTexture } from "./boardTextures";
+import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
+import { rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { PostStack } from "./postStack";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
 import { slabGeometry } from "./regionMeshes";
-import { type BoardLook, shadowReach, sunAt } from "./sun";
+import { type BoardLook, shadowReach, sunAt, sunAtAzimuth } from "./sun";
 import { shadowDirection, MAX_UNIT_SHADOWS, writeUnitShadows } from "./unitShadows";
 import { boardAnimates, boardDetail } from "./zoomDetail";
 
@@ -66,7 +69,20 @@ export interface BoardSceneProps {
   dim: boolean;
   /** The viewer asked for less motion: the water, the smoke, and the sun hold still. */
   still: boolean;
+  /**
+   * Shogun ground sheets. Set, the land is the natural terrain and the faction wash instead of the
+   * baked faction palette, and the Z menu's Shogun controls drive it. The sea canvas stays `bake`.
+   */
+  shogun?: {
+    terrain: HTMLCanvasElement;
+    faction: HTMLCanvasElement;
+    lines: HTMLCanvasElement;
+    front: HTMLCanvasElement;
+  } | null;
 }
+
+const SHOGUN_INK = rgbOf(SHOGUN.ink);
+const SEPIA_INK = rgbOf("#2B2620");
 
 /** Ambient motion draws at most this often. A camera move or a repaint draws at once. */
 const AMBIENT_FRAME_MS = 1000 / 30;
@@ -263,6 +279,54 @@ export function BoardScene(props: BoardSceneProps) {
     (old) => old.dispose(),
     [bake, gl],
   );
+  const shogunShared = useMemo(() => {
+    const uniforms = shogunUniforms();
+    const source = kit.shared;
+    uniforms.uTime = source.uTime;
+    uniforms.uSunDir = source.uSunDir;
+    uniforms.uSunColor = source.uSunColor;
+    uniforms.uAmbient = source.uAmbient;
+    uniforms.uDirect = source.uDirect;
+    uniforms.uRelief = source.uRelief;
+    uniforms.uShadowVec = source.uShadowVec;
+    uniforms.uShadowAlpha = source.uShadowAlpha;
+    uniforms.uBounds = source.uBounds;
+    uniforms.uMask = source.uMask;
+    return uniforms;
+  }, [kit]);
+  const shogunLand = useDisposable(
+    () => landMaterial(shogunShared),
+    (old) => old.dispose(),
+    [shogunShared],
+  );
+  const shogunSheets = props.shogun ?? null;
+  const shogunTextures = useDisposable(
+    () => {
+      if (!shogunSheets) {
+        return null;
+      }
+      const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+      return {
+        terrain: sheetTexture(shogunSheets.terrain, true, anisotropy),
+        faction: sheetTexture(shogunSheets.faction, true, anisotropy),
+        lines: sheetTexture(shogunSheets.lines, true, anisotropy),
+        front: sheetTexture(shogunSheets.front, true, anisotropy),
+      };
+    },
+    (old) => {
+      old?.terrain.dispose();
+      old?.faction.dispose();
+      old?.lines.dispose();
+      old?.front.dispose();
+    },
+    [shogunSheets, gl],
+  );
+  if (shogunTextures) {
+    shogunShared.uTerrain.value = shogunTextures.terrain;
+    shogunShared.uFaction.value = shogunTextures.faction;
+    shogunShared.uLines.value = shogunTextures.lines;
+    shogunShared.uFront.value = shogunTextures.front;
+  }
   const maskTexture = useDisposable(
     () => sheetTexture(mask, false),
     (old) => old.dispose(),
@@ -307,7 +371,25 @@ export function BoardScene(props: BoardSceneProps) {
   useEffect(() => {
     clock.current.dirty = true;
     invalidate();
-  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still]);
+  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still, shogunTextures]);
+
+  useEffect(() => {
+    if (!shogunTextures) {
+      return;
+    }
+    kit.cliff.uniforms.uRockHigh.value.copy(rgbOf(SHOGUN.rockHigh));
+    kit.cliff.uniforms.uRockLow.value.copy(rgbOf(SHOGUN.rockLow));
+    kit.cliff.uniforms.uRockWet.value.copy(rgbOf(SHOGUN.rockWet));
+    kit.cliff.uniforms.uRockLip.value.copy(rgbOf(SHOGUN.rockLip));
+    kit.water.uniforms.uFoam.value.copy(rgbOf(SHOGUN.foam));
+    kit.water.uniforms.uWaveTint.value.copy(rgbOf(SHOGUN.seaShelf));
+    kit.water.uniforms.uTable.value.copy(rgbOf(SHOGUN.beyond));
+    kit.water.uniforms.uNeat.value.copy(rgbOf(SHOGUN.foam));
+    return subscribeVisuals(() => {
+      clock.current.dirty = true;
+      invalidate();
+    });
+  }, [shogunTextures, kit, invalidate]);
 
   useEffect(() => {
     store.invalidate = () => invalidate();
@@ -328,7 +410,17 @@ export function BoardScene(props: BoardSceneProps) {
     const state = clock.current;
     const tune = getBoardTune();
     const raw = boardDetail(frame.view.k, frame.fitK, frame.maxK);
-    const detail = tunedBoard(raw, tune);
+    const tuned = tunedBoard(raw, tune);
+    const shogunNow = shogunTextures !== null;
+    const detail = shogunNow
+      ? {
+          ...tuned,
+          props: mapVisuals.showBiomeProps ? tuned.props : 0,
+          water: mapVisuals.showCoastalWaves ? tuned.water : 0,
+          smoke: mapVisuals.showBattleSmoke ? tuned.smoke * (mapVisuals.smokeOpacity / 0.22) : 0,
+          focus: mapVisuals.enableDoF ? tuned.focus * (mapVisuals.bokehIntensity / 0.6) : 0,
+        }
+      : tuned;
     const moving = !still && getDrawFlags().anims && boardAnimates(detail) && !document.hidden;
     const size = gl.getDrawingBufferSize(bufferSize);
     // A resized canvas has lost its picture, and a repainted 2D canvas has a new one to show.
@@ -344,7 +436,8 @@ export function BoardScene(props: BoardSceneProps) {
     state.dirty = false;
 
     const seconds = still ? OPENING_SECONDS : OPENING_SECONDS + (now - state.start) / 1000;
-    const sun = sunAt(seconds, look, still);
+    const shogun = shogunTextures !== null;
+    const sun = shogun && !mapVisuals.sunSweep ? sunAtAzimuth(mapVisuals.sunAzimuth, look) : sunAt(seconds, look, still);
     const { shared } = kit;
     shared.uTime.value = seconds;
     shared.uStepTime.value = Math.floor(seconds * 12) / 12;
@@ -381,6 +474,18 @@ export function BoardScene(props: BoardSceneProps) {
     const bias = 0.7 * detail.flatten;
     kit.water.uniforms.uBias.value = bias;
     kit.landTop.uniforms.uBias.value = bias;
+    if (shogun) {
+      const land = shogunLand.uniforms;
+      land.uFactionAlpha.value = factionWash(raw.closeness, mapVisuals);
+      land.uGrain.value = mapVisuals.terrainGrainStrength;
+      land.uSharp.value = Math.min(1, Math.max(0, (frame.view.k / LINE_SHEET_SCALE - 0.8) / 1.5));
+      land.uInkWeight.value = 1 - 0.4 * raw.closeness;
+      const friendly = friendlyBorderInk(mapVisuals.friendlyBorderStyle);
+      land.uFriendly.value.set(friendly.dashed, friendly.solid);
+      const front = getBoardTune().enemyBand ? { dual: 0, classic: 0 } : frontlineInk(mapVisuals.frontlineStyle);
+      land.uFrontStyle.value.set(front.dual, front.classic);
+      land.uInk.value.copy(tune.borders === "previous" ? SEPIA_INK : SHOGUN_INK);
+    }
 
     kit.prop.uniforms.uGrow.value = detail.props;
     kit.propShadow.uniforms.uGrow.value = detail.props;
@@ -400,7 +505,8 @@ export function BoardScene(props: BoardSceneProps) {
     // A shadow under every counter. Fixed and faint from altitude, cast by the sun close in.
     unitShadows.count = writeUnitShadows(unitShadows.instanceMatrix.array as Float32Array, frame, sun, UNIT_SHADOW_LIFT);
     unitShadows.instanceMatrix.needsUpdate = true;
-    kit.unitShadow.uniforms.uAlpha.value = 0.2 + (sun.shadow - 0.2) * detail.relief * sun.direct;
+    const shadow = 0.2 + (sun.shadow - 0.2) * detail.relief * sun.direct;
+    kit.unitShadow.uniforms.uAlpha.value = shogun ? shadow * (mapVisuals.contactShadow / 0.32) : shadow;
 
     // Frame buffers follow the canvas.
     post.setSize(size.x, size.y);
@@ -470,7 +576,7 @@ export function BoardScene(props: BoardSceneProps) {
         <primitive object={unitShadows} />
       </group>
       <group ref={board}>
-        <mesh geometry={slab} material={[kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
+        <mesh geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
         <Craters scars={scars} kit={kit} />
         {PROP_KINDS.map((kind) => (plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} /> : null))}
         <Smoke scars={scars} chimneys={plan.chimneys} kit={kit} />

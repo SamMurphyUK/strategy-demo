@@ -745,26 +745,28 @@ function spriteSheet(unitType: string, factionId: string, face: FaceSign): Canva
   return baked;
 }
 
-/** Distance between squad copies, in CSS pixels. The baked offsets suit a rifleman.
- * A tank or a plane is wider than that step, so the extra copies would sit inside the first.
- */
+/** Distance between squad copies, in CSS pixels. Wide enough that a tank or a plane does not cover its neighbour. */
 function squadStep(figureW: number): number {
-  return Math.max(10, figureW * 0.72);
+  return Math.max(16, figureW * 0.92);
 }
 
+/**
+ * Two stand side by side. Three stand as a triangle, two behind and one in front, so each body
+ * can be counted. A bigger stack still shows three. Smaller `y` is farther from the camera.
+ */
 function placedSquad(count: number, step: number): { x: number; y: number }[] {
   const n = squadOffsets(count).length;
   if (n >= 3) {
     return [
-      { x: -step, y: -3 },
-      { x: 0, y: 0 },
-      { x: step, y: 3 },
+      { x: -step * 0.62, y: -step * 0.34 },
+      { x: step * 0.62, y: -step * 0.28 },
+      { x: 0, y: step * 0.42 },
     ];
   }
   if (n === 2) {
     return [
-      { x: -step / 2, y: -2 },
-      { x: step / 2, y: 2 },
+      { x: -step * 0.52, y: -step * 0.14 },
+      { x: step * 0.52, y: step * 0.18 },
     ];
   }
   return [{ x: 0, y: 0 }];
@@ -773,9 +775,18 @@ function placedSquad(count: number, step: number): { x: number; y: number }[] {
 /** Foreshortened baseplate, then the upright sprite standing on its centre. */
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
-  const rx = radius * 1.15;
-  const ry = Math.max(2, radius * 0.65);
   const { x, y } = paint;
+  const figureScale = uprightScale(paint.unitType);
+  const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
+  const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
+  const infantry = paint.unitType === "infantry" ? resolved ?? resolveQuickClip("JAP", "infantry") : null;
+  const clip = infantry ?? (resolved?.fallback ? null : resolved);
+  const pixelScale = clip && clip.height > 0 ? (UPRIGHT_FIGURE_PX * figureScale) / clip.height : 1;
+  const figureW = clip ? clip.width * pixelScale : 16 * figureScale;
+  const squad = placedSquad(paint.count, squadStep(figureW));
+  const reach = squad.reduce((span, off) => Math.max(span, Math.abs(off.x)), 0);
+  const rx = radius * 1.15 + reach * 0.35;
+  const ry = Math.max(2, radius * 0.65 + reach * 0.08);
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
@@ -793,16 +804,8 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
 
   const color = factionPalette(paint.factionId).primary;
   const pose = facingPose(paint.aim ?? 0);
-  const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
-  const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
-  // Infantry on this board is the shared Japanese sheet until a power has its own.
-  const infantry = paint.unitType === "infantry" ? resolved ?? resolveQuickClip("JAP", "infantry") : null;
-  const clip = infantry ?? (resolved?.fallback ? null : resolved);
   const sheet = !clip && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
   const bob = clip || paint.idleTime == null ? 0 : idleBob(paint.unitType, paint.idleTime, paint.idlePhase ?? 0);
-  const figureScale = uprightScale(paint.unitType);
-  const pixelScale = clip && clip.height > 0 ? (UPRIGHT_FIGURE_PX * figureScale) / clip.height : 1;
-  const figureW = clip ? clip.width * pixelScale : 16 * figureScale;
   const sink = VEHICLE_SINK.has(paint.unitType) ? VEHICLE_SINK_PX : 0;
   const poseName = clip && clip.idle > 0 ? "idle" : "walk";
   const poseCount = clip ? clip[poseName] : 0;
@@ -812,9 +815,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const staggerIdle = paint.unitType === "infantry" && poseName === "idle" && poseCount > 1;
   const asVector = campaignFrame != null && clip != null && poseCount > 0;
   withCrisp(ctx, paint.dpr, (at) => {
-    const figures = placedSquad(paint.count, squadStep(figureW))
-      .slice()
-      .sort((a, b) => a.y - b.y);
+    const figures = squad.slice().sort((a, b) => a.y - b.y);
     for (let i = 0; i < figures.length; i += 1) {
       const off = figures[i]!;
       const frameIndex = staggerIdle
@@ -863,7 +864,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       }
       ctx.restore();
     }
-    if (!asVector && paint.count > 1) {
+    if (!asVector && paint.count > 3) {
       drawHardwareBadge(ctx, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
     }
     if (!asVector && paint.fuel != null) {
@@ -875,7 +876,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     target.save();
     target.setTransform(paint.dpr, 0, 0, paint.dpr, 0, 0);
     withCrisp(target, paint.dpr, (at) => {
-      if (paint.count > 1) {
+      if (paint.count > 3) {
         drawHardwareBadge(target, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
       }
       if (paint.fuel != null) {

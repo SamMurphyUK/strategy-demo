@@ -57,6 +57,7 @@ import {
   HOVER_COLOR,
   HOVER_TINT,
   LAND_WASH,
+  SEA_SEAM_WIDTH,
   SELECTED_COLOR,
   SELECTED_TINT,
 } from "./mapStyle";
@@ -751,13 +752,37 @@ function fillLandWash(ctx: CanvasRenderingContext2D, s: TerrainScene, color: str
   }
 }
 
-function drawFrontlines(ctx: CanvasRenderingContext2D, segments: readonly FrontlineSegment[]): void {
-  if (segments.length === 0) {
+/**
+ * Sea-zone seams, the same stroke the baked map uses: spruce, one world unit wide.
+ * Drawn on a board whose water picture does not carry the bake.
+ */
+export function drawSeaZoneBorders(
+  ctx: CanvasRenderingContext2D,
+  s: TerrainScene,
+  edges: readonly [number, number, number, number][],
+): void {
+  if (edges.length === 0) {
     return;
   }
   ctx.save();
-  ctx.lineCap = "butt";
-  ctx.lineJoin = "miter";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = MILITARY.spruce;
+  ctx.lineWidth = SEA_SEAM_WIDTH;
+  for (const dx of s.copies) {
+    setWorldTransform(ctx, s.view, s.dpr);
+    ctx.translate(dx, 0);
+    ctx.beginPath();
+    for (const [x1, y1, x2, y2] of edges) {
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function strokeFrontline(ctx: CanvasRenderingContext2D, segments: readonly FrontlineSegment[]): void {
   ctx.beginPath();
   for (const segment of segments) {
     ctx.moveTo(segment.x1, segment.y1);
@@ -765,11 +790,73 @@ function drawFrontlines(ctx: CanvasRenderingContext2D, segments: readonly Frontl
   }
   ctx.strokeStyle = "rgba(156, 82, 78, 0.45)";
   ctx.lineWidth = 6;
+  ctx.setLineDash([]);
   ctx.stroke();
   ctx.strokeStyle = MILITARY.terracotta;
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 3]);
   ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawFrontlines(ctx: CanvasRenderingContext2D, segments: readonly FrontlineSegment[]): void {
+  if (segments.length === 0) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+  strokeFrontline(ctx, segments);
+  ctx.restore();
+}
+
+/** The old hostile band, on a board that otherwise paints its own frontline. */
+export function drawClassicFront(
+  ctx: CanvasRenderingContext2D,
+  s: TerrainScene,
+  segments: readonly FrontlineSegment[],
+): void {
+  if (segments.length === 0) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+  for (const dx of s.copies) {
+    setWorldTransform(ctx, s.view, s.dpr);
+    ctx.translate(dx, 0);
+    strokeFrontline(ctx, segments);
+  }
+  ctx.restore();
+}
+
+/** The old territory ink: a wide shade, then the charcoal or sepia line. */
+export function drawClassicBorders(
+  ctx: CanvasRenderingContext2D,
+  s: TerrainScene,
+  edges: readonly [number, number, number, number][],
+  passes: readonly { color: string; width: number }[],
+): void {
+  if (edges.length === 0 || passes.length === 0) {
+    return;
+  }
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const dx of s.copies) {
+    setWorldTransform(ctx, s.view, s.dpr);
+    ctx.translate(dx, 0);
+    ctx.beginPath();
+    for (const [x1, y1, x2, y2] of edges) {
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    }
+    for (const pass of passes) {
+      ctx.lineWidth = pass.width;
+      ctx.strokeStyle = pass.color;
+      ctx.stroke();
+    }
+  }
   ctx.restore();
 }
 

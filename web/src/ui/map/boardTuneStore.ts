@@ -104,6 +104,8 @@ export function parseTune(value: unknown): BoardTune | null {
     palette,
     colors,
     borders,
+    territoryLines: typeof raw.territoryLines === "boolean" ? raw.territoryLines : false,
+    enemyBand: typeof raw.enemyBand === "boolean" ? raw.enemyBand : false,
   };
 }
 

@@ -113,6 +113,9 @@ export function MainMenu({
           <button type="button" title="The vanilla board with the Shogun II art pass" onClick={() => onOpenBoard("shogun")}>
             Shogun
           </button>
+          <button type="button" title="The diorama's units and play, on the Shogun ground. Z opens the picture controls" onClick={() => onOpenBoard("shogun2")}>
+            Shogun V2
+          </button>
           <button type="button" onClick={() => setPage("settings")}>
             Settings
           </button>
