@@ -1,3 +1,4 @@
+import { BOARD_SKINS, skinDisables, skinFor, skinOwner } from "../viewport3d/skins/boardSkin";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FactionKey } from "../theme/factionPalette";
 import {
@@ -165,12 +166,14 @@ type SwitchKey = { [K in VisualKey]: MapVisualConfig[K] extends boolean ? K : ne
 
 /** A switch for one feature of the table. */
 function Flag(props: { name: SwitchKey; label: string; title?: string }) {
+  const foreign = skinDisables(skinFor(mapVisuals, true), props.name);
   return (
-    <label className="art-tune-flag" title={props.title}>
+    <label className="art-tune-flag" title={foreign ? skinNote(props.title, props.name) : props.title} style={foreign ? SKIN_DIM : undefined}>
       <input
         type="checkbox"
         aria-label={props.title ?? props.label}
         checked={mapVisuals[props.name]}
+        disabled={foreign}
         onChange={(event) => setVisual(props.name, event.target.checked)}
       />
       {props.label}
@@ -178,12 +181,24 @@ function Flag(props: { name: SwitchKey; label: string; title?: string }) {
   );
 }
 
+/** How a setting that belongs to the other skin looks: dimmed, and locked. */
+const SKIN_DIM = { opacity: 0.45 } as const;
+
+/** The tip for a dimmed setting: what it is, and which skin it belongs to. */
+function skinNote(title: string | undefined, key: VisualKey): string {
+  const owner = skinOwner(key);
+  return `${title ?? ""} (${owner ? BOARD_SKINS[owner].label : "another skin"} only)`.trim();
+}
+
 /** A slider and a number box for one setting. Both hold the same value, inside the setting's range. */
 function Num(props: { name: NumberKey; label: string; title: string; unit?: string; off?: boolean }) {
   const [min, max] = VISUAL_RANGES[props.name] ?? [0, 1];
   const value = mapVisuals[props.name];
+  // A setting that belongs to another skin does nothing under this one, so it is dimmed and locked.
+  const foreign = skinDisables(skinFor(mapVisuals, true), props.name);
+  const off = props.off || foreign;
   return (
-    <label className="coast-slider" title={props.title}>
+    <label className="coast-slider" title={foreign ? skinNote(props.title, props.name) : props.title} style={foreign ? SKIN_DIM : undefined}>
       <span>{props.label}</span>
       <input
         type="range"
@@ -192,7 +207,7 @@ function Num(props: { name: NumberKey; label: string; title: string; unit?: stri
         max={max}
         step="any"
         value={value}
-        disabled={props.off}
+        disabled={off}
         onChange={(event) => setVisual(props.name, Number(event.target.value))}
       />
       <input
@@ -203,7 +218,7 @@ function Num(props: { name: NumberKey; label: string; title: string; unit?: stri
         max={max}
         step={(max - min) / 100}
         value={Number(value.toFixed(3))}
-        disabled={props.off}
+        disabled={off}
         onChange={(event) => {
           const next = Number(event.target.value);
           if (event.target.value !== "" && Number.isFinite(next)) {

@@ -34,11 +34,11 @@
       "locked": false
     },
     "landmark:moscow": {
-      "dx": 0,
-      "dy": 0,
+      "dx": 1,
+      "dy": -1,
       "dz": 0,
-      "mult": 1,
-      "dturn": 0.524,
+      "mult": 0.826,
+      "dturn": 0,
       "locked": false
     },
     "landmark:ottawa": {

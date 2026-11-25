@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VISUALS, VISUAL_RANGES } from "../../../src/ui/map/mapVisualConfig";
-import { BOARD_SKINS, DEFAULT_SKIN, skinDefine, skinFor, skinOwns } from "../../../src/ui/viewport3d/skins/boardSkin";
+import { BOARD_SKINS, DEFAULT_SKIN, skinDefine, skinDisables, skinFor, skinOwner, skinOwns } from "../../../src/ui/viewport3d/skins/boardSkin";
 
 describe("the board's skins", () => {
   it("falls back to the baked skin whenever the pixel chart cannot draw", () => {
@@ -29,5 +29,15 @@ describe("the board's skins", () => {
     expect(skinOwns("baked", "softLandBrush")).toBe(false);
     expect(skinOwns("pixel", "seaSheenStrength")).toBe(false);
     expect(Object.keys(VISUAL_RANGES).length).toBeGreaterThan(0);
+  });
+
+  it("dims a setting only under a skin that does not own it", () => {
+    expect(skinOwner("softLandBrush")).toBe("pixel");
+    expect(skinDisables("baked", "softLandBrush")).toBe(true);
+    expect(skinDisables("pixel", "softLandBrush")).toBe(false);
+    // Settings every skin reads are never dimmed, and neither is the chart switch itself.
+    expect(skinOwner("seaSheenStrength")).toBeNull();
+    expect(skinDisables("baked", "seaSheenStrength")).toBe(false);
+    expect(skinDisables("baked", "enableFauxPixelMap")).toBe(false);
   });
 });

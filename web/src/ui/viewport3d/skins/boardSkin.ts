@@ -77,6 +77,22 @@ export function skinOwns(skin: BoardSkinId, key: VisualKey): boolean {
   return BOARD_SKINS[skin].owns.includes(key);
 }
 
+/** The skin a setting belongs to, or null for one every skin reads. */
+export function skinOwner(key: VisualKey): BoardSkinId | null {
+  for (const skin of Object.values(BOARD_SKINS)) {
+    if (skin.owns.includes(key)) {
+      return skin.id;
+    }
+  }
+  return null;
+}
+
+/** Whether a setting belongs to a skin other than the active one, so it does nothing now. */
+export function skinDisables(active: BoardSkinId, key: VisualKey): boolean {
+  const owner = skinOwner(key);
+  return owner !== null && owner !== active;
+}
+
 /** The define for a skin, as a material's defines say it: 1, or null for none. */
 export function skinDefine(skin: BoardSkinId): { name: "PIXIE"; value: 1 | null } {
   return { name: "PIXIE", value: BOARD_SKINS[skin].define === "PIXIE" ? 1 : null };
