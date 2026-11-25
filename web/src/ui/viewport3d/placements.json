@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "items": {
+    "landmark:berlin": {
+      "dx": 4,
+      "dy": -2,
+      "dz": 0,
+      "mult": 0.909,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:cairo": {
+      "dx": -7,
+      "dy": -9,
+      "dz": 0,
+      "mult": 1.464,
+      "dturn": -0.262,
+      "locked": false
+    },
+    "landmark:leningrad": {
+      "dx": -4,
+      "dy": -23,
+      "dz": 0,
+      "mult": 0.909,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:london": {
+      "dx": 5,
+      "dy": 10,
+      "dz": 0,
+      "mult": 0.751,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:moscow": {
+      "dx": 0,
+      "dy": 0,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0.524,
+      "locked": false
+    },
+    "landmark:ottawa": {
+      "dx": 1,
+      "dy": 0,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:paris": {
+      "dx": 1,
+      "dy": 5,
+      "dz": 13,
+      "mult": 0.909,
+      "dturn": 1.048,
+      "locked": false
+    },
+    "landmark:rome": {
+      "dx": 7,
+      "dy": 26,
+      "dz": -1,
+      "mult": 0.751,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:stalingrad": {
+      "dx": 7,
+      "dy": 2,
+      "dz": 0,
+      "mult": 1.464,
+      "dturn": -0.267,
+      "locked": false
+    },
+    "landmark:washington": {
+      "dx": 4,
+      "dy": 2,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0,
+      "locked": false
+    }
+  }
+}

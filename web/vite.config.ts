@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from "vite";
 import { bakeUnitPlugin } from "./dev/bakeUnitPlugin.mjs";
 import { publicDirPlugin } from "./dev/publicDirPlugin.mjs";
 import { saveCoastTunePlugin } from "./dev/saveCoastTunePlugin.mjs";
+import { savePlacementsPlugin } from "./dev/savePlacementsPlugin.mjs";
 import { saveMapPlugin } from "./dev/saveMapPlugin.mjs";
 import { unitStampsPlugin } from "./dev/unitStampsPlugin.mjs";
 
@@ -22,6 +23,7 @@ export default defineConfig(({ mode }) => {
     publicDirPlugin(),
     saveMapPlugin({ file: "../demomap01.json" }),
     saveCoastTunePlugin(),
+    savePlacementsPlugin(),
     bakeUnitPlugin(),
     unitStampsPlugin(),
   ],

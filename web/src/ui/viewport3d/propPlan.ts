@@ -21,6 +21,8 @@ export interface PropInstance {
   height: number;
   /** Rotation about the vertical, in radians. */
   turn: number;
+  /** Lift above the ground, in world units. Absent is 0. Set by the placement editor. */
+  lift?: number;
   /** Colour of the tinted parts (foliage, rock, walls), as 0 to 1 sRGB. */
   tint: Rgb;
   /** A switch for the model's optional part: 1 puts snow on a peak, or a second chimney on a factory. */

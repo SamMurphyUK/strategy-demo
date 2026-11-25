@@ -283,6 +283,7 @@ export function propBuffers(instances: readonly PropInstance[], ground = 0): Pro
     matrices[m + 10] = prop.height;
     matrices[m + 12] = prop.x;
     matrices[m + 13] = -prop.y;
+    matrices[m + 14] = prop.lift ?? 0;
     matrices[m + 15] = 1;
     tints.set(prop.tint, i * 3);
     flags[i * 3] = prop.snow;

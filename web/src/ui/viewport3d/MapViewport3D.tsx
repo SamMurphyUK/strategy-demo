@@ -27,6 +27,16 @@ import { battleScarDescriptors } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { wrapWorldX } from "../map/viewMath";
 import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
+import { PlacementButton, PlacementEditor } from "./PlacementEditor";
+import savedPlacements from "./placements.json";
+import {
+  applyPlacements,
+  parsePlacements,
+  PLACEMENTS_STORAGE_KEY,
+  type Placements,
+  placeLandmarks,
+  serializePlacements,
+} from "./placements";
 import { BOARD_BAKE_SCALE, coastMaskCanvas } from "./boardTextures";
 import { planRoads, riverLines } from "./groundSheet";
 import { buildReliefPatch, RELIEF_ZONES } from "./mountainRelief";
@@ -114,8 +124,31 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
+/** The draft the editor left in this browser, or the file saved in the project. */
+function loadPlacements(): Placements {
+  try {
+    const draft = window.localStorage.getItem(PLACEMENTS_STORAGE_KEY);
+    if (draft) {
+      return parsePlacements(JSON.parse(draft));
+    }
+  } catch {
+    // A bad draft is the same as none.
+  }
+  return parsePlacements(savedPlacements);
+}
+
 export default function MapViewport3D(props: MapViewProps) {
   const { geometry, land } = props;
+  const [placements, setPlacements] = useState<Placements>(loadPlacements);
+  const [editing, setEditing] = useState(false);
+  const changePlacements = (next: Placements) => {
+    setPlacements(next);
+    try {
+      window.localStorage.setItem(PLACEMENTS_STORAGE_KEY, JSON.stringify(serializePlacements(next)));
+    } catch {
+      // The draft is a convenience. Not keeping it costs nothing.
+    }
+  };
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const store = useRef<BoardStore>({ frame: null, paint: 0, invalidate: null }).current;
@@ -195,6 +228,18 @@ export default function MapViewport3D(props: MapViewProps) {
     );
     return planProps({ bounds: sheet, isLand, keepClear, towns });
   }, [land, geometry, clipped]);
+
+  // The plan with the editor's edits laid on it, and the landmarks where they stand.
+  const placedPlan = useMemo(() => (plan ? applyPlacements(plan, placements) : null), [plan, placements]);
+  const landmarks = useMemo(
+    () =>
+      placeLandmarks((name) => {
+        const wanted = name.toLowerCase();
+        const region = geometry.regions.find((item) => item.id.toLowerCase() === wanted);
+        return region ? region.anchor : null;
+      }, placements),
+    [geometry, placements],
+  );
 
   // The table under the pieces: the three sculpted ranges, the rivers, and the roads between the
   // capitals and the factories. Set dressing only, laid out once for a map.
@@ -341,7 +386,8 @@ export default function MapViewport3D(props: MapViewProps) {
           bounds={bounds}
           bake={bake}
           mask={mask}
-          plan={plan}
+          plan={placedPlan ?? plan}
+          landmarks={landmarks}
           scars={scars}
           look={look}
           dim={props.menuBackdrop === true}
@@ -354,5 +400,29 @@ export default function MapViewport3D(props: MapViewProps) {
   ) : null;
 
   const board: BoardLayer = { node, active: ready && drawable, frame: layer.frame, touch: layer.touch };
-  return <MapView {...props} board={board} />;
+  return (
+    <>
+      <MapView {...props} board={board} />
+      {!props.menuBackdrop && ready ? <PlacementButton open={editing} onToggle={() => setEditing((on) => !on)} /> : null}
+      {editing && plan ? (
+        <PlacementEditor
+          frame={() => store.frame}
+          surface={() => document.querySelector<HTMLElement>("canvas.map-canvas")}
+          plan={placedPlan ?? plan}
+          landmarks={landmarks}
+          placements={placements}
+          onChange={changePlacements}
+          onRevert={() => {
+            try {
+              window.localStorage.removeItem(PLACEMENTS_STORAGE_KEY);
+            } catch {
+              // Nothing was kept.
+            }
+            setPlacements(parsePlacements(savedPlacements));
+          }}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
+    </>
+  );
 }

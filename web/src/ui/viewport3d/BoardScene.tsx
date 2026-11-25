@@ -12,7 +12,7 @@
 // shade, the glow, the outline, and the grain belong to the finishing passes in postStack.ts.
 // Each one that is off is not drawn, not allocated, and not in any shader.
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { BoardFrame, FigureCards } from "../map/boardLayer";
 import { stackOfFigure } from "../map/figureCards";
@@ -73,6 +73,7 @@ import { idSheetTexture } from "./pixieTextures";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
+import { loadLandmarks } from "./landmarkModels";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
 import { slabGeometry } from "./regionMeshes";
@@ -130,9 +131,16 @@ export interface BoardSceneProps {
    * settings say. The Shogun boards never draw it.
    */
   pixie?: BoardPixie | null;
+  /** The landmarks standing on the board, each at its place (see placements.ts). */
+  landmarks?: readonly BoardLandmark[];
 }
 
 /** The sheets of the pixel chart that are made for a map, before the board draws. */
+export interface BoardLandmark {
+  id: string;
+  instance: PropInstance;
+}
+
 export interface BoardPixie {
   /** The signed distance to the coast. */
   coast: CoastField;
@@ -434,6 +442,8 @@ function useDisposable<T>(build: () => T, dispose: (value: T) => void, deps: rea
 
 interface PropFieldProps {
   kind: PropKind;
+  /** A model of its own, in place of the kind's. Cloned, so the caller keeps it. */
+  model?: THREE.BufferGeometry;
   instances: readonly PropInstance[];
   kit: Kit;
   /** The sculpted ranges. A prop on one stands on it. */
@@ -441,10 +451,10 @@ interface PropFieldProps {
 }
 
 /** Every prop of one kind as a single instanced draw, and their shadows as a second. */
-function PropField({ kind, instances, kit, patches }: PropFieldProps) {
+function PropField({ kind, model, instances, kit, patches }: PropFieldProps) {
   const field = useDisposable(
     () => {
-      const geometry = propGeometry(kind);
+      const geometry = model ? model.clone() : propGeometry(kind);
       const buffers = propBuffers(instances, GROUND_SHARE[kind]);
       geometry.setAttribute("aFlag", new THREE.InstancedBufferAttribute(buffers.flags, 3));
       // The range's two shapes under each prop's foot. The shader mixes and scales them as it does the land's.
@@ -481,7 +491,7 @@ function PropField({ kind, instances, kit, patches }: PropFieldProps) {
       old.shadow.dispose();
       old.caster.dispose();
     },
-    [kind, instances, kit, patches],
+    [kind, model, instances, kit, patches],
   );
   return (
     <>
@@ -490,6 +500,12 @@ function PropField({ kind, instances, kit, patches }: PropFieldProps) {
       <primitive object={field.caster} />
     </>
   );
+}
+
+/** One landmark: a single prop with a model of its own. */
+function Landmark({ mark, model, kit, patches }: { mark: BoardLandmark; model: THREE.BufferGeometry; kit: Kit; patches: readonly ReliefPatch[] }) {
+  const instances = useMemo(() => [mark.instance], [mark.instance]);
+  return <PropField kind="house" model={model} instances={instances} kit={kit} patches={patches} />;
 }
 
 /** One sculpted range: a grid laid on the land, lifted in the shader, and the same grid for the sun's shadow map. */
@@ -609,6 +625,19 @@ export function BoardScene(props: BoardSceneProps) {
   live.current = props;
 
   const kit = useDisposable(createKit, disposeKit, []);
+  // The landmark models load once, a file at a time, and the board draws each as it arrives.
+  const [landmarkModels, setLandmarkModels] = useState<Record<string, THREE.BufferGeometry> | null>(null);
+  useEffect(() => {
+    let live = true;
+    loadLandmarks().then((models) => {
+      if (live) {
+        setLandmarkModels(models);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const post = useDisposable(
     () => new PostStack(),
     (old) => old.dispose(),
@@ -1353,6 +1382,11 @@ export function BoardScene(props: BoardSceneProps) {
         {PROP_KINDS.map((kind) =>
           plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} patches={patches} /> : null,
         )}
+        {landmarkModels
+          ? (props.landmarks ?? []).map((mark) =>
+              landmarkModels[mark.id] ? <Landmark key={mark.id} mark={mark} model={landmarkModels[mark.id]} kit={kit} patches={patches} /> : null,
+            )
+          : null}
         <Smoke scars={scars} chimneys={plan.chimneys} kit={kit} />
       </group>
     </>
