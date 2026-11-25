@@ -608,6 +608,12 @@ export function BoardLookPanel() {
         <Num name="pixelPaletteSaturation" label="Saturation" title="Saturation of the chart's land palette. 1 is the palette as listed." off={!mapVisuals.enableFauxPixelMap} />
         <Num name="seaContourSteps" label="Sea bands" title="Depth bands on the sea, from the shelf to the open ocean. A whole number." off={!mapVisuals.enableFauxPixelMap} />
         <Num name="coastRimIntensity" label="Coast rim" title="Strength of the one-texel ochre rim where the land meets the sea" off={!mapVisuals.enableFauxPixelMap} />
+        <Flag name="enablePixelFoam" label="Shallows foam" title="The pale dithered shallows along the coast. Off, the sea stays its deep colour to the shore." />
+        <Num name="pixelFoamReach" label="Foam reach" title="How much of the shelf stays pale. 1 is the whole shelf; 0.7 takes it in by 30%." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enablePixelFoam} />
+        <Num name="pixelFoamBleed" label="Foam bleed" title="How far the edge of the shallows breathes in and out. 0 is a fixed edge." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enablePixelFoam} />
+        <Num name="seaWaveRings" label="Wave rings" title="The rings of surf that roll in around the coast. 0 is none." />
+        <Num name="seaSheenStrength" label="Sea shine" title="Brightness of the sun glitter on the sea. 0 is none." />
+        <Num name="seaFarVisibility" label="Far shine" title="How much of the waves and the glitter is left with the camera zoomed all the way out. 0 is none, 1 is all of it." />
         <Flag name="regionalPaletteDetail" label="Climate palettes" title="Each territory takes the palette of its climate: temperate, boreal, arid, or tropical. Off, the whole land is one temperate ramp." />
 
         <h3>Mountains</h3>

@@ -159,6 +159,18 @@ export interface MapVisualConfig {
   seaContourSteps: number;
   /** Strength of the one-texel ochre rim where the land meets the sea. */
   coastRimIntensity: number;
+  /** The pale dithered shallows along the coast. Off, the sea keeps its deep colour right up to the shore. */
+  enablePixelFoam: boolean;
+  /** How much of the shelf stays pale. 1 is the whole shelf, 0.7 takes the foam in by 30%. */
+  pixelFoamReach: number;
+  /** How far the edge of the shallows breathes in and out, like a tide lapping. 0 is a fixed edge. */
+  pixelFoamBleed: number;
+  /** Strength of the rings of surf that roll in around the coast. 0 is none. */
+  seaWaveRings: number;
+  /** Brightness of the sun glitter on the sea. 0 is none. */
+  seaSheenStrength: number;
+  /** How much of the waves and the glitter is left with the camera as far out as it goes. 0 is none, 1 is all of it. */
+  seaFarVisibility: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
   regionalPaletteDetail: boolean;
 }
@@ -236,6 +248,12 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   pixelPaletteSaturation: 0.7,
   seaContourSteps: 4,
   coastRimIntensity: 0.9,
+  enablePixelFoam: true,
+  pixelFoamReach: 0.7,
+  pixelFoamBleed: 0.5,
+  seaWaveRings: 1.2,
+  seaSheenStrength: 2,
+  seaFarVisibility: 0.7,
   regionalPaletteDetail: true,
 });
 
@@ -354,6 +372,11 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   pixelPaletteSaturation: [0, 1.5],
   seaContourSteps: [2, 6],
   coastRimIntensity: [0, 1],
+  pixelFoamReach: [0.2, 1.2],
+  pixelFoamBleed: [0, 1],
+  seaWaveRings: [0, 2.5],
+  seaSheenStrength: [0, 5],
+  seaFarVisibility: [0, 1],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];
@@ -711,6 +734,10 @@ export interface PixieLook {
   seaSteps: number;
   rim: number;
   regional: boolean;
+  /** Share of the shelf that stays pale: 0 with the foam off. */
+  foamReach: number;
+  foamBleed: number;
+  rings: number;
 }
 
 /**
@@ -742,6 +769,9 @@ export function pixieLook(config: Readonly<MapVisualConfig>, k: number, maxK: nu
     seaSteps: Math.max(2, Math.round(config.seaContourSteps)),
     rim: config.coastRimIntensity,
     regional: config.regionalPaletteDetail,
+    foamReach: config.enablePixelFoam ? config.pixelFoamReach : 0,
+    foamBleed: config.pixelFoamBleed,
+    rings: config.seaWaveRings,
   };
 }
 

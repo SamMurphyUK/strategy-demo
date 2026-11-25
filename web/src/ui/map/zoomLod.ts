@@ -7,7 +7,7 @@ export type MapLod = 0 | 1 | 2;
 /** Halfway from a flat zoom to the previous 1.175 mark, so the pixel pop-in is about 50% sooner. */
 const OPERATIONAL = 1.0875;
 /** Upright sprites replace the icon tokens at this zoom, then a short timed fade plays. */
-const TACTICAL_IN = 3.8;
+export const TACTICAL_IN = 3.8;
 /** Stay on sprites until the zoom drops back through here, so a notch of wheel does not flicker. */
 const TACTICAL_OUT = 3.65;
 /** Stamps finish fading in here and stay. */

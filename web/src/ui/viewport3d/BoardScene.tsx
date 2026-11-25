@@ -896,7 +896,7 @@ export function BoardScene(props: BoardSceneProps) {
           focus: mapVisuals.enableDoF ? tuned.focus * (mapVisuals.bokehIntensity / 0.6) : 0,
         }
       : tuned;
-    const moving = !still && getDrawFlags().anims && boardAnimates(detail) && !document.hidden;
+    const moving = !still && getDrawFlags().anims && boardAnimates(detail, mapVisuals.seaFarVisibility > 0.01) && !document.hidden;
     const size = gl.getDrawingBufferSize(bufferSize);
     // A resized canvas has lost its picture, and a repainted 2D canvas has a new one to show.
     const repainted = state.seen !== store.paint || size.x !== post.width || size.y !== post.height;
@@ -1047,7 +1047,8 @@ export function BoardScene(props: BoardSceneProps) {
       }
       chartNow.uPixGrid.value.set(chart.coarse, chart.fine, chart.share, chart.dither);
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
-      chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH, coastField?.reach ?? 1, chart.regional ? 1 : 0);
+      chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH * Math.max(chart.foamReach, 0.02), coastField?.reach ?? 1, chart.regional ? 1 : 0);
+      chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
     } else if (chartSheet.current) {
@@ -1083,7 +1084,9 @@ export function BoardScene(props: BoardSceneProps) {
     sea.current.position.set(pose.target[0], pose.target[1] + shift, -SEA_DROP);
     sea.current.scale.set(pose.halfWidth * 2 + 60, (pose.halfHeight * 2) / cosPitch + 80, 1);
     kit.water.uniforms.uShift.value = shift;
-    kit.water.uniforms.uWater.value = detail.water;
+    // The waves and the shine keep a share of themselves with the camera all the way out.
+    const seaShare = detail.water + (1 - detail.water) * mapVisuals.seaFarVisibility;
+    kit.water.uniforms.uWater.value = seaShare;
     const bias = 0.7 * detail.flatten;
     kit.water.uniforms.uBias.value = bias;
     kit.landTop.uniforms.uBias.value = bias;
@@ -1093,7 +1096,7 @@ export function BoardScene(props: BoardSceneProps) {
     const sheen = skySheen(mapVisuals.envReflectionWeight);
     const glowLook = bloomLook(mapVisuals.bloomWeight);
     const embers = detail.smoke > 0.01 && live.current.scars.some((scar) => scar.ember);
-    const glitter = sheen > 0 && detail.water > 0.01 && sun.direct > 0.01;
+    const glitter = sheen > 0 && mapVisuals.seaSheenStrength > 0 && sun.direct > 0.01 && seaShare > 0.01;
     const snowfield = ranges !== null && ranges.snowGlow > 0.004 && sun.direct > 0.01;
     const glowing =
       glowLook !== null &&
@@ -1113,7 +1116,9 @@ export function BoardScene(props: BoardSceneProps) {
       const tilt = Math.min(1, pose.pitch / FULL_TILT);
       water.uSky.value = sky.current.texture;
       // More sky as the camera comes down. From straight above the sea is the chart it was painted as.
-      water.uSheen.value.set(sheen * detail.water * (0.1 + 0.2 * tilt), sheen * detail.water * (glowing ? 1.5 : 0.8));
+      const strength = mapVisuals.seaSheenStrength;
+      water.uSheen.value.set(sheen * seaShare * strength * (0.1 + 0.2 * tilt), sheen * seaShare * strength * (glowing ? 1.5 : 0.8));
+      water.uSheenFar.value = (1 - tilt) * mapVisuals.seaFarVisibility;
       water.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
       water.uEye.value.set(pose.target[0], pose.target[1] + shift, 1 / pose.halfWidth, cosPitch / pose.halfHeight);
     } else if (sky.current) {

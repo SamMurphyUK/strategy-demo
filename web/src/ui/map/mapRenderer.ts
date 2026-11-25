@@ -102,6 +102,7 @@ import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
 import { drawHoldCircles } from "./shipHold";
 import {
   type MapLod,
+  TACTICAL_IN,
   type TerrainStamp,
   terrainStampFadeAlpha,
   terrainStamps,
@@ -1362,7 +1363,8 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         worldY,
         paint: () => {
           setScreenTransform(ctx, scene.dpr);
-          const lean = unitLean(scene.view.k, getBoardTune());
+          // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
+          const lean = unitLean(Math.min(scene.view.k, TACTICAL_IN), getBoardTune());
           if (lean !== 1) {
             ctx.translate(counter.x, counter.y);
             ctx.scale(1, lean);

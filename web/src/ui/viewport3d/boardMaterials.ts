@@ -307,6 +307,8 @@ export interface PixieUniforms {
   uPixFaction: { value: THREE.Texture | null };
   /** The signed distance to the coast (see buildCoastField). */
   uPixCoast: { value: THREE.Texture | null };
+  /** How far the edge of the shallows breathes, and the strength of the surf rings. */
+  uPixFoam: { value: THREE.Vector4 };
   /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
   uPixUnits: { value: Float32Array };
   uPixUnitN: { value: number };
@@ -328,6 +330,7 @@ export function pixieUniforms(): PixieUniforms {
     uPixIds: { value: null },
     uPixFaction: { value: null },
     uPixCoast: { value: null },
+    uPixFoam: { value: new THREE.Vector4(0.5, 1.2, 0, 0) },
     uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
     uPixUnitN: { value: 0 },
   };
@@ -875,6 +878,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uPixSea: pixie.uPixSea,
       uPixIds: pixie.uPixIds,
       uPixCoast: pixie.uPixCoast,
+      uPixFoam: pixie.uPixFoam,
       uBake: shared.uBake,
       uMask: shared.uMask,
       uBounds: shared.uBounds,
@@ -895,6 +899,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uSheen: { value: new THREE.Vector2(0, 0) },
       /** Unit vector from the board toward the camera. */
       uToEye: { value: new THREE.Vector3(0, 0, 1) },
+      /** 1 with the camera far out: the glitter is then read as if the eye stood on the sun path. */
+      uSheenFar: { value: 0 },
       /** The middle of the view, and one over its half reach each way: the glitter gathers under the sun. */
       uEye: { value: new THREE.Vector4(0, 0, 1, 1) },
     },
@@ -920,6 +926,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uniform vec2 uSheen;
       uniform vec3 uToEye;
       uniform vec4 uEye;
+      uniform float uSheenFar;
       // Height of the swell at a scene point: two long sets crossing.
       float seaHeight(vec2 p) {
         float h = vnoise(p * 0.42 + vec2(uTime * 0.09, uTime * 0.05)) * 0.6;
@@ -945,6 +952,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uniform sampler2D uPixCoast;
       uniform sampler2D uPixIds;
       uniform vec4 uPixSea;
+      uniform vec4 uPixFoam;
       #endif
       void main() {
         #ifdef PIXIE
@@ -964,6 +972,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         // open ocean. The contours wander a little out at sea, and the dither carries one band into the next.
         float away = (textureLod(uPixCoast, sheetUv(foot), 0.0).r * 255.0 - 128.0) / 127.0 * uPixSea.z;
         away += (fbm(foot * 0.07 + 2.0) - 0.5) * 7.0 * smoothstep(1.0, 8.0, away);
+        // The edge of the shallows breathes: it creeps in and out across the dither, a slow tide that is out of step along the coast.
+        away += sin(uTime * 0.5 + vnoise(foot * 0.16) * 6.2832) * uPixFoam.x * 0.09 * uPixSea.y * smoothstep(-2.0, 3.0, away);
         float deep = pow(clamp(away / uPixSea.y, 0.0, 1.0), 0.7);
         float band = clamp(floor(deep * uPixSea.x + (bay - 0.5) * uPixGrid.w * 0.9), 0.0, uPixSea.x - 1.0) / max(uPixSea.x - 1.0, 1.0);
         vec3 c = band < 0.3333 ? mix(PIX_SEA[0], PIX_SEA[1], band * 3.0) : (band < 0.6667 ? mix(PIX_SEA[1], PIX_SEA[2], band * 3.0 - 1.0) : mix(PIX_SEA[2], PIX_SEA[3], band * 3.0 - 2.0));
@@ -976,28 +986,40 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         #else
         vec3 c = texture2D(uBake, sheetUv(m), uBias).rgb;
         #endif
-        vec3 mask = texture2D(uMask, sheetUv(foot)).rgb;
+        // The surf is read where the pixel is, not at the middle of its texel, so its rings stay smooth round the coast.
+        #ifdef PIXIE
+        vec2 mw = vec2(vScene.x, uShift - vScene.y);
+        #else
+        vec2 mw = m;
+        #endif
+        vec2 footW = mw - vec2(0.0, uShift);
+        vec3 mask = texture2D(uMask, sheetUv(footW)).rgb;
         float shore = clamp(mask.b * 2.0, 0.0, 1.0);
         float edge = mask.g;
 
         // A slow swell, then drifting dashes on the open sea.
-        float swell = fbm(m * 0.05 + vec2(uTime * 0.03, uTime * 0.011));
+        float swell = fbm(mw * 0.05 + vec2(uTime * 0.03, uTime * 0.011));
         #ifndef PIXIE
         c += (swell - 0.5) * 0.05 * uWater;
         #endif
-        float row = floor(m.y / 1.4);
+        float row = floor(mw.y / 1.4);
         float rowSeed = hash21(vec2(row, 7.0));
-        float along = m.x * 0.55 + uTime * (0.12 + 0.2 * rowSeed) + rowSeed * 40.0;
-        float dash = step(0.74, vnoise(vec2(along, row * 1.7))) * step(0.45, rowSeed) * step(fract(m.y / 1.4), 0.22);
+        float along = mw.x * 0.55 + uTime * (0.12 + 0.2 * rowSeed) + rowSeed * 40.0;
+        float dash = step(0.74, vnoise(vec2(along, row * 1.7))) * step(0.45, rowSeed) * step(fract(mw.y / 1.4), 0.22);
         c = mix(c, uWaveTint, dash * 0.24 * uWater * (1.0 - shore));
 
         // Surf: bands that roll in toward the cliff and break, and a line of foam that laps at its foot.
-        float phase = shore * 3.2 - uTime * 0.16 + (vnoise(m * 0.35) - 0.5) * 0.9;
+        float phase = shore * 3.2 - uTime * 0.16 + (vnoise(mw * 0.35) - 0.5) * 0.9;
         float crest = smoothstep(0.78, 0.86, fract(phase)) * smoothstep(0.1, 0.5, shore);
-        float broken = step(0.35, vnoise(vec2(m.x * 1.3 + uTime * 0.2, m.y * 1.3)));
-        float foam = crest * broken * 0.6;
-        float lap = 0.05 * sin(uTime * 0.8 + vnoise(m * 0.5) * 6.2832);
-        foam = max(foam, smoothstep(0.3 + lap, 0.42 + lap, edge) * (0.55 + 0.45 * vnoise(m * 2.2 + uTime * 0.3)));
+        float broken = step(0.35, vnoise(vec2(mw.x * 1.3 + uTime * 0.2, mw.y * 1.3)));
+        #ifdef PIXIE
+        float rings = uPixFoam.y;
+        #else
+        float rings = 1.0;
+        #endif
+        float foam = min(crest * broken * 0.6 * rings, 1.0);
+        float lap = 0.05 * sin(uTime * 0.8 + vnoise(mw * 0.5) * 6.2832);
+        foam = max(foam, smoothstep(0.3 + lap, 0.42 + lap, edge) * (0.55 + 0.45 * vnoise(mw * 2.2 + uTime * 0.3)));
         foam = floor(foam * 3.0 + 0.5) / 3.0;
         c = mix(c, uFoam, foam * uWater);
 
@@ -1025,6 +1047,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         vec3 n = normalize(vec3(-slope * 0.3, 1.0));
         vec2 off = (at - uEye.xy) * uEye.zw;
         vec3 eye = normalize(uToEye - vec3(off.x * 0.6, off.y * 0.3, 0.0));
+        // From straight above, the sun path is out of reach of a flat sea. Far out, the eye is read as if it stood on that path, so the glitter still gathers under the sun.
+        eye = normalize(mix(eye, normalize(vec3(-uSunDir.xy, uSunDir.z) - vec3(off.x * (0.6 + 1.6 * uSheenFar), off.y * (0.3 + 1.2 * uSheenFar), 0.0)), uSheenFar * 0.9));
         vec3 r = reflect(-eye, n);
         // A slope turned from the eye mirrors the pale haze low in the sky. A flat one mirrors the zenith.
         vec3 sky = textureLod(uSky, vec3(r.x, r.z, -r.y), 1.5).rgb;
@@ -1035,12 +1059,21 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         #endif
         // The sun's patch: a warm wash, and inside it short dashes of light that come and go, drawn
         // the way the sea's own dashes are. Most of the patch stays water.
-        float glare = pow(max(dot(r, uSunDir), 0.0), 26.0) * calm * uDirect * (1.0 - shade);
+        float glare = pow(max(dot(r, uSunDir), 0.0), mix(26.0, 18.0, uSheenFar)) * calm * uDirect * (1.0 - shade);
         vec3 sunlit = uSunColor * vec3(1.0, 0.92, 0.76);
         c += sunlit * glare * uSheen.x * 0.32;
+        #ifdef PIXIE
+        // One glint to a texel, so it holds its size at every zoom.
+        vec2 cell = grid.xy;
+        #else
         vec2 cell = vec2(floor(m.x * 1.9 + floor(m.y * 4.2) * 0.37), floor(m.y * 4.2));
+        #endif
         float flick = hash21(cell + floor(uTime * 2.5 + hash21(cell.yx) * 3.0) * 17.0);
+        #ifdef PIXIE
+        float dashes = step(1.0 - min(0.35, 0.1 * glare), flick);
+        #else
         float dashes = step(1.0 - 0.1 * glare * glare, flick) * step(fract(m.y * 4.2), 0.5);
+        #endif
         c += sunlit * dashes * uSheen.y;
         #endif
 

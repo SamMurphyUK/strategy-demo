@@ -57,6 +57,6 @@ export function boardDetail(k: number, fitK: number, maxK: number): BoardDetail 
 }
 
 /** True when something on the board moves on its own at this zoom, so frames must keep coming. */
-export function boardAnimates(detail: BoardDetail): boolean {
-  return detail.water > 0 || detail.relief > 0 || detail.smoke > 0;
+export function boardAnimates(detail: BoardDetail, seaAlive = false): boolean {
+  return seaAlive || detail.water > 0 || detail.relief > 0 || detail.smoke > 0;
 }
