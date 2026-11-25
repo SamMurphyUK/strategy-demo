@@ -1,0 +1,384 @@
+// The pixel skin: the land and the sea drawn as square texels fixed to the board.
+//
+// A skin is a set of shader chunks that answer the same questions (see bakedSkin.ts for the other
+// one), plus the uniforms the chunks read. The land and water materials in boardMaterials.ts are
+// the same for every skin: they ask for `skinLand()` and for `seaTexel`, `seaBase`, `seaWaveAt`,
+// `seaRings`, `seaGlints`, and `seaPopCell`, and the define `PIXIE` picks which skin answers.
+import * as THREE from "three";
+import { CLEARING_REACH } from "../unitShadows";
+import { PIXIE_COAST_REACH, PIXIE_HEIGHT_TOP, PIXIE_INK, PIXIE_LAND, PIXIE_SEA, PIXIE_SHELF_WIDTH, unitRgb } from "../pixieSheet";
+
+const LINE_REACH = "2.5";
+
+// --- The pixel chart ----------------------------------------------------------------------------
+//
+// A material built with `PIXIE` draws the land or the sea as square texels fixed to the board
+// (see pixieSheet.ts, and pixieLook in mapVisualConfig.ts). With the define absent none of this
+// is in the shader. The numbers are uniforms, so a slider costs a frame; the palette is constant.
+
+export interface PixieUniforms {
+  /** Texels to a world unit on the coarse grid and on the fine one, the share of coarse texels split into four, and the dither. */
+  uPixGrid: { value: THREE.Vector4 };
+  /** Hillshade contrast, tones each side of level, the palette's saturation, and the coastal rim. */
+  uPixShade: { value: THREE.Vector4 };
+  /** Depth bands, the shelf's width and the coast field's reach in world units, and 1 while each territory wears its climate. */
+  uPixSea: { value: THREE.Vector4 };
+  /** Rivers, roads, the faction wash, and the border ink: each a strength from 0 to 1. */
+  uPixLines: { value: THREE.Vector4 };
+  /** Relief and ground cover (see buildPixieSheet). */
+  uPixSheet: { value: THREE.Texture | null };
+  /** The share of each climate zone at a point (see climateZoneCanvas). */
+  uPixZone: { value: THREE.Texture | null };
+  /** Each territory's id (see regionIdCanvas). */
+  uPixIds: { value: THREE.Texture | null };
+  /** Each territory's faction colour, flat. */
+  uPixFaction: { value: THREE.Texture | null };
+  /** The signed distance to the coast (see buildCoastField). */
+  uPixCoast: { value: THREE.Texture | null };
+  /** How far the edge of the shallows breathes, and the strength of the surf rings. */
+  uPixFoam: { value: THREE.Vector4 };
+  /** How soft the land is, the brush stroke strength, and two spare. */
+  uPixSoft: { value: THREE.Vector4 };
+  /** The light and shade the soft land keeps, and three spare. */
+  uPixSoft2: { value: THREE.Vector4 };
+  /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
+  uPixUnits: { value: Float32Array };
+  uPixUnitN: { value: number };
+}
+
+/** Slots in the terrain shader's unit list. The same number as MAX_UNIT_CLEARINGS in unitShadows.ts. */
+export const PIXIE_UNIT_SLOTS = 96;
+/** Where the dither and the slope shade stand under a unit: a share of what they are elsewhere. */
+const PIXIE_CLEAR_LEVEL = 0.18;
+
+export function pixieUniforms(): PixieUniforms {
+  return {
+    uPixGrid: { value: new THREE.Vector4(1, 2, 0, 0.7) },
+    uPixShade: { value: new THREE.Vector4(1.4, 3, 1, 0.9) },
+    uPixSea: { value: new THREE.Vector4(4, PIXIE_SHELF_WIDTH, PIXIE_COAST_REACH, 1) },
+    uPixLines: { value: new THREE.Vector4(1, 0, 0.2, 1) },
+    uPixSheet: { value: null },
+    uPixZone: { value: null },
+    uPixIds: { value: null },
+    uPixFaction: { value: null },
+    uPixCoast: { value: null },
+    uPixFoam: { value: new THREE.Vector4(0.5, 1.2, 0, 0) },
+    uPixSoft: { value: new THREE.Vector4(0, 0, 1, 1) },
+    uPixSoft2: { value: new THREE.Vector4(1, 0, 0, 0) },
+    uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
+    uPixUnitN: { value: 0 },
+  };
+}
+
+export function glslColor(hex: string): string {
+  return `vec3(${unitRgb(hex)
+    .map((channel) => channel.toFixed(4))
+    .join(", ")})`;
+}
+
+/** The texel grid, the ordered dither, and the chart's colours. It needs `hash21` from NOISE before it. */
+export const PIXEL_COMMON = /* glsl */ `
+uniform vec4 uPixGrid;
+uniform vec3 uPixUnits[${PIXIE_UNIT_SLOTS}];
+uniform float uPixUnitN;
+// 1 at a unit's base and out to its edge, easing to 0 at ${CLEARING_REACH} times the base's radius. Where it is 1 the
+// dither and the slope shade stand at a fraction of their strength, so a figure never sits on noise.
+float pixClearing(vec2 p) {
+  float near = 0.0;
+  for (int i = 0; i < ${PIXIE_UNIT_SLOTS}; i++) {
+    if (float(i) >= uPixUnitN) {
+      break;
+    }
+    vec3 u = uPixUnits[i];
+    near = max(near, 1.0 - smoothstep(u.z * 0.8, u.z * ${CLEARING_REACH.toFixed(2)}, distance(p, u.xy)));
+  }
+  return near;
+}
+float pixCalm(vec2 p) {
+  return mix(1.0, ${PIXIE_CLEAR_LEVEL.toFixed(2)}, pixClearing(p));
+}
+const vec3 PIX_LAND[20] = vec3[20](${PIXIE_LAND.flat().map(glslColor).join(", ")});
+const vec3 PIX_SEA[4] = vec3[4](${PIXIE_SEA.map(glslColor).join(", ")});
+const vec3 PIX_UMBER = ${glslColor(PIXIE_INK.umber)};
+const vec3 PIX_FLOOR = ${glslColor(PIXIE_INK.floor)};
+const vec3 PIX_CHALK = ${glslColor(PIXIE_INK.chalk)};
+const vec3 PIX_SNOW = ${glslColor(PIXIE_INK.snow)};
+const vec3 PIX_SNOW_SHADE = ${glslColor(PIXIE_INK.snowShade)};
+const vec3 PIX_RIM = ${glslColor(PIXIE_INK.rim)};
+const vec3 PIX_RIM_RUST = ${glslColor(PIXIE_INK.rimRust)};
+const vec3 PIX_RIVER = ${glslColor(PIXIE_INK.river)};
+const vec3 PIX_ROAD = ${glslColor(PIXIE_INK.road)};
+const vec3 PIX_INK = ${glslColor(PIXIE_INK.border)};
+const vec3 PIX_SEAM = ${glslColor(PIXIE_INK.seam)};
+// The 4 by 4 Bayer threshold of a texel, 0 to 15 sixteenths. The same sum as bayer4 in pixieSheet.ts.
+float bayer2(vec2 a) {
+  a = mod(floor(a), 2.0);
+  return fract(a.x * 0.5 + a.y * 0.75);
+}
+float bayer4(vec2 a) {
+  return bayer2(0.5 * a) * 0.25 + bayer2(a);
+}
+// The texel a point of the board lies in: its index in xy, and the texels to a world unit in z.
+// The grid is fixed to the board. Between two densities the coarse texels split into four, a few
+// at a time, and every line of the fine grid lies on a line of the coarse one.
+vec3 pixTexel(vec2 p) {
+  float density = mix(uPixGrid.x, uPixGrid.y, step(hash21(floor(p * uPixGrid.x) + 0.5), uPixGrid.z));
+  return vec3(floor(p * density), density);
+}
+`;
+
+
+/** The land's pixel-chart declarations: the sheets it reads, and the helpers that colour a texel. */
+export const PIXEL_LAND_DECLS = /* glsl */ `
+      uniform sampler2D uPixSheet;
+      uniform sampler2D uPixZone;
+      uniform sampler2D uPixIds;
+      uniform sampler2D uPixFaction;
+      uniform sampler2D uMask;
+      uniform sampler2D uGround;
+      uniform vec4 uPixShade;
+      uniform vec4 uPixSea;
+      uniform vec4 uPixLines;
+      uniform vec4 uPixSoft;
+      uniform vec4 uPixSoft2;
+      // Height of the ground at a map point, in world units: the ranges of the relief sheet, cut
+      // into ridges, on lowlands that roll a little.
+      float pixHeight(vec2 m) {
+        float range = textureLod(uPixSheet, sheetUv(m), 0.0).r * ${PIXIE_HEIGHT_TOP.toFixed(1)};
+        float ridged = 1.0 - abs(vnoise(m * 0.8 + 5.3) * 2.0 - 1.0);
+        return range * (0.6 + 0.75 * ridged) + (fbm(m * 0.16) - 0.5) * 0.9 + (vnoise(m * 0.55 + 17.0) - 0.5) * 0.3;
+      }
+      // 1 on land, 0 on water.
+      float pixLand(vec2 m) {
+        return textureLod(uMask, sheetUv(m), 0.0).r;
+      }
+      // One zone colour at a tone and a height. wl and wh are how wide each step from one tone
+      // to the next is eased: near 0 the steps are hard, as the strategic chart has them.
+      vec3 pixTone(int zone, float xt, float high, float wl, float wh) {
+        vec3 c = PIX_LAND[zone * 5];
+        c = mix(c, PIX_LAND[zone * 5 + 1], smoothstep(1.0 - wl, 1.0 + wl, xt));
+        c = mix(c, PIX_LAND[zone * 5 + 2], smoothstep(2.0 - wl, 2.0 + wl, xt));
+        c = mix(c, PIX_LAND[zone * 5 + 3], smoothstep(1.05 - wh, 1.05 + wh, high));
+        c = mix(c, PIX_LAND[zone * 5 + 4], smoothstep(2.5 - wh, 2.5 + wh, high));
+        return c;
+      }
+`;
+
+/** The land's colour from the pixel chart. `skinLand` is what the land material asks for. */
+export const PIXEL_LAND_SKIN = /* glsl */ `
+struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; };
+LandSkinOut skinLand() {
+  // Where the cloud's shadow is read: the chart reads it at the middle of a texel.
+  vec2 sceneAt = vec2(0.0);
+        // The texel this piece of land lies in, and the map point at its middle. Everything below
+        // is read there, so a texel is one flat colour and it never slides under the camera.
+        vec2 mapAt = vec2(vUv.x * uBounds.z + uBounds.x, (1.0 - vUv.y) * uBounds.w + uBounds.y);
+        vec3 grid = pixTexel(mapAt);
+        vec2 cell = grid.xy;
+        float e = 1.0 / grid.z;
+        vec2 m = (cell + 0.5) * e;
+        sceneAt += vec2(m.x - mapAt.x, mapAt.y - m.y);
+        vec2 uv = sheetUv(m);
+        float bay = bayer4(cell) + 0.03125;
+        // Under and around a unit the dither and the slope shade ease down, so the figure reads on quiet ground.
+        // The soft land reads the ground where the pixel is, not at the middle of its texel, so its washes have no steps.
+        // A range keeps the pixel chart, its height map and its light: only the flat land goes soft, and a range's foot eases into it.
+        #ifdef RELIEF
+        float softK = 1.0 - smoothstep(0.02, 0.3, vRise);
+        #else
+        float softK = 1.0;
+        #endif
+        float soft = uPixSoft.x * softK;
+        // The ground is read at the middle of its texel until the land is half soft, so there is no blurred in-between.
+        vec2 ms = mix(m, mapAt, smoothstep(0.5, 1.0, soft) * 0.9);
+        float calm = mix(pixCalm(m), 0.5 + 0.5 * pixCalm(m), soft);
+        float spread = (bay - 0.5) * uPixGrid.w * calm * mix(1.0, uPixSoft.z, soft);
+
+        // The ground cover is read a little off its place, so the boxes of the biome table do
+        // not show as straight lines. The height is read where it is.
+        vec2 warp = (vec2(vnoise(ms * 0.06 + 3.7), vnoise(ms * 0.06 + 41.3)) - 0.5) * 12.0
+          + (vec2(vnoise(ms * 0.019 + 71.1), vnoise(ms * 0.019 + 13.9)) - 0.5) * 26.0;
+        vec4 field = textureLod(uPixSheet, sheetUv(ms + warp), 0.0);
+        vec4 here = textureLod(uPixSheet, sheetUv(ms), 0.0);
+
+        // The climate zone. Where two zones meet, the dither picks between them by their shares.
+        int zone = 0;
+        vec4 zoneShare = vec4(1.0, 0.0, 0.0, 0.0);
+        if (uPixSea.w > 0.5) {
+          vec3 zones = textureLod(uPixZone, sheetUv(ms + warp * 0.35), 0.0).rgb;
+          float pick = 0.5 + spread;
+          zone = pick < zones.r ? 0 : (pick < zones.r + zones.g ? 1 : (pick < zones.r + zones.g + zones.b ? 2 : 3));
+          zoneShare = vec4(zone == 0 ? 1.0 : 0.0, zone == 1 ? 1.0 : 0.0, zone == 2 ? 1.0 : 0.0, zone == 3 ? 1.0 : 0.0);
+          if (soft > 0.001) {
+            // Soft, the zones run into each other by their shares and no dither picks between them.
+            float zs = soft * 0.35;
+            float b1 = zones.r;
+            float b2 = b1 + zones.g;
+            float b3 = b2 + zones.b;
+            float s1 = smoothstep(b1 - zs, b1 + zs, pick);
+            float s2 = smoothstep(b2 - zs, b2 + zs, pick);
+            float s3 = smoothstep(b3 - zs, b3 + zs, pick);
+            zoneShare = vec4(1.0 - s1, s1 * (1.0 - s2), s2 * (1.0 - s3), s3);
+          }
+        }
+
+        // The tone inside the zone's ramp: dry ground, meadow, or forest by how green the place
+        // is, then upland and crest by its height. The dither carries one tone into the next.
+        float h0 = pixHeight(ms);
+        float lush = field.g + (fbm(ms * 0.21 + 11.0) - 0.5) * 0.5;
+        // Brush strokes: long, low noise that wanders where one band gives way to the next.
+        float stroke = fbm(vec2(ms.x * 0.05, ms.y * 0.13) + 7.0) - 0.5;
+        float xt = clamp(lush * 3.0 + spread * 0.9 + stroke * uPixSoft.y * softK * 1.6, 0.0, 2.999);
+        float high = h0 + spread * 0.6;
+        float wl = max(soft * 0.55, 1e-4);
+        float wh = max(soft * 0.7, 1e-4);
+        vec3 c = vec3(0.0);
+        for (int zi = 0; zi < 4; zi++) {
+          float share = zoneShare[zi];
+          if (share > 0.001) {
+            c += share * pixTone(zi, xt, high, wl, wh);
+          }
+        }
+        c *= 1.0 + (fbm(ms * 0.5 + 3.0) - 0.5) * 0.07 * uPixSoft.y * softK;
+        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uPixShade.z * mix(1.0, uPixSoft.w, soft));
+
+        // Whose land it is: a wash of the faction's colour over the ground. Land nobody holds is left as it lies.
+        vec3 ids = textureLod(uPixIds, uv, 0.0).rgb;
+        vec3 faction = textureLod(uPixFaction, uv, 0.0).rgb;
+        float owned = step(0.001, ids.r + ids.g) * step(ids.b, 0.5);
+        c = mix(c, faction, uPixLines.z * owned);
+
+        // Snow: on the summits that carry it, and scattered over the cold north.
+        // The cold ground is patched by a broad drift, so the snow line is no line of latitude. An ice sheet is whole.
+        float cold = field.b * (0.5 + 1.1 * fbm(ms * 0.045 + 23.0));
+        float frost = max(max(here.a, cold) + spread * 0.18 + (vnoise(ms * 0.33 + 9.0) - 0.5) * 0.12, smoothstep(0.8, 0.95, field.b));
+        float snowy = step(0.56, frost);
+        #ifdef RELIEF
+        // The snow line slider sets where a range turns white, still cut into texels.
+        snowy = max(snowy, step(0.5, smoothstep(uMountain.z - uMountain.w, uMountain.z + uMountain.w, vRise) + spread * 0.3) * step(0.05, vRise));
+        #endif
+        c = mix(c, PIX_SNOW, snowy);
+
+        // Hillshade. The slope is taken across the texel's four neighbours, and the light on it
+        // is cut into flat tones: umber on the side turned from the sun, chalk on the side turned to it.
+        vec2 grad = vec2(pixHeight(ms + vec2(e, 0.0)) - pixHeight(ms - vec2(e, 0.0)), pixHeight(ms + vec2(0.0, e)) - pixHeight(ms - vec2(0.0, e))) / (2.0 * e);
+        // Map y runs down the sheet and the sun's runs up it.
+        vec2 sunward = normalize(vec2(uSunDir.x, -uSunDir.y) + vec2(1e-4));
+        float lean = clamp(-dot(grad, sunward) * uPixShade.x * mix(1.0, uPixSoft2.x, soft), -1.0, 1.0);
+        float level = clamp(floor(lean * uPixShade.y + 0.5 + spread * 0.5) / uPixShade.y, -1.0, 1.0);
+        // Soft, the light and shade run on in a slope and not in flat tones.
+        level = mix(level, lean, soft * 0.85);
+        // The band between the darkest shade and the brightest light is held narrow, so a figure's own darks and lights stand clear of it.
+        level *= calm;
+        if (level < 0.0) {
+          c = mix(c, mix(PIX_UMBER, PIX_SNOW_SHADE, snowy), -level * 0.52);
+        } else {
+          c = mix(c, mix(PIX_CHALK, vec3(1.0), snowy), level * 0.28);
+        }
+
+        // The coast: a texel that is on the water's edge, or has a neighbour that is.
+        float landNear = min(min(pixLand(m + vec2(e, 0.0)), pixLand(m - vec2(e, 0.0))), min(pixLand(m + vec2(0.0, e)), pixLand(m - vec2(0.0, e))));
+        float rim = 1.0 - step(0.5, min(pixLand(m), landNear));
+        if (rim < 0.5) {
+          // A border is where the texel to the east or the south belongs to someone else. It is
+          // heavier between two factions than inside one.
+          vec2 eastAt = m + vec2(e, 0.0);
+          vec2 southAt = m + vec2(0.0, e);
+          vec3 east = textureLod(uPixIds, sheetUv(eastAt), 0.0).rgb;
+          vec3 south = textureLod(uPixIds, sheetUv(southAt), 0.0).rgb;
+          bool onEast = any(greaterThan(abs(east.rg - ids.rg), vec2(0.002)));
+          bool onSouth = any(greaterThan(abs(south.rg - ids.rg), vec2(0.002)));
+          if (onEast || onSouth) {
+            vec3 theirs = textureLod(uPixFaction, sheetUv(onEast ? eastAt : southAt), 0.0).rgb;
+            float frontier = step(0.04, distance(theirs, faction));
+            c = mix(c, PIX_INK, uPixLines.w * mix(0.4, 0.82, frontier));
+          }
+          // A road and a river are each one texel wide: the texels whose middle is within half a texel of the line.
+          vec4 lines = textureLod(uGround, uv, 0.0);
+          float within = min(0.5 * e, 2.3);
+          float roadAway = length((lines.ba * 255.0 - 128.0) * (${LINE_REACH} / 127.0));
+          float riverAway = length((lines.rg * 255.0 - 128.0) * (${LINE_REACH} / 127.0));
+          c = mix(c, PIX_ROAD, uPixLines.y * 0.7 * step(roadAway, within));
+          c = mix(c, PIX_RIVER, uPixLines.x * step(riverAway, within));
+        }
+        c = mix(c, mix(PIX_RIM, PIX_RIM_RUST, step(0.8, bay)), rim * uPixShade.w);
+  LandSkinOut result;
+  result.c = c;
+  result.sceneShift = sceneAt;
+  result.snowy = snowy;
+  result.level = level;
+  return result;
+}
+`;
+
+/** The sea's pixel-chart answers. */
+export const PIXEL_SEA_SKIN = /* glsl */ `
+uniform sampler2D uPixCoast;
+uniform sampler2D uPixIds;
+uniform vec4 uPixSea;
+uniform vec4 uPixFoam;
+// 1 where the skin mirrors the sky on the sea, and where it tints the swell. The chart keeps its depth bands flat.
+const float SKIN_SKY = 0.0;
+const float SKIN_SWELL = 0.0;
+struct SeaTexel { vec2 at; float e; float bay; vec2 cell; };
+SeaTexel seaTexel(vec2 p) {
+  vec3 grid = pixTexel(p);
+  SeaTexel t;
+  t.e = 1.0 / grid.z;
+  t.at = (grid.xy + 0.5) * t.e;
+  t.bay = bayer4(grid.xy) + 0.03125;
+  t.cell = grid.xy;
+  return t;
+}
+// The sea colour at a map point m, measured from the cliff foot as foot.
+vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
+        // Depth by the distance to the coast, in flat bands: pale on the shelf, steel teal in the
+        // open ocean. The contours wander a little out at sea, and the dither carries one band into the next.
+        float away = (textureLod(uPixCoast, sheetUv(foot), 0.0).r * 255.0 - 128.0) / 127.0 * uPixSea.z;
+        away += (fbm(foot * 0.07 + 2.0) - 0.5) * 7.0 * smoothstep(1.0, 8.0, away);
+        // The edge of the shallows breathes: it creeps in and out across the dither, a slow tide that is out of step along the coast.
+        away += sin(uTime * 0.5 + vnoise(foot * 0.16) * 6.2832) * uPixFoam.x * 0.09 * uPixSea.y * smoothstep(-2.0, 3.0, away);
+        float deep = pow(clamp(away / uPixSea.y, 0.0, 1.0), 0.7);
+        float band = clamp(floor(deep * uPixSea.x + (t.bay - 0.5) * uPixGrid.w * 0.9), 0.0, uPixSea.x - 1.0) / max(uPixSea.x - 1.0, 1.0);
+        vec3 c = band < 0.3333 ? mix(PIX_SEA[0], PIX_SEA[1], band * 3.0) : (band < 0.6667 ? mix(PIX_SEA[1], PIX_SEA[2], band * 3.0 - 1.0) : mix(PIX_SEA[2], PIX_SEA[3], band * 3.0 - 2.0));
+        // A seam is where the texel to the east or the south lies in another sea zone.
+        vec3 ids = textureLod(uPixIds, sheetUv(m), 0.0).rgb;
+        vec3 east = textureLod(uPixIds, sheetUv(m + vec2(t.e, 0.0)), 0.0).rgb;
+        vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, t.e)), 0.0).rgb;
+        float seam = step(0.5, ids.b) * max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)));
+        c = mix(c, PIX_SEAM, seam * 0.55);
+  return c;
+}
+// Where the surf is read: the pixel itself, not the middle of its texel, so its rings stay smooth.
+vec2 seaWaveAt(vec2 scenePoint, vec2 m) {
+  return vec2(scenePoint.x, uShift - scenePoint.y);
+}
+float seaRings() {
+  return uPixFoam.y;
+}
+// The sun's glints: one texel each, on a lattice turned off the board's axes.
+float seaGlints(SeaTexel t, vec2 m, float glare) {
+        // Glints sit on a lattice turned off the board's axes, each cell holding one at a jittered place,
+        // so they scatter and show no square grid. A glint is one texel, so it holds its size at every zoom.
+        float dashes = 0.0;
+        if (glare > 0.01) {
+          float cellSize = t.e * 2.6 * uSheenShape.y;
+          vec2 q = mat2(0.891, 0.454, -0.454, 0.891) * t.at / cellSize;
+          vec2 base = floor(q);
+          float chance = min(0.8, 0.5 * glare);
+          for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+              vec2 id = base + vec2(float(i), float(j));
+              vec2 pt = id + 0.5 + (vec2(hash21(id + 3.1), hash21(id + 9.7)) - 0.5) * (0.5 + 0.5 * uSheenShape.z);
+              float on = step(hash21(id + floor(uTime * 2.2 + hash21(id.yx) * 3.0) * 17.0), chance);
+              vec2 gap = abs((q - pt) * cellSize);
+              dashes = max(dashes, on * step(max(gap.x, gap.y), t.e * 0.55));
+            }
+          }
+        }
+  return dashes;
+}
+vec2 seaPopCell(SeaTexel t, vec2 m) {
+  return t.cell;
+}
+`;

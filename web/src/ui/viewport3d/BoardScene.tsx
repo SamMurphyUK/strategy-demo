@@ -74,6 +74,7 @@ import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
 import { loadLandmarks } from "./landmarkModels";
+import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
 import { slabGeometry } from "./regionMeshes";
@@ -1060,8 +1061,10 @@ export function BoardScene(props: BoardSceneProps) {
       chartSheet.current = null;
       chartNow.uPixSheet.value = null;
     }
+    // The skin picks the shader chunks the land and the sea ask for colour. The baked skin is the fallback.
+    const skin = skinDefine(chart ? "pixel" : DEFAULT_SKIN);
     for (const material of [kit.landTop, kit.mountain, kit.water]) {
-      setDefine(material, "PIXIE", chart ? 1 : null);
+      setDefine(material, skin.name, skin.value);
     }
     // The cliff under the chart's ochre rim is cut from the same ochre, and carries no grain.
     if ((chart !== null) !== chartCliff.current) {
