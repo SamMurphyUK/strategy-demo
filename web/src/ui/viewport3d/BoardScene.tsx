@@ -74,6 +74,7 @@ import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
 import { loadLandmarks } from "./landmarkModels";
+import { frontDirection, frontSweep } from "../map/shipSway";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
@@ -81,7 +82,7 @@ import { slabGeometry } from "./regionMeshes";
 import { buildSkyEnvironment } from "./skyEnv";
 import { type BoardLook, shadowLight, shadowReach, sunFor } from "./sun";
 import { fitSunShadow } from "./sunShadow";
-import { shadowDirection, MAX_UNIT_SHADOWS, writeUnitClearings, writeUnitShadows } from "./unitShadows";
+import { shadowDirection, MAX_UNIT_SHADOWS, writeShipPositions, writeUnitClearings, writeUnitShadows } from "./unitShadows";
 import { boardAnimates, boardDetail } from "./zoomDetail";
 
 /** What MapView last painted, and how to ask the board for a frame. Mutable; never React state. */
@@ -90,6 +91,8 @@ export interface BoardStore {
   /** Bumped whenever a 2D canvas is repainted. */
   paint: number;
   invalidate: (() => void) | null;
+  /** How far the ground under a world point stands up the screen, in CSS pixels: the sculpted ranges, as they are drawn now. */
+  lift?: ((world: Vec2) => number) | null;
 }
 
 export interface BattleScar {
@@ -390,7 +393,7 @@ const AIR_KIND = 2;
  * reaches from them, and where that picture is on the figure canvas. A ship stands on the water,
  * and an aircraft is lifted off the ground, so its shadow falls clear of it.
  */
-function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number): number {
+function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number, drop: number): number {
   rig.kinds.clear();
   for (const layout of frame.layouts) {
     const sea = layout.region.type === "sea" ? SEA_KIND : 0;
@@ -417,7 +420,7 @@ function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, ma
     const sea = (kind & SEA_KIND) !== 0;
     foot[count * 3] = world.x;
     foot[count * 3 + 1] = -world.y + (sea ? shift : 0);
-    foot[count * 3 + 2] = (sea ? -SEA_DROP : 0) + ((kind & AIR_KIND) !== 0 ? lift : 0);
+    foot[count * 3 + 2] = (sea ? -drop : 0) + ((kind & AIR_KIND) !== 0 ? lift : 0);
     box[count * 4] = (card.left - card.feetX) / perUnit;
     box[count * 4 + 1] = (card.feetY - (card.top + card.h)) / perUnit;
     box[count * 4 + 2] = card.w / perUnit;
@@ -834,6 +837,8 @@ export function BoardScene(props: BoardSceneProps) {
 
   const bufferSize = useMemo(() => new THREE.Vector2(), []);
   const sea = useRef<THREE.Mesh>(null);
+  const slabMain = useRef<THREE.Mesh>(null);
+  const slabCast = useRef<THREE.Mesh>(null);
   const board = useRef<THREE.Group>(null);
   const once = useRef<THREE.Group>(null);
   // `sun` is how far into its days the sun has come, which is the board's own time only at the shipped pace.
@@ -986,12 +991,27 @@ export function BoardScene(props: BoardSceneProps) {
       Math.max(0.04, 1 - (1 - CAST_TINT[2]) * depth),
     );
     post.grade.uniforms.uSunTint.value.copy(shared.uSunTint.value);
+    post.grade.uniforms.uTokenClear.value = 1 - Math.min(1, Math.max(0, frame.unitFade));
 
     // The table: the sculpted ranges, the grain, the rivers, and the roads. Each is in a shader
     // only while it is on, and the sheets they read are made the first frame something reads them.
     const pixel = 1 / Math.max(projectionScales(frame.view.k).sx * (frame.dpr > 0 ? frame.dpr : 1), 1e-6);
     const ranges = table && table.patches.length > 0 ? mountainLook(mapVisuals, detail.relief, frame.view.k) : null;
-    shared.uMountain.value.set(ranges?.height ?? 0, ranges?.sharpness ?? 0, ranges?.snowLine ?? 1, ranges?.snowBlend ?? 0.1);
+    // The slider multiplies how far the ranges rise, and the figures standing on them are lifted by the same amount.
+    const rise = (ranges?.height ?? 0) * mapVisuals.mountainReliefHeight;
+    shared.uMountain.value.set(rise, ranges?.sharpness ?? 0, ranges?.snowLine ?? 1, ranges?.snowBlend ?? 0.1);
+    if (rise > 0.001 && patches.length > 0) {
+      const scales = projectionScales(frame.view.k);
+      // A rise of one world unit shows as this many pixels up the screen: the vertical share of the tilt.
+      const upright = Math.sqrt(Math.max(0, 1 - (scales.sy / scales.sx) ** 2));
+      const blend = ranges?.sharpness ?? 0;
+      store.lift = (world) => {
+        const under = sampleReliefFields(patches, world.x, world.y);
+        return (under.dome + (under.ridge - under.dome) * blend) * rise * scales.sx * upright;
+      };
+    } else {
+      store.lift = null;
+    }
     const grain = table ? surfaceLook(mapVisuals) : null;
     const rivers = table && table.rivers.length > 0 ? riverLook(mapVisuals) : null;
     const roads = table && table.roads.length > 0 ? roadLook(mapVisuals, raw.closeness) : null;
@@ -1051,11 +1071,18 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixGrid.value.set(chart.coarse, chart.fine, chart.share, chart.dither);
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
       chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH * Math.max(chart.foamReach, 0.02), coastField?.reach ?? 1, chart.regional ? 1 : 0);
-      chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
+      chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, mapVisuals.waveGlintStrength);
+      // The wave front that rocks the ships, drawn as a faint glint on the open sea. It reads the same clock the ships do.
+      const sweep = frontSweep(mapVisuals.waveDirectionDeg);
+      const direction = frontDirection(mapVisuals.waveDirectionDeg);
+      const loop = Math.max(0.5, mapVisuals.waveLoopSeconds);
+      chartNow.uWaveSweepProgress.value = (((performance.now() / 1000) % loop) + loop) % loop / loop;
+      chartNow.uWaveSweep.value.set(sweep.from, sweep.to, direction.x, direction.y);
       chartNow.uPixSoft.value.set(chart.soft, chart.brush, chart.softDither, chart.softSat);
       chartNow.uPixSoft2.value.set(chart.softBand, 0, 0, 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
+      chartNow.uPixShipN.value = writeShipPositions(chartNow.uPixShips.value, frame);
     } else if (chartSheet.current) {
       chartSheet.current.dispose();
       chartSheet.current = null;
@@ -1086,9 +1113,20 @@ export function BoardScene(props: BoardSceneProps) {
     camera.updateMatrixWorld();
 
     // The water: one sheet under the whole view, slid north so its picture registers with the land's.
-    const shift = seaShift(frame.view.k);
+    // How far the water lies below the land, set by the land-height slider. The slab is stretched to meet it, and
+    // everything that is registered to the sea's depth reads the same number.
+    const heightScale = mapVisuals.terrainHeightScale;
+    const drop = SEA_DROP * heightScale;
+    const shift = seaShift(frame.view.k, drop);
     const cosPitch = Math.max(0.5, Math.cos(pose.pitch));
-    sea.current.position.set(pose.target[0], pose.target[1] + shift, -SEA_DROP);
+    sea.current.position.set(pose.target[0], pose.target[1] + shift, -drop);
+    for (const slabMesh of [slabMain.current, slabCast.current]) {
+      if (slabMesh) {
+        slabMesh.position.z = -drop;
+        slabMesh.scale.z = heightScale;
+      }
+    }
+    kit.water.uniforms.uDrop.value = drop;
     sea.current.scale.set(pose.halfWidth * 2 + 60, (pose.halfHeight * 2) / cosPitch + 80, 1);
     kit.water.uniforms.uShift.value = shift;
     // The waves and the shine keep a share of themselves with the camera all the way out.
@@ -1152,7 +1190,7 @@ export function BoardScene(props: BoardSceneProps) {
           centerY: pose.target[1],
           halfWidth: pose.halfWidth,
           halfDepth: pose.halfHeight / cosPitch,
-          seaDrop: SEA_DROP,
+          seaDrop: drop,
           seaShift: shift,
           top: CASTER_TOP,
         },
@@ -1222,7 +1260,7 @@ export function BoardScene(props: BoardSceneProps) {
       rig.mask = canvasSlot(rig.mask, mask, store.paint);
       kit.cardCaster.uniforms.uFigures.value = rig.mask.texture;
       if (rig.paint !== store.paint) {
-        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift);
+        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift, drop);
         rig.paint = store.paint;
       }
       cards = rig.cards.geometry.instanceCount;
@@ -1392,9 +1430,9 @@ export function BoardScene(props: BoardSceneProps) {
         <primitive object={rig.cards} />
       </group>
       <group ref={board}>
-        <mesh geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
+        <mesh ref={slabMain} geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
         {/* The cliff once more, for the sun's shadow map only. */}
-        <mesh geometry={slab} material={slabCaster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
+        <mesh ref={slabCast} geometry={slab} material={slabCaster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
         {patches.map((patch, i) => (
           <Range key={i} patch={patch} kit={kit} />
         ))}

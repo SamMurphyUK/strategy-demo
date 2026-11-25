@@ -20,7 +20,10 @@ import { hasQuickUnit, infantryIdlePhase, INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK
 import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { quickSvgFigure } from "../../art/quickSvgFigure";
-import { drawBasePlinth } from "./basePlinth";
+import { drawBasePlinth, drawWaterlineRing } from "./basePlinth";
+import { getUnitTransforms } from "./unitTransformStore";
+import { resolveTransform } from "./unitTransforms";
+import { shipSway, type SwayInput } from "./shipSway";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { PlinthLook } from "./mapVisualConfig";
 import { getFigureScale } from "./figureScaleStore";
@@ -53,6 +56,10 @@ export interface UprightPaint {
   tokenPx: number;
   /** Size of the figure, from the detailed sprites' own scale curve. Absent is 1. */
   spriteScale?: number;
+  /** How far a ship's hull sits below the water, in CSS pixels. Absent is none. */
+  submergePx?: number;
+  /** What the swell and the wave front need to move a ship: its place, its ring, and the sliders. Naval units only. */
+  swell?: Omit<SwayInput, "seconds" | "landShare" | "submarine">;
   dpr: number;
   selected: boolean;
   unmoved: boolean;
@@ -783,18 +790,40 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const radius = paint.tokenPx / 2;
   const { x, y } = paint;
   const figureScale = uprightScale(paint.unitType) * (paint.spriteScale ?? 1);
+  // A ship is drawn once however many stand in the stack, where units draw a small squad. The count is a badge.
+  const naval = SEA_UNITS.has(paint.unitType);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
   const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
   const infantry = paint.unitType === "infantry" ? resolved ?? resolveQuickClip("JAP", "infantry") : null;
   const clip = infantry ?? (resolved?.fallback ? null : resolved);
   const pixelScale = clip && clip.height > 0 ? (UPRIGHT_FIGURE_PX * figureScale) / clip.height : 1;
   const figureW = clip ? clip.width * pixelScale : 16 * figureScale;
-  const squad = placedSquad(paint.count, squadStep(figureW));
+  const squad = naval ? [{ x: 0, y: 0 }] : placedSquad(paint.count, squadStep(figureW));
+  const badgeFrom = naval ? 1 : 3;
   const reach = squad.reduce((span, off) => Math.max(span, Math.abs(off.x)), 0);
   const rx = radius * 1.15 + reach * 0.35;
   const ry = Math.max(2, radius * 0.65 + reach * 0.08);
   ctx.save();
-  if (paint.plinth) {
+  const move = resolveTransform(getUnitTransforms(), paint.factionId, paint.unitType, paint.count);
+  // A ship rides the swell: a bob and a roll, calmer in the lee of a cliff. It moves only while the picture is live.
+  let sway: { bob: number; roll: number; pitch: number } = { bob: 0, roll: 0, pitch: 0 };
+  if (naval && paint.idleTime != null && paint.swell) {
+    let land = 0;
+    if (paint.landAt) {
+      const around = [
+        [rx * 1.5, 0],
+        [-rx * 1.5, 0],
+        [0, ry * 2],
+        [0, -ry * 2],
+      ];
+      land = around.filter(([ax, ay]) => paint.landAt!(x + ax, y + ay)).length / around.length;
+    }
+    sway = shipSway({ ...paint.swell, seconds: paint.idleTime, landShare: land, submarine: paint.unitType === "submarine" || paint.unitType === "sub" });
+  }
+  if (paint.plinth && naval) {
+    // A ship rides the water on a faint ring, not on a turned base.
+    drawWaterlineRing(ctx, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
+  } else if (paint.plinth) {
     // The turned base of the 3D board (see basePlinth.ts).
     drawBasePlinth(ctx, paint.plinth, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
   } else {
@@ -838,13 +867,23 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
           id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,
           clip,
           href,
-          x: x + off.x,
-          y: y + off.y + sink,
+          x: x + off.x + move.dx,
+          y: y + off.y + sink + move.dy - move.dz - sway.bob,
           unitScale: pixelScale,
           face: pose.face,
           rootX: -clip.feet.x,
           rootY: -clip.feet.y,
         });
+        // The preset's turn and tilt, and a ship's hull below the water.
+        if (move.rot + sway.roll !== 0) {
+          figure.turnDeg = move.rot + sway.roll;
+        }
+        if (move.tilt + sway.pitch * 4 !== 0) {
+          figure.tiltDeg = move.tilt + sway.pitch * 4;
+        }
+        if (naval && paint.plinth && (paint.submergePx ?? 0) > 0) {
+          figure.submergePx = paint.submergePx;
+        }
         if (SEA_UNITS.has(paint.unitType) && paint.landAt) {
           const box = spriteScreenBox(
             x + off.x,
@@ -865,7 +904,13 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
         continue;
       }
       ctx.save();
-      ctx.translate(at(x + off.x), at(y + off.y + bob + sink));
+      ctx.translate(at(x + off.x + move.dx), at(y + off.y + bob + sink + move.dy - move.dz - sway.bob));
+      if (move.rot + sway.roll !== 0) {
+        ctx.rotate(((move.rot + sway.roll) * Math.PI) / 180);
+      }
+      if (move.tilt + sway.pitch * 4 !== 0) {
+        ctx.scale(1, Math.max(0.2, Math.cos(((move.tilt + sway.pitch * 4) * Math.PI) / 180)));
+      }
       ctx.scale(figureScale, figureScale);
       if (pose.face < 0) ctx.scale(-1, 1);
       if (sheet) {
@@ -875,7 +920,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       }
       ctx.restore();
     }
-    if (!asVector && paint.count > 3) {
+    if (!asVector && paint.count > badgeFrom) {
       drawHardwareBadge(ctx, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
     }
     if (!asVector && paint.fuel != null) {
@@ -887,7 +932,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     target.save();
     target.setTransform(paint.dpr, 0, 0, paint.dpr, 0, 0);
     withCrisp(target, paint.dpr, (at) => {
-      if (paint.count > 3) {
+      if (paint.count > badgeFrom) {
         drawHardwareBadge(target, `[${paint.count}]`, at(x), at(y + ry * 0.2) + 2, GOLD_NUM, "center");
       }
       if (paint.fuel != null) {

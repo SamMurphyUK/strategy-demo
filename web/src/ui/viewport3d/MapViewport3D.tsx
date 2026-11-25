@@ -399,7 +399,7 @@ export default function MapViewport3D(props: MapViewProps) {
     </BoardBoundary>
   ) : null;
 
-  const board: BoardLayer = { node, active: ready && drawable, frame: layer.frame, touch: layer.touch };
+  const board: BoardLayer = { node, active: ready && drawable, frame: layer.frame, touch: layer.touch, groundLift: (world) => store.lift?.(world) ?? 0 };
   return (
     <>
       <MapView {...props} board={board} />

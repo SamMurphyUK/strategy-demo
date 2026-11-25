@@ -196,6 +196,24 @@ export interface MapVisualConfig {
   detailedSpriteBaseScale: number;
   /** How far the detailed sprites follow the board as the camera comes in from 3.8. 1 is steady in world space, like the terrain; 0 holds their size on screen. */
   detailedSpriteWorldLock: number;
+  /** How high the land stands above the sea: the ceiling of the land, and so the height of the cliffs. 1 is as shipped. */
+  terrainHeightScale: number;
+  /** A multiplier on how far the sculpted ranges rise off the land. 1 is the range height as set. */
+  mountainReliefHeight: number;
+  /** How far a ship's hull sits below the water, in world units. 0 floats on the surface. */
+  navalSubmergeDepth: number;
+  /** How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level whatever this is. */
+  navalIdleBobAmp: number;
+  /** How hard a wave front rocks a ship (roll and pitch) as it crosses it. 0 is no rocking. */
+  navalWaveRockAmp: number;
+  /** Seconds for the invisible wave front to sweep the board and come round again. */
+  waveLoopSeconds: number;
+  /** The direction the front travels, in degrees: 0 runs west to east, 90 north to south. */
+  waveDirectionDeg: number;
+  /** A submarine's share of a surface ship's rocking. 0.8 is 20% less. */
+  subRockFactor: number;
+  /** Strength of the faint glint that runs along the wave front over the open sea, a moment before it rocks the ships. 0 is none. */
+  waveGlintStrength: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
   regionalPaletteDetail: boolean;
 }
@@ -293,6 +311,15 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   softLandBrush: 0.5,
   detailedSpriteBaseScale: 0.85,
   detailedSpriteWorldLock: 1,
+  terrainHeightScale: 1,
+  mountainReliefHeight: 1,
+  navalSubmergeDepth: 0.6,
+  navalIdleBobAmp: 0.66,
+  navalWaveRockAmp: 1,
+  waveLoopSeconds: 20,
+  waveDirectionDeg: 0,
+  subRockFactor: 0.8,
+  waveGlintStrength: 0.5,
   regionalPaletteDetail: true,
 });
 
@@ -429,6 +456,15 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   softLandBrush: [0, 1],
   detailedSpriteBaseScale: [0.3, 2],
   detailedSpriteWorldLock: [0, 1.2],
+  terrainHeightScale: [0.3, 2],
+  mountainReliefHeight: [0, 3],
+  navalSubmergeDepth: [0, 3],
+  navalIdleBobAmp: [0, 3],
+  navalWaveRockAmp: [0, 3],
+  waveLoopSeconds: [5, 60],
+  waveDirectionDeg: [0, 360],
+  subRockFactor: [0, 1],
+  waveGlintStrength: [0, 2],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];

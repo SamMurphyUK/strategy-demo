@@ -156,12 +156,82 @@ function fadeInland(plate: HTMLCanvasElement, box: StampBox, shore: ShoreStencil
  * its `globalAlpha` is kept, so the caller's fade applies.
  */
 /** Puts the picture's top at the right height when `lean` shortens it toward the feet. */
-function placeFigure(ctx: CanvasRenderingContext2D, box: StampBox, feetY: number, lean: number): void {
+function placeFigure(ctx: CanvasRenderingContext2D, box: StampBox, feetY: number, lean: number, turn = 0, feetX = 0): void {
   const ty = feetY + (box.top - feetY) * lean;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (turn !== 0) {
+    // The turn is about the feet, in screen space, after the mirror.
+    ctx.translate(feetX, feetY);
+    ctx.rotate(turn);
+    ctx.translate(-feetX, -feetY);
+  }
   if (box.mirror) {
-    ctx.setTransform(-1, 0, 0, lean, box.left + box.w, ty);
+    ctx.transform(-1, 0, 0, lean, box.left + box.w, ty);
   } else {
-    ctx.setTransform(1, 0, 0, lean, box.left, ty);
+    ctx.transform(1, 0, 0, lean, box.left, ty);
+  }
+}
+
+const FOAM_SEAM = "rgb(221, 207, 153)";
+const seams = new WeakMap<HTMLCanvasElement, Map<number, readonly [number, number] | null>>();
+
+/** The first and last opaque pixel of one row of a picture, or null for a clear row. Remembered. */
+function seamSpan(plate: HTMLCanvasElement, row: number): readonly [number, number] | null {
+  let rows = seams.get(plate);
+  if (!rows) {
+    rows = new Map();
+    seams.set(plate, rows);
+  }
+  if (rows.has(row)) {
+    return rows.get(row) ?? null;
+  }
+  let span: readonly [number, number] | null = null;
+  try {
+    const strip = document.createElement("canvas");
+    strip.width = plate.width;
+    strip.height = 1;
+    const sctx = strip.getContext("2d");
+    if (sctx && row >= 0 && row < plate.height) {
+      sctx.drawImage(plate, 0, row, plate.width, 1, 0, 0, plate.width, 1);
+      const data = sctx.getImageData(0, 0, plate.width, 1).data;
+      let first = -1;
+      let last = -1;
+      for (let x = 0; x < plate.width; x++) {
+        if (data[x * 4 + 3] > 40) {
+          first = first < 0 ? x : first;
+          last = x;
+        }
+      }
+      span = first >= 0 ? [first, last + 1] : null;
+    }
+  } catch {
+    span = null;
+  }
+  rows.set(row, span);
+  return span;
+}
+
+/**
+ * Draws a figure's picture in its box. With `sink` pixels of hull below the water, the picture is cut
+ * there, and a one pixel line of foam is drawn across the hull where it meets the water.
+ */
+function drawPlate(ctx: CanvasRenderingContext2D, plate: HTMLCanvasElement, box: StampBox, sink: number): void {
+  const cut = Math.min(Math.max(0, Math.round(sink)), Math.floor(box.h * 0.3));
+  if (cut <= 0) {
+    ctx.drawImage(plate, 0, 0, box.w, box.h);
+    return;
+  }
+  const keep = box.h - cut;
+  const source = Math.max(1, Math.round((plate.height * keep) / box.h));
+  ctx.drawImage(plate, 0, 0, plate.width, source, 0, 0, box.w, keep);
+  const span = seamSpan(plate, source - 1);
+  if (span) {
+    const share = box.w / plate.width;
+    ctx.save();
+    ctx.globalAlpha *= 0.85;
+    ctx.fillStyle = FOAM_SEAM;
+    ctx.fillRect(span[0] * share, keep - 1, (span[1] - span[0]) * share, 1);
+    ctx.restore();
   }
 }
 
@@ -234,16 +304,11 @@ export function stampFigures(
     next.set(unit.id, plate);
     const feetY = Math.round(unit.y * dpr);
     ctx.globalAlpha = part.opacity != null && part.opacity < 1 ? fade * part.opacity : fade;
-    if (unit.shoreFade && shore) {
-      const faded = fadeInland(plate, box, shore, dpr);
-      if (faded) {
-        placeFigure(ctx, box, feetY, lean);
-        ctx.drawImage(faded, 0, 0, box.w, box.h);
-        continue;
-      }
-    }
-    placeFigure(ctx, box, feetY, lean);
-    ctx.drawImage(plate, 0, 0, box.w, box.h);
+    const faded = unit.shoreFade && shore ? fadeInland(plate, box, shore, dpr) : null;
+    const tilt = unit.tiltDeg ? Math.max(0.2, Math.cos((unit.tiltDeg * Math.PI) / 180)) : 1;
+    const turn = unit.turnDeg ? (unit.turnDeg * Math.PI) / 180 : 0;
+    placeFigure(ctx, box, feetY, lean * tilt, turn, Math.round(unit.x * dpr));
+    drawPlate(ctx, faded ?? plate, box, (unit.submergePx ?? 0) * dpr);
   }
   ctx.restore();
   ctx.globalAlpha = fade;

@@ -664,6 +664,10 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uPixIds: pixie.uPixIds,
       uPixCoast: pixie.uPixCoast,
       uPixFoam: pixie.uPixFoam,
+      uPixShips: pixie.uPixShips,
+      uPixShipN: pixie.uPixShipN,
+      uWaveSweepProgress: pixie.uWaveSweepProgress,
+      uWaveSweep: pixie.uWaveSweep,
       uBake: shared.uBake,
       uMask: shared.uMask,
       uBounds: shared.uBounds,
@@ -775,6 +779,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         foam = max(foam, smoothstep(0.3 + lap, 0.42 + lap, edge) * (0.55 + 0.45 * vnoise(mw * 2.2 + uTime * 0.3)));
         foam = floor(foam * 3.0 + 0.5) / 3.0;
         c = mix(c, uFoam, foam * uWater);
+        // The wave front, seen over the open sea a moment before it rocks the ships. uPixFoam.w is the setting.
+        c += uSunColor * seaSwellGlint(tx, footW) * (1.0 - shore) * uWater * uDirect * 0.5;
 
         // The cliff's shadow on the water, and glints where the sun still reaches.
         #ifdef SUN_SHADOW
@@ -1347,6 +1353,8 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       /** The glow's colour and strength. */
       uBloomTint: { value: new THREE.Vector3(1, 0.9, 0.74) },
       uSunTint: { value: new THREE.Vector3(1, 1, 1) },
+      /** 1 while the round icon tokens are showing, 0 once the detailed figures are: no shadow lies over a token. */
+      uTokenClear: { value: 0 },
       /** The figures of the marked stacks, alone on a clear canvas. */
       uOutMap: { value: null },
       uOutSize: { value: new THREE.Vector2(1, 1) },
@@ -1402,6 +1410,7 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       #endif
       #ifdef SUN_SHADOW
       uniform vec3 uSunTint;
+      uniform float uTokenClear;
       #endif
       ${GRAIN}
       #ifdef OUTLINE
@@ -1504,7 +1513,8 @@ export function gradeMaterial(): THREE.ShaderMaterial {
         #ifdef SUN_SHADOW
         // The first canvas is what lies flat on the board: the washes, the counters, the bases the
         // figures stand on. A shadow cast across the ground crosses them too.
-        o.rgb *= mix(uSunTint, vec3(1.0), scene.a);
+        // The round icon tokens are not under the sun: a cliff's shadow does not cross them. The detailed figures' bases are.
+        o.rgb *= mix(mix(uSunTint, vec3(1.0), scene.a), vec3(1.0), uTokenClear);
         #endif
         c = c * (1.0 - o.a) + o.rgb;
         o = layer(uLayer1) * uOn.y;

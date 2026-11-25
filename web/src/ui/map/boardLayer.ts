@@ -5,6 +5,7 @@
 // base map and paints the washes, counters, sprites, and arrows on clear canvases, and the layer
 // lays those canvases over its own picture.
 import type { ReactNode } from "react";
+import type { Vec2 } from "./geometry";
 import type { RegionLayout } from "./mapRenderer";
 import type { View } from "./viewMath";
 
@@ -84,4 +85,6 @@ export interface BoardLayer {
   ownFront?: boolean;
   /** The canvas draws the lines between sea zones. The water picture has none of its own. */
   seaBorders?: boolean;
+  /** How far the ground under a world point stands up the screen, in CSS pixels. A figure there is lifted by it, so its base sits on the slope. */
+  groundLift?(world: Vec2): number;
 }

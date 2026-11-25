@@ -123,6 +123,33 @@ export function writeUnitClearings(out: Float32Array, frame: BoardFrame): number
 }
 
 /**
+ * Where each ship afloat stands, as map x, map y (down the sheet), and the radius of its mark, in
+ * world units. The sea shader holds them for the swell and the bounce round a hull. Returns how many.
+ */
+export function writeShipPositions(out: Float32Array, frame: BoardFrame): number {
+  const k = Math.max(frame.view.k, 1e-6);
+  const radius = frame.tokenPx / 2 / k;
+  const limit = Math.floor(out.length / 3);
+  let count = 0;
+  for (const layout of frame.layouts) {
+    for (const counter of layout.counters) {
+      if (count >= limit) {
+        return count;
+      }
+      if (counter.domain !== "sea" || counter.x < -80 || counter.y < -80 || counter.x > frame.width + 80 || counter.y > frame.height + 80) {
+        continue;
+      }
+      const world = screenToWorld(frame.view, counter);
+      out[count * 3] = world.x;
+      out[count * 3 + 1] = world.y;
+      out[count * 3 + 2] = radius;
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
  * Writes one matrix per counter in the frame into `out` (sixteen numbers each, column-major), for a
  * quad that spans -1 to 1. Returns how many were written. With `contact` set the figures cast
  * their own shadows, and each stack gets only the dark under its base.
@@ -138,6 +165,11 @@ export function writeUnitShadows(out: Float32Array, frame: BoardFrame, sun: SunS
         return count;
       }
       if (counter.x < -80 || counter.y < -80 || counter.x > frame.width + 80 || counter.y > frame.height + 80) {
+        continue;
+      }
+      // A ship floats on the water. The disc these draw lies on the land plane, above the water, so it would
+      // read as a shadow hovering over the sea. A ship's own shadow is cast onto the water by the sun.
+      if (counter.domain === "sea") {
         continue;
       }
       const world = screenToWorld(frame.view, counter);

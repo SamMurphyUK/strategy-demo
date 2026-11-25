@@ -1,3 +1,4 @@
+import { stackLabel } from "./stackLabel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
 import { fuelForDisplayEntry, offeredMoveDestinations } from "../../engine/air/air_fuel";
@@ -1120,7 +1121,7 @@ export function App() {
           unitTitle={(entry) => {
             const name = unitName(entry.unit_type_id, session.state.unit_types);
             const historic = rosterName(entry.unit_type_id, entry.faction_id);
-            return historic ? `${historic} (${name})` : name;
+            return stackLabel(historic, name, entry.count);
           }}
           movement={
             editing

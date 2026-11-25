@@ -44,7 +44,17 @@ export interface PixieUniforms {
   /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
   uPixUnits: { value: Float32Array };
   uPixUnitN: { value: number };
+  /** Each ship afloat on screen: map x, map y, and the radius of its mark. For the next pass (hull bounce and sway). */
+  uPixShips: { value: Float32Array };
+  uPixShipN: { value: number };
+  /** How far round its loop the wave front is, from 0 to 1. The ships are rocked by the same line (see shipSway.ts). */
+  uWaveSweepProgress: { value: number };
+  /** Where the front starts and ends along its direction, in world units, and the direction itself. */
+  uWaveSweep: { value: THREE.Vector4 };
 }
+
+/** Slots in the sea shader's ship list. */
+export const PIXIE_SHIP_SLOTS = 32;
 
 /** Slots in the terrain shader's unit list. The same number as MAX_UNIT_CLEARINGS in unitShadows.ts. */
 export const PIXIE_UNIT_SLOTS = 96;
@@ -67,6 +77,10 @@ export function pixieUniforms(): PixieUniforms {
     uPixSoft2: { value: new THREE.Vector4(1, 0, 0, 0) },
     uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
     uPixUnitN: { value: 0 },
+    uPixShips: { value: new Float32Array(PIXIE_SHIP_SLOTS * 3) },
+    uPixShipN: { value: 0 },
+    uWaveSweepProgress: { value: 0 },
+    uWaveSweep: { value: new THREE.Vector4(0, 1, 1, 0) },
   };
 }
 
@@ -317,6 +331,10 @@ uniform sampler2D uPixCoast;
 uniform sampler2D uPixIds;
 uniform vec4 uPixSea;
 uniform vec4 uPixFoam;
+uniform vec3 uPixShips[${PIXIE_SHIP_SLOTS}];
+uniform float uPixShipN;
+uniform float uWaveSweepProgress;
+uniform vec4 uWaveSweep;
 // 1 where the skin mirrors the sky on the sea, and where it tints the swell. The chart keeps its depth bands flat.
 const float SKIN_SKY = 0.0;
 const float SKIN_SWELL = 0.0;
@@ -330,11 +348,40 @@ SeaTexel seaTexel(vec2 p) {
   t.cell = grid.xy;
   return t;
 }
+// The distance from a point of the sea to the coast, in world units: the field the shallows are cut from.
+// The next pass reads it for the swell that breaks on a cliff, and for the way a hull bounces near one.
+float seaCoastDist(vec2 foot) {
+  return (textureLod(uPixCoast, sheetUv(foot), 0.0).r * 255.0 - 128.0) / 127.0 * uPixSea.z;
+}
+// 1 on a ship's mark and out to its edge, easing to 0 a radius beyond it. Ships are the entries of uPixShips.
+// Nothing reads it yet: it is the hook for displacement round a hull.
+float seaShipNear(vec2 mapPoint) {
+  float near = 0.0;
+  for (int i = 0; i < ${PIXIE_SHIP_SLOTS}; i++) {
+    if (float(i) >= uPixShipN) {
+      break;
+    }
+    vec3 s = uPixShips[i];
+    near = max(near, 1.0 - smoothstep(s.z, s.z * 2.0, distance(mapPoint, s.xy)));
+  }
+  return near;
+}
+// A faint glint, one texel wide, along the wave front that rocks the ships: it is the same line, so the swell
+// is seen coming a moment before it arrives. The glint is broken into points that come and go, and a
+// ghost of it trails a little behind. foot is the point measured from the cliff foot, in map units.
+float seaSwellGlint(SeaTexel t, vec2 foot) {
+  float front = mix(uWaveSweep.x, uWaveSweep.y, uWaveSweepProgress);
+  float away = dot(foot, uWaveSweep.zw) - front;
+  float line = step(abs(away), t.e * 0.5);
+  float ghost = step(abs(away + t.e * 3.0), t.e * 0.5);
+  float flick = hash21(t.cell + floor(uTime * 3.0) * 7.0);
+  return (line * step(0.5, flick) + ghost * step(0.82, flick) * 0.5) * uPixFoam.w;
+}
 // The sea colour at a map point m, measured from the cliff foot as foot.
 vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         // Depth by the distance to the coast, in flat bands: pale on the shelf, steel teal in the
         // open ocean. The contours wander a little out at sea, and the dither carries one band into the next.
-        float away = (textureLod(uPixCoast, sheetUv(foot), 0.0).r * 255.0 - 128.0) / 127.0 * uPixSea.z;
+        float away = seaCoastDist(foot);
         away += (fbm(foot * 0.07 + 2.0) - 0.5) * 7.0 * smoothstep(1.0, 8.0, away);
         // The edge of the shallows breathes: it creeps in and out across the dither, a slow tide that is out of step along the coast.
         away += sin(uTime * 0.5 + vnoise(foot * 0.16) * 6.2832) * uPixFoam.x * 0.09 * uPixSea.y * smoothstep(-2.0, 3.0, away);

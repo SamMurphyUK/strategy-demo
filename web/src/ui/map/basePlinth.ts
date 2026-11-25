@@ -76,6 +76,34 @@ export function plinthParts(shape: PlinthShape, look: PlinthLook): PlinthParts {
   };
 }
 
+/**
+ * The mark under a ship, in place of a base: a faint wash of the faction's colour and a ring, flat on
+ * the water. A ship sits in the sea, not on a plinth, so it has no wall, no wood, and no brass.
+ */
+export function drawWaterlineRing(ctx: PlinthContext, shape: PlinthShape): void {
+  const { x, y, rx, ry } = shape;
+  const full = Math.PI * 2;
+  ctx.save();
+  ctx.globalAlpha = 0.16;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, full);
+  ctx.fillStyle = shape.color;
+  ctx.fill();
+  ctx.globalAlpha = 0.62;
+  ctx.lineWidth = Math.max(1.5, rx * 0.06);
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, full);
+  ctx.strokeStyle = shape.color;
+  ctx.stroke();
+  ctx.globalAlpha = 0.34;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx * 0.86, ry * 0.86, 0, 0, full);
+  ctx.strokeStyle = PLINTH_EDGE;
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Draws the base. The figure is drawn after it, standing on its centre. */
 export function drawBasePlinth(ctx: PlinthContext, look: PlinthLook, shape: PlinthShape): void {
   const { x, y, rx, ry } = shape;

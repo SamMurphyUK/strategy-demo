@@ -29,6 +29,9 @@ SeaTexel seaTexel(vec2 p) {
   t.cell = vec2(0.0);
   return t;
 }
+float seaSwellGlint(SeaTexel t, vec2 foot) {
+  return 0.0;
+}
 vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
   return texture2D(uBake, sheetUv(m), uBias).rgb;
 }

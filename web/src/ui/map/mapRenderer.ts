@@ -1091,6 +1091,8 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
 
 export interface GameOverlay {
   layouts: RegionLayout[];
+  /** How far the ground under a world point stands up the screen, in CSS pixels. Absent is flat. */
+  groundLift?(world: Vec2): number;
   owners: Record<string, string>;
   selectedStack: { regionId: string; key: string } | null;
   isUnmoved(regionId: string, entry: StackEntry): boolean;
@@ -1357,12 +1359,18 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         continue;
       }
       const { entry } = counter.slot;
-      const worldY = screenToWorld(copyView, { x: counter.x, y: counter.y }).y;
+      const world = screenToWorld(copyView, { x: counter.x, y: counter.y });
+      const worldY = world.y;
       const selected = game.selectedStack?.regionId === layout.region.id && game.selectedStack.key === counter.slot.key;
       items.push({
         worldY,
         paint: () => {
           setScreenTransform(ctx, scene.dpr);
+          // A figure on a range stands on its slope: it is lifted by how far the ground there stands up the screen.
+          const lift = game.groundLift?.(world) ?? 0;
+          if (lift !== 0) {
+            ctx.translate(0, -lift);
+          }
           // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
           const lean = unitLean(Math.min(scene.view.k, TACTICAL_IN), getBoardTune());
           if (lean !== 1) {
@@ -1378,6 +1386,21 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             y: counter.y,
             tokenPx,
             spriteScale: game.unitScale,
+            swell:
+              counter.domain === "sea"
+                ? {
+                    worldX: world.x,
+                    worldY: world.y,
+                    // The radius of the ship's waterline ring, in world units.
+                    ringWorld: (tokenPx / 2 / Math.max(scene.view.k, 1e-6)) * 1.15,
+                    bobAmp: mapVisuals.navalIdleBobAmp,
+                    rockAmp: mapVisuals.navalWaveRockAmp,
+                    loopSeconds: mapVisuals.waveLoopSeconds,
+                    directionDeg: mapVisuals.waveDirectionDeg,
+                    subFactor: mapVisuals.subRockFactor,
+                  }
+                : undefined,
+            submergePx: counter.domain === "sea" ? mapVisuals.navalSubmergeDepth * scene.view.k * 0.55 : 0,
             dpr: scene.dpr,
             selected,
             unmoved: game.isUnmoved(layout.region.id, entry),

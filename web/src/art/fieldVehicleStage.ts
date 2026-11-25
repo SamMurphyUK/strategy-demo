@@ -51,6 +51,10 @@ export interface VehicleSvgUnit {
    * The rest of the picture stays solid.
    */
   shoreFade?: boolean;
+  /** Leans the picture toward the camera (+) or away (-), in degrees: it shortens the picture, as the board's lean does. */
+  tiltDeg?: number;
+  /** How far the hull sits below the water, in CSS pixels. The picture is cut there and a foam seam is drawn. */
+  submergePx?: number;
   parts: VehicleSvgPart[];
 }
 

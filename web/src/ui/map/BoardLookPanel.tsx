@@ -634,6 +634,15 @@ export function BoardLookPanel() {
         <Num name="seaSheenSpacing" label="Shine spacing" title="Distance between glints. 1 is the old spacing; 1.2 is 20% wider. It widens more as the camera rises." />
         <Num name="seaSheenScatter" label="Shine scatter" title="How far the glints and the edge of the patch are scattered off a regular grid." />
         <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
+        <Num name="terrainHeightScale" label="Land height" title="How high the land stands above the sea: the ceiling of the land and the height of its cliffs. 1 is as shipped." />
+        <Num name="mountainReliefHeight" label="Range rise" title="A multiplier on how far the sculpted ranges rise off the land. 1 is the range height as set." />
+        <Num name="navalIdleBobAmp" label="Ship heave" title="How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level." />
+        <Num name="navalWaveRockAmp" label="Wave rock" title="How hard a wave front rocks a ship, in roll and pitch, as it crosses it. 0 is no rocking." />
+        <Num name="waveLoopSeconds" label="Wave loop" title="Seconds for the invisible wave front to sweep the board and come round again." unit="s" />
+        <Num name="waveDirectionDeg" label="Wave direction" title="The direction the front travels, in degrees: 0 runs west to east, 90 north to south." unit="deg" />
+        <Num name="waveGlintStrength" label="Swell glint" title="Strength of the faint glint that runs along the wave front over the open sea, a moment before it rocks the ships. 0 is none." />
+        <Num name="subRockFactor" label="Sub rock" title="A submarine's share of a surface ship's rocking. 0.8 is 20% less." />
+        <Num name="navalSubmergeDepth" label="Ship depth" title="How far a ship's hull sits below the water, in world units. 0 floats on the surface." />
         <Num name="detailedSpriteBaseScale" label="Sprite size" title="Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace." />
         <Num name="detailedSpriteWorldLock" label="Sprite world lock" title="How far the detailed sprites follow the board as the camera comes in. 1 is steady in world space, like the terrain and landmarks; 0 holds their size on screen." />
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
