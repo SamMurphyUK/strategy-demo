@@ -81,6 +81,7 @@ import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
 import { unitLean } from "./boardTune";
 import { getBoardTune } from "./boardTuneStore";
+import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
 import { buildSurfCoast, cliffLift, ringSpan, surfLocalPx, type SurfSample, type SurfTune } from "./coastRelief";
 import {
@@ -1332,6 +1333,8 @@ function paintSmokePlume(ctx: CanvasRenderingContext2D, scene: TerrainScene, dx:
 function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
   const tokenPx = TOKEN_PX * game.unitScale;
   const facing = facingByStack(scene, game);
+  // On the 3D board a figure stands on a turned base. The 2D map keeps the flat baseplate.
+  const plinth = scene.backdrop ? plinthLook(mapVisuals) : null;
   const items: { worldY: number; paint: () => void }[] = [];
   for (const layout of game.layouts) {
     const copyView = { ...scene.view, x: scene.view.x - layout.copyDx };
@@ -1387,6 +1390,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             landAt: scene.land
               ? (sx, sy) => landMaskAt(scene.land!, screenToWorld(copyView, { x: sx, y: sy }))
               : undefined,
+            plinth,
           });
         },
       });

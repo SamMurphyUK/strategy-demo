@@ -549,6 +549,47 @@
     gap: 4px;
   }
 
+  & .tune-fold h3 {
+    margin: 12px 0 4px;
+    color: var(--gold-text);
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  & .tune-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 6px 0 2px;
+  }
+
+  & .tune-preset {
+    order: 9;
+    flex: 1 1 100%;
+    font: inherit;
+    font-size: 10px;
+    color: inherit;
+    background: rgb(0 0 0 / 0.25);
+    border: 1px solid currentColor;
+    resize: vertical;
+  }
+
+  & .coast-slider:has(.tune-number) {
+    grid-template-columns: 96px 1fr 56px;
+  }
+
+  & .tune-number {
+    width: 100%;
+    min-width: 0;
+    padding: 1px 2px;
+    border: 1px solid var(--brass);
+    background: transparent;
+    color: var(--parchment);
+    font: 11px/1.2 var(--mono);
+    text-align: right;
+  }
+
   & .tune-color {
     display: flex;
     align-items: center;

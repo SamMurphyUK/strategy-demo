@@ -76,10 +76,16 @@ export interface ShogunUniforms {
   uSunMatrix: { value: THREE.Matrix4 };
   uSunTexel: { value: THREE.Vector4 };
   uSunTint: { value: THREE.Vector3 };
+  /** Where a standing figure cast, read only with `BASES_ONLY`. */
+  uSunCards: { value: THREE.Texture | null };
+  /** The sculpted ranges of the plain 3D board. This ground has none, so the height stays 0. */
+  uMountain: { value: THREE.Vector4 };
 }
 
 export function shogunUniforms(): ShogunUniforms {
   return {
+    uSunCards: { value: null },
+    uMountain: { value: new THREE.Vector4(0, 0, 0, 0) },
     uSunMap: { value: null },
     uSunMatrix: { value: new THREE.Matrix4() },
     uSunTexel: { value: new THREE.Vector4(1 / 2048, 1 / 2048, 0.0005, 0.3) },
@@ -209,6 +215,7 @@ export function landMaterial(shared: ShogunUniforms): THREE.ShaderMaterial {
       uSunMatrix: shared.uSunMatrix,
       uSunTexel: shared.uSunTexel,
       uSunTint: shared.uSunTint,
+      uSunCards: shared.uSunCards,
     },
     vertexShader: /* glsl */ `
       ${SUN_VERTEX}
@@ -301,8 +308,12 @@ export function landMaterial(shared: ShogunUniforms): THREE.ShaderMaterial {
         float reach = 1.0;
         #ifdef SUN_SHADOW
         float shade = sunShade(vSun);
-        c *= mix(vec3(1.0), uSunTint, shade);
         reach = 1.0 - shade;
+        #ifdef BASES_ONLY
+        // A figure's shadow belongs to the bases. The ground keeps what the land itself casts.
+        shade *= 1.0 - sunCards(vSun);
+        #endif
+        c *= mix(vec3(1.0), uSunTint, shade);
         #endif
         gl_FragColor = vec4(c, reach);
       }

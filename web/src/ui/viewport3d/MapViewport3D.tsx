@@ -19,16 +19,41 @@ import { landMaskAt } from "../map/landMask";
 import { bakeTerrain } from "../map/mapBake";
 import { ownersSignature } from "../map/mapBakeMath";
 import { MapView, type MapViewProps } from "../map/MapView";
-import { clipperFor, pointInMultiPolygon } from "../map/regionClip";
+import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regionClip";
 import { battleScarDescriptors } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { wrapWorldX } from "../map/viewMath";
-import { type BattleScar, BoardScene, type BoardStore } from "./BoardScene";
+import { type BattleScar, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
 import { BOARD_BAKE_SCALE, coastMaskCanvas } from "./boardTextures";
+import { planRoads, riverLines } from "./groundSheet";
+import { buildReliefPatch, RELIEF_ZONES } from "./mountainRelief";
 import { planProps, townSites } from "./propPlan";
 import type { BoardLook } from "./sun";
 
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
+/** The longest single road, in world units: about a seventh of the way round the board. */
+const ROAD_REACH = 110;
+
+/** The box round a shape. */
+function boxOf(shape: MultiPolygon): Rect {
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  let y1 = Number.NEGATIVE_INFINITY;
+  for (const polygon of shape) {
+    for (const [x, y] of polygon[0] ?? []) {
+      x0 = Math.min(x0, x);
+      y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x);
+      y1 = Math.max(y1, y);
+    }
+  }
+  return x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 0, h: 0 };
+}
+
+function inBox(p: Vec2, box: Rect): boolean {
+  return p.x >= box.x && p.x <= box.x + box.w && p.y >= box.y && p.y <= box.y + box.h;
+}
 
 /** If the WebGL canvas cannot start, the board layer steps aside and the 2D ground stays. */
 class BoardBoundary extends Component<{ onError(): void; children: ReactNode }, { failed: boolean }> {
@@ -137,6 +162,84 @@ export default function MapViewport3D(props: MapViewProps) {
     return planProps({ bounds: sheet, isLand, keepClear, towns });
   }, [land, geometry, clipped]);
 
+  // The table under the pieces: the three sculpted ranges, the rivers, and the roads between the
+  // capitals and the factories. Set dressing only, laid out once for a map.
+  const table = useMemo<BoardTable | null>(() => {
+    if (!land) {
+      return null;
+    }
+    const sheet = land.viewBox;
+    const isLand = (p: Vec2) => landMaskAt(land, { x: wrapWorldX(p.x, sheet), y: p.y });
+    const lands = geometry.regions
+      .filter((region) => region.type === "land")
+      .map((region) => {
+        const shape = clipped?.get(region.id) ?? roughShape(region);
+        return { region, shape, box: boxOf(shape) };
+      });
+    const owner = (p: Vec2) => lands.find((item) => inBox(p, item.box) && pointInMultiPolygon(p, item.shape));
+    const keepClear = lands.flatMap(({ region }) => [region.anchor, facilityAnchorOf(region), ...slotsOf(region)]);
+
+    // A road runs from one town's roofs to the next, where the map gives a territory a town.
+    const hubs = lands
+      .filter(({ region }) => region.capital === true || facilitiesOf(region).factory !== "none")
+      .map(({ region, shape }) => {
+        const size = facilitiesOf(region).factory;
+        const town = townSites(
+          [
+            {
+              id: region.id,
+              ipc: Math.max(region.ipc, 2),
+              factory: size === "major" ? 2 : size === "minor" ? 1 : 0,
+              anchor: region.anchor,
+              contains: (p: Vec2) => pointInMultiPolygon(p, shape),
+            },
+          ],
+          isLand,
+          keepClear,
+        )[0];
+        return town ? { x: town.x, y: town.y } : { x: region.anchor.x, y: region.anchor.y };
+      });
+    const rivers = riverLines();
+    // A road keeps to dry land and out of the ranges no territory owns. A point on the hairline
+    // between two territories belongs to neither shape, and a road crosses there all the same.
+    const inRange = (p: Vec2) => RELIEF_ZONES.some((zone) => zone.gap !== undefined && inBox(p, zone.gap.box)) && owner(p) === undefined;
+    const roads = planRoads(hubs, (p) => isLand(p) && !inRange(p), { reach: ROAD_REACH });
+
+    // A range leaves a valley for a river and a pass for a road.
+    const valleys = [...rivers.flat(), ...roads.flat()];
+    const patches = RELIEF_ZONES.flatMap((zone, index) => {
+      if (zone.gap) {
+        const patch = buildReliefPatch({
+          box: zone.gap.box,
+          inside: (p) => isLand(p) && owner(p) === undefined,
+          seed: zone.gap.seed,
+          // No piece stands on land no territory owns, and a summit is too low to hide one beside it.
+          keepClear: [],
+          valleys,
+          rise: zone.rise,
+          step: zone.step,
+          salt: index * 37 + 11,
+        });
+        return patch ? [patch] : [];
+      }
+      const found = lands.find((item) => item.region.id === zone.region);
+      if (!found) {
+        return [];
+      }
+      const patch = buildReliefPatch({
+        box: found.box,
+        inside: (p) => pointInMultiPolygon(p, found.shape) && isLand(p),
+        keepClear,
+        valleys,
+        rise: zone.rise,
+        step: zone.step,
+        salt: index * 37 + 11,
+      });
+      return patch ? [patch] : [];
+    });
+    return { patches, rivers, roads };
+  }, [land, geometry, clipped]);
+
   // Craters where the fighting is. The same marks the 2D map paints, so they sit in the same places.
   const scarKey = (props.relief?.scars ?? []).map((scar) => `${scar.regionId}:${scar.ember ? 1 : 0}`).join("|");
   const reliefRef = useRef(props.relief);
@@ -209,6 +312,7 @@ export default function MapViewport3D(props: MapViewProps) {
           look={look}
           dim={props.menuBackdrop === true}
           still={still}
+          table={table}
         />
       </Canvas>
     </BoardBoundary>

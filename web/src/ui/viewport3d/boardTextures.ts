@@ -60,6 +60,37 @@ export function sheetTexture(canvas: HTMLCanvasElement, mipmaps: boolean, anisot
   return texture;
 }
 
+/**
+ * A sheet of numbers that covers the world once and repeats sideways: the ground sheet (four bytes
+ * a texel) or the cover sheet (one). Rows run up the sheet. The bytes are read as they are stored.
+ */
+export function dataSheetTexture(data: Uint8Array, width: number, height: number, channels: 1 | 4): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, width, height, channels === 4 ? THREE.RGBAFormat : THREE.RedFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** The grain tile (see groundSheet.ts): square, repeating both ways, with every smaller level, so it goes smooth from altitude. */
+export function grainTexture(data: Uint8Array, size: number, anisotropy = 1): THREE.DataTexture {
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = anisotropy;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 /** A 2D canvas the map painted, to lay over the board texel for texel. Its colour is premultiplied. */
 export function overlayTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);

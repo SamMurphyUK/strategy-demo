@@ -46,10 +46,19 @@ export interface SharedUniforms {
   uSunTexel: { value: THREE.Vector4 };
   /** What a full shadow multiplies the ground by. White is no shadow. */
   uSunTint: { value: THREE.Vector3 };
+  /** The shadow map's colour: 1 where a standing figure cast. Read only with `BASES_ONLY`. */
+  uSunCards: { value: THREE.Texture | null };
+  /**
+   * The sculpted ranges: height of the tallest summit now in world units, how ridged (0 dome, 1
+   * massif), the snow line, and half the snow's blend. A height of 0 is flat ground.
+   */
+  uMountain: { value: THREE.Vector4 };
 }
 
 export function sharedUniforms(): SharedUniforms {
   return {
+    uSunCards: { value: null },
+    uMountain: { value: new THREE.Vector4(0, 0.6, 0.56, 0.2) },
     uSunMap: { value: null },
     uSunMatrix: { value: new THREE.Matrix4() },
     uSunTexel: { value: new THREE.Vector4(1 / 2048, 1 / 2048, 0.0005, 0.3) },
@@ -176,6 +185,25 @@ float sunShade(vec3 at) {
   return 1.0 - (lit * 0.36 + ring * 0.16);
   #endif
 }
+#ifdef BASES_ONLY
+uniform sampler2D uSunCards;
+// 1 where a standing figure is what stands between this point and the sun. Read a little wide,
+// so the soft edge of the figure's shadow is covered too.
+float sunCards(vec3 at) {
+  vec2 d = uSunTexel.xy * 2.4;
+  vec2 e = uSunTexel.xy * 1.7;
+  float m = textureLod(uSunCards, at.xy, 0.0).r;
+  m = max(m, textureLod(uSunCards, at.xy + vec2(d.x, 0.0), 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy - vec2(d.x, 0.0), 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy + vec2(0.0, d.y), 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy - vec2(0.0, d.y), 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy + e, 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy - e, 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy + vec2(e.x, -e.y), 0.0).r);
+  m = max(m, textureLod(uSunCards, at.xy + vec2(-e.x, e.y), 0.0).r);
+  return clamp(m * 2.0, 0.0, 1.0);
+}
+#endif
 #endif
 `;
 
@@ -185,6 +213,7 @@ function sunUniforms(shared: SharedUniforms) {
     uSunMatrix: shared.uSunMatrix,
     uSunTexel: shared.uSunTexel,
     uSunTint: shared.uSunTint,
+    uSunCards: shared.uSunCards,
   };
 }
 
@@ -208,21 +237,113 @@ export function setDefine(material: THREE.ShaderMaterial, name: string, value: n
 
 // --- Land ---------------------------------------------------------------------------------------
 
-/** The top of the land: the baked sheet, under the sun. */
-export function landTopMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: { ...lightUniforms(shared), ...sunUniforms(shared), uBake: shared.uBake, uBounds: shared.uBounds, uBias: { value: 0 } },
+/**
+ * What is drawn on the land besides its printed colour: the grain, the rivers, and the roads (see
+ * groundSheet.ts), and the look of the sculpted ranges. One object, shared by the flat land, the
+ * ranges, and the cliff. Each part is read only by a shader built with its define.
+ */
+export interface GroundUniforms {
+  /** The way to the nearest river in red and green, and to the nearest road in blue and alpha. */
+  uGround: { value: THREE.Texture | null };
+  /** 1 where the grain is fine: sand, snow, tundra. */
+  uCover: { value: THREE.Texture | null };
+  /** The grain tile: slope in red and green, height in blue. */
+  uTile: { value: THREE.Texture | null };
+  /** Depth of the grain, roughness, repeats per world unit, and the land's saturation. */
+  uSurface: { value: THREE.Vector4 };
+  /** Half width, depth shade, bank strength. */
+  uRiver: { value: THREE.Vector3 };
+  /** Half width, opacity, warmth. */
+  uRoad: { value: THREE.Vector3 };
+  /** World units across one pixel of the frame. Lines are never drawn thinner than a pixel. */
+  uPixel: { value: number };
+  /** Unit vector from the board toward the camera. */
+  uToEye: { value: THREE.Vector3 };
+  /** How far sunlit snow goes above white, and how far the rock and snow have come in. */
+  uSnowLook: { value: THREE.Vector2 };
+}
+
+export function groundUniforms(): GroundUniforms {
+  return {
+    uGround: { value: null },
+    uCover: { value: null },
+    uTile: { value: null },
+    uSurface: { value: new THREE.Vector4(0.5, 0.8, 1 / 21, 1) },
+    uRiver: { value: new THREE.Vector3(0.3, 0.4, 0.5) },
+    uRoad: { value: new THREE.Vector3(0.15, 0.7, 0.5) },
+    uPixel: { value: 0.1 },
+    uToEye: { value: new THREE.Vector3(0, 0, 1) },
+    uSnowLook: { value: new THREE.Vector2(0, 1) },
+  };
+}
+
+/** The furthest the ground sheet can tell, in world units. The same number as GROUND_REACH in groundSheet.ts. */
+const LINE_REACH = "2.5";
+
+/**
+ * The top of the land: the baked sheet, under the sun.
+ *
+ * Built plain, it is that and nothing more. Four defines add to it, and each is absent from the
+ * shader when its define is: `SURFACE` lights a fine grain and thins the colour, `RIVERS` and
+ * `ROADS` draw the lines of the ground sheet, and `BASES_ONLY` keeps a figure's shadow off the
+ * ground. With `relief` the same material is built for the sculpted ranges: its vertices are
+ * lifted by `uMountain`, and the lifted ground goes from the territory's colour through slate and
+ * rock to snow. Where a range's height is 0 it draws exactly what the flat land draws, so the two
+ * join with no seam.
+ */
+export function landTopMaterial(shared: SharedUniforms, ground: GroundUniforms = groundUniforms(), relief = false): THREE.ShaderMaterial {
+  const material = new THREE.ShaderMaterial({
+    defines: relief ? { RELIEF: 1 } : {},
+    uniforms: {
+      ...lightUniforms(shared),
+      ...sunUniforms(shared),
+      ...ground,
+      uBake: shared.uBake,
+      uBounds: shared.uBounds,
+      uMountain: shared.uMountain,
+      uBias: { value: 0 },
+      uSlate: { value: blend(MILITARY.spruce, MILITARY.taupe, 0.52) },
+      uRock: { value: blend(MILITARY.feldgrau, MILITARY.bone, 0.3) },
+      uSnow: { value: new THREE.Vector3(0.94, 0.94, 0.91) },
+      uSnowShade: { value: new THREE.Vector3(0.6, 0.66, 0.74) },
+      // The sea's own colours, so a river reads as the same water running inland.
+      uRiverShallow: { value: blend(MILITARY.spruce, MILITARY.steel, 0.35) },
+      uRiverDeep: { value: blend(MILITARY.steel, MILITARY.charcoal, 0.3) },
+      uRoadCool: { value: new THREE.Vector3(0.9, 0.89, 0.84) },
+      uRoadWarm: { value: new THREE.Vector3(0.95, 0.87, 0.7) },
+    },
     vertexShader: /* glsl */ `
       ${SHEET}
       ${SUN_VERTEX}
       varying vec2 vUv;
       varying vec2 vScene;
+      #ifdef RELIEF
+      attribute vec2 aField;
+      attribute vec4 aSlope;
+      uniform vec4 uMountain;
+      varying float vRise;
+      varying vec2 vSlope;
+      #ifdef SUN_SHADOW
+      uniform vec4 uSunTexel;
+      #endif
+      #endif
       void main() {
-        vUv = sheetUv(vec2(position.x, -position.y));
-        vec4 world = modelMatrix * vec4(position, 1.0);
+        vec3 p = position;
+        #ifdef RELIEF
+        vRise = mix(aField.x, aField.y, uMountain.y);
+        vSlope = mix(aSlope.xy, aSlope.zw, uMountain.y) * uMountain.x;
+        p.z += vRise * uMountain.x;
+        #endif
+        vUv = sheetUv(vec2(p.x, -p.y));
+        vec4 world = modelMatrix * vec4(p, 1.0);
         vScene = world.xy;
         #ifdef SUN_SHADOW
+        #ifdef RELIEF
+        // Read a little off the slope, so a ridge does not shade itself in stripes.
+        vSun = (uSunMatrix * vec4(world.xyz + normalize(vec3(-vSlope, 1.0)) * uSunTexel.w, 1.0)).xyz;
+        #else
         vSun = (uSunMatrix * world).xyz;
+        #endif
         #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
@@ -235,28 +356,190 @@ export function landTopMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
       uniform float uBias;
       varying vec2 vUv;
       varying vec2 vScene;
+      #if defined(RELIEF) || defined(RIVERS) || defined(ROADS)
+      uniform float uPixel;
+      #endif
+      #ifdef RELIEF
+      uniform vec4 uMountain;
+      uniform vec2 uSnowLook;
+      uniform vec3 uSlate;
+      uniform vec3 uRock;
+      uniform vec3 uSnow;
+      uniform vec3 uSnowShade;
+      varying float vRise;
+      varying vec2 vSlope;
+      #endif
+      #if defined(RIVERS) || defined(ROADS)
+      uniform sampler2D uGround;
+      #endif
+      #ifdef SURFACE
+      uniform sampler2D uTile;
+      uniform sampler2D uCover;
+      uniform vec4 uSurface;
+      uniform vec3 uToEye;
+      #endif
+      #ifdef RIVERS
+      uniform vec3 uRiver;
+      uniform vec3 uRiverShallow;
+      uniform vec3 uRiverDeep;
+      #endif
+      #ifdef ROADS
+      uniform vec3 uRoad;
+      uniform vec3 uRoadCool;
+      uniform vec3 uRoadWarm;
+      #endif
       void main() {
         vec3 c = texture2D(uBake, vUv, uBias).rgb;
-        c *= lit(uSunDir.z);
+        // The surface's facing, in scene space. Flat land looks straight up.
+        vec3 n = vec3(0.0, 0.0, 1.0);
+        #ifdef SURFACE
+        // A printed sheet under flock: a little of the colour comes out.
+        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uSurface.w);
+        #endif
+
+        #ifdef RELIEF
+        // The range is low, so its slopes are read steeper than they are for the light.
+        n = normalize(vec3(-vSlope * 2.4, 1.0));
+        float foot = smoothstep(0.02, 0.3, vRise);
+        vec3 rock = mix(uSlate, uRock, smoothstep(0.24, 0.72, vRise));
+        rock *= 0.9 + 0.2 * vnoise(vScene * 1.7);
+        // Faint benches up the slope, the way a carved model shows its layers.
+        rock *= 1.0 - 0.08 * smoothstep(0.1, 0.0, abs(fract(vRise * 8.0) - 0.5)) * foot;
+        c = mix(c, rock, foot * 0.8 * uSnowLook.y);
+        // Snow comes on over a band and is scattered through it: a speckle a pixel or two across
+        // while there is room for one, and a soft drift under that.
+        float speck = mix(vnoise(vScene * 2.6), hash21(floor(vScene * 9.0)), 0.6 * smoothstep(0.5, 1.2, 0.111 / uPixel));
+        float snow = smoothstep(uMountain.z - uMountain.w, uMountain.z + uMountain.w, vRise + (speck - 0.5) * uMountain.w * 1.7);
+        // A steep face holds less of it.
+        snow *= 1.0 - 0.55 * smoothstep(0.12, 0.42, 1.0 - n.z);
+        snow *= uSnowLook.y;
+        // Snow shows its ridges by colour as well as by light: white toward the sun, and a cold
+        // blue-grey on the face turned from it. Level snow is nearly white.
+        float facing = dot(normalize(vec3(-vSlope * 4.0, 1.0)), uSunDir) - uSunDir.z;
+        c = mix(c, mix(uSnowShade, uSnow, smoothstep(-0.25, 0.1, facing)), snow);
+        #endif
+
+        #if defined(RIVERS) || defined(ROADS)
+        vec4 ground = texture2D(uGround, vUv);
+        #endif
+        #ifdef RIVERS
+        {
+          vec2 way = (ground.rg * 255.0 - 128.0) * (${LINE_REACH} / 127.0);
+          float d = length(way);
+          vec2 away = way / max(d, 1e-4);
+          float half_ = max(uRiver.x, uPixel * 0.6);
+          float wet = 1.0 - smoothstep(half_ - uPixel, half_ + uPixel, d);
+          // The channel is not cut into the land. Its banks are shaded as if it were: the bank
+          // that faces the sun is lit, and the one under the sun is dark.
+          float bank = (1.0 - wet) * (1.0 - smoothstep(half_, half_ * 1.9 + 0.14, d));
+          float toSun = dot(-away, normalize(uSunDir.xy + 1e-4));
+          c *= 1.0 + uRiver.z * 0.42 * toSun * bank * uRelief * uDirect;
+          vec3 water = mix(uRiverShallow, uRiverDeep, uRiver.y * smoothstep(half_, 0.0, d));
+          water += 0.05 * (vnoise(vScene * 3.1 + vec2(uTime * 0.21, uTime * 0.07)) - 0.5) * uRelief;
+          c = mix(c, water, wet);
+        }
+        #endif
+        #ifdef ROADS
+        {
+          vec2 way = (ground.ba * 255.0 - 128.0) * (${LINE_REACH} / 127.0);
+          float d = length(way);
+          float half_ = max(uRoad.x, uPixel * 0.55);
+          float line = 1.0 - smoothstep(half_ - uPixel, half_ + uPixel, d);
+          float edge = 1.0 - smoothstep(half_ * 1.8 - uPixel, half_ * 1.8 + uPixel, d);
+          // A hair of shade either side keeps the pale line readable on pale ground.
+          c *= 1.0 - 0.3 * (edge - line) * uRoad.y;
+          c = mix(c, mix(uRoadCool, uRoadWarm, uRoad.z), line * uRoad.y);
+        }
+        #endif
+
+        #ifdef SURFACE
+        // The grain: one tile read at three sizes and three turns, so the eye finds no repeat.
+        // Flock and soil are coarse. Sand and snow are fine and shallow. A slope is cut rock.
+        float fine = texture2D(uCover, vUv).r;
+        vec2 at = vScene * uSurface.z;
+        vec3 broad = texture2D(uTile, mat2(0.6, 0.8, -0.8, 0.6) * at * 0.31 + 0.11).xyz;
+        vec3 mid = texture2D(uTile, at).xyz;
+        vec3 small = texture2D(uTile, mat2(0.8, -0.6, 0.6, 0.8) * at * 2.7 + 0.37).xyz;
+        vec2 tilt = (broad.xy - 0.502) * 0.6 * (1.0 - fine) + (mid.xy - 0.502) * mix(1.0, 0.3, fine) + (small.xy - 0.502) * mix(0.7, 0.9, fine);
+        float bump = broad.z * 0.2 * (1.0 - fine) + mid.z * 0.45 + small.z * 0.35;
+        float depth = uSurface.x * mix(1.0, 0.6, fine);
+        #ifdef RELIEF
+        depth *= 1.0 + 1.3 * foot;
+        #endif
+        // A low sun rakes every bump, and flock would turn to fur. The grain is eased as the sun drops.
+        n = normalize(n + vec3(-tilt * depth * 6.0 * clamp(uSunDir.z * 1.1, 0.5, 1.0), 0.0));
+        // The hollows of the grain hold a little shade.
+        c *= 1.0 + (bump - 0.5) * 0.24 * depth * uRelief;
+        #endif
+
+        c *= lit(dot(n, uSunDir));
         c *= 1.0 - cloudShade(vScene);
         // Alpha carries the light that reaches the ground, for the pieces painted over it (see gradeMaterial).
         float reach = 1.0;
+        float lightShare = 1.0;
         #ifdef SUN_SHADOW
         float shade = sunShade(vSun);
-        c *= mix(vec3(1.0), uSunTint, shade);
         reach = 1.0 - shade;
+        #ifdef BASES_ONLY
+        // A figure's shadow belongs to the bases. The ground keeps what the land itself casts.
+        shade *= 1.0 - sunCards(vSun);
+        #endif
+        c *= mix(vec3(1.0), uSunTint, shade);
+        lightShare = 1.0 - shade;
+        #endif
+        #ifdef SURFACE
+        // Satin: a soft return toward the sun, wider and fainter as the ground gets rougher.
+        float gloss = 1.0 - uSurface.y;
+        float shine = pow(max(dot(n, normalize(uSunDir + uToEye)), 0.0), mix(8.0, 48.0, gloss));
+        c += uSunColor * shine * gloss * 0.3 * uDirect * uRelief * lightShare;
+        #endif
+        #if defined(SURFACE) || defined(RELIEF)
+        // The land is paper white at most, so the grain never glows.
+        c = min(c, vec3(1.0));
+        #endif
+        #ifdef RELIEF
+        // Snow on a face turned to the sun goes past white, and the glow spreads from it.
+        c *= 1.0 + uSnowLook.x * snow * smoothstep(-0.02, 0.16, facing) * lightShare * uDirect;
         #endif
         gl_FragColor = vec4(c, reach);
       }
     `,
   });
+  if (relief) {
+    // The range lies on the land's top face where its height is 0. It wins that tie.
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -1;
+    material.polygonOffsetUnits = -2;
+  }
+  return material;
+}
+
+/** The sculpted ranges, as the sun sees them. `uMountain` is the land's, so they rise together. */
+export function mountainCasterMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
+  return caster(
+    new THREE.ShaderMaterial({
+      uniforms: { uMountain: shared.uMountain },
+      vertexShader: /* glsl */ `
+        attribute vec2 aField;
+        uniform vec4 uMountain;
+        void main() {
+          vec3 p = position;
+          p.z += mix(aField.x, aField.y, uMountain.y) * uMountain.x;
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: CASTER_FRAGMENT,
+    }),
+  );
 }
 
 /** The cliff between land and water: strata, darker and wet toward the foot, lit by its facing. */
-export function cliffMaterial(shared: SharedUniforms, drop: number): THREE.ShaderMaterial {
+export function cliffMaterial(shared: SharedUniforms, drop: number, ground: GroundUniforms = groundUniforms()): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
       ...lightUniforms(shared),
+      uTile: ground.uTile,
+      uSurface: ground.uSurface,
       uDrop: { value: drop },
       uRockHigh: { value: blend(MILITARY.brown, MILITARY.tan, 0.28) },
       uRockLow: { value: blend(MILITARY.taupe, MILITARY.brown, 0.2) },
@@ -285,6 +568,11 @@ export function cliffMaterial(shared: SharedUniforms, drop: number): THREE.Shade
       varying vec3 vNormal;
       varying float vHeight;
       varying float vAlong;
+      #ifdef SURFACE
+      uniform sampler2D uTile;
+      uniform vec4 uSurface;
+      uniform float uDrop;
+      #endif
       void main() {
         float wobble = vnoise(vec2(vAlong * 0.8, 3.0)) * 1.3;
         float band = floor(vHeight * 5.0 + wobble);
@@ -295,6 +583,12 @@ export function cliffMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         rock = mix(rock, uRockLip, step(0.92, vHeight) * 0.7);
         vec3 n = normalize(vNormal);
         float ndl = dot(n, uSunDir);
+        #ifdef SURFACE
+        // Cut plaster: the same grain as the land, laid along the face, a little deeper.
+        vec3 cut = texture2D(uTile, vec2(vAlong, vHeight * uDrop) * uSurface.z * 2.2).xyz;
+        rock *= 1.0 + (cut.z - 0.5) * 0.36 * uSurface.x * uRelief;
+        ndl += (cut.x - 0.502) * 3.0 * uSurface.x;
+        #endif
         // The cliffs in view face the viewer and away from the sun. A fill from the near side keeps the strata readable.
         vec3 light = lit(stepped(ndl * 1.15)) + vec3(0.14, 0.14, 0.16) * max(-n.y, 0.0) * uRelief;
         gl_FragColor = vec4(rock * light, 1.0);
@@ -410,6 +704,11 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         // The cliff's shadow on the water, and glints where the sun still reaches.
         #ifdef SUN_SHADOW
         float shade = sunShade(vSun);
+        float thrown = shade;
+        #ifdef BASES_ONLY
+        // A ship's shadow belongs to its base. The water keeps what the cliff casts.
+        shade *= 1.0 - sunCards(vSun);
+        #endif
         #else
         vec2 toSun = vec2(-uShadowVec.x, uShadowVec.y) * uDrop;
         float shade = max(texture2D(uMask, sheetUv(foot + toSun * 0.5)).g, texture2D(uMask, sheetUv(foot + toSun)).g);
@@ -458,7 +757,11 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
         c = mix(c, uNeat, 0.3 * step(-1.1, past) * step(past, -0.7));
         vec3 table = uTable * (0.92 + 0.12 * vnoise(vec2(m.x * 0.12, m.y * 2.4))) * (0.62 + 0.38 * smoothstep(0.0, 6.0, past));
         c = mix(c, table, step(0.0, past));
+        #ifdef SUN_SHADOW
+        gl_FragColor = vec4(c, 1.0 - thrown * step(past, 0.0));
+        #else
         gl_FragColor = vec4(c, 1.0 - shade * step(past, 0.0));
+        #endif
       }
     `,
   });
@@ -469,16 +772,23 @@ export function waterMaterial(shared: SharedUniforms, drop: number): THREE.Shade
 const PROP_VERTEX = /* glsl */ `
 attribute float aPart;
 attribute vec3 aFlag;
+attribute vec2 aRise;
 uniform float uGrow;
+uniform vec4 uMountain;
 // The model point in the board's space: an optional part folds away, and everything rises with uGrow.
+// A prop on a sculpted range stands on it: aRise is the range's two shapes at its foot (see mountainRelief.ts).
 vec3 propPoint() {
   vec3 p = position;
-  if (aPart > 2.5 && aFlag.x < 0.5) {
+  float rise = mix(aRise.x, aRise.y, uMountain.y);
+  // Nothing grows above the tree line. Rock and dunes (aFlag.z) stand wherever they are put.
+  if ((aPart > 2.5 && aFlag.x < 0.5) || (uMountain.x > 0.0 && aFlag.z < 0.01 && rise > 0.4)) {
     p = vec3(0.0);
   }
   p.xy *= mix(0.35, 1.0, uGrow);
   p.z *= uGrow;
-  return (instanceMatrix * vec4(p, 1.0)).xyz;
+  vec3 at = (instanceMatrix * vec4(p, 1.0)).xyz;
+  at.z += rise * uMountain.x;
+  return at;
 }
 `;
 
@@ -491,6 +801,7 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
       ...sunUniforms(shared),
       uBake: shared.uBake,
       uBounds: shared.uBounds,
+      uMountain: shared.uMountain,
       uGrow: { value: 0 },
       uSnow: { value: new THREE.Vector3(0.88, 0.86, 0.8) },
     },
@@ -600,6 +911,8 @@ export function propShadowMaterial(shared: SharedUniforms): THREE.ShaderMaterial
     new THREE.ShaderMaterial({
       uniforms: {
         uGrow: { value: 0 },
+        // The flattened shadow lies on level ground. It is the stand-in for boards with no shadow map.
+        uMountain: { value: new THREE.Vector4(0, 0, 0, 0) },
         uShadowVec: shared.uShadowVec,
         uShadowAlpha: shared.uShadowAlpha,
         uMask: shared.uMask,
@@ -669,10 +982,10 @@ export function cliffCasterMaterial(): THREE.ShaderMaterial {
 }
 
 /** Trees, peaks, and buildings, as the sun sees them. `uGrow` is the prop material's, so they rise together. */
-export function propCasterMaterial(grow: { value: number }): THREE.ShaderMaterial {
+export function propCasterMaterial(grow: { value: number }, mountain: { value: THREE.Vector4 }): THREE.ShaderMaterial {
   return caster(
     new THREE.ShaderMaterial({
-      uniforms: { uGrow: grow },
+      uniforms: { uGrow: grow, uMountain: mountain },
       vertexShader: /* glsl */ `
         ${PROP_VERTEX}
         void main() {

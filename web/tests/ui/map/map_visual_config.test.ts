@@ -5,23 +5,37 @@ import {
   BLOOM_THRESHOLD,
   bloomLook,
   bokehShare,
+  castShadowLook,
   DEFAULT_VISUALS,
   factionWash,
   friendlyBorderInk,
   frontlineInk,
   getVisualRev,
   grainAmount,
+  INFANTRY_FIGURE_PX,
   mapVisuals,
+  MOUNTAIN_FIGURE_SHARE,
+  mountainHeightCap,
+  mountainLook,
   outlineLook,
   parseVisuals,
   PLAIN_VISUALS,
+  plinthLook,
   resetVisuals,
+  riverLook,
+  roadLook,
   setVisual,
+  SHADOW_OPACITY_UNIT,
   shadowMapSize,
   skySheen,
   SOLID_VISUALS,
   subscribeVisuals,
+  sunArcOf,
+  sunPace,
+  surfaceLook,
+  VISUAL_KEYS,
   VISUAL_PRESETS,
+  VISUAL_RANGES,
   visualPresetJson,
   visualPresetOf,
   wantsFigureCards,
@@ -184,6 +198,192 @@ describe("light and lens", () => {
     for (const mode of ["units-only", "watercolor-only", "both", "off"] as const) {
       expect(parseVisuals({ outlineMode: mode }).highlightMode).toBe("click-and-drag");
     }
+  });
+});
+
+describe("the table", () => {
+  const SWITCHES = [
+    "enableShogunMountains",
+    "enableScatteredRocks",
+    "enablePbrSurface",
+    "enableRivers",
+    "enableRoads",
+    "enableSunTransit",
+    "enableShadows",
+    "enableBasePlinths",
+    "shadowOnBasesOnly",
+  ] as const;
+  const NUMBERS = [
+    "mountainPeakHeight",
+    "mountainRidgeSharpness",
+    "mountainSnowLine",
+    "mountainSnowBlend",
+    "mountainSnowGlow",
+    "pbrNormalStrength",
+    "pbrRoughness",
+    "pbrTilingScale",
+    "terrainSaturation",
+    "riverWidth",
+    "riverDepthShade",
+    "riverBankHighlight",
+    "roadWidth",
+    "roadOpacity",
+    "roadWarmth",
+    "sunCycleSpeed",
+    "sunMinElevation",
+    "sunMaxElevation",
+    "sunWarmthIntensity",
+    "ambientFillIntensity",
+    "shadowOpacity",
+    "shadowSoftness",
+    "shadowNormalBias",
+    "plinthRimWidth",
+    "plinthRoughness",
+    "plinthBrassIntensity",
+  ] as const;
+
+  it("gives every part a switch, and every number a range that holds its default", () => {
+    for (const key of SWITCHES) {
+      expect(typeof DEFAULT_VISUALS[key]).toBe("boolean");
+    }
+    for (const key of NUMBERS) {
+      const [low, high] = VISUAL_RANGES[key];
+      expect(low).toBeLessThan(high);
+      expect(DEFAULT_VISUALS[key]).toBeGreaterThanOrEqual(low);
+      expect(DEFAULT_VISUALS[key]).toBeLessThanOrEqual(high);
+      // A number is a number: a pasted word falls back, and a wild one is held to the range.
+      expect(parseVisuals({ [key]: "high" })[key]).toBe(DEFAULT_VISUALS[key]);
+      expect(parseVisuals({ [key]: 1e9 })[key]).toBe(high);
+      expect(parseVisuals({ [key]: -1e9 })[key]).toBe(low);
+    }
+    expect(VISUAL_KEYS).toEqual(Object.keys(DEFAULT_VISUALS));
+  });
+
+  it("ships the ranges, the grain, the rivers, the roads, the moving sun, the shadows, and the bases on", () => {
+    expect(DEFAULT_VISUALS.enableShogunMountains).toBe(true);
+    expect(DEFAULT_VISUALS.enableScatteredRocks).toBe(false);
+    expect(DEFAULT_VISUALS.enablePbrSurface).toBe(true);
+    expect(DEFAULT_VISUALS.enableRivers).toBe(true);
+    expect(DEFAULT_VISUALS.enableRoads).toBe(true);
+    expect(DEFAULT_VISUALS.enableSunTransit).toBe(true);
+    expect(DEFAULT_VISUALS.enableShadows).toBe(true);
+    expect(DEFAULT_VISUALS.enableBasePlinths).toBe(true);
+    expect(DEFAULT_VISUALS.shadowOnBasesOnly).toBe(false);
+    expect(DEFAULT_VISUALS.sunMinElevation).toBe(35);
+    expect(DEFAULT_VISUALS.sunMaxElevation).toBe(65);
+  });
+
+  it("has no work for a part that is off", () => {
+    expect(mountainLook({ ...DEFAULT_VISUALS, enableShogunMountains: false }, 1, 8)).toBeNull();
+    expect(surfaceLook({ ...DEFAULT_VISUALS, enablePbrSurface: false })).toBeNull();
+    expect(riverLook({ ...DEFAULT_VISUALS, enableRivers: false })).toBeNull();
+    expect(roadLook({ ...DEFAULT_VISUALS, enableRoads: false }, 1)).toBeNull();
+    expect(castShadowLook({ ...DEFAULT_VISUALS, enableShadows: false })).toBeNull();
+    expect(castShadowLook({ ...DEFAULT_VISUALS, shadowQuality: "off" })).toBeNull();
+    expect(plinthLook({ ...DEFAULT_VISUALS, enableBasePlinths: false })).toBeNull();
+    expect(sunPace({ ...DEFAULT_VISUALS, enableSunTransit: false })).toBe(0);
+    expect(wantsFigureCards({ ...DEFAULT_VISUALS, enableShadows: false }).shadows).toBe(false);
+  });
+
+  it("leaves the plain board as it was: the loose peaks, the shipped arc, a flat base, and none of the rest", () => {
+    expect(mountainLook(PLAIN_VISUALS, 1, 8)).toBeNull();
+    expect(PLAIN_VISUALS.enableScatteredRocks).toBe(true);
+    expect(surfaceLook(PLAIN_VISUALS)).toBeNull();
+    expect(riverLook(PLAIN_VISUALS)).toBeNull();
+    expect(roadLook(PLAIN_VISUALS, 1)).toBeNull();
+    expect(castShadowLook(PLAIN_VISUALS)).toBeNull();
+    expect(plinthLook(PLAIN_VISUALS)).toBeNull();
+    expect(sunArcOf(PLAIN_VISUALS)).toEqual({ minElevation: 30, maxElevation: 62, warmth: 1, fill: 1 });
+    expect(sunPace(PLAIN_VISUALS)).toBe(1);
+  });
+
+  it("keeps a summit under two fifths of an infantry figure at every zoom", () => {
+    expect(MOUNTAIN_FIGURE_SHARE).toBeLessThanOrEqual(0.4);
+    for (const k of [1.5, 3, 6, 12, 16, 24]) {
+      for (const peak of [0.5, 1.1, 2]) {
+        const look = mountainLook({ ...DEFAULT_VISUALS, mountainPeakHeight: peak }, 1, k)!;
+        // A world unit is k pixels up the screen at most, and less with the camera tipped.
+        expect(look.height * k).toBeLessThanOrEqual(0.4 * INFANTRY_FIGURE_PX + 1e-9);
+        expect(look.height).toBeLessThanOrEqual(peak);
+      }
+    }
+    expect(mountainHeightCap(12)).toBeCloseTo((0.4 * 33.6) / 12, 9);
+  });
+
+  it("lowers the ranges to nothing as the board climbs to altitude", () => {
+    let previous = mountainLook(DEFAULT_VISUALS, 1, 6)!.height;
+    for (const relief of [0.8, 0.6, 0.4, 0.2, 0.05]) {
+      const look = mountainLook(DEFAULT_VISUALS, relief, 6)!;
+      expect(look.height).toBeLessThan(previous);
+      expect(look.fade).toBeCloseTo(relief, 9);
+      previous = look.height;
+    }
+    expect(mountainLook(DEFAULT_VISUALS, 0, 6)).toBeNull();
+    expect(mountainLook({ ...DEFAULT_VISUALS, mountainPeakHeight: 0 }, 1, 6)).toBeNull();
+  });
+
+  it("carries the snow's line, blend, and glow straight through", () => {
+    const look = mountainLook({ ...DEFAULT_VISUALS, mountainSnowLine: 0.7, mountainSnowBlend: 0.3, mountainSnowGlow: 0.9, mountainRidgeSharpness: 0.25 }, 1, 6)!;
+    expect(look.snowLine).toBe(0.7);
+    expect(look.snowBlend).toBe(0.3);
+    expect(look.snowGlow).toBe(0.9);
+    expect(look.sharpness).toBe(0.25);
+    // The blend is never a hard line.
+    expect(VISUAL_RANGES.mountainSnowBlend[0]).toBeGreaterThan(0);
+  });
+
+  it("gives the grain, the rivers, and the roads their numbers as they are set", () => {
+    expect(surfaceLook({ ...DEFAULT_VISUALS, pbrNormalStrength: 1.2, pbrRoughness: 0.4, pbrTilingScale: 30, terrainSaturation: 0.7 })).toEqual({
+      normal: 1.2,
+      roughness: 0.4,
+      tiling: 30,
+      saturation: 0.7,
+    });
+    expect(riverLook({ ...DEFAULT_VISUALS, riverWidth: 1, riverDepthShade: 0.3, riverBankHighlight: 0.8 })).toEqual({ halfWidth: 0.5, depth: 0.3, bank: 0.8 });
+    expect(roadLook({ ...DEFAULT_VISUALS, roadWidth: 0.4, roadOpacity: 0.6, roadWarmth: 0.2 }, 1)).toEqual({ halfWidth: 0.2, opacity: 0.6, warmth: 0.2 });
+  });
+
+  it("fades the roads out toward the fitted board, with no step", () => {
+    expect(roadLook(DEFAULT_VISUALS, 0)).toBeNull();
+    expect(roadLook({ ...DEFAULT_VISUALS, roadOpacity: 0 }, 1)).toBeNull();
+    let previous = 0;
+    for (let i = 1; i <= 40; i++) {
+      const opacity = roadLook(DEFAULT_VISUALS, i / 40)?.opacity ?? 0;
+      expect(opacity).toBeGreaterThanOrEqual(previous);
+      expect(opacity - previous).toBeLessThan(0.2);
+      previous = opacity;
+    }
+    expect(previous).toBeCloseTo(DEFAULT_VISUALS.roadOpacity, 9);
+  });
+
+  it("darkens a shadow by its opacity, measured against the shipped tint", () => {
+    expect(castShadowLook({ ...DEFAULT_VISUALS, shadowOpacity: SHADOW_OPACITY_UNIT })!.depth).toBeCloseTo(1, 9);
+    expect(castShadowLook({ ...DEFAULT_VISUALS, shadowOpacity: 0 })!.depth).toBe(0);
+    expect(castShadowLook({ ...DEFAULT_VISUALS, shadowOpacity: 0.72 })!.depth).toBeCloseTo(2, 9);
+    const look = castShadowLook({ ...DEFAULT_VISUALS, shadowSoftness: 2, shadowNormalBias: 0.3, shadowOnBasesOnly: true, shadowQuality: "high" })!;
+    expect(look).toMatchObject({ size: 4096, softness: 2, normalBias: 0.3, basesOnly: true });
+    expect(castShadowLook(DEFAULT_VISUALS)!.size).toBe(2048);
+    expect(castShadowLook(DEFAULT_VISUALS)!.basesOnly).toBe(false);
+  });
+
+  it("never lets the noon sun stand lower than the dawn sun", () => {
+    expect(sunArcOf(DEFAULT_VISUALS)).toEqual({ minElevation: 35, maxElevation: 65, warmth: 1.2, fill: 1 });
+    const arc = sunArcOf({ ...DEFAULT_VISUALS, sunMinElevation: 55, sunMaxElevation: 40 });
+    expect(arc.maxElevation).toBe(55);
+    expect(arc.minElevation).toBe(55);
+    expect(sunPace({ ...DEFAULT_VISUALS, sunCycleSpeed: 3 })).toBe(3);
+  });
+
+  it("puts a tight bright highlight on a polished rim and a wide faint one on a matt rim", () => {
+    const polished = plinthLook({ ...DEFAULT_VISUALS, plinthRoughness: 0 })!;
+    const satin = plinthLook({ ...DEFAULT_VISUALS, plinthRoughness: 0.5 })!;
+    const matt = plinthLook({ ...DEFAULT_VISUALS, plinthRoughness: 1 })!;
+    expect(polished.sheen).toBeGreaterThan(satin.sheen);
+    expect(satin.sheen).toBeGreaterThan(matt.sheen);
+    expect(matt.sheen).toBe(0);
+    expect(polished.sheenArc).toBeLessThan(satin.sheenArc);
+    expect(satin.sheenArc).toBeLessThan(matt.sheenArc);
+    expect(plinthLook({ ...DEFAULT_VISUALS, plinthRimWidth: 0.3, plinthBrassIntensity: 0.4 })).toMatchObject({ rim: 0.3, brass: 0.4 });
   });
 });
 

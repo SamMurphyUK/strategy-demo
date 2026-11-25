@@ -63,36 +63,53 @@ const DUSK: SunState = {
 /** The fixed light for a viewer who asked for less motion: mid-morning. */
 const STILL_DAY = 0.3;
 
-function dayLight(day: number): SunState {
+/** The shape of the day: how high the sun stands at its ends and at noon, and how strong its two lights are. */
+export interface SunArc {
+  /** Height of the sun at dawn and at dusk, in degrees above the table. */
+  minElevation: number;
+  /** Height at noon. */
+  maxElevation: number;
+  /** 1 is the shipped amber at the ends of the day. More warms noon too. 0 is white light all day. */
+  warmth: number;
+  /** Strength of the cool fill from the sky. */
+  fill: number;
+}
+
+/** The arc the board shipped with. */
+export const SHIPPED_ARC: Readonly<SunArc> = Object.freeze({ minElevation: 30, maxElevation: 62, warmth: 1, fill: 1 });
+
+function dayLight(day: number, arc: Readonly<SunArc> = SHIPPED_ARC): SunState {
   const height = Math.sin(Math.PI * day);
-  const warmth = (1 - height) ** 1.5;
+  const low = (1 - height) ** 1.5;
+  const warmth = Math.min(1, Math.max(0, low * arc.warmth + 0.3 * (arc.warmth - 1)));
   // Azimuth is measured from north toward east. The sun starts on the east side and ends on the west.
-  const dir = direction(62 - 124 * day, 30 + 32 * height);
+  const dir = direction(62 - 124 * day, arc.minElevation + (arc.maxElevation - arc.minElevation) * height);
   const edge = smooth(0, 0.07, day) * smooth(1, 0.93, day);
+  const sky = mix(SKY, SKY_LOW, low);
   return {
     dir,
     color: mix(NOON, GOLD, warmth),
-    ambient: mix(SKY, SKY_LOW, warmth),
+    ambient: [sky[0] * arc.fill, sky[1] * arc.fill, sky[2] * arc.fill],
     direct: edge,
     shadow: SHADOW_ALPHA * edge,
   };
 }
 
 /** The light at `seconds` since the board opened. */
-export function sunAt(seconds: number, look: BoardLook = "field", still = false): SunState {
+export function sunAt(seconds: number, look: BoardLook = "field", still = false, arc: Readonly<SunArc> = SHIPPED_ARC): SunState {
   if (look === "dusk") {
     return DUSK;
   }
   if (still) {
-    return dayLight(STILL_DAY);
+    return dayLight(STILL_DAY, arc);
   }
   const phase = (((seconds % SUN_CYCLE_S) + SUN_CYCLE_S) % SUN_CYCLE_S) / SUN_CYCLE_S;
   if (phase >= DAY_SHARE) {
     // Between days. The direct light is already out, so only the fill shows.
-    const rest = dayLight(1);
-    return { ...rest, dir: dayLight(0).dir, direct: 0, shadow: 0 };
+    const rest = dayLight(1, arc);
+    return { ...rest, dir: dayLight(0, arc).dir, direct: 0, shadow: 0 };
   }
-  return dayLight(phase / DAY_SHARE);
+  return dayLight(phase / DAY_SHARE, arc);
 }
 
 /** How far east or west of north a held sun can stand, in degrees. Inside the lit part of the day. */
@@ -102,12 +119,12 @@ export const HELD_SUN_LIMIT = 50;
  * The daylight with the sun held at an azimuth, in degrees east of north. It is the same arc the
  * moving sun follows, so a held sun at 0 is noon and one at either limit is a long warm shadow.
  */
-export function sunAtAzimuth(azimuthDeg: number, look: BoardLook = "field"): SunState {
+export function sunAtAzimuth(azimuthDeg: number, look: BoardLook = "field", arc: Readonly<SunArc> = SHIPPED_ARC): SunState {
   if (look === "dusk") {
     return DUSK;
   }
   const azimuth = Math.min(HELD_SUN_LIMIT, Math.max(-HELD_SUN_LIMIT, azimuthDeg));
-  return dayLight((62 - azimuth) / 124);
+  return dayLight((62 - azimuth) / 124, arc);
 }
 
 export type SunCycleMode = "animated" | "static-noon" | "static-golden" | "off";
@@ -126,18 +143,19 @@ export function sunFor(
   look: BoardLook = "field",
   still = false,
   held: number | null = null,
+  arc: Readonly<SunArc> = SHIPPED_ARC,
 ): SunState {
   if (cycle === "off") {
-    const rest = sunAtAzimuth(0, look);
+    const rest = sunAtAzimuth(0, look, arc);
     return { ...rest, direct: 0, shadow: 0 };
   }
   if (cycle === "static-noon") {
-    return sunAtAzimuth(0, look);
+    return sunAtAzimuth(0, look, arc);
   }
   if (cycle === "static-golden") {
-    return sunAtAzimuth(GOLDEN_AZIMUTH, look);
+    return sunAtAzimuth(GOLDEN_AZIMUTH, look, arc);
   }
-  return held === null ? sunAt(seconds, look, still) : sunAtAzimuth(held, look);
+  return held === null ? sunAt(seconds, look, still, arc) : sunAtAzimuth(held, look, arc);
 }
 
 /**

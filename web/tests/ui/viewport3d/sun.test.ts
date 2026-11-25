@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DAY_SHARE, HELD_SUN_LIMIT, litFactor, shadowReach, SUN_CYCLE_S, sunAt, sunAtAzimuth } from "../../../src/ui/viewport3d/sun";
+import {
+  DAY_SHARE,
+  HELD_SUN_LIMIT,
+  litFactor,
+  SHIPPED_ARC,
+  shadowReach,
+  SUN_CYCLE_S,
+  sunAt,
+  sunAtAzimuth,
+  sunFor,
+} from "../../../src/ui/viewport3d/sun";
 
 const DAY = SUN_CYCLE_S * DAY_SHARE;
 
@@ -84,5 +94,64 @@ describe("board sun", () => {
   it("caps how far a shadow can reach", () => {
     expect(shadowReach(sunAt(0, "dusk"), 1.2)).toBe(1.2);
     expect(shadowReach(sunAt(DAY * 0.5), 5)).toBeCloseTo(1 / Math.tan((62 * Math.PI) / 180), 6);
+  });
+});
+
+describe("the sun's arc", () => {
+  const elevation = (dir: readonly number[]) => Math.asin(dir[2]) * (180 / Math.PI);
+  const arc = { minElevation: 35, maxElevation: 65, warmth: 1, fill: 1 };
+
+  it("is the shipped arc when none is given", () => {
+    expect(SHIPPED_ARC).toEqual({ minElevation: 30, maxElevation: 62, warmth: 1, fill: 1 });
+    for (const s of [3, 40, 138, 250, 290]) {
+      expect(sunAt(s, "field", false, SHIPPED_ARC)).toEqual(sunAt(s));
+      expect(sunFor("animated", s, "field", false, null, SHIPPED_ARC)).toEqual(sunFor("animated", s, "field"));
+    }
+    expect(sunAtAzimuth(20, "field", SHIPPED_ARC)).toEqual(sunAtAzimuth(20));
+  });
+
+  it("stands at the low height at each end of the day and the high one at noon, and between them all day", () => {
+    expect(elevation(sunAt(0.0001, "field", false, arc).dir)).toBeCloseTo(35, 1);
+    expect(elevation(sunAt(DAY * 0.5, "field", false, arc).dir)).toBeCloseTo(65, 6);
+    expect(elevation(sunAt(DAY - 0.0001, "field", false, arc).dir)).toBeCloseTo(35, 1);
+    for (let s = 0; s < DAY; s += 5) {
+      const height = elevation(sunAt(s, "field", false, arc).dir);
+      expect(height).toBeGreaterThanOrEqual(35 - 1e-6);
+      expect(height).toBeLessThanOrEqual(65 + 1e-6);
+    }
+  });
+
+  it("holds one height all day when the two are the same", () => {
+    const level = { ...arc, minElevation: 50, maxElevation: 50 };
+    for (let s = 1; s < DAY; s += 20) {
+      expect(elevation(sunAt(s, "field", false, level).dir)).toBeCloseTo(50, 6);
+    }
+  });
+
+  it("warms the light with the warmth, and whitens it at none", () => {
+    const blue = (warmth: number, day: number) => {
+      const sun = sunAt(DAY * day, "field", false, { ...arc, warmth });
+      return sun.color[2] / sun.color[0];
+    };
+    // More warmth, less blue for the red, at noon and in the morning alike.
+    expect(blue(2, 0.5)).toBeLessThan(blue(1, 0.5));
+    expect(blue(2, 0.15)).toBeLessThan(blue(1, 0.15));
+    expect(blue(1, 0.15)).toBeLessThan(blue(0, 0.15));
+    // No warmth is the plain noon light all day.
+    expect(sunAt(DAY * 0.15, "field", false, { ...arc, warmth: 0 }).color).toEqual(sunAt(DAY * 0.5, "field", false, { ...arc, warmth: 0 }).color);
+    // The shipped warmth leaves noon as it was.
+    expect(sunAt(DAY * 0.5, "field", false, arc).color).toEqual(sunAt(DAY * 0.5).color);
+  });
+
+  it("scales the fill from the sky and leaves the sunlight alone", () => {
+    const plain = sunAt(DAY * 0.3, "field", false, arc);
+    const strong = sunAt(DAY * 0.3, "field", false, { ...arc, fill: 1.5 });
+    strong.ambient.forEach((value, i) => expect(value).toBeCloseTo(plain.ambient[i] * 1.5, 9));
+    expect(strong.color).toEqual(plain.color);
+    expect(strong.dir).toEqual(plain.dir);
+  });
+
+  it("leaves the dusk look its own light", () => {
+    expect(sunAt(10, "dusk", false, arc)).toEqual(sunAt(10, "dusk"));
   });
 });

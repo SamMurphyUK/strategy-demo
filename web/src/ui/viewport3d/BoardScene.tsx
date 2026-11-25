@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { BoardFrame, FigureCards } from "../map/boardLayer";
 import { stackOfFigure } from "../map/figureCards";
-import type { Rect } from "../map/geometry";
+import type { Rect, Vec2 } from "../map/geometry";
 import type { MultiPolygon } from "../map/regionClip";
 import { gradeSaturation, gradeWarm, tunedBoard } from "../map/boardTune";
 import { getBoardTune } from "../map/boardTuneStore";
@@ -24,15 +24,21 @@ import {
   aoLook,
   BLOOM_THRESHOLD,
   bloomLook,
+  castShadowLook,
   factionWash,
   friendlyBorderInk,
   frontlineInk,
   grainAmount,
   mapVisuals,
+  mountainLook,
   outlineLook,
-  shadowMapSize,
+  riverLook,
+  roadLook,
   skySheen,
   subscribeVisuals,
+  sunArcOf,
+  sunPace,
+  surfaceLook,
 } from "../map/mapVisualConfig";
 import { getDrawFlags } from "../map/renderDebug";
 import type { CraterMark } from "../map/terrainRelief";
@@ -43,7 +49,9 @@ import {
   cliffCasterMaterial,
   cliffMaterial,
   craterMaterial,
+  groundUniforms,
   landTopMaterial,
+  mountainCasterMaterial,
   OUTLINE_SLOTS,
   OVERLAY_SLOTS,
   propCasterMaterial,
@@ -55,7 +63,9 @@ import {
   unitShadowMaterial,
   waterMaterial,
 } from "./boardMaterials";
-import { clearTexture, overlayTexture, sheetTexture } from "./boardTextures";
+import { clearTexture, dataSheetTexture, grainTexture, overlayTexture, sheetTexture } from "./boardTextures";
+import { buildCoverSheet, buildGroundSheet, grainTile } from "./groundSheet";
+import { reliefBuffers, type ReliefPatch, sampleReliefFields } from "./mountainRelief";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
@@ -106,6 +116,18 @@ export interface BoardSceneProps {
     lines: HTMLCanvasElement;
     front: HTMLCanvasElement;
   } | null;
+  /**
+   * The sculpted ranges, the rivers, and the roads of the plain 3D board (see mountainRelief.ts
+   * and groundSheet.ts). Absent, the land is a flat slab with the loose peaks on it.
+   */
+  table?: BoardTable | null;
+}
+
+/** What the plain 3D board lays on its land. Lines are map points. */
+export interface BoardTable {
+  patches: readonly ReliefPatch[];
+  rivers: readonly (readonly Vec2[])[];
+  roads: readonly (readonly Vec2[])[];
 }
 
 const SHOGUN_INK = rgbOf(SHOGUN.ink);
@@ -139,6 +161,10 @@ const MAX_FIGURE_CARDS = 1024;
 const CAST_TINT: readonly [number, number, number] = [0.64, 0.66, 0.79];
 /** How bright an ember is while the glow is on. Above 1 it is hot enough to spread. */
 const EMBER_GLOW = 2.4;
+/** How far past white sunlit snow goes at the full snow glow, while the glow is on. */
+const SNOW_GLOW = 1.1;
+/** The loose rock models. With the sculpted ranges on the board they are put away unless asked for. */
+const ROCK_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(["peak", "rock"]);
 /** The camera's steepest tip, in radians: the sea shows the most sky from here. */
 const FULL_TILT = 0.55;
 const SELECT_INK = rgbOf(PIGMENT.select);
@@ -146,7 +172,12 @@ const HOVER_INK = rgbOf(PIGMENT.hover);
 
 interface Kit {
   shared: ReturnType<typeof sharedUniforms>;
+  /** The grain, the rivers, and the roads, as the land, the ranges, and the cliff read them. */
+  ground: ReturnType<typeof groundUniforms>;
   landTop: THREE.ShaderMaterial;
+  /** The land's material once more, for the sculpted ranges. */
+  mountain: THREE.ShaderMaterial;
+  mountainCaster: THREE.ShaderMaterial;
   cliff: THREE.ShaderMaterial;
   water: THREE.ShaderMaterial;
   prop: THREE.ShaderMaterial;
@@ -164,11 +195,15 @@ interface Kit {
 
 function createKit(): Kit {
   const shared = sharedUniforms();
+  const ground = groundUniforms();
   const prop = propMaterial(shared);
   return {
     shared,
-    landTop: landTopMaterial(shared),
-    cliff: cliffMaterial(shared, SEA_DROP),
+    ground,
+    landTop: landTopMaterial(shared, ground),
+    mountain: landTopMaterial(shared, ground, true),
+    mountainCaster: mountainCasterMaterial(shared),
+    cliff: cliffMaterial(shared, SEA_DROP, ground),
     water: waterMaterial(shared, SEA_DROP),
     prop,
     propShadow: propShadowMaterial(shared),
@@ -176,7 +211,7 @@ function createKit(): Kit {
     crater: craterMaterial(shared),
     smoke: smokeMaterial(shared),
     cliffCaster: cliffCasterMaterial(),
-    propCaster: propCasterMaterial(prop.uniforms.uGrow),
+    propCaster: propCasterMaterial(prop.uniforms.uGrow, shared.uMountain),
     cardCaster: cardCasterMaterial(),
     noCaster: new THREE.MeshBasicMaterial({ visible: false }),
   };
@@ -185,6 +220,8 @@ function createKit(): Kit {
 function disposeKit(kit: Kit): void {
   for (const material of [
     kit.landTop,
+    kit.mountain,
+    kit.mountainCaster,
     kit.cliff,
     kit.water,
     kit.prop,
@@ -369,15 +406,27 @@ interface PropFieldProps {
   kind: PropKind;
   instances: readonly PropInstance[];
   kit: Kit;
+  /** The sculpted ranges. A prop on one stands on it. */
+  patches: readonly ReliefPatch[];
 }
 
 /** Every prop of one kind as a single instanced draw, and their shadows as a second. */
-function PropField({ kind, instances, kit }: PropFieldProps) {
+function PropField({ kind, instances, kit, patches }: PropFieldProps) {
   const field = useDisposable(
     () => {
       const geometry = propGeometry(kind);
       const buffers = propBuffers(instances, GROUND_SHARE[kind]);
       geometry.setAttribute("aFlag", new THREE.InstancedBufferAttribute(buffers.flags, 3));
+      // The range's two shapes under each prop's foot. The shader mixes and scales them as it does the land's.
+      const rise = new Float32Array(instances.length * 2);
+      if (patches.length > 0) {
+        instances.forEach((prop, i) => {
+          const under = sampleReliefFields(patches, prop.x, prop.y);
+          rise[i * 2] = under.dome;
+          rise[i * 2 + 1] = under.ridge;
+        });
+      }
+      geometry.setAttribute("aRise", new THREE.InstancedBufferAttribute(rise, 2));
       const matrices = new THREE.InstancedBufferAttribute(buffers.matrices, 16);
       const make = (material: THREE.Material, order: number, tinted: boolean) => {
         const mesh = new THREE.InstancedMesh(geometry, material, buffers.count);
@@ -388,6 +437,7 @@ function PropField({ kind, instances, kit }: PropFieldProps) {
         // The shadow pass moves vertices in the shader, so the model's bounds do not hold.
         mesh.frustumCulled = false;
         mesh.renderOrder = order;
+        mesh.userData.rock = ROCK_KINDS.has(kind);
         return mesh;
       };
       // The same instances once more, for the sun's shadow map only.
@@ -401,7 +451,7 @@ function PropField({ kind, instances, kit }: PropFieldProps) {
       old.shadow.dispose();
       old.caster.dispose();
     },
-    [kind, instances, kit],
+    [kind, instances, kit, patches],
   );
   return (
     <>
@@ -410,6 +460,44 @@ function PropField({ kind, instances, kit }: PropFieldProps) {
       <primitive object={field.caster} />
     </>
   );
+}
+
+/** One sculpted range: a grid laid on the land, lifted in the shader, and the same grid for the sun's shadow map. */
+function Range({ patch, kit }: { patch: ReliefPatch; kit: Kit }) {
+  const range = useDisposable(
+    () => {
+      const buffers = reliefBuffers(patch);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions, 3));
+      geometry.setAttribute("aField", new THREE.BufferAttribute(buffers.fields, 2));
+      geometry.setAttribute("aSlope", new THREE.BufferAttribute(buffers.slopes, 4));
+      geometry.setIndex(new THREE.BufferAttribute(buffers.indices, 1));
+      const ground = new THREE.Mesh(geometry, kit.mountain);
+      // The shader lifts the vertices, so the flat grid's bounds do not hold.
+      ground.frustumCulled = false;
+      ground.visible = false;
+      const caster = new THREE.Mesh(geometry, kit.mountainCaster);
+      caster.frustumCulled = false;
+      caster.layers.set(CASTER_LAYER);
+      caster.visible = false;
+      return { geometry, ground, caster };
+    },
+    (old) => old.geometry.dispose(),
+    [patch, kit],
+  );
+  return (
+    <>
+      <primitive object={range.ground} />
+      <primitive object={range.caster} />
+    </>
+  );
+}
+
+/** The textures the land's grain, rivers, and roads are read from. Each exists only while something reads it. */
+interface GroundTextures {
+  lines: THREE.DataTexture | null;
+  tile: THREE.DataTexture | null;
+  cover: THREE.DataTexture | null;
 }
 
 /** Shell craters, flat on the land. */
@@ -479,8 +567,12 @@ function Smoke({ scars, chimneys, kit }: { scars: readonly BattleScar[]; chimney
   return <primitive object={mesh.smoke} />;
 }
 
+const NO_PATCHES: readonly ReliefPatch[] = [];
+
 export function BoardScene(props: BoardSceneProps) {
   const { store, land, bounds, bake, mask, plan, scars } = props;
+  const table = props.table ?? null;
+  const patches = table?.patches ?? NO_PATCHES;
   const gl = useThree((state) => state.gl);
   const invalidate = useThree((state) => state.invalidate);
   const live = useRef(props);
@@ -527,6 +619,7 @@ export function BoardScene(props: BoardSceneProps) {
     uniforms.uSunMatrix = source.uSunMatrix;
     uniforms.uSunTexel = source.uSunTexel;
     uniforms.uSunTint = source.uSunTint;
+    uniforms.uSunCards = source.uSunCards;
     return uniforms;
   }, [kit]);
   const rig = useDisposable(() => createSunRig(kit.cardCaster), disposeSunRig, [kit]);
@@ -535,6 +628,8 @@ export function BoardScene(props: BoardSceneProps) {
   const sky = useRef<THREE.WebGLRenderTarget | null>(null);
   const outlineMap = useRef<CanvasSlot | null>(null);
   const sunMatrix = useMemo(() => new THREE.Matrix4(), []);
+  const groundTextures = useRef<GroundTextures>({ lines: null, tile: null, cover: null });
+  const clearWas = useMemo(() => new THREE.Color(), []);
   useEffect(
     () => () => {
       sky.current?.dispose();
@@ -543,6 +638,26 @@ export function BoardScene(props: BoardSceneProps) {
       outlineMap.current = null;
     },
     [],
+  );
+  // The ground sheet is baked from the table's lines, so a new table drops it. The grain goes with the board.
+  useEffect(
+    () => () => {
+      groundTextures.current.lines?.dispose();
+      groundTextures.current.lines = null;
+      kit.ground.uGround.value = null;
+    },
+    [table, bounds, kit],
+  );
+  useEffect(
+    () => () => {
+      groundTextures.current.tile?.dispose();
+      groundTextures.current.cover?.dispose();
+      groundTextures.current.tile = null;
+      groundTextures.current.cover = null;
+      kit.ground.uTile.value = null;
+      kit.ground.uCover.value = null;
+    },
+    [bounds, kit],
   );
   const shogunLand = useDisposable(
     () => landMaterial(shogunShared),
@@ -615,13 +730,14 @@ export function BoardScene(props: BoardSceneProps) {
   const sea = useRef<THREE.Mesh>(null);
   const board = useRef<THREE.Group>(null);
   const once = useRef<THREE.Group>(null);
-  const clock = useRef({ start: performance.now(), lastDraw: 0, seen: -1, dirty: true });
+  // `sun` is how far into its days the sun has come, which is the board's own time only at the shipped pace.
+  const clock = useRef({ start: performance.now(), lastDraw: 0, seen: -1, dirty: true, sun: 0, sunAt: performance.now() });
 
   // A new picture is due whenever something React handed down changes.
   useEffect(() => {
     clock.current.dirty = true;
     invalidate();
-  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still, shogunTextures]);
+  }, [invalidate, bakeTexture, maskTexture, slab, plan, scars, props.look, props.dim, props.still, shogunTextures, table]);
 
   useEffect(() => {
     if (!shogunTextures) {
@@ -693,8 +809,18 @@ export function BoardScene(props: BoardSceneProps) {
 
     const seconds = still ? OPENING_SECONDS : OPENING_SECONDS + (now - state.start) / 1000;
     const shogun = shogunTextures !== null;
+    // The sun keeps its own time: the board's, at the pace the settings give it. Stopped, it stays where it stands.
+    state.sun += ((now - state.sunAt) / 1000) * sunPace(mapVisuals);
+    state.sunAt = now;
     // The Shogun board can hold its moving sun at an azimuth. The static settings win over that.
-    const sun = sunFor(mapVisuals.sunCycle, seconds, look, still, shogun && !mapVisuals.sunSweep ? mapVisuals.sunAzimuth : null);
+    const sun = sunFor(
+      mapVisuals.sunCycle,
+      still ? OPENING_SECONDS : OPENING_SECONDS + state.sun,
+      look,
+      still,
+      shogun && !mapVisuals.sunSweep ? mapVisuals.sunAzimuth : null,
+      sunArcOf(mapVisuals),
+    );
     const { shared } = kit;
     shared.uTime.value = seconds;
     shared.uStepTime.value = Math.floor(seconds * 12) / 12;
@@ -710,17 +836,22 @@ export function BoardScene(props: BoardSceneProps) {
 
     // The sun's shadow map. With it on, the cliff, the props, and the figures cast for real, and
     // the flattened stand-ins they used to cast with are put away.
-    const mapSize = shadowMapSize(mapVisuals.shadowQuality);
-    const sunMap = mapSize > 0;
+    const castLook = castShadowLook(mapVisuals);
+    const mapSize = castLook?.size ?? 0;
+    const sunMap = castLook !== null;
     const cast = sunMap ? sun.direct * detail.relief : 0;
     const casting = cast > 0.004;
+    // Figures shade the bases and leave the ground clean: the map's colour says where a figure cast.
+    const basesOnly = castLook?.basesOnly === true ? 1 : null;
     shared.uShadowAlpha.value = sunMap ? 0 : sun.shadow * detail.relief;
     const kernel = sunMap ? (mapSize >= 4096 ? 2 : 1) : null;
-    setDefine(kit.landTop, "SUN_SHADOW", kernel);
-    setDefine(shogunLand, "SUN_SHADOW", kernel);
-    setDefine(kit.water, "SUN_SHADOW", kernel);
+    for (const material of [kit.landTop, kit.mountain, shogunLand, kit.water]) {
+      setDefine(material, "SUN_SHADOW", kernel);
+      setDefine(material, "BASES_ONLY", kernel !== null ? basesOnly : null);
+    }
     setDefine(kit.prop, "SUN_SHADOW", kernel);
     setDefine(post.grade, "SUN_SHADOW", kernel);
+    kit.cardCaster.colorWrite = basesOnly !== null;
     if (!sunMap && rig.target) {
       rig.target.depthTexture?.dispose();
       rig.target.dispose();
@@ -728,21 +859,79 @@ export function BoardScene(props: BoardSceneProps) {
       rig.mask?.texture.dispose();
       rig.mask = null;
       shared.uSunMap.value = null;
+      shared.uSunCards.value = null;
     } else if (sunMap && (!rig.target || rig.target.width !== mapSize)) {
       rig.target?.depthTexture?.dispose();
       rig.target?.dispose();
       rig.target = sunTarget(mapSize);
       shared.uSunMap.value = rig.target.depthTexture;
+      shared.uSunCards.value = rig.target.texture;
       // A map that was never drawn has no texture behind it, and every shader that reads it then
       // draws nothing at all. From altitude nothing casts, so the first pass may be a long way off.
       gl.setRenderTarget(rig.target);
-      gl.clear(false, true, false);
+      gl.clear(true, true, false);
       gl.setRenderTarget(null);
     }
-    // A full shadow is the ground with the sun taken off it: cooler, and a third darker.
-    const depth = cast * (sun.direct > 0 ? sun.shadow / (0.3 * sun.direct) : 0);
-    shared.uSunTint.value.set(1 - (1 - CAST_TINT[0]) * depth, 1 - (1 - CAST_TINT[1]) * depth, 1 - (1 - CAST_TINT[2]) * depth);
+    // A full shadow is the ground with the sun taken off it: cooler, and a third darker at the shipped opacity.
+    const depth = cast * (sun.direct > 0 ? sun.shadow / (0.3 * sun.direct) : 0) * (castLook?.depth ?? 1);
+    shared.uSunTint.value.set(
+      Math.max(0.04, 1 - (1 - CAST_TINT[0]) * depth),
+      Math.max(0.04, 1 - (1 - CAST_TINT[1]) * depth),
+      Math.max(0.04, 1 - (1 - CAST_TINT[2]) * depth),
+    );
     post.grade.uniforms.uSunTint.value.copy(shared.uSunTint.value);
+
+    // The table: the sculpted ranges, the grain, the rivers, and the roads. Each is in a shader
+    // only while it is on, and the sheets they read are made the first frame something reads them.
+    const pixel = 1 / Math.max(projectionScales(frame.view.k).sx * (frame.dpr > 0 ? frame.dpr : 1), 1e-6);
+    const ranges = table && table.patches.length > 0 ? mountainLook(mapVisuals, detail.relief, frame.view.k) : null;
+    shared.uMountain.value.set(ranges?.height ?? 0, ranges?.sharpness ?? 0, ranges?.snowLine ?? 1, ranges?.snowBlend ?? 0.1);
+    const grain = table ? surfaceLook(mapVisuals) : null;
+    const rivers = table && table.rivers.length > 0 ? riverLook(mapVisuals) : null;
+    const roads = table && table.roads.length > 0 ? roadLook(mapVisuals, raw.closeness) : null;
+    const earth = kit.ground;
+    const sheets = groundTextures.current;
+    if (table && (rivers || roads)) {
+      if (!sheets.lines) {
+        const sheet = buildGroundSheet(live.current.bounds, table.rivers, table.roads);
+        sheets.lines = dataSheetTexture(sheet.data, sheet.width, sheet.height, 4);
+        earth.uGround.value = sheets.lines;
+      }
+    } else if (sheets.lines) {
+      sheets.lines.dispose();
+      sheets.lines = null;
+      earth.uGround.value = null;
+    }
+    if (grain) {
+      if (!sheets.tile || !sheets.cover) {
+        const cover = buildCoverSheet(live.current.bounds);
+        sheets.tile = grainTexture(grainTile(256), 256, Math.min(8, gl.capabilities.getMaxAnisotropy()));
+        sheets.cover = dataSheetTexture(cover.data, cover.width, cover.height, 1);
+        earth.uTile.value = sheets.tile;
+        earth.uCover.value = sheets.cover;
+      }
+      earth.uSurface.value.set(grain.normal, grain.roughness, 1 / Math.max(grain.tiling, 1e-3), grain.saturation);
+    } else if (sheets.tile || sheets.cover) {
+      sheets.tile?.dispose();
+      sheets.cover?.dispose();
+      sheets.tile = null;
+      sheets.cover = null;
+      earth.uTile.value = null;
+      earth.uCover.value = null;
+    }
+    if (rivers) {
+      earth.uRiver.value.set(rivers.halfWidth, rivers.depth, rivers.bank);
+    }
+    if (roads) {
+      earth.uRoad.value.set(roads.halfWidth, roads.opacity, roads.warmth);
+    }
+    earth.uPixel.value = pixel;
+    for (const material of [kit.landTop, kit.mountain]) {
+      setDefine(material, "SURFACE", grain ? 1 : null);
+      setDefine(material, "RIVERS", rivers ? 1 : null);
+      setDefine(material, "ROADS", roads ? 1 : null);
+    }
+    setDefine(kit.cliff, "SURFACE", grain ? 1 : null);
 
     // The camera is the 2D view, tipped (see boardCamera.ts).
     const pose = boardPose(cameraOf(frame.view, frame.width, frame.height), frame.width, frame.height);
@@ -766,14 +955,21 @@ export function BoardScene(props: BoardSceneProps) {
     const bias = 0.7 * detail.flatten;
     kit.water.uniforms.uBias.value = bias;
     kit.landTop.uniforms.uBias.value = bias;
+    kit.mountain.uniforms.uBias.value = bias;
 
     // The glow needs something hot to spread: an ember under a battle's smoke, or the sun on the sea.
     const sheen = skySheen(mapVisuals.envReflectionWeight);
     const glowLook = bloomLook(mapVisuals.bloomWeight);
     const embers = detail.smoke > 0.01 && live.current.scars.some((scar) => scar.ember);
     const glitter = sheen > 0 && detail.water > 0.01 && sun.direct > 0.01;
-    const glowing = glowLook !== null && (embers || glitter) && (gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"));
+    const snowfield = ranges !== null && ranges.snowGlow > 0.004 && sun.direct > 0.01;
+    const glowing =
+      glowLook !== null &&
+      (embers || glitter || snowfield) &&
+      (gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"));
     kit.smoke.uniforms.uGlow.value = glowing ? EMBER_GLOW : 1;
+    earth.uSnowLook.value.set(glowing && ranges ? ranges.snowGlow * SNOW_GLOW : 0, ranges?.fade ?? 0);
+    earth.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
 
     // The sky on the sea. The dome is built the first frame the sheen is on.
     setDefine(kit.water, "SKY_SHEEN", sheen > 0 ? 1 : null);
@@ -826,7 +1022,9 @@ export function BoardScene(props: BoardSceneProps) {
       sunMatrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
       shared.uSunMatrix.value.copy(sunMatrix).multiply(eye.projectionMatrix).multiply(eye.matrixWorldInverse);
       const texel = Math.max(fit.texelX, fit.texelY);
-      shared.uSunTexel.value.set(1 / mapSize, 1 / mapSize, (0.05 + texel * 1.5) / (fit.far - fit.near), 0.14 + texel * 2);
+      // The taps are spread by the softness, and a slope is read the normal bias off its face.
+      const spread = (castLook?.softness ?? 1) / mapSize;
+      shared.uSunTexel.value.set(spread, spread, (0.05 + texel * 1.5) / (fit.far - fit.near), (castLook?.normalBias ?? 0.14) + texel * 2);
       // The figures' cards stand square to the sun, so a low sun from the side still throws the whole figure.
       const flat = Math.hypot(light[0], light[1]) || 1;
       kit.cardCaster.uniforms.uSide.value.set(light[1] / flat, -light[0] / flat, 0);
@@ -848,14 +1046,19 @@ export function BoardScene(props: BoardSceneProps) {
     kit.propShadow.uniforms.uGrow.value = detail.props;
     kit.smoke.uniforms.uSmoke.value = detail.smoke;
     kit.smoke.uniforms.uCamUp.value.set(0, Math.cos(pose.pitch), Math.sin(pose.pitch));
+    // With the sculpted ranges on the board, the loose rock models are put away unless they are asked for.
+    const rocks = !table || table.patches.length === 0 || mapVisuals.enableScatteredRocks;
     for (const child of board.current.children) {
       const material = (child as THREE.Mesh).material;
+      const standing = detail.props > 0.001 && (rocks || child.userData.rock !== true);
       if (material === kit.prop) {
-        child.visible = detail.props > 0.001;
+        child.visible = standing;
       } else if (material === kit.propShadow) {
-        child.visible = detail.props > 0.001 && shared.uShadowAlpha.value > 0.004;
+        child.visible = standing && shared.uShadowAlpha.value > 0.004;
       } else if (material === kit.smoke) {
         child.visible = detail.smoke > 0.001;
+      } else if (material === kit.mountain) {
+        child.visible = ranges !== null;
       }
     }
 
@@ -877,7 +1080,11 @@ export function BoardScene(props: BoardSceneProps) {
     rig.cards.visible = cards > 0;
     for (const child of board.current.children) {
       if (child.layers.mask === 1 << CASTER_LAYER) {
-        child.visible = casting && ((child as THREE.Mesh).material !== kit.propCaster || detail.props > 0.001);
+        const material = (child as THREE.Mesh).material;
+        child.visible =
+          casting &&
+          (material !== kit.propCaster || (detail.props > 0.001 && (rocks || child.userData.rock !== true))) &&
+          (material !== kit.mountainCaster || ranges !== null);
       }
     }
 
@@ -978,7 +1185,16 @@ export function BoardScene(props: BoardSceneProps) {
       // The sun's picture first: everything that casts, once for each copy of the world in view.
       if (casting && rig.target) {
         gl.setRenderTarget(rig.target);
-        gl.clear(false, true, false);
+        if (basesOnly !== null) {
+          // The map's colour starts clear, and the figures' cards write it.
+          const alphaWas = gl.getClearAlpha();
+          gl.getClearColor(clearWas);
+          gl.setClearColor(0x000000, 0);
+          gl.clear(true, true, false);
+          gl.setClearColor(clearWas, alphaWas);
+        } else {
+          gl.clear(false, true, false);
+        }
         copies.forEach((dx, i) => {
           board.current!.position.x = dx;
           board.current!.updateMatrixWorld(true);
@@ -1027,8 +1243,13 @@ export function BoardScene(props: BoardSceneProps) {
         <mesh geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
         {/* The cliff once more, for the sun's shadow map only. */}
         <mesh geometry={slab} material={slabCaster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
+        {patches.map((patch, i) => (
+          <Range key={i} patch={patch} kit={kit} />
+        ))}
         <Craters scars={scars} kit={kit} />
-        {PROP_KINDS.map((kind) => (plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} /> : null))}
+        {PROP_KINDS.map((kind) =>
+          plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} patches={patches} /> : null,
+        )}
         <Smoke scars={scars} chimneys={plan.chimneys} kit={kit} />
       </group>
     </>

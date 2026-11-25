@@ -20,7 +20,9 @@ import { hasQuickUnit, infantryIdlePhase, INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK
 import { quickFrameUrl, resolveQuickClip } from "../../art/quickUnitCatalog";
 import type { VehicleSvgUnit } from "../../art/fieldVehicleStage";
 import { quickSvgFigure } from "../../art/quickSvgFigure";
+import { drawBasePlinth } from "./basePlinth";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
+import type { PlinthLook } from "./mapVisualConfig";
 import { getFigureScale } from "./figureScaleStore";
 import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
@@ -71,6 +73,8 @@ export interface UprightPaint {
   landAt?: (x: number, y: number) => boolean;
   /** Transport seats. Null draws none. 0 draws two empty rings. */
   holds?: number | null;
+  /** The turned base of the 3D board. Absent or null draws the flat baseplate. */
+  plinth?: PlinthLook | null;
 }
 
 /** The guns are drawn toward +x, so +1 faces right and -1 faces left. */
@@ -788,19 +792,24 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const rx = radius * 1.15 + reach * 0.35;
   const ry = Math.max(2, radius * 0.65 + reach * 0.08);
   ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle = MILITARY.charcoal;
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(x, y - ry * 0.08, rx * 0.78, ry * 0.62, 0, 0, Math.PI * 2);
-  ctx.fillStyle = factionPalette(paint.factionId).primary;
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.lineWidth = 1.25;
-  ctx.strokeStyle = GOLD;
-  ctx.stroke();
+  if (paint.plinth) {
+    // The turned base of the 3D board (see basePlinth.ts).
+    drawBasePlinth(ctx, paint.plinth, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
+  } else {
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = MILITARY.charcoal;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, y - ry * 0.08, rx * 0.78, ry * 0.62, 0, 0, Math.PI * 2);
+    ctx.fillStyle = factionPalette(paint.factionId).primary;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.lineWidth = 1.25;
+    ctx.strokeStyle = GOLD;
+    ctx.stroke();
+  }
 
   const color = factionPalette(paint.factionId).primary;
   const pose = facingPose(paint.aim ?? 0);

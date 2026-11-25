@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FactionKey } from "../theme/factionPalette";
 import {
   borderPasses,
@@ -24,13 +24,17 @@ import {
   subscribeVisuals,
   SUN_CYCLES,
   VISUAL_PRESETS,
+  VISUAL_RANGES,
+  visualPresetJson,
   visualPresetOf,
   type EffectWeight,
   type FrontlineStyle,
   type FriendlyBorderStyle,
   type HighlightRule,
+  type MapVisualConfig,
   type OutlineMode,
   type SunCycle,
+  type VisualKey,
   type VisualPresetName,
 } from "./mapVisualConfig";
 import { getDrawSample, subscribeDrawSample } from "./renderDebug";
@@ -153,6 +157,127 @@ function KnobRow(props: { label: string; title: string; knob: Knob; onChange(kno
       />
       <span className="mono">{props.knob.on ? num(props.knob.amount) : "off"}</span>
     </label>
+  );
+}
+
+type NumberKey = { [K in VisualKey]: MapVisualConfig[K] extends number ? K : never }[VisualKey];
+type SwitchKey = { [K in VisualKey]: MapVisualConfig[K] extends boolean ? K : never }[VisualKey];
+
+/** A switch for one feature of the table. */
+function Flag(props: { name: SwitchKey; label: string; title?: string }) {
+  return (
+    <label className="art-tune-flag" title={props.title}>
+      <input
+        type="checkbox"
+        aria-label={props.title ?? props.label}
+        checked={mapVisuals[props.name]}
+        onChange={(event) => setVisual(props.name, event.target.checked)}
+      />
+      {props.label}
+    </label>
+  );
+}
+
+/** A slider and a number box for one setting. Both hold the same value, inside the setting's range. */
+function Num(props: { name: NumberKey; label: string; title: string; unit?: string; off?: boolean }) {
+  const [min, max] = VISUAL_RANGES[props.name] ?? [0, 1];
+  const value = mapVisuals[props.name];
+  return (
+    <label className="coast-slider" title={props.title}>
+      <span>{props.label}</span>
+      <input
+        type="range"
+        aria-label={props.title}
+        min={min}
+        max={max}
+        step="any"
+        value={value}
+        disabled={props.off}
+        onChange={(event) => setVisual(props.name, Number(event.target.value))}
+      />
+      <input
+        type="number"
+        className="mono tune-number"
+        aria-label={`${props.title}, as a number`}
+        min={min}
+        max={max}
+        step={(max - min) / 100}
+        value={Number(value.toFixed(3))}
+        disabled={props.off}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (event.target.value !== "" && Number.isFinite(next)) {
+            setVisual(props.name, next);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+/**
+ * Copies text the old way, through a selection. For when the clipboard is refused: a page that
+ * is not focused, or one not served over https.
+ */
+function copyBySelection(text: string): boolean {
+  const box = document.createElement("textarea");
+  box.value = text;
+  box.setAttribute("readonly", "");
+  box.style.position = "fixed";
+  box.style.opacity = "0";
+  document.body.appendChild(box);
+  box.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  box.remove();
+  return ok;
+}
+
+/**
+ * Copies the live settings as a preset, and says so for a moment. If the browser refuses both
+ * ways of copying, the text is put in a box to copy by hand.
+ */
+function CopyPreset() {
+  const [copied, setCopied] = useState<"" | "yes" | "no">("");
+  const [shown, setShown] = useState<string | null>(null);
+  useEffect(() => {
+    if (copied === "") {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopied(""), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const settle = (text: string, ok: boolean) => {
+    setCopied(ok ? "yes" : "no");
+    setShown(ok ? null : text);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          const text = visualPresetJson(mapVisuals);
+          const done = navigator.clipboard?.writeText(text);
+          if (!done) {
+            settle(text, copyBySelection(text));
+            return;
+          }
+          done.then(
+            () => settle(text, true),
+            () => settle(text, copyBySelection(text)),
+          );
+        }}
+      >
+        {copied === "yes" ? "Copied" : copied === "no" ? "Copy failed" : "Copy Preset JSON"}
+      </button>
+      {shown !== null && (
+        <textarea className="tune-preset" aria-label="Preset JSON" readOnly rows={6} value={shown} onFocus={(event) => event.currentTarget.select()} />
+      )}
+    </>
   );
 }
 
@@ -459,6 +584,66 @@ export function BoardLookPanel() {
         <p className="muted">
           Shadows fall from the cliffs, the terrain, and the figures. The glow spreads from embers and the sun on the sea. The outline marks the stack you picked or point at, as a line, a watercolour wash, or both, and never a territory.
         </p>
+      </Fold>
+      <Fold title="Table" startOpen>
+        <p className="muted">
+          The 3D board only. Each part has a switch and its own numbers. A part that is off is not built, not drawn, and not in any shader. The ranges, the grain, and the roads come in with the close zoom.
+        </p>
+        <div className="tune-actions">
+          <CopyPreset />
+          <button type="button" onClick={() => resetVisuals()}>
+            Reset Defaults
+          </button>
+        </div>
+
+        <h3>Mountains</h3>
+        <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />
+        <Flag name="enableScatteredRocks" label="Loose rock models" title="Loose peak and boulder models along the world's ranges" />
+        <Num name="mountainPeakHeight" label="Height" title="Height of the tallest summit, in world units. Held under two fifths of an infantry figure." off={!mapVisuals.enableShogunMountains} />
+        <Num name="mountainRidgeSharpness" label="Ridges" title="0 is a smooth dome. 1 is a ridged massif." off={!mapVisuals.enableShogunMountains} />
+        <Num name="mountainSnowLine" label="Snow line" title="Share of the summit's height where the snow is half on" off={!mapVisuals.enableShogunMountains} />
+        <Num name="mountainSnowBlend" label="Snow blend" title="How gradually the snow comes on. Small is a hard line." off={!mapVisuals.enableShogunMountains} />
+        <Num name="mountainSnowGlow" label="Snow glow" title="How far sunlit snow goes past white. Needs Glow on, under Light and lens." off={!mapVisuals.enableShogunMountains} />
+
+        <h3>Surface</h3>
+        <Flag name="enablePbrSurface" label="Grain" title="Fine relief on the land and the cliffs, lit by the sun" />
+        <Num name="pbrNormalStrength" label="Depth" title="Depth of the grain" off={!mapVisuals.enablePbrSurface} />
+        <Num name="pbrRoughness" label="Roughness" title="1 is matt flock. Lower puts a satin sheen on the ground toward the sun." off={!mapVisuals.enablePbrSurface} />
+        <Num name="pbrTilingScale" label="Tiling" title="World units the grain covers before it repeats" off={!mapVisuals.enablePbrSurface} />
+        <Num name="terrainSaturation" label="Saturation" title="Saturation of the land's colour under the grain. 1 is the printed colour." off={!mapVisuals.enablePbrSurface} />
+
+        <h3>Rivers</h3>
+        <Flag name="enableRivers" label="Rivers" title="Rivers drawn on the land" />
+        <Num name="riverWidth" label="Width" title="Width of a river, in world units" off={!mapVisuals.enableRivers} />
+        <Num name="riverDepthShade" label="Depth" title="How much darker the middle of the channel is than its edge" off={!mapVisuals.enableRivers} />
+        <Num name="riverBankHighlight" label="Banks" title="Strength of the sunlit and the shaded bank" off={!mapVisuals.enableRivers} />
+
+        <h3>Roads</h3>
+        <Flag name="enableRoads" label="Roads" title="Roads between the capitals and the factories" />
+        <Num name="roadWidth" label="Width" title="Width of a road, in world units" off={!mapVisuals.enableRoads} />
+        <Num name="roadOpacity" label="Opacity" title="Opacity of a road at the close zoom. It fades out toward the fitted board." off={!mapVisuals.enableRoads} />
+        <Num name="roadWarmth" label="Warmth" title="0 is bone ivory. 1 is warm parchment." off={!mapVisuals.enableRoads} />
+
+        <h3>Sun</h3>
+        <Flag name="enableSunTransit" label="Sun crosses the table" title="The sun crosses the table. Off, it stops where it stands." />
+        <Num name="sunCycleSpeed" label="Speed" title="How fast the day passes. 1 is a day in five minutes." off={!mapVisuals.enableSunTransit} />
+        <Num name="sunMinElevation" label="Low" title="Height of the sun at either end of the day, in degrees" />
+        <Num name="sunMaxElevation" label="High" title="Height of the sun at noon, in degrees" />
+        <Num name="sunWarmthIntensity" label="Warmth" title="Amber of the sunlight. 1 is the shipped amber at the ends of the day. 0 is white light." />
+        <Num name="ambientFillIntensity" label="Fill" title="Strength of the cool fill from the sky" />
+
+        <h3>Shadows</h3>
+        <Flag name="enableShadows" label="Cast shadows" title="Shadows cast by the sun. The map's size is Shadows, under Light and lens." />
+        <Num name="shadowOpacity" label="Opacity" title="How dark a full cast shadow is" off={!mapVisuals.enableShadows} />
+        <Num name="shadowSoftness" label="Softness" title="Width of a shadow's edge, in texels of the shadow map" off={!mapVisuals.enableShadows} />
+        <Num name="shadowNormalBias" label="Bias" title="How far off a slope the shadow map is read, in world units" off={!mapVisuals.enableShadows} />
+        <Flag name="shadowOnBasesOnly" label="Figure shadows on bases only" title="A figure's shadow falls on bases and counters and leaves the ground clean" />
+
+        <h3>Bases</h3>
+        <Flag name="enableBasePlinths" label="Turned bases" title="A dark wood base with a brass ring under each standing figure" />
+        <Num name="plinthRimWidth" label="Rim" title="Width of the dark rim, as a share of the base" off={!mapVisuals.enableBasePlinths} />
+        <Num name="plinthRoughness" label="Roughness" title="0 is polished, 1 is matt. Between, the rim carries a satin highlight." off={!mapVisuals.enableBasePlinths} />
+        <Num name="plinthBrassIntensity" label="Brass" title="0 is a ring in the faction's colour. 1 is brass." off={!mapVisuals.enableBasePlinths} />
       </Fold>
       <Fold title="Shogun">
         <p className="muted">The Shogun ground. Wash, grain, borders, and the frontline. The switches above still gate the relief, the water, the smoke, and the trees.</p>
