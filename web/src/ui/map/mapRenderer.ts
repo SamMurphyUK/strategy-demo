@@ -1377,6 +1377,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             x: counter.x,
             y: counter.y,
             tokenPx,
+            spriteScale: game.unitScale,
             dpr: scene.dpr,
             selected,
             unmoved: game.isUnmoved(layout.region.id, entry),

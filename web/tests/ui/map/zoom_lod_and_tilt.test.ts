@@ -6,7 +6,7 @@ import {
   tiltFactor,
   worldToScreen,
 } from "../../../src/ui/map/viewMath";
-import { lodForZoom, sortByGroundY, SPRITE_FADE_MS, squadSpriteCount, terrainStampAlpha, uprightDrawOrder } from "../../../src/ui/map/zoomLod";
+import { detailedSpriteScale, lodForZoom, sortByGroundY, SPRITE_FADE_MS, squadSpriteCount, terrainStampAlpha, uprightDrawOrder } from "../../../src/ui/map/zoomLod";
 
 describe("oblique tilt", () => {
   it("round-trips world and screen at a flat zoom and at full tilt", () => {
@@ -77,5 +77,27 @@ describe("semantic zoom lod", () => {
       "facility",
       "south-unit",
     ]);
+  });
+});
+
+describe("the detailed sprites' scale curve", () => {
+  it("is the base at the 3.8 reveal, whatever the lock", () => {
+    for (const lock of [0, 0.5, 1]) {
+      expect(detailedSpriteScale(3.8, 0.85, lock)).toBeCloseTo(0.85, 9);
+    }
+  });
+
+  it("holds one size on screen at lock 0, and grows with the board at lock 1", () => {
+    expect(detailedSpriteScale(7.5, 0.85, 0)).toBeCloseTo(0.85, 9);
+    expect(detailedSpriteScale(7.6, 0.85, 1) / detailedSpriteScale(3.8, 0.85, 1)).toBeCloseTo(2, 9);
+  });
+
+  it("never shrinks as the camera comes in", () => {
+    let last = 0;
+    for (let k = 3.8; k <= 7.5; k += 0.1) {
+      const scale = detailedSpriteScale(k, 0.85, 1);
+      expect(scale).toBeGreaterThanOrEqual(last);
+      last = scale;
+    }
   });
 });

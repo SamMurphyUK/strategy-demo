@@ -51,6 +51,8 @@ export interface UprightPaint {
   x: number;
   y: number;
   tokenPx: number;
+  /** Size of the figure, from the detailed sprites' own scale curve. Absent is 1. */
+  spriteScale?: number;
   dpr: number;
   selected: boolean;
   unmoved: boolean;
@@ -780,7 +782,7 @@ function placedSquad(count: number, step: number): { x: number; y: number }[] {
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
   const { x, y } = paint;
-  const figureScale = uprightScale(paint.unitType);
+  const figureScale = uprightScale(paint.unitType) * (paint.spriteScale ?? 1);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
   const resolved = useQuick ? resolveQuickClip(paint.factionId, paint.unitType) : null;
   const infantry = paint.unitType === "infantry" ? resolved ?? resolveQuickClip("JAP", "infantry") : null;

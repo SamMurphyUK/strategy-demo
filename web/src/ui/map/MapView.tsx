@@ -78,7 +78,7 @@ import {
   zoomAt,
   terrainHoldPlacement,
 } from "./viewMath";
-import { lodForZoom, type MapLod, SPRITE_FADE_MS, TACTICAL_IN, UPRIGHT_HIT_PX } from "./zoomLod";
+import { detailedSpriteScale, lodForZoom, type MapLod, SPRITE_FADE_MS, TACTICAL_IN, UPRIGHT_HIT_PX } from "./zoomLod";
 
 export interface CombatMarker {
   regionId: string;
@@ -336,6 +336,15 @@ function strokeWarningRing(
   }
 }
 
+/**
+ * Whether the region under the pointer is marked. Moving over a region marks nothing: a click
+ * selects it and opens the inspector. Once a unit is picked, the region under the pointer is
+ * marked so a destination can be seen. The "always-hover" setting keeps the old behaviour.
+ */
+function hoverMarkWanted(props: Pick<MapViewProps, "selectedStack" | "highlight">): boolean {
+  return mapVisuals.highlightMode === "always-hover" || props.selectedStack !== null || props.highlight.kind === "move";
+}
+
 export function MapView(props: MapViewProps) {
   const { geometry, land, editor } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -476,8 +485,11 @@ export function MapView(props: MapViewProps) {
   const only = editor ? editor.overlay.layer : null;
   // Tokens are a fixed size in the world, so they scale with the map and hold their formation at every zoom;
   // only the extremes are clamped (see worldTokenPx).
-  const unitScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
+  const tokenScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
   const mapLod: MapLod = editor ? 0 : lodForZoom(view.k, lodHold.current);
+  // The detailed sprites have a curve of their own: see detailedSpriteScale. The round tokens keep theirs.
+  const unitScale =
+    !editor && mapLod === 2 ? detailedSpriteScale(view.k, mapVisuals.detailedSpriteBaseScale, mapVisuals.detailedSpriteWorldLock) : tokenScale;
   if (!editor) {
     lodHold.current = mapLod;
     if (spriteGate.current === null) {
@@ -499,7 +511,7 @@ export function MapView(props: MapViewProps) {
       spriteFade.current = null;
     }
   }
-  const uprightReach = unitFade >= 0.5 ? UPRIGHT_HIT_PX : 0;
+  const uprightReach = unitFade >= 0.5 ? UPRIGHT_HIT_PX * Math.max(1, unitScale) : 0;
   const tokenHitPx = TOKEN_PX * unitScale * 0.5 + 4;
   const plusHitPx = Math.max(4, TOKEN_PX * unitScale * 0.22);
   /** A region's unit slots: hand-placed, or generated from its true shape. Cached per shape by the generator. */
@@ -1134,7 +1146,7 @@ export function MapView(props: MapViewProps) {
         if (props.battleIcons && props.battleIcons.length > 0) {
           drawStandingBattleIcons(arrowCtx, scene, props.battleIcons);
         }
-        if (!board?.ownFront || mapVisuals.highlightMode === "always-hover") {
+        if (hoverMarkWanted(props)) {
           drawHoverMark(arrowCtx, scene, hoverRef.current);
         }
         if (props.warningRegionId) {
@@ -1690,7 +1702,7 @@ export function MapView(props: MapViewProps) {
     if (icons && icons.length > 0) {
       drawStandingBattleIcons(ctx, scene, icons);
     }
-    if (live.current.props.board?.ownFront !== true || mapVisuals.highlightMode === "always-hover") {
+    if (hoverMarkWanted(live.current.props)) {
       drawHoverMark(ctx, scene, hoverRef.current);
     }
     if (frame.warningRegionId !== "") {

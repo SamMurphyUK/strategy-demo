@@ -192,6 +192,10 @@ export interface MapVisualConfig {
   softLandValueBand: number;
   /** How far brush strokes wander the soft bands. 0 is clean bands. */
   softLandBrush: number;
+  /** Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace. */
+  detailedSpriteBaseScale: number;
+  /** How far the detailed sprites follow the board as the camera comes in from 3.8. 1 is steady in world space, like the terrain; 0 holds their size on screen. */
+  detailedSpriteWorldLock: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
   regionalPaletteDetail: boolean;
 }
@@ -287,6 +291,8 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   softLandSaturation: 0.58,
   softLandValueBand: 0.6,
   softLandBrush: 0.5,
+  detailedSpriteBaseScale: 0.85,
+  detailedSpriteWorldLock: 1,
   regionalPaletteDetail: true,
 });
 
@@ -421,6 +427,8 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   softLandSaturation: [0, 1.2],
   softLandValueBand: [0.2, 1.2],
   softLandBrush: [0, 1],
+  detailedSpriteBaseScale: [0.3, 2],
+  detailedSpriteWorldLock: [0, 1.2],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];

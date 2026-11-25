@@ -619,6 +619,8 @@ export function BoardLookPanel() {
         <Num name="seaSheenSpacing" label="Shine spacing" title="Distance between glints. 1 is the old spacing; 1.2 is 20% wider. It widens more as the camera rises." />
         <Num name="seaSheenScatter" label="Shine scatter" title="How far the glints and the edge of the patch are scattered off a regular grid." />
         <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
+        <Num name="detailedSpriteBaseScale" label="Sprite size" title="Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace." />
+        <Num name="detailedSpriteWorldLock" label="Sprite world lock" title="How far the detailed sprites follow the board as the camera comes in. 1 is steady in world space, like the terrain and landmarks; 0 holds their size on screen." />
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
         <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
