@@ -44,7 +44,10 @@ describe("zoom detail", () => {
     expect(monitor.focus).toBeCloseTo(laptop.focus, 12);
   });
 
-  it("brings the dressing in before the lens, and never takes any of it back on the way down", () => {
+  it("holds terrain off through the middle of the zoom, and never takes the dressing back", () => {
+    const mid = boardDetail(Math.sqrt(1.2 * 8), 1.2, 8);
+    expect(mid.closeness).toBeCloseTo(0.5, 12);
+    expect(mid.props).toBe(0);
     let previous = boardDetail(1.2, 1.2, 8);
     for (let step = 1; step <= 60; step++) {
       const detail = boardDetail(1.2 * (8 / 1.2) ** (step / 60), 1.2, 8);
@@ -52,7 +55,6 @@ describe("zoom detail", () => {
       expect(detail.relief).toBeGreaterThanOrEqual(previous.relief);
       expect(detail.focus).toBeGreaterThanOrEqual(previous.focus);
       expect(detail.flatten).toBeLessThanOrEqual(previous.flatten);
-      expect(detail.props).toBeGreaterThanOrEqual(detail.focus);
       previous = detail;
     }
   });

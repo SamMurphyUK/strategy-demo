@@ -529,6 +529,46 @@
     accent-color: var(--gold);
   }
 
+  & .tune-fold {
+    margin: 8px 0 0;
+    border-top: 1px solid var(--brass);
+  }
+
+  & .tune-fold summary {
+    cursor: pointer;
+    padding: 8px 0 4px;
+    color: var(--gold-text);
+    font: 700 11px/1.2 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  & .tune-knob span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  & .tune-color {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 3px 0;
+    color: var(--parchment);
+    font: 11px/1.2 var(--mono);
+    letter-spacing: 0.04em;
+  }
+
+  & .tune-color input[type="color"],
+  & .tune-border {
+    width: 36px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid var(--brass);
+    background: transparent;
+  }
+
   & .coast-tune h3 {
     margin: 12px 0 6px;
     color: var(--gold-text);

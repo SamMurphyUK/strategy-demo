@@ -1,6 +1,9 @@
-// Pan and zoom maths for the map canvas. Pure.
+// Pan and zoom maths for the map canvas. Pure apart from the live foreshortening curve,
+// which the Z menu writes and these functions read.
 import type { Rect, Vec2 } from "./geometry";
 import { MAX_BAKE_SCALE } from "./mapBakeMath";
+import { getTiltCurve } from "./boardTuneStore";
+import { groundRatio, groundSquash, zoomShare } from "./boardTune";
 
 /** `x`, `y` is the world point at the canvas's top-left corner; `k` is screen pixels per world unit. */
 export interface View {
@@ -48,28 +51,26 @@ export function worldTokenPx(viewK: number, tokenWorld: number): number {
 }
 
 /**
- * How far the camera has tipped toward eye level. Flat at zoom 1.15, fully tipped at 2.2.
- * World X stays at `zoom`. World Y is drawn at `zoom * (1 - 0.15 * tilt)`.
+ * How far the foreshortening line has travelled, 0 at the far zoom and 1 at the close zoom.
+ * The amount of squash at each end is the tilt curve. World X stays at `zoom`. World Y is
+ * `zoom` times the ground ratio.
  */
 export function tiltFactor(zoom: number): number {
-  if (zoom >= 2.2) {
-    return 1;
-  }
-  if (zoom <= 1.15) {
-    return 0;
-  }
-  return (zoom - 1.15) / (2.2 - 1.15);
+  const curve = getTiltCurve();
+  return zoomShare(zoom, curve.start, curve.end);
 }
 
 /** Screen pixels per world unit. `sx` is the zoom; `sy` is the foreshortened vertical scale. */
 export function projectionScales(zoom: number): { sx: number; sy: number } {
-  const tilt = tiltFactor(zoom);
-  return { sx: zoom, sy: zoom * (1 - 0.15 * tilt) };
+  return { sx: zoom, sy: zoom * groundRatio(zoom, getTiltCurve()) };
 }
 
-/** Coastal cliff drop, relative to the flat map. Full tilt stretches it by 2.6. */
+/**
+ * Coastal cliff drop, relative to the flat map. The shipped 15% squash stretches it by 2.6.
+ * A flatter curve shortens the face with it.
+ */
 export function cliffDepthScale(zoom: number): number {
-  return 1 + 1.6 * tiltFactor(zoom);
+  return 1 + (1.6 * groundSquash(zoom, getTiltCurve())) / 0.15;
 }
 
 export function fitView(bounds: Rect, width: number, height: number, padding = 16): View {

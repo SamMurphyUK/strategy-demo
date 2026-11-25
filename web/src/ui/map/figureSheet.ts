@@ -155,11 +155,22 @@ function fadeInland(plate: HTMLCanvasElement, box: StampBox, shore: ShoreStencil
  * Draw every figure onto `ctx`, back to front in the order given. `ctx` is in device pixels and
  * its `globalAlpha` is kept, so the caller's fade applies.
  */
+/** Puts the picture's top at the right height when `lean` shortens it toward the feet. */
+function placeFigure(ctx: CanvasRenderingContext2D, box: StampBox, feetY: number, lean: number): void {
+  const ty = feetY + (box.top - feetY) * lean;
+  if (box.mirror) {
+    ctx.setTransform(-1, 0, 0, lean, box.left + box.w, ty);
+  } else {
+    ctx.setTransform(1, 0, 0, lean, box.left, ty);
+  }
+}
+
 export function stampFigures(
   ctx: CanvasRenderingContext2D,
   units: readonly VehicleSvgUnit[],
   dpr: number,
   shore: ShoreStencil | null,
+  lean = 1,
 ): void {
   const next = new Map<string, HTMLCanvasElement>();
   const fade = ctx.globalAlpha;
@@ -176,20 +187,17 @@ export function stampFigures(
       continue;
     }
     next.set(unit.id, plate);
+    const feetY = Math.round(unit.y * dpr);
     ctx.globalAlpha = part.opacity != null && part.opacity < 1 ? fade * part.opacity : fade;
     if (unit.shoreFade && shore) {
       const faded = fadeInland(plate, box, shore, dpr);
       if (faded) {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.drawImage(faded, 0, 0, box.w, box.h, box.left, box.top, box.w, box.h);
+        placeFigure(ctx, box, feetY, lean);
+        ctx.drawImage(faded, 0, 0, box.w, box.h);
         continue;
       }
     }
-    if (box.mirror) {
-      ctx.setTransform(-1, 0, 0, 1, box.left + box.w, box.top);
-    } else {
-      ctx.setTransform(1, 0, 0, 1, box.left, box.top);
-    }
+    placeFigure(ctx, box, feetY, lean);
     ctx.drawImage(plate, 0, 0, box.w, box.h);
   }
   ctx.restore();

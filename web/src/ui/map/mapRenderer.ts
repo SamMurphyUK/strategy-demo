@@ -78,6 +78,8 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
+import { unitLean } from "./boardTune";
+import { getBoardTune } from "./boardTuneStore";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
 import { buildSurfCoast, cliffLift, ringSpan, surfLocalPx, type SurfSample, type SurfTune } from "./coastRelief";
 import {
@@ -1270,6 +1272,12 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         worldY,
         paint: () => {
           setScreenTransform(ctx, scene.dpr);
+          const lean = unitLean(scene.view.k, getBoardTune());
+          if (lean !== 1) {
+            ctx.translate(counter.x, counter.y);
+            ctx.scale(1, lean);
+            ctx.translate(-counter.x, -counter.y);
+          }
           drawUprightStack(ctx, {
             unitType: entry.unit_type_id,
             factionId: entry.faction_id,

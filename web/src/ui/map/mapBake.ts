@@ -13,9 +13,9 @@
 // The world wraps horizontally. Land is cut at the left and right edges, so edges lying on the seam are
 // never inked: a coastline or border drawn there would be a false line through land that carries on in the
 // next copy.
-import type { FactionKey } from "../theme/factionPalette";
 import { MILITARY } from "../theme/militaryPalette";
-import { resolveFaction } from "../theme/factionPalette";
+import { landColor, paintSignature, borderPasses } from "./boardTune";
+import { getBoardTune } from "./boardTuneStore";
 import type { Rect, RegionShape } from "./geometry";
 import { hatchSegments, isHatchedOwner } from "./hatch";
 import {
@@ -32,7 +32,6 @@ import {
 import { coastBevel, DEEP_SEA_SHARE, mixHex, SHELF_GROW, shelfBands } from "./coastRelief";
 import { sunkTerritoryFill } from "./figureGround";
 import {
-  BORDER_PASSES,
   BURN_PASSES,
   COAST_INK,
   NEUTRAL_HATCH,
@@ -79,15 +78,6 @@ const SHELF = MILITARY.spruce;
 const BEVEL_HIGHLIGHT = { color: MILITARY.cream, alpha: 0.3 };
 const BEVEL_SHADOW = { color: MILITARY.charcoal, alpha: 0.4 };
 const INNER_SHADE = MILITARY.charcoal;
-/** Faction land from the strip. `FACTION_TINT` remains the tested parchment palette. */
-const TACTICAL_LAND: Record<FactionKey, string> = {
-  JAP: MILITARY.terracotta,
-  USSR: MILITARY.crimson,
-  GER: MILITARY.feldgrau,
-  UK: MILITARY.khaki,
-  US: MILITARY.olive,
-  NEUTRAL: MILITARY.bone,
-};
 let tile: HTMLCanvasElement | null = null;
 let waveCanvas: HTMLCanvasElement | null = null;
 let ditherCanvas: HTMLCanvasElement | null = null;
@@ -142,7 +132,7 @@ function ditherTile(): HTMLCanvasElement {
 }
 
 function tacticalLandTint(owner: string): string {
-  return TACTICAL_LAND[resolveFaction(owner)];
+  return landColor(owner, getBoardTune());
 }
 
 /**
@@ -313,7 +303,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
 
   // Neutral land under everything, then a hatch on the decorative gaps the territories will cover.
   if (land) {
-    ctx.fillStyle = TACTICAL_LAND.NEUTRAL;
+    ctx.fillStyle = tacticalLandTint("");
     ctx.fill(land.masterLandPath);
   }
   const hatch = segmentsPath(hatchSegments(bounds, NEUTRAL_HATCH.spacing));
@@ -426,9 +416,9 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     ctx.clip(land.masterLandPath);
   }
   const borders = segmentsPath(sharedEdges(landShapes, seam, land ? 2 : 1));
-  for (const pass of BORDER_PASSES) {
+  for (const pass of borderPasses(getBoardTune())) {
     ctx.lineWidth = pass.width;
-    ctx.strokeStyle = pass.width > 2 ? "rgba(100, 83, 85, 0.28)" : MILITARY.charcoal;
+    ctx.strokeStyle = pass.color;
     ctx.stroke(borders);
   }
   ctx.restore();
@@ -462,7 +452,7 @@ export class TerrainBake {
       paths: input.paths,
       land: input.land,
       exact: input.exact,
-      owners: ownersSignature(input.regions, input.owners),
+      owners: `${ownersSignature(input.regions, input.owners)}#${paintSignature(getBoardTune())}`,
       bounds: `${input.bounds.x},${input.bounds.y},${input.bounds.w},${input.bounds.h}`,
     };
     const before = this.cache.builds;

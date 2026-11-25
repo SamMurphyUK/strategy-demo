@@ -12,6 +12,8 @@ export interface VehicleStageCamera {
   camX: number;
   camY: number;
   viewScale: number;
+  /** Height of a figure relative to a screen-facing drawing. Omitted means 1. */
+  figureLean?: number;
 }
 
 export interface VehicleSvgPart {
@@ -179,6 +181,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
   let shore: ShoreVeil | null = null;
   let shoreKey = "";
   let shoreCss = { w: 1, h: 1 };
+  let figureLean = 1;
 
   const applyShore = () => {
     const mark = shore ? `${shore.path.slice(0, 32)}|${shore.path.length}|${shore.path.slice(-32)}` : "";
@@ -312,6 +315,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
     const turn = unit.turnDeg ?? 0;
     const mirror = face < 0 ? ` scale(${face} 1)` : "";
     const spin = turn !== 0 ? ` rotate(${turn})` : "";
+    const lean = figureLean;
     if (unit.shoreFade) {
       node.veil.setAttribute("mask", `url(#${shoreId})`);
     } else {
@@ -319,7 +323,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
     }
     node.group.setAttribute(
       "transform",
-      `translate(${unit.x} ${unit.y})${spin}${mirror} scale(${unit.unitScale})`,
+      `translate(${unit.x} ${unit.y})${spin}${mirror} scale(${unit.unitScale} ${unit.unitScale * lean})`,
     );
     node.root.setAttribute("transform", `translate(${unit.rootX} ${unit.rootY})`);
     unit.parts.forEach((part, index) => {
@@ -353,6 +357,7 @@ export function createVehicleStage(svg: SVGSVGElement): VehicleStage {
 
   return {
     sync(cameraState, list, light) {
+      figureLean = cameraState.figureLean != null && cameraState.figureLean > 0 ? cameraState.figureLean : 1;
       const width = Math.max(1, cameraState.cssWidth);
       const height = Math.max(1, cameraState.cssHeight);
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);

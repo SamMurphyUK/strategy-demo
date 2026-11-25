@@ -38,6 +38,8 @@ import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
 import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
+import { unitLean } from "./boardTune";
+import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
 import { getFigureScaleRev, subscribeFigureScale } from "./figureScaleStore";
@@ -399,6 +401,7 @@ export function MapView(props: MapViewProps) {
   const [spriteClock, setSpriteClock] = useState(0);
   const [tuneOpen, setTuneOpen] = useState(false);
   const coastRev = useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
+  const boardRev = useSyncExternalStore(subscribeBoardTune, getBoardTuneRev);
   const figureRev = useSyncExternalStore(subscribeFigureScale, getFigureScaleRev);
   const drawFlags = useSyncExternalStore(subscribeDrawFlags, getDrawFlags);
   const cameraLock = useRef(false);
@@ -740,9 +743,14 @@ export function MapView(props: MapViewProps) {
     const stage = vectorStage.current;
     // The sheet stamps one shared picture for each kind. Off, every figure is its own SVG node.
     const sheet = getDrawFlags().sheet;
+    const lean = unitLean(scene?.view.k ?? live.current.view.k, getBoardTune());
     if (stage && cssW > 0 && cssH > 0) {
       stage.setShoreVeil(scene && !sheet ? shoreVeilFor(scene) : null);
-      stage.sync({ cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1 }, sheet ? [] : frame.vectors, null);
+      stage.sync(
+        { cssWidth: cssW, cssHeight: cssH, camX: 0, camY: 0, viewScale: 1, figureLean: lean },
+        sheet ? [] : frame.vectors,
+        null,
+      );
       if (vectorRef.current) {
         vectorRef.current.style.opacity = fade < 1 ? String(Math.max(0, fade)) : "";
       }
@@ -762,7 +770,7 @@ export function MapView(props: MapViewProps) {
     cctx.clearRect(0, 0, chrome.width, chrome.height);
     cctx.globalAlpha = Math.max(0, Math.min(1, fade));
     if (sheet) {
-      stampFigures(cctx, frame.vectors, dpr, scene ? shoreStencilFor(scene) : null);
+      stampFigures(cctx, frame.vectors, dpr, scene ? shoreStencilFor(scene) : null, lean);
     }
     for (const paint of frame.chrome) {
       paint(cctx);
@@ -1117,6 +1125,7 @@ export function MapView(props: MapViewProps) {
     spriteClock,
     tokenArtRev,
     coastRev,
+    boardRev,
     figureRev,
     unitFade,
     geometry,

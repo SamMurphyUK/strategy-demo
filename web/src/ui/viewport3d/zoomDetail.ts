@@ -1,10 +1,9 @@
 // How much of the diorama shows at a zoom. Pure.
 //
 // High above the board the picture is a clean strategic sheet: flat territories, sharp borders,
-// counters. As the camera comes down and tips, the table dressing rises out of it: trees and
-// mountains grow, the sun starts to shade, the water moves, and close in the lens narrows to a
-// miniature's shallow focus. Every number here is 0 at altitude and 1 on the table, except
-// `flatten`, which runs the other way.
+// counters. As the camera comes down the sun starts to shade and the water moves. Trees and
+// mountains wait until the close zoom. Close in, the lens narrows to a miniature's shallow focus.
+// Every number here is 0 at altitude and 1 on the table, except `flatten`, which runs the other way.
 //
 // The measure is `closeness`: how far the zoom has travelled from the fitted board to the closest
 // zoom the player can reach, on a log scale. A wide monitor fits the board at a larger scale than a
@@ -47,7 +46,8 @@ export function boardDetail(k: number, fitK: number, maxK: number): BoardDetail 
   return {
     closeness: c,
     flatten: 1 - ramp(0.02, 0.3, c),
-    props: ramp(0.1, 0.46, c),
+    // Trees and mountains wait until the close zoom. The Z menu can pull this earlier.
+    props: ramp(0.7, 0.94, c),
     relief: ramp(0.06, 0.4, c),
     water: ramp(0.12, 0.5, c),
     smoke: ramp(0.08, 0.36, c),

@@ -12,6 +12,8 @@ import * as THREE from "three";
 import type { BoardFrame } from "../map/boardLayer";
 import type { Rect } from "../map/geometry";
 import type { MultiPolygon } from "../map/regionClip";
+import { gradeSaturation, gradeWarm, tunedBoard } from "../map/boardTune";
+import { getBoardTune } from "../map/boardTuneStore";
 import { getDrawFlags } from "../map/renderDebug";
 import type { CraterMark } from "../map/terrainRelief";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
@@ -324,7 +326,9 @@ export function BoardScene(props: BoardSceneProps) {
     const { look, dim, still } = live.current;
     const now = performance.now();
     const state = clock.current;
-    const detail = boardDetail(frame.view.k, frame.fitK, frame.maxK);
+    const tune = getBoardTune();
+    const raw = boardDetail(frame.view.k, frame.fitK, frame.maxK);
+    const detail = tunedBoard(raw, tune);
     const moving = !still && getDrawFlags().anims && boardAnimates(detail) && !document.hidden;
     const size = gl.getDrawingBufferSize(bufferSize);
     // A resized canvas has lost its picture, and a repainted 2D canvas has a new one to show.
@@ -429,8 +433,8 @@ export function BoardScene(props: BoardSceneProps) {
     // The canvases are top-aligned with the frame. A fractional pixel ratio can leave them a row apart.
     grade.uLayerShift.value.set(0, layerHeight - size.y);
     grade.uExact.value = Math.abs(layerWidth - size.x) <= 1 && Math.abs(layerHeight - size.y) <= 1 ? 1 : 0;
-    grade.uSaturation.value = 0.88 - 0.05 * detail.closeness;
-    grade.uWarm.value = look === "dusk" ? 0 : detail.focus;
+    grade.uSaturation.value = gradeSaturation(raw.closeness, tune);
+    grade.uWarm.value = gradeWarm(raw.focus, look === "dusk", tune);
     grade.uDusk.value = look === "dusk" ? 1 : 0;
     grade.uDim.value = dim ? 1 : 0;
 

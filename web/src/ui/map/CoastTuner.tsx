@@ -12,6 +12,7 @@ import { FIGURE_CLASSES, FIGURE_CLASS_LABEL, type FigureClass } from "./figureSc
 import { getFigureScales, setFigureClassScale, subscribeFigureScale } from "./figureScaleStore";
 import type { RegionShape, Vec2 } from "./geometry";
 import type { MasterLand } from "./svgLandLoader";
+import { BoardLookPanel } from "./BoardLookPanel";
 import { getDrawFlags, getDrawSample, setDrawFlag, subscribeDrawFlags, subscribeDrawSample, type DrawFlags } from "./renderDebug";
 
 interface Props {
@@ -195,6 +196,7 @@ export function CoastTuner({ regions, land, viewCenter }: Props) {
   return (
     <aside className="panel coast-tune" aria-label="Coast tuner" onPointerDown={(event) => event.stopPropagation()}>
       <DrawReadout />
+      <BoardLookPanel />
       <h2>Coast</h2>
       <h3>Figures</h3>
       <label className="coast-slider">
