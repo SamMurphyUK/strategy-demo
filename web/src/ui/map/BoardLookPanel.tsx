@@ -614,6 +614,11 @@ export function BoardLookPanel() {
         <Num name="seaWaveRings" label="Wave rings" title="The rings of surf that roll in around the coast. 0 is none." />
         <Num name="seaSheenStrength" label="Sea shine" title="Brightness of the sun glitter on the sea. 0 is none." />
         <Num name="seaFarVisibility" label="Far shine" title="How much of the waves and the glitter is left with the camera zoomed all the way out. 0 is none, 1 is all of it." />
+        <Num name="seaSheenRadius" label="Shine radius" title="Size of the patch of sea the sun glitter gathers in. 1 is the old size; 0.7 is 30% smaller." />
+        <Num name="seaSheenFarRadius" label="Far radius" title="The shine radius as a share of itself with the camera zoomed all the way out. 0.9 is a further 10% smaller." />
+        <Num name="seaSheenSpacing" label="Shine spacing" title="Distance between glints. 1 is the old spacing; 1.2 is 20% wider. It widens more as the camera rises." />
+        <Num name="seaSheenScatter" label="Shine scatter" title="How far the glints and the edge of the patch are scattered off a regular grid." />
+        <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
         <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />

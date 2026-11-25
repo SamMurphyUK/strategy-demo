@@ -311,6 +311,8 @@ export interface PixieUniforms {
   uPixFoam: { value: THREE.Vector4 };
   /** How soft the land is, the brush stroke strength, and two spare. */
   uPixSoft: { value: THREE.Vector4 };
+  /** The light and shade the soft land keeps, and three spare. */
+  uPixSoft2: { value: THREE.Vector4 };
   /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
   uPixUnits: { value: Float32Array };
   uPixUnitN: { value: number };
@@ -333,7 +335,8 @@ export function pixieUniforms(): PixieUniforms {
     uPixFaction: { value: null },
     uPixCoast: { value: null },
     uPixFoam: { value: new THREE.Vector4(0.5, 1.2, 0, 0) },
-    uPixSoft: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uPixSoft: { value: new THREE.Vector4(0, 0, 1, 1) },
+    uPixSoft2: { value: new THREE.Vector4(1, 0, 0, 0) },
     uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
     uPixUnitN: { value: 0 },
   };
@@ -503,6 +506,7 @@ export function landTopMaterial(
       uniform vec4 uPixSea;
       uniform vec4 uPixLines;
       uniform vec4 uPixSoft;
+      uniform vec4 uPixSoft2;
       // Height of the ground at a map point, in world units: the ranges of the relief sheet, cut
       // into ridges, on lowlands that roll a little.
       float pixHeight(vec2 m) {
@@ -575,10 +579,16 @@ export function landTopMaterial(
         float bay = bayer4(cell) + 0.03125;
         // Under and around a unit the dither and the slope shade ease down, so the figure reads on quiet ground.
         // The soft land reads the ground where the pixel is, not at the middle of its texel, so its washes have no steps.
-        float soft = uPixSoft.x;
+        // A range keeps the pixel chart, its height map and its light: only the flat land goes soft, and a range's foot eases into it.
+        #ifdef RELIEF
+        float softK = 1.0 - smoothstep(0.02, 0.3, vRise);
+        #else
+        float softK = 1.0;
+        #endif
+        float soft = uPixSoft.x * softK;
         vec2 ms = mix(m, mapAt, soft * 0.9);
         float calm = mix(pixCalm(m), 0.5 + 0.5 * pixCalm(m), soft);
-        float spread = (bay - 0.5) * uPixGrid.w * calm;
+        float spread = (bay - 0.5) * uPixGrid.w * calm * mix(1.0, uPixSoft.z, soft);
 
         // The ground cover is read a little off its place, so the boxes of the biome table do
         // not show as straight lines. The height is read where it is.
@@ -614,7 +624,7 @@ export function landTopMaterial(
         float lush = field.g + (fbm(ms * 0.21 + 11.0) - 0.5) * 0.5;
         // Brush strokes: long, low noise that wanders where one band gives way to the next.
         float stroke = fbm(vec2(ms.x * 0.05, ms.y * 0.13) + 7.0) - 0.5;
-        float xt = clamp(lush * 3.0 + spread * 0.9 + stroke * uPixSoft.y * 1.6, 0.0, 2.999);
+        float xt = clamp(lush * 3.0 + spread * 0.9 + stroke * uPixSoft.y * softK * 1.6, 0.0, 2.999);
         float high = h0 + spread * 0.6;
         float wl = max(soft * 0.55, 1e-4);
         float wh = max(soft * 0.7, 1e-4);
@@ -625,8 +635,8 @@ export function landTopMaterial(
             c += share * pixTone(zi, xt, high, wl, wh);
           }
         }
-        c *= 1.0 + (fbm(ms * 0.5 + 3.0) - 0.5) * 0.07 * uPixSoft.y;
-        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uPixShade.z);
+        c *= 1.0 + (fbm(ms * 0.5 + 3.0) - 0.5) * 0.07 * uPixSoft.y * softK;
+        c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uPixShade.z * mix(1.0, uPixSoft.w, soft));
 
         // Whose land it is: a wash of the faction's colour over the ground. Land nobody holds is left as it lies.
         vec3 ids = textureLod(uPixIds, uv, 0.0).rgb;
@@ -639,6 +649,10 @@ export function landTopMaterial(
         float cold = field.b * (0.5 + 1.1 * fbm(ms * 0.045 + 23.0));
         float frost = max(max(here.a, cold) + spread * 0.18 + (vnoise(ms * 0.33 + 9.0) - 0.5) * 0.12, smoothstep(0.8, 0.95, field.b));
         float snowy = step(0.56, frost);
+        #ifdef RELIEF
+        // The snow line slider sets where a range turns white, still cut into texels.
+        snowy = max(snowy, step(0.5, smoothstep(uMountain.z - uMountain.w, uMountain.z + uMountain.w, vRise) + spread * 0.3) * step(0.05, vRise));
+        #endif
         c = mix(c, PIX_SNOW, snowy);
 
         // Hillshade. The slope is taken across the texel's four neighbours, and the light on it
@@ -646,7 +660,7 @@ export function landTopMaterial(
         vec2 grad = vec2(pixHeight(ms + vec2(e, 0.0)) - pixHeight(ms - vec2(e, 0.0)), pixHeight(ms + vec2(0.0, e)) - pixHeight(ms - vec2(0.0, e))) / (2.0 * e);
         // Map y runs down the sheet and the sun's runs up it.
         vec2 sunward = normalize(vec2(uSunDir.x, -uSunDir.y) + vec2(1e-4));
-        float lean = clamp(-dot(grad, sunward) * uPixShade.x, -1.0, 1.0);
+        float lean = clamp(-dot(grad, sunward) * uPixShade.x * mix(1.0, uPixSoft2.x, soft), -1.0, 1.0);
         float level = clamp(floor(lean * uPixShade.y + 0.5 + spread * 0.5) / uPixShade.y, -1.0, 1.0);
         // Soft, the light and shade run on in a slope and not in flat tones.
         level = mix(level, lean, soft * 0.85);
@@ -796,6 +810,10 @@ export function landTopMaterial(
         // Snow on a face turned to the sun goes past white, and the glow spreads from it.
         c *= 1.0 + uSnowLook.x * snow * smoothstep(-0.02, 0.16, facing) * lightShare * uDirect;
         #endif
+        #if defined(RELIEF) && defined(PIXIE)
+        // Snow on the ranges blooms: the lit side goes past white and the glow spreads from it, as on a Shogun II peak.
+        c *= 1.0 + uSnowLook.x * snowy * (0.35 + 0.65 * smoothstep(-0.1, 0.5, level)) * lightShare * uDirect;
+        #endif
         #ifdef PIXIE
         // Shade stops at warm slate umber. Nothing on the chart goes to black, so a dark piece still reads on it.
         c = max(c, PIX_FLOOR);
@@ -939,6 +957,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uToEye: { value: new THREE.Vector3(0, 0, 1) },
       /** 1 with the camera far out: the glitter is then read as if the eye stood on the sun path. */
       uSheenFar: { value: 0 },
+      /** Patch size, glint spacing, scatter, and how often a breaking wave pops. */
+      uSheenShape: { value: new THREE.Vector4(0.7, 1.2, 0.7, 0.5) },
       /** The middle of the view, and one over its half reach each way: the glitter gathers under the sun. */
       uEye: { value: new THREE.Vector4(0, 0, 1, 1) },
     },
@@ -965,6 +985,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uniform vec3 uToEye;
       uniform vec4 uEye;
       uniform float uSheenFar;
+      uniform vec4 uSheenShape;
       // Height of the swell at a scene point: two long sets crossing.
       float seaHeight(vec2 p) {
         float h = vnoise(p * 0.42 + vec2(uTime * 0.09, uTime * 0.05)) * 0.6;
@@ -1083,7 +1104,9 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         float h0 = seaHeight(p);
         vec2 slope = vec2(seaHeight(p + vec2(0.3, 0.0)) - h0, seaHeight(p + vec2(0.0, 0.3)) - h0) / 0.3;
         vec3 n = normalize(vec3(-slope * 0.3, 1.0));
-        vec2 off = (at - uEye.xy) * uEye.zw;
+        // The patch is smaller as the radius falls, and its edge is scattered by a slow noise so it is not a clean oval.
+        vec2 off = (at - uEye.xy) * uEye.zw / max(uSheenShape.x, 0.05);
+        off += (vec2(vnoise(m * 0.09 + 4.0), vnoise(m * 0.09 + 19.0)) - 0.5) * 0.5 * uSheenShape.z;
         vec3 eye = normalize(uToEye - vec3(off.x * 0.6, off.y * 0.3, 0.0));
         // From straight above, the sun path is out of reach of a flat sea. Far out, the eye is read as if it stood on that path, so the glitter still gathers under the sun.
         eye = normalize(mix(eye, normalize(vec3(-uSunDir.xy, uSunDir.z) - vec3(off.x * (0.6 + 1.6 * uSheenFar), off.y * (0.3 + 1.2 * uSheenFar), 0.0)), uSheenFar * 0.9));
@@ -1101,18 +1124,41 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         vec3 sunlit = uSunColor * vec3(1.0, 0.92, 0.76);
         c += sunlit * glare * uSheen.x * 0.32;
         #ifdef PIXIE
-        // One glint to a texel, so it holds its size at every zoom.
-        vec2 cell = grid.xy;
+        // Glints sit on a lattice turned off the board's axes, each cell holding one at a jittered place,
+        // so they scatter and show no square grid. A glint is one texel, so it holds its size at every zoom.
+        float dashes = 0.0;
+        if (glare > 0.01) {
+          float cellSize = e * 2.6 * uSheenShape.y;
+          vec2 q = mat2(0.891, 0.454, -0.454, 0.891) * at / cellSize;
+          vec2 base = floor(q);
+          float chance = min(0.8, 0.5 * glare);
+          for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+              vec2 id = base + vec2(float(i), float(j));
+              vec2 pt = id + 0.5 + (vec2(hash21(id + 3.1), hash21(id + 9.7)) - 0.5) * (0.5 + 0.5 * uSheenShape.z);
+              float on = step(hash21(id + floor(uTime * 2.2 + hash21(id.yx) * 3.0) * 17.0), chance);
+              vec2 gap = abs((q - pt) * cellSize);
+              dashes = max(dashes, on * step(max(gap.x, gap.y), e * 0.55));
+            }
+          }
+        }
         #else
         vec2 cell = vec2(floor(m.x * 1.9 + floor(m.y * 4.2) * 0.37), floor(m.y * 4.2));
-        #endif
         float flick = hash21(cell + floor(uTime * 2.5 + hash21(cell.yx) * 3.0) * 17.0);
-        #ifdef PIXIE
-        float dashes = step(1.0 - min(0.35, 0.1 * glare), flick);
-        #else
         float dashes = step(1.0 - 0.1 * glare * glare, flick) * step(fract(m.y * 4.2), 0.5);
         #endif
         c += sunlit * dashes * uSheen.y;
+        // Now and then a wave breaks in the sun and throws a glint. It is rare, and only where the light could catch it.
+        float catchSun = smoothstep(0.15, 0.85, dot(r, uSunDir)) * calm * uDirect * (1.0 - shade);
+        float breaking = max(crest * broken, dash);
+        #ifdef PIXIE
+        vec2 popCell = grid.xy;
+        #else
+        vec2 popCell = floor(m * 3.0);
+        #endif
+        float popRoll = hash21(popCell + 5.0 + floor(uTime * 3.0 + hash21(popCell.yx) * 5.0) * 29.0);
+        float pop = step(1.0 - 0.03 * uSheenShape.w, popRoll) * step(0.2, breaking) * catchSun;
+        c += sunlit * pop * uSheen.y * 1.4;
         #endif
 
         #ifdef SUN_SHADOW

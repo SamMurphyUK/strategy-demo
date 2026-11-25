@@ -171,6 +171,16 @@ export interface MapVisualConfig {
   seaSheenStrength: number;
   /** How much of the waves and the glitter is left with the camera as far out as it goes. 0 is none, 1 is all of it. */
   seaFarVisibility: number;
+  /** Size of the patch of sea the sun glitter gathers in. 1 is the old size; 0.7 is 30% smaller. */
+  seaSheenRadius: number;
+  /** The same, as a share of the above with the camera zoomed all the way out. 0.9 is a further 10% smaller. */
+  seaSheenFarRadius: number;
+  /** Distance between glints. 1 is the old spacing; 1.2 is 20% wider. Wider again as the camera rises. */
+  seaSheenSpacing: number;
+  /** How far the glints and the edge of the patch are scattered off a regular grid. */
+  seaSheenScatter: number;
+  /** How often a breaking wave throws a glint where the sun could catch it. 0 is never. */
+  seaSheenPops: number;
   /** At sprite zoom the land eases from the pixel chart to a soft posterized wash, so the figures stand out. */
   enableSoftLand: boolean;
   /** The zoom where the softening starts, and the zoom where it is whole. The sprites arrive at 3.8. */
@@ -265,6 +275,11 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaWaveRings: 1.2,
   seaSheenStrength: 2,
   seaFarVisibility: 0.7,
+  seaSheenRadius: 0.7,
+  seaSheenFarRadius: 0.9,
+  seaSheenSpacing: 1.2,
+  seaSheenScatter: 0.7,
+  seaSheenPops: 0.5,
   enableSoftLand: true,
   softLandFrom: 2,
   softLandTo: 3.8,
@@ -395,6 +410,11 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   seaWaveRings: [0, 2.5],
   seaSheenStrength: [0, 5],
   seaFarVisibility: [0, 1],
+  seaSheenRadius: [0.2, 1.5],
+  seaSheenFarRadius: [0.5, 1.2],
+  seaSheenSpacing: [0.5, 3],
+  seaSheenScatter: [0, 1],
+  seaSheenPops: [0, 1],
   softLandFrom: [0.5, 6],
   softLandTo: [1, 8],
   softLandDither: [0, 1],
@@ -766,6 +786,10 @@ export interface PixieLook {
   soft: number;
   /** Brush stroke strength, already scaled by `soft`. */
   brush: number;
+  /** What the soft land keeps of the dither, the colour, and the light and shade. The shader applies them. */
+  softDither: number;
+  softSat: number;
+  softBand: number;
 }
 
 /**
@@ -804,10 +828,10 @@ export function pixieLook(config: Readonly<MapVisualConfig>, k: number, maxK: nu
     coarse,
     fine: coarse * 2,
     share: smooth((level - octave - 0.35) / 0.3),
-    dither: config.pixelDitherStrength * (1 - soft * (1 - config.softLandDither)),
-    contrast: config.pixelHillshadeContrast * (1 - soft * (1 - config.softLandValueBand)),
+    dither: config.pixelDitherStrength,
+    contrast: config.pixelHillshadeContrast,
     steps: Math.max(1, Math.round(config.pixelShadowSteps)),
-    saturation: config.pixelPaletteSaturation * (1 - soft * (1 - config.softLandSaturation)),
+    saturation: config.pixelPaletteSaturation,
     seaSteps: Math.max(2, Math.round(config.seaContourSteps)),
     rim: config.coastRimIntensity,
     regional: config.regionalPaletteDetail,
@@ -816,6 +840,9 @@ export function pixieLook(config: Readonly<MapVisualConfig>, k: number, maxK: nu
     rings: config.seaWaveRings,
     soft,
     brush: soft * config.softLandBrush,
+    softDither: config.softLandDither,
+    softSat: config.softLandSaturation,
+    softBand: config.softLandValueBand,
   };
 }
 

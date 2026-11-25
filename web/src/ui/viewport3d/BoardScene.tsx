@@ -192,6 +192,8 @@ const CAST_TINT: readonly [number, number, number] = [0.64, 0.66, 0.79];
 const EMBER_GLOW = 2.4;
 /** How far past white sunlit snow goes at the full snow glow, while the glow is on. */
 const SNOW_GLOW = 1.1;
+/** How much of the way to the sun path the eye is held at every zoom, for the sea's glitter. */
+const SHEEN_PATH = 0.65;
 /** The loose rock models. With the sculpted ranges on the board they are put away unless asked for. */
 const ROCK_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(["peak", "rock"]);
 /** The camera's steepest tip, in radians: the sea shows the most sky from here. */
@@ -1049,7 +1051,8 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
       chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH * Math.max(chart.foamReach, 0.02), coastField?.reach ?? 1, chart.regional ? 1 : 0);
       chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
-      chartNow.uPixSoft.value.set(chart.soft, chart.brush, 0, 0);
+      chartNow.uPixSoft.value.set(chart.soft, chart.brush, chart.softDither, chart.softSat);
+      chartNow.uPixSoft2.value.set(chart.softBand, 0, 0, 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
     } else if (chartSheet.current) {
@@ -1119,7 +1122,15 @@ export function BoardScene(props: BoardSceneProps) {
       // More sky as the camera comes down. From straight above the sea is the chart it was painted as.
       const strength = mapVisuals.seaSheenStrength;
       water.uSheen.value.set(sheen * seaShare * strength * (0.1 + 0.2 * tilt), sheen * seaShare * strength * (glowing ? 1.5 : 0.8));
-      water.uSheenFar.value = (1 - tilt) * mapVisuals.seaFarVisibility;
+      // The glitter keeps to the sun path at every zoom, so it is still there close in, where the eye alone would miss it.
+      water.uSheenFar.value = Math.min(1, SHEEN_PATH + (1 - tilt) * mapVisuals.seaFarVisibility * (1 - SHEEN_PATH));
+      // The patch is smaller by the radius, and a further share smaller with the camera all the way out.
+      water.uSheenShape.value.set(
+        mapVisuals.seaSheenRadius * (1 - (1 - tilt) * (1 - mapVisuals.seaSheenFarRadius)),
+        mapVisuals.seaSheenSpacing * (1 + 0.25 * (1 - tilt)),
+        mapVisuals.seaSheenScatter,
+        mapVisuals.seaSheenPops,
+      );
       water.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
       water.uEye.value.set(pose.target[0], pose.target[1] + shift, 1 / pose.halfWidth, cosPitch / pose.halfHeight);
     } else if (sky.current) {

@@ -166,17 +166,21 @@ describe("the texel grid at a zoom", () => {
     expect(landSoftness({ ...DEFAULT_VISUALS, enableSoftLand: false }, MAX)).toBe(0);
   });
 
-  it("eases the dither, colour, and light toward the soft land's values as it softens", () => {
+  it("hands the soft land's keeps to the shader and leaves the shared numbers alone, so the ranges stay pixelated", () => {
     const far = pixieLook(DEFAULT_VISUALS, 1.5, MAX)!;
     const near = pixieLook(DEFAULT_VISUALS, MAX, MAX)!;
     expect(far.soft).toBe(0);
-    expect(far.dither).toBe(DEFAULT_VISUALS.pixelDitherStrength);
-    expect(near.soft).toBe(1);
-    expect(near.dither).toBeCloseTo(DEFAULT_VISUALS.pixelDitherStrength * DEFAULT_VISUALS.softLandDither, 9);
-    expect(near.saturation).toBeCloseTo(DEFAULT_VISUALS.pixelPaletteSaturation * DEFAULT_VISUALS.softLandSaturation, 9);
-    expect(near.contrast).toBeCloseTo(DEFAULT_VISUALS.pixelHillshadeContrast * DEFAULT_VISUALS.softLandValueBand, 9);
-    expect(near.brush).toBeCloseTo(DEFAULT_VISUALS.softLandBrush, 9);
     expect(far.brush).toBe(0);
+    expect(near.soft).toBe(1);
+    expect(near.brush).toBeCloseTo(DEFAULT_VISUALS.softLandBrush, 9);
+    for (const look of [far, near]) {
+      expect(look.dither).toBe(DEFAULT_VISUALS.pixelDitherStrength);
+      expect(look.saturation).toBe(DEFAULT_VISUALS.pixelPaletteSaturation);
+      expect(look.contrast).toBe(DEFAULT_VISUALS.pixelHillshadeContrast);
+      expect(look.softDither).toBe(DEFAULT_VISUALS.softLandDither);
+      expect(look.softSat).toBe(DEFAULT_VISUALS.softLandSaturation);
+      expect(look.softBand).toBe(DEFAULT_VISUALS.softLandValueBand);
+    }
   });
 
   it("passes the weights through, with the tones and the sea bands as whole numbers", () => {
