@@ -6,6 +6,7 @@ import {
   PIXEL_CHART_VISUALS,
   PIXIE_MIN_TEXEL_PX,
   PIXIE_ZOOM_FOLLOW,
+  landSoftness,
   pixieLook,
   PLAIN_VISUALS,
   resetVisuals,
@@ -149,6 +150,33 @@ describe("the texel grid at a zoom", () => {
     const near = pixieLook(DEFAULT_VISUALS, MAX * 4, MAX)!;
     expect(near.coarse).toBeCloseTo(DEFAULT_VISUALS.pixelTexelDensity, 9);
     expect(Number.isFinite(pixieLook(DEFAULT_VISUALS, FIT, 0)!.coarse)).toBe(true);
+  });
+
+  it("softens the land with the zoom and by nothing else", () => {
+    const at = (k: number) => landSoftness(DEFAULT_VISUALS, k);
+    expect(at(1)).toBe(0);
+    expect(at(DEFAULT_VISUALS.softLandFrom)).toBe(0);
+    expect(at(DEFAULT_VISUALS.softLandTo)).toBe(1);
+    expect(at(MAX)).toBe(1);
+    let last = 0;
+    for (let k = 1; k <= MAX; k += 0.1) {
+      expect(at(k)).toBeGreaterThanOrEqual(last);
+      last = at(k);
+    }
+    expect(landSoftness({ ...DEFAULT_VISUALS, enableSoftLand: false }, MAX)).toBe(0);
+  });
+
+  it("eases the dither, colour, and light toward the soft land's values as it softens", () => {
+    const far = pixieLook(DEFAULT_VISUALS, 1.5, MAX)!;
+    const near = pixieLook(DEFAULT_VISUALS, MAX, MAX)!;
+    expect(far.soft).toBe(0);
+    expect(far.dither).toBe(DEFAULT_VISUALS.pixelDitherStrength);
+    expect(near.soft).toBe(1);
+    expect(near.dither).toBeCloseTo(DEFAULT_VISUALS.pixelDitherStrength * DEFAULT_VISUALS.softLandDither, 9);
+    expect(near.saturation).toBeCloseTo(DEFAULT_VISUALS.pixelPaletteSaturation * DEFAULT_VISUALS.softLandSaturation, 9);
+    expect(near.contrast).toBeCloseTo(DEFAULT_VISUALS.pixelHillshadeContrast * DEFAULT_VISUALS.softLandValueBand, 9);
+    expect(near.brush).toBeCloseTo(DEFAULT_VISUALS.softLandBrush, 9);
+    expect(far.brush).toBe(0);
   });
 
   it("passes the weights through, with the tones and the sea bands as whole numbers", () => {

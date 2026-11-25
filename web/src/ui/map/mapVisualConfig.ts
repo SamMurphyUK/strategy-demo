@@ -171,6 +171,17 @@ export interface MapVisualConfig {
   seaSheenStrength: number;
   /** How much of the waves and the glitter is left with the camera as far out as it goes. 0 is none, 1 is all of it. */
   seaFarVisibility: number;
+  /** At sprite zoom the land eases from the pixel chart to a soft posterized wash, so the figures stand out. */
+  enableSoftLand: boolean;
+  /** The zoom where the softening starts, and the zoom where it is whole. The sprites arrive at 3.8. */
+  softLandFrom: number;
+  softLandTo: number;
+  /** What is left of the dither, the colour, and the light and shade once the land is soft. 1 is as strategic. */
+  softLandDither: number;
+  softLandSaturation: number;
+  softLandValueBand: number;
+  /** How far brush strokes wander the soft bands. 0 is clean bands. */
+  softLandBrush: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
   regionalPaletteDetail: boolean;
 }
@@ -254,6 +265,13 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaWaveRings: 1.2,
   seaSheenStrength: 2,
   seaFarVisibility: 0.7,
+  enableSoftLand: true,
+  softLandFrom: 2,
+  softLandTo: 3.8,
+  softLandDither: 0.1,
+  softLandSaturation: 0.58,
+  softLandValueBand: 0.6,
+  softLandBrush: 0.5,
   regionalPaletteDetail: true,
 });
 
@@ -377,6 +395,12 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   seaWaveRings: [0, 2.5],
   seaSheenStrength: [0, 5],
   seaFarVisibility: [0, 1],
+  softLandFrom: [0.5, 6],
+  softLandTo: [1, 8],
+  softLandDither: [0, 1],
+  softLandSaturation: [0, 1.2],
+  softLandValueBand: [0.2, 1.2],
+  softLandBrush: [0, 1],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];
@@ -738,6 +762,23 @@ export interface PixieLook {
   foamReach: number;
   foamBleed: number;
   rings: number;
+  /** 0 on the strategic chart, 1 on the soft land. Eases with the zoom. */
+  soft: number;
+  /** Brush stroke strength, already scaled by `soft`. */
+  brush: number;
+}
+
+/**
+ * How soft the land is at a zoom: 0 up to `softLandFrom`, 1 from `softLandTo`, an ease between. It
+ * follows the camera and nothing else, so zooming scrubs it both ways with no timer and no pop.
+ */
+export function landSoftness(config: Readonly<MapVisualConfig>, k: number): number {
+  if (!config.enableSoftLand) {
+    return 0;
+  }
+  const from = config.softLandFrom;
+  const to = Math.max(config.softLandTo, from + 0.01);
+  return smooth((k - from) / (to - from));
 }
 
 /**
@@ -758,20 +799,23 @@ export function pixieLook(config: Readonly<MapVisualConfig>, k: number, maxK: nu
   const level = Math.max(-PIXIE_OCTAVES, PIXIE_ZOOM_FOLLOW * Math.log2(Math.min(1, Math.max(k, 1e-6) / top)));
   const octave = Math.floor(level);
   const coarse = density * 2 ** octave;
+  const soft = landSoftness(config, k);
   return {
     coarse,
     fine: coarse * 2,
     share: smooth((level - octave - 0.35) / 0.3),
-    dither: config.pixelDitherStrength,
-    contrast: config.pixelHillshadeContrast,
+    dither: config.pixelDitherStrength * (1 - soft * (1 - config.softLandDither)),
+    contrast: config.pixelHillshadeContrast * (1 - soft * (1 - config.softLandValueBand)),
     steps: Math.max(1, Math.round(config.pixelShadowSteps)),
-    saturation: config.pixelPaletteSaturation,
+    saturation: config.pixelPaletteSaturation * (1 - soft * (1 - config.softLandSaturation)),
     seaSteps: Math.max(2, Math.round(config.seaContourSteps)),
     rim: config.coastRimIntensity,
     regional: config.regionalPaletteDetail,
     foamReach: config.enablePixelFoam ? config.pixelFoamReach : 0,
     foamBleed: config.pixelFoamBleed,
     rings: config.seaWaveRings,
+    soft,
+    brush: soft * config.softLandBrush,
   };
 }
 

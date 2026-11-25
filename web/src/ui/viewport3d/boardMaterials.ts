@@ -309,6 +309,8 @@ export interface PixieUniforms {
   uPixCoast: { value: THREE.Texture | null };
   /** How far the edge of the shallows breathes, and the strength of the surf rings. */
   uPixFoam: { value: THREE.Vector4 };
+  /** How soft the land is, the brush stroke strength, and two spare. */
+  uPixSoft: { value: THREE.Vector4 };
   /** Each unit's map x, map y, and base radius (see writeUnitClearings), and how many are set. */
   uPixUnits: { value: Float32Array };
   uPixUnitN: { value: number };
@@ -331,6 +333,7 @@ export function pixieUniforms(): PixieUniforms {
     uPixFaction: { value: null },
     uPixCoast: { value: null },
     uPixFoam: { value: new THREE.Vector4(0.5, 1.2, 0, 0) },
+    uPixSoft: { value: new THREE.Vector4(0, 0, 0, 0) },
     uPixUnits: { value: new Float32Array(PIXIE_UNIT_SLOTS * 3) },
     uPixUnitN: { value: 0 },
   };
@@ -499,6 +502,7 @@ export function landTopMaterial(
       uniform vec4 uPixShade;
       uniform vec4 uPixSea;
       uniform vec4 uPixLines;
+      uniform vec4 uPixSoft;
       // Height of the ground at a map point, in world units: the ranges of the relief sheet, cut
       // into ridges, on lowlands that roll a little.
       float pixHeight(vec2 m) {
@@ -509,6 +513,16 @@ export function landTopMaterial(
       // 1 on land, 0 on water.
       float pixLand(vec2 m) {
         return textureLod(uMask, sheetUv(m), 0.0).r;
+      }
+      // One zone colour at a tone and a height. wl and wh are how wide each step from one tone
+      // to the next is eased: near 0 the steps are hard, as the strategic chart has them.
+      vec3 pixTone(int zone, float xt, float high, float wl, float wh) {
+        vec3 c = PIX_LAND[zone * 5];
+        c = mix(c, PIX_LAND[zone * 5 + 1], smoothstep(1.0 - wl, 1.0 + wl, xt));
+        c = mix(c, PIX_LAND[zone * 5 + 2], smoothstep(2.0 - wl, 2.0 + wl, xt));
+        c = mix(c, PIX_LAND[zone * 5 + 3], smoothstep(1.05 - wh, 1.05 + wh, high));
+        c = mix(c, PIX_LAND[zone * 5 + 4], smoothstep(2.5 - wh, 2.5 + wh, high));
+        return c;
       }
       #endif
       #if defined(RELIEF) || defined(RIVERS) || defined(ROADS)
@@ -560,36 +574,58 @@ export function landTopMaterial(
         vec2 uv = sheetUv(m);
         float bay = bayer4(cell) + 0.03125;
         // Under and around a unit the dither and the slope shade ease down, so the figure reads on quiet ground.
-        float calm = pixCalm(m);
+        // The soft land reads the ground where the pixel is, not at the middle of its texel, so its washes have no steps.
+        float soft = uPixSoft.x;
+        vec2 ms = mix(m, mapAt, soft * 0.9);
+        float calm = mix(pixCalm(m), 0.5 + 0.5 * pixCalm(m), soft);
         float spread = (bay - 0.5) * uPixGrid.w * calm;
 
         // The ground cover is read a little off its place, so the boxes of the biome table do
         // not show as straight lines. The height is read where it is.
-        vec2 warp = (vec2(vnoise(m * 0.06 + 3.7), vnoise(m * 0.06 + 41.3)) - 0.5) * 12.0
-          + (vec2(vnoise(m * 0.019 + 71.1), vnoise(m * 0.019 + 13.9)) - 0.5) * 26.0;
-        vec4 field = textureLod(uPixSheet, sheetUv(m + warp), 0.0);
-        vec4 here = textureLod(uPixSheet, uv, 0.0);
+        vec2 warp = (vec2(vnoise(ms * 0.06 + 3.7), vnoise(ms * 0.06 + 41.3)) - 0.5) * 12.0
+          + (vec2(vnoise(ms * 0.019 + 71.1), vnoise(ms * 0.019 + 13.9)) - 0.5) * 26.0;
+        vec4 field = textureLod(uPixSheet, sheetUv(ms + warp), 0.0);
+        vec4 here = textureLod(uPixSheet, sheetUv(ms), 0.0);
 
         // The climate zone. Where two zones meet, the dither picks between them by their shares.
         int zone = 0;
+        vec4 zoneShare = vec4(1.0, 0.0, 0.0, 0.0);
         if (uPixSea.w > 0.5) {
-          vec3 zones = textureLod(uPixZone, sheetUv(m + warp * 0.35), 0.0).rgb;
+          vec3 zones = textureLod(uPixZone, sheetUv(ms + warp * 0.35), 0.0).rgb;
           float pick = 0.5 + spread;
           zone = pick < zones.r ? 0 : (pick < zones.r + zones.g ? 1 : (pick < zones.r + zones.g + zones.b ? 2 : 3));
+          zoneShare = vec4(zone == 0 ? 1.0 : 0.0, zone == 1 ? 1.0 : 0.0, zone == 2 ? 1.0 : 0.0, zone == 3 ? 1.0 : 0.0);
+          if (soft > 0.001) {
+            // Soft, the zones run into each other by their shares and no dither picks between them.
+            float zs = soft * 0.35;
+            float b1 = zones.r;
+            float b2 = b1 + zones.g;
+            float b3 = b2 + zones.b;
+            float s1 = smoothstep(b1 - zs, b1 + zs, pick);
+            float s2 = smoothstep(b2 - zs, b2 + zs, pick);
+            float s3 = smoothstep(b3 - zs, b3 + zs, pick);
+            zoneShare = vec4(1.0 - s1, s1 * (1.0 - s2), s2 * (1.0 - s3), s3);
+          }
         }
 
         // The tone inside the zone's ramp: dry ground, meadow, or forest by how green the place
         // is, then upland and crest by its height. The dither carries one tone into the next.
-        float h0 = pixHeight(m);
-        float lush = field.g + (fbm(m * 0.21 + 11.0) - 0.5) * 0.5;
-        int tone = int(clamp(floor(lush * 3.0 + spread * 0.9), 0.0, 2.0));
+        float h0 = pixHeight(ms);
+        float lush = field.g + (fbm(ms * 0.21 + 11.0) - 0.5) * 0.5;
+        // Brush strokes: long, low noise that wanders where one band gives way to the next.
+        float stroke = fbm(vec2(ms.x * 0.05, ms.y * 0.13) + 7.0) - 0.5;
+        float xt = clamp(lush * 3.0 + spread * 0.9 + stroke * uPixSoft.y * 1.6, 0.0, 2.999);
         float high = h0 + spread * 0.6;
-        if (high > 2.5) {
-          tone = 4;
-        } else if (high > 1.05) {
-          tone = 3;
+        float wl = max(soft * 0.55, 1e-4);
+        float wh = max(soft * 0.7, 1e-4);
+        vec3 c = vec3(0.0);
+        for (int zi = 0; zi < 4; zi++) {
+          float share = zoneShare[zi];
+          if (share > 0.001) {
+            c += share * pixTone(zi, xt, high, wl, wh);
+          }
         }
-        vec3 c = PIX_LAND[zone * 5 + tone];
+        c *= 1.0 + (fbm(ms * 0.5 + 3.0) - 0.5) * 0.07 * uPixSoft.y;
         c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uPixShade.z);
 
         // Whose land it is: a wash of the faction's colour over the ground. Land nobody holds is left as it lies.
@@ -600,18 +636,20 @@ export function landTopMaterial(
 
         // Snow: on the summits that carry it, and scattered over the cold north.
         // The cold ground is patched by a broad drift, so the snow line is no line of latitude. An ice sheet is whole.
-        float cold = field.b * (0.5 + 1.1 * fbm(m * 0.045 + 23.0));
-        float frost = max(max(here.a, cold) + spread * 0.18 + (vnoise(m * 0.33 + 9.0) - 0.5) * 0.12, smoothstep(0.8, 0.95, field.b));
+        float cold = field.b * (0.5 + 1.1 * fbm(ms * 0.045 + 23.0));
+        float frost = max(max(here.a, cold) + spread * 0.18 + (vnoise(ms * 0.33 + 9.0) - 0.5) * 0.12, smoothstep(0.8, 0.95, field.b));
         float snowy = step(0.56, frost);
         c = mix(c, PIX_SNOW, snowy);
 
         // Hillshade. The slope is taken across the texel's four neighbours, and the light on it
         // is cut into flat tones: umber on the side turned from the sun, chalk on the side turned to it.
-        vec2 grad = vec2(pixHeight(m + vec2(e, 0.0)) - pixHeight(m - vec2(e, 0.0)), pixHeight(m + vec2(0.0, e)) - pixHeight(m - vec2(0.0, e))) / (2.0 * e);
+        vec2 grad = vec2(pixHeight(ms + vec2(e, 0.0)) - pixHeight(ms - vec2(e, 0.0)), pixHeight(ms + vec2(0.0, e)) - pixHeight(ms - vec2(0.0, e))) / (2.0 * e);
         // Map y runs down the sheet and the sun's runs up it.
         vec2 sunward = normalize(vec2(uSunDir.x, -uSunDir.y) + vec2(1e-4));
         float lean = clamp(-dot(grad, sunward) * uPixShade.x, -1.0, 1.0);
         float level = clamp(floor(lean * uPixShade.y + 0.5 + spread * 0.5) / uPixShade.y, -1.0, 1.0);
+        // Soft, the light and shade run on in a slope and not in flat tones.
+        level = mix(level, lean, soft * 0.85);
         // The band between the darkest shade and the brightest light is held narrow, so a figure's own darks and lights stand clear of it.
         level *= calm;
         if (level < 0.0) {

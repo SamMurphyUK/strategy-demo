@@ -1049,6 +1049,7 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
       chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH * Math.max(chart.foamReach, 0.02), coastField?.reach ?? 1, chart.regional ? 1 : 0);
       chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
+      chartNow.uPixSoft.value.set(chart.soft, chart.brush, 0, 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
     } else if (chartSheet.current) {
