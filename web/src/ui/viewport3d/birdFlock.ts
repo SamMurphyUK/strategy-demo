@@ -5,7 +5,9 @@
 // silhouettes inland. The simulation is pure, apart from the mesh it writes into; nothing here touches React.
 import * as THREE from "three";
 
-export const FLOCKS = 3;
+/** Flocks the pool holds: three is the usual, and over Africa twice as many fly. */
+export const BASE_FLOCKS = 3;
+export const FLOCKS = BASE_FLOCKS * 2;
 export const BIRDS_PER_FLOCK = 10;
 export const BIRD_POOL = FLOCKS * BIRDS_PER_FLOCK;
 /** How far from the camera's target a flock may stray before it is let go, in world units. */
@@ -57,6 +59,8 @@ interface Flock {
   z: number;
   heading: number;
   seed: number;
+  /** The colour a flock keeps for its whole flight: set where it spawned, never changed after. */
+  gull: boolean;
 }
 
 export interface BirdParams {
@@ -74,8 +78,10 @@ export interface BirdParams {
   windY: number;
   /** Height of the ground (hills, ranges, lowered islands) at a map point. */
   groundAt(x: number, y: number): number;
-  /** True where land is near water: the gulls' place. */
+  /** True where land is near water: the gulls' place. Asked once, where a flock spawns. */
   coastAt(x: number, y: number): boolean;
+  /** How many times the usual flocks fly here: 2 over Africa, else 1. */
+  boost: number;
 }
 
 export interface BirdFlocks {
@@ -113,6 +119,8 @@ export function createBirds(): BirdFlocks {
   geometry.setAttribute("aTint", tint);
   const material = new THREE.ShaderMaterial({
     transparent: true,
+    // Over everything the 3D scene draws (the 2D planes and units are painted above it anyway).
+    depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
     toneMapped: false,
@@ -147,15 +155,15 @@ export function createBirds(): BirdFlocks {
   mesh.count = BIRD_POOL;
   mesh.frustumCulled = false;
   mesh.visible = false;
-  mesh.renderOrder = 6;
-  const flocks: Flock[] = Array.from({ length: FLOCKS }, (_, i) => ({ active: false, cooldown: 1 + i * 3, age: 0, life: 0, fade: 0, x: 0, y: 0, z: 0, heading: 0, seed: i + 1 }));
+  mesh.renderOrder = 50;
+  const flocks: Flock[] = Array.from({ length: FLOCKS }, (_, i) => ({ active: false, cooldown: 1 + i * 3, age: 0, life: 0, fade: 0, x: 0, y: 0, z: 0, heading: 0, seed: i + 1, gull: false }));
   const dummy = new THREE.Object3D();
   let spawns = 0;
   return {
     mesh,
     update(params) {
       material.uniforms.uTime.value = params.seconds;
-      const wanted = params.micro > 0.25 && params.weight > 0.01 ? Math.min(FLOCKS, Math.max(1, Math.round(1 + params.weight * 2))) : 0;
+      const wanted = params.micro > 0.25 && params.weight > 0.01 ? Math.min(FLOCKS, Math.max(1, Math.round((1 + params.weight * 2) * params.boost))) : 0;
       const closeness = Math.min(1, Math.max(0, (params.micro - 0.25) / 0.3));
       let any = false;
       flocks.forEach((flock, f) => {
@@ -166,6 +174,8 @@ export function createBirds(): BirdFlocks {
             const reach = FLOCK_REACH * 0.85;
             const at = spawnPoint({ x: params.x, y: params.y }, { x: params.windX, y: params.windY }, reach, (hash(spawns, flock.seed) - 0.5) * 50);
             flock.active = true;
+            // Its colour is the colour of where it comes from, and it keeps it: no shift as it crosses a coast.
+            flock.gull = params.coastAt(at.x, at.y);
             flock.x = at.x;
             flock.y = at.y;
             flock.z = params.groundAt(at.x, at.y) + CLEARANCE + 2 + hash(spawns, 7) * 4;
@@ -203,8 +213,7 @@ export function createBirds(): BirdFlocks {
             flock.fade = 0;
           }
         }
-        // Gulls over the coast, dark silhouettes inland: read once for the flock, where it flies.
-        const coast = flock.active && params.coastAt(flock.x, flock.y);
+        const coast = flock.gull;
         for (let b = 0; b < BIRDS_PER_FLOCK; b++) {
           const i = f * BIRDS_PER_FLOCK + b;
           const alpha = flock.active ? flock.fade : 0;

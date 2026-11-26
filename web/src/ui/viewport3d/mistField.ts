@@ -96,7 +96,10 @@ export function createMist(): MistField {
         // Cool grey-blue in the valleys, a warm damp cream over the jungle, and over the monsoon jungles a thick humid olive-parchment (#D6DEC8).
         // Held at 0.88 or under, so the bloom never lights a ribbon.
         vec3 tint = mix(vec3(0.80, 0.87, 0.93), vec3(0.93, 0.89, 0.74), min(vMist.x, 1.0));
-        tint = mix(tint, vec3(0.839, 0.871, 0.784), step(1.5, vMist.x));
+        tint = mix(tint, vec3(0.839, 0.871, 0.784), step(1.5, vMist.x) * step(vMist.x, 2.5));
+        // The regional hazes: a cool light grey over Europe, a warm dusty ochre over sub-Saharan Africa.
+        tint = mix(tint, vec3(0.83, 0.86, 0.89), step(2.5, vMist.x) * step(vMist.x, 3.5));
+        tint = mix(tint, vec3(0.88, 0.8, 0.62), step(3.5, vMist.x));
         gl_FragColor = vec4(min(tint, vec3(0.88)), a);
       }
     `,
@@ -124,16 +127,19 @@ export function createMist(): MistField {
       picked.forEach((site, i) => {
         const jungle = site.kind === "jungle";
         const dense = site.dense === true;
+        const haze = site.haze;
         const ground = params.groundAt(site.x, site.y);
         // Valley mist lies on the trough floor so the ridges stand out of it; jungle mist hangs a little over the canopy, and the monsoon mist
         // hugs just above the tree tops, on the ground's own height.
-        const z = dense ? Math.max(0, ground) + params.canopy + site.seed * 0.25 : jungle ? 0.85 + site.seed * 0.2 : Math.max(0, ground) + 0.5 + site.seed * 0.4;
-        const width = (dense ? 21 : jungle ? 16 : 11) * (0.8 + site.seed * 0.6);
+        const z = haze ? Math.max(0, ground) + 2.4 + site.seed * 1.2 : dense ? Math.max(0, ground) + params.canopy + site.seed * 0.25 : jungle ? 0.85 + site.seed * 0.2 : Math.max(0, ground) + 0.5 + site.seed * 0.4;
+        const width = (haze ? 34 : dense ? 21 : jungle ? 16 : 11) * (0.8 + site.seed * 0.6);
         size.set(width, width * (0.32 + site.seed * 0.12), 1);
         matrix.makeRotationZ((site.seed - 0.5) * 1.2).scale(size).setPosition(site.x, -site.y, z);
         mesh.setMatrixAt(i, matrix);
         const edge = 1 - Math.min(1, Math.hypot(site.x - params.x, site.y - params.y) / REACH);
-        mist.setXYZ(i, dense ? 2 : jungle ? 1 : 0, site.seed, Math.min(1, edge * 2.2) * (dense ? Math.min(1.6, params.monsoon) : 1));
+        // Europe's haze is light, sub-Saharan Africa's heavy.
+        const strength = haze === "europe" ? 0.42 : haze === "africa" ? 1.5 : dense ? Math.min(1.6, params.monsoon) : 1;
+        mist.setXYZ(i, haze === "africa" ? 4 : haze === "europe" ? 3 : dense ? 2 : jungle ? 1 : 0, site.seed, Math.min(1, edge * 2.2) * strength);
       });
       mesh.instanceMatrix.needsUpdate = true;
       mist.needsUpdate = true;

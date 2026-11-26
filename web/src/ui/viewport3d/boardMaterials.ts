@@ -819,9 +819,9 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
         // The cliffs in view face the viewer and away from the sun. A fill from the near side keeps the strata readable.
         vec3 light = lit(stepped(ndl * 1.15)) + vec3(0.14, 0.14, 0.16) * max(-n.y, 0.0) * uRelief * max(0.0, 1.0 - uCliffShade * 0.5);
         // Shade of its own: the foot of the wall sits in the dark where the water meets it, and the face turned from the sun goes deeper.
-        float foot = 1.0 - smoothstep(0.0, 0.7, vHeight);
-        float away = 1.0 - smoothstep(-0.2, 0.5, ndl);
-        rock *= 1.0 - uCliffShade * (0.34 * foot + 0.22 * away);
+        float foot = 1.0 - smoothstep(0.0, 0.8, vHeight);
+        float away = 1.0 - smoothstep(-0.2, 0.55, ndl);
+        rock *= 1.0 - clamp(uCliffShade * (0.4 * foot + 0.3 * away), 0.0, 0.85);
         gl_FragColor = vec4(rock * light, 1.0);
       }
     `,
@@ -1143,10 +1143,12 @@ export interface LandmarkUniforms {
   uLandmarkBaseShare: { value: number };
   /** How hard the sun catches the surface: a specular rim and a warm key against a cool shade. */
   uLandmarkSpec: { value: number };
+  /** How deep the shadows drawn on a monument go. 1 is the plain shade. */
+  uLandmarkShadow: { value: number };
 }
 
 export function landmarkUniforms(): LandmarkUniforms {
-  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 } };
+  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 }, uLandmarkShadow: { value: 1 } };
 }
 
 /** Trees, peaks, and buildings. With `landmark` it is a city landmark, at a fixed size and revealed from the ground up. */
@@ -1228,6 +1230,7 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
       varying vec3 vN;
       varying vec3 vWorld;
       uniform float uLandmarkSpec;
+      uniform float uLandmarkShadow;
       uniform vec3 uSunDir;
       uniform vec3 uSunColor;
       uniform float uDirect;
@@ -1239,7 +1242,13 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
       void main() {
         vec3 c = vColor;
         #ifdef SUN_SHADOW
-        c *= mix(vec3(1.0), uSunTint, sunShade(vSun) * vSunFacing);
+        float castOn = sunShade(vSun) * vSunFacing;
+        #ifdef LANDMARK
+        // The shadows drawn on a monument are stronger: the cast shadow goes deeper, and the faces turned from the sun darken a little.
+        castOn = clamp(castOn * uLandmarkShadow, 0.0, 1.0);
+        c *= 1.0 - 0.16 * max(uLandmarkShadow - 1.0, 0.0) * (1.0 - vSunFacing);
+        #endif
+        c *= mix(vec3(1.0), uSunTint, castOn);
         #endif
         #ifdef LANDMARK
         // A warm key against a cool shade, and the sun caught on an edge: a tight specular where a face turns

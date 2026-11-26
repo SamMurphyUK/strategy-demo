@@ -65,6 +65,9 @@ export interface PlanInput {
 
 /** Where the factory model's chimneys stand, in model units. The second is mirrored in x. */
 export const FACTORY_CHIMNEY = { x: 0.3, y: 0.18, top: 1.4 } as const;
+/** A factory's footprint and height on the board: half again what they were (2.7 and 2.3). */
+export const FACTORY_SCALE = 4.05;
+export const FACTORY_HEIGHT = 3.45;
 
 /** Spacing of the tree grid, in world units. */
 export const TREE_STEP = 2.6;
@@ -195,7 +198,9 @@ export type Theater = "pacific" | "africa" | "other";
 
 /** The theater of a place, from its longitude and latitude. */
 export function theaterOf(lon: number, lat: number): Theater {
-  if (lat >= -26 && lat <= 26 && (lon >= 92 || lon <= -140)) {
+  // Australia is not the jungle theater: its trees keep their own colour.
+  const australia = lon >= 110 && lon <= 156 && lat < -10;
+  if (lat >= -26 && lat <= 26 && (lon >= 92 || lon <= -140) && !australia) {
     return "pacific";
   }
   if (lat >= -36 && lat <= 22 && lon >= -20 && lon <= 55) {
@@ -350,29 +355,29 @@ export function planProps(input: PlanInput): PropPlan {
       props.factory.push({
         x: centre.x,
         y: centre.y,
-        scale: 2.7,
-        height: 2.3,
+        scale: FACTORY_SCALE,
+        height: FACTORY_HEIGHT,
         turn,
         tint: shade(BROWN, cellHash(index, 5, 71), 0.1),
         snow: town.factory > 1 ? 1 : 0,
       });
-      built.add(centre.x, centre.y, 2.2);
+      built.add(centre.x, centre.y, 3.3);
       // The model's chimneys, turned with it. Model y points north; map y points south.
       const stacks = town.factory > 1 ? [FACTORY_CHIMNEY.x, -FACTORY_CHIMNEY.x] : [FACTORY_CHIMNEY.x];
       for (const mx of stacks) {
-        const cx = mx * 2.7;
-        const cy = FACTORY_CHIMNEY.y * 2.7;
+        const cx = mx * FACTORY_SCALE;
+        const cy = FACTORY_CHIMNEY.y * FACTORY_SCALE;
         chimneys.push({
           x: centre.x + cx * Math.cos(turn) - cy * Math.sin(turn),
           y: centre.y - (cx * Math.sin(turn) + cy * Math.cos(turn)),
-          z: FACTORY_CHIMNEY.top * 2.3,
+          z: FACTORY_CHIMNEY.top * FACTORY_HEIGHT,
         });
       }
     }
     let placed = 0;
     for (let attempt = 0; attempt < town.houses * 6 && placed < town.houses; attempt++) {
       const angle = cellHash(index, attempt, 17) * Math.PI * 2;
-      const reach = (town.factory > 0 ? 2.6 : 0.4) + cellHash(index, attempt, 19) * (1.6 + town.houses * 0.32);
+      const reach = (town.factory > 0 ? 3.9 : 0.4) + cellHash(index, attempt, 19) * (1.6 + town.houses * 0.32);
       const p = { x: centre.x + Math.cos(angle) * reach, y: centre.y + Math.sin(angle) * reach * 0.8 };
       if (!inside(p, COAST_MARGIN) || built.near(p.x, p.y, 0.75) || reserved.near(p.x, p.y, TREE_CLEARANCE)) {
         continue;

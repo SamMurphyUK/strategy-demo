@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BIRD_POOL, BIRDS_PER_FLOCK, curlFlow, FLOCKS, spawnPoint } from "../../../src/ui/viewport3d/birdFlock";
+import { BASE_FLOCKS, BIRD_POOL, BIRDS_PER_FLOCK, curlFlow, FLOCKS, spawnPoint } from "../../../src/ui/viewport3d/birdFlock";
 
 describe("bird flocks", () => {
   it("pools two to three flocks of eight to twelve birds", () => {
-    expect(FLOCKS).toBeGreaterThanOrEqual(2);
-    expect(FLOCKS).toBeLessThanOrEqual(3);
+    expect(BASE_FLOCKS).toBeGreaterThanOrEqual(2);
+    expect(BASE_FLOCKS).toBeLessThanOrEqual(3);
+    // Africa flies twice as many.
+    expect(FLOCKS).toBe(BASE_FLOCKS * 2);
     expect(BIRDS_PER_FLOCK).toBeGreaterThanOrEqual(8);
     expect(BIRDS_PER_FLOCK).toBeLessThanOrEqual(12);
     expect(BIRD_POOL).toBe(FLOCKS * BIRDS_PER_FLOCK);

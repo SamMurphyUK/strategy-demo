@@ -782,7 +782,7 @@ export function BoardLookPanel() {
         <Num name="islandElevationScale" label="Island height" title="How much of its cliff an island keeps. 1 stands as tall as the continents; lower sits lower in the sea, so the Pacific atolls are not pillars." />
         <IslandRegionHeight />
         <Num name="cliffShadowStrength" label="Cliff shadow" title="How dark the cliffs are in their own shade: the foot where the water meets the wall, and the face turned from the sun. 0 is the old flat light." />
-        <Num name="shipShadowStretch" label="Ship shadow length" title="How far a ship's shadow stretches across the water. Low is a short, soft shadow close to the hull, near a reflection. 0 is none." />
+        <Num name="landmarkShadowStrength" label="Monument shadow" title="How deep the shadows drawn on the monuments go. 1 is the plain shade." />
         <Num name="tiltShiftStrength" label="Tilt-shift" title="The soft blur of the top and bottom of the frame in the micro tier. 0 is none." />
         <Num name="microMinDistance" label="Nearest camera" title="The nearest the camera may come, in camera distance. The tiers are 14, 7.5 and 3.8; micro ends here." />
         <Num name="dioramaNormalStrength" label="Diorama relief" title="How deep the diorama surface's relief reads in the light." />

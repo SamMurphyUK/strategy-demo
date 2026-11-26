@@ -176,6 +176,9 @@ describe("theater canopy tints", () => {
     expect(theaterOf(120, 5)).toBe("pacific");
     expect(theaterOf(-170, 0)).toBe("pacific");
     expect(theaterOf(30, -5)).toBe("africa");
+    // Australia is left out.
+    expect(theaterOf(135, -25)).toBe("other");
+    expect(theaterOf(145, -5)).toBe("pacific");
     expect(theaterOf(10, 50)).toBe("other");
     const own: [number, number, number] = [0.4, 0.4, 0.4];
     expect(theaterTint(own, "other", 0.5, 1)).toEqual(own);

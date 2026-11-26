@@ -15,13 +15,15 @@ export interface MistSite {
   kind: MistKind;
   /** The thick monsoon mist of the Southeast Asian jungles: bigger, denser, and just over the canopy. */
   dense?: boolean;
+  /** A regional haze: a light, cool one over Europe, a heavy, dusty one over sub-Saharan Africa. */
+  haze?: "europe" | "africa";
   /** 0 to 1, fixed per site: size, speed, and phase of the drift. */
   seed: number;
 }
 
 /** Ribbons in the pool. */
-export const MIST_POOL = 72;
-const VALLEY_STEP = 4;
+export const MIST_POOL = 110;
+const VALLEY_STEP = 3;
 const JUNGLE_STEP = 14;
 
 function hash2(x: number, y: number): number {
@@ -42,7 +44,8 @@ export function valleySites(patches: readonly ReliefPatch[]): MistSite[] {
         const x = patch.originX + gx * patch.step;
         const y = patch.originY + gy * patch.step;
         const here = sampleReliefField(patch, x, y);
-        if (!(here.ridge > 0.04 && here.ridge < 0.42)) {
+        // The troughs and the flanks both: mist lies thick over the whole of a range, not only in its floors.
+        if (!(here.ridge > 0.04 && here.ridge < 0.7)) {
           continue;
         }
         const high = [
@@ -50,7 +53,7 @@ export function valleySites(patches: readonly ReliefPatch[]): MistSite[] {
           [-reach, 0],
           [0, reach],
           [0, -reach],
-        ].some(([dx, dy]) => sampleReliefField(patch, x + dx, y + dy).ridge > here.ridge + 0.22);
+        ].some(([dx, dy]) => sampleReliefField(patch, x + dx, y + dy).ridge > here.ridge + 0.1);
         if (high) {
           out.push({ x, y, kind: "valley", seed: hash2(x, y) });
         }
@@ -101,6 +104,38 @@ export function monsoonSites(
         if (isLand(jx, jy) && region.contains({ x: jx, y: jy })) {
           out.push({ x: jx, y: jy, kind: "jungle", dense: true, seed: hash2(jx, jy) });
         }
+      }
+    }
+  }
+  return out;
+}
+
+/** The kind of regional haze a place lies under, from its longitude and latitude. */
+export function hazeOf(lon: number, lat: number): "europe" | "africa" | null {
+  if (lon >= -10 && lon <= 40 && lat >= 36 && lat <= 62) {
+    return "europe";
+  }
+  if (lon >= -18 && lon <= 52 && lat >= -35 && lat <= 9) {
+    return "africa";
+  }
+  return null;
+}
+
+/** Haze sites: a coarse grid over the land where `hazeAt` names a haze. */
+export function hazeSites(
+  bounds: { x: number; y: number; w: number; h: number },
+  hazeAt: (x: number, y: number) => "europe" | "africa" | null,
+  isLand: (x: number, y: number) => boolean,
+  step = 11,
+): MistSite[] {
+  const out: MistSite[] = [];
+  for (let y = bounds.y + step / 2; y < bounds.y + bounds.h; y += step) {
+    for (let x = bounds.x + step / 2; x < bounds.x + bounds.w; x += step) {
+      const jx = x + (hash2(x, y) - 0.5) * step * 0.8;
+      const jy = y + (hash2(y, x) - 0.5) * step * 0.8;
+      const haze = hazeAt(jx, jy);
+      if (haze && isLand(jx, jy)) {
+        out.push({ x: jx, y: jy, kind: "valley", haze, seed: hash2(jx, jy) });
       }
     }
   }

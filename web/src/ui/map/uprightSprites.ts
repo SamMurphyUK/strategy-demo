@@ -857,6 +857,16 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   }
   if (paint.plinth && naval) {
     // A ship rides the water on a faint ring, not on a turned base.
+    // The ship's shadow: almost flat, a faint soft ellipse lying on the water under the hull, a touch to the lee. No sun is cast on it.
+    if (typeof ctx.ellipse === "function") {
+      ctx.save();
+      ctx.globalAlpha *= 0.2;
+      ctx.fillStyle = "rgb(8, 18, 28)";
+      ctx.beginPath();
+      ctx.ellipse(x + rx * 0.1, y - (paint.waterRisePx ?? 0) + ry * 0.3, rx * 0.95, ry * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     // The ring rides flush on the water, up on a crest and down in a trough.
     drawWaterlineRing(ctx, { x, y: y - (paint.waterRisePx ?? 0), rx, ry, color: factionPalette(paint.factionId).primary });
   } else if (paint.noBase) {

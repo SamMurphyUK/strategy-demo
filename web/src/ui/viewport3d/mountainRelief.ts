@@ -476,8 +476,17 @@ export function buildHillPatch(site: HillSite): ReliefPatch | null {
       // Three octaves of swell: a broad one, a rolling one, and a small undulation.
       const swell = noise(x * 0.035, y * 0.035, site.salt) * 0.55 + noise(x * 0.09, y * 0.09, site.salt + 3) * 0.33 + noise(x * 0.22, y * 0.22, site.salt + 7) * 0.12;
       // Dune ridges lie across the wind, long and low, and wander with a slow noise.
-      const t = (x * 0.8 + y * 0.6) * 0.42 + noise(x * 0.05, y * 0.05, site.salt + 11) * 3.4;
-      const dune = 0.5 + 0.5 * Math.sin(t);
+      // The crest lines are not straight: the direction they run turns slowly with the ground, a randomised sine wanders them off their line, the
+      // phase is pushed by the swell so the ridges follow the hills, and a slow noise cuts natural breaks in them.
+      const turn = (noise(x * 0.028, y * 0.028, site.salt + 13) - 0.5) * 1.9 + 0.65;
+      const along = x * Math.cos(turn) + y * Math.sin(turn);
+      const across = -x * Math.sin(turn) + y * Math.cos(turn);
+      const wander = Math.sin(across * 0.11 + noise(x * 0.04, y * 0.04, site.salt + 17) * 6) * 2.6 + Math.sin(across * 0.27 + along * 0.05 + site.salt) * 1.1;
+      const t = along * 0.4 + wander + noise(x * 0.05, y * 0.05, site.salt + 11) * 3.4 + swell * 4.2;
+      const crest = 0.5 + 0.5 * Math.sin(t);
+      // Breaks: where the slow noise falls low the crest thins out and gaps open along it.
+      const gap = smooth((noise(x * 0.085 + 3, y * 0.085, site.salt + 23) - 0.3) / 0.25);
+      const dune = crest * (0.25 + 0.75 * gap);
       const height = ground * (kind.swell * (0.25 + 0.75 * swell) + kind.dune * 0.7 * dune * (0.45 + 0.55 * swell));
       if (height <= 0) {
         continue;

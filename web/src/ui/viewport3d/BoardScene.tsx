@@ -47,7 +47,7 @@ import { projectionScales, screenToWorld } from "../map/viewMath";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
 import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
-import { biomeAtMap, lonLatToMap } from "./geography";
+import { biomeAtMap, lonLatToMap, mapToLonLat } from "./geography";
 import { createMist } from "./mistField";
 import { type IslandCell, islandScale, lowerShare, makeLowerAt } from "./islandLowering";
 import { getIslandRevision, getIslandScales, subscribeIslandScales } from "../map/islandOverrides";
@@ -61,7 +61,7 @@ import { createPowder } from "./crestPowder";
 import { buildForestSheet } from "./forestSheet";
 import { type BiomeTextures, haveBiomes, loadBiomeTextures } from "./terrainTextures";
 import { dioramaFade } from "./skins/dioramaPbr";
-import { jungleSites, type MistSite, valleySites } from "./mistPlacement";
+import { hazeOf, hazeSites, jungleSites, type MistSite, valleySites } from "./mistPlacement";
 import {
   cardCasterMaterial,
   cliffCasterMaterial,
@@ -98,7 +98,7 @@ import { MAX_PLINTHS, plinthBuffers, plinthRadius, writePlinths } from "./plinth
 import { plinthGeometry } from "./plinthMeshes";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
-import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
+import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack, theaterOf } from "./propPlan";
 import { slabGeometry } from "./regionMeshes";
 import { buildSkyEnvironment } from "./skyEnv";
 import { type BoardLook, shadowLight, shadowReach, sunFor } from "./sun";
@@ -204,7 +204,8 @@ const PROP_SHADOW_REACH = 0.9;
 /** Lift of ground marks above the land, in world units, so they do not fight it for depth. */
 const CRATER_LIFT = 0.02;
 const UNIT_SHADOW_LIFT = 0.04;
-const PUFFS = { battle: 9, minor: 5, chimney: 5 } as const;
+// A factory's chimney sends up half again as much smoke as it did (5 puffs).
+const PUFFS = { battle: 9, minor: 5, chimney: 8 } as const;
 
 /** The layer only the sun's shadow camera draws. The board camera draws layer 0 and never sees it. */
 const CASTER_LAYER = 1;
@@ -444,7 +445,7 @@ const AIR_KIND = 2;
  * reaches from them, and where that picture is on the figure canvas. A ship stands on the water,
  * and an aircraft is lifted off the ground, so its shadow falls clear of it.
  */
-function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number, drop: number, shipStretch: number): number {
+function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number, drop: number): number {
   rig.kinds.clear();
   for (const layout of frame.layouts) {
     const sea = layout.region.type === "sea" ? SEA_KIND : 0;
@@ -469,16 +470,17 @@ function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, ma
     const world = screenToWorld(frame.view, { x: card.feetX / dpr, y: card.feetY / dpr });
     const kind = rig.kinds.get(stackOfFigure(card.id)) ?? 0;
     const sea = (kind & SEA_KIND) !== 0;
+    // A ship casts no sun shadow: it is drawn with a faint flat one under the hull instead (see uprightSprites.ts).
+    if (sea) {
+      continue;
+    }
     foot[count * 3] = world.x;
     foot[count * 3 + 1] = -world.y + (sea ? shift : 0);
     foot[count * 3 + 2] = (sea ? -drop : 0) + ((kind & AIR_KIND) !== 0 ? lift : 0);
-    // A ship rides low on the water, so its shadow is a short, soft one lying close to the hull, near a reflection: the card is
-    // squashed to a share of its height, and the sun throws it that much shorter.
-    const stretch = sea ? shipStretch : 1;
     box[count * 4] = (card.left - card.feetX) / perUnit;
-    box[count * 4 + 1] = ((card.feetY - (card.top + card.h)) / perUnit) * stretch;
+    box[count * 4 + 1] = (card.feetY - (card.top + card.h)) / perUnit;
     box[count * 4 + 2] = card.w / perUnit;
-    box[count * 4 + 3] = (card.h / perUnit) * stretch;
+    box[count * 4 + 3] = card.h / perUnit;
     sheet[count * 4] = (card.left * scale) / mask.width;
     sheet[count * 4 + 1] = 1 - ((card.top + card.h) * scale) / mask.height;
     sheet[count * 4 + 2] = ((card.left + card.w) * scale) / mask.width;
@@ -732,8 +734,9 @@ function boxOfLonLat(lon0: number, lat0: number, lon1: number, lat1: number): TH
 }
 const THEATERS = {
   africa: boxOfLonLat(-20, 22, 55, -36),
-  pacificEast: boxOfLonLat(92, 26, 180, -26),
-  pacificWest: boxOfLonLat(-180, 26, -140, -26),
+  // The Pacific boxes stop at 10 degrees south, so Australia is left out (see theaterOf).
+  pacificEast: boxOfLonLat(92, 26, 180, -10),
+  pacificWest: boxOfLonLat(-180, 26, -140, -10),
 };
 const TROPICS = { north: lonLatToMap(0, 23).y, south: lonLatToMap(0, -23).y };
 const NO_RELIEF = { dome: 0, ridge: 0 } as const;
@@ -981,7 +984,7 @@ export function BoardScene(props: BoardSceneProps) {
   );
   // The mist: where it can lie, found once, and a pool of ribbons spent on the sites near the camera.
   const mistSites = useMemo(
-    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? [])],
+    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? []), ...hazeSites(bounds, (x, y) => { const place = mapToLonLat({ x, y }); return hazeOf(place.lon, place.lat); }, (x, y) => pointInMultiPolygon({ x, y }, land))],
     [patches, bounds, land, props.mistExtra],
   );
   // How far each base has faded, by stack, and the last frame's time.
@@ -1455,11 +1458,15 @@ export function BoardScene(props: BoardSceneProps) {
       },
       threshold: 0.06,
     });
+    // Africa spawns twice as many flocks: the camera over its box.
+    const place = mapToLonLat({ x: pose.target[0], y: -pose.target[1] });
+    const birdBoost = theaterOf(place.lon, place.lat) === "africa" ? 2 : 1;
     birds.update({
       x: pose.target[0],
       y: -pose.target[1],
       micro,
       weight: mapVisuals.microBirdsWeight,
+      boost: birdBoost,
       seconds: now / 1000,
       dt: weatherDt,
       windX: 1.6 * mapVisuals.windStrength,
@@ -1626,6 +1633,7 @@ export function BoardScene(props: BoardSceneProps) {
     kit.landmarkLook.uLandmarkBand.value = mapVisuals.landmarkRevealBand;
     // The surfaces catch the sun harder the sliders say, and the board's tooth and sheen come in over the close zoom.
     kit.landmarkLook.uLandmarkSpec.value = mapVisuals.landmarkRimStrength;
+    kit.landmarkLook.uLandmarkShadow.value = mapVisuals.landmarkShadowStrength;
     kit.plinthLook.uLandmarkSpec.value = mapVisuals.plinthSpecular;
     const boardSheen = mapVisuals.boardSheenStrength * Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35));
     kit.landTop.uniforms.uBoardSheen.value = boardSheen;
@@ -1661,7 +1669,7 @@ export function BoardScene(props: BoardSceneProps) {
       rig.mask = canvasSlot(rig.mask, mask, store.paint);
       kit.cardCaster.uniforms.uFigures.value = rig.mask.texture;
       if (rig.paint !== store.paint) {
-        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift, drop, mapVisuals.shipShadowStretch);
+        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift, drop);
         rig.paint = store.paint;
       }
       cards = rig.cards.geometry.instanceCount;

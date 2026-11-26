@@ -200,7 +200,8 @@ export interface MapVisualConfig {
   /** The tilt-shift blur of the top and bottom of the frame in the micro tier. 0 is none. */
   tiltShiftStrength: number;
   /** How far a ship's shadow stretches across the water, as a share of what the sun would throw. 0 is none; low is a reflection. */
-  shipShadowStretch: number;
+  /** How deep the shadows drawn on the monuments go. 1 is the plain shade. */
+  landmarkShadowStrength: number;
   /** How much of its cliff an island keeps: 1 stands as tall as the continents, lower sits lower in the sea. A territory can take its own (see islandOverrides.ts). */
   islandElevationScale: number;
   /** The thick monsoon mist over the Southeast Asian jungles, hugging the canopy. 0 is none. */
@@ -391,7 +392,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   microPitchDeg: 38,
   microSpriteTiltDeg: 10,
   tiltShiftStrength: 1,
-  shipShadowStretch: 0.28,
+  landmarkShadowStrength: 1.7,
   islandElevationScale: 0.6,
   seaJungleMistStrength: 1,
   microBirdsWeight: 1,
@@ -400,7 +401,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   sandSubsurfaceAmber: 0.6,
   snowDriftBleed: 0.7,
   crestPowderStrength: 0.6,
-  cliffShadowStrength: 0.6,
+  cliffShadowStrength: 1.1,
   dioramaNormalStrength: 0.7,
   albedoDetailStrength: 0.5,
   snowColdTint: 0.5,
@@ -577,7 +578,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   microPitchDeg: [30, 60],
   microSpriteTiltDeg: [0, 20],
   tiltShiftStrength: [0, 2],
-  shipShadowStretch: [0, 1],
+  landmarkShadowStrength: [1, 3],
   islandElevationScale: [0.15, 1],
   seaJungleMistStrength: [0, 2],
   microBirdsWeight: [0, 2],
