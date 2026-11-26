@@ -18,18 +18,22 @@ export const FLASH_LIGHTS = 4;
 export interface FlashUniforms {
   uFlash: { value: THREE.Vector4[] };
   uFlashColor: { value: THREE.Vector3 };
+  /** The sky's light on every lit surface (battleSky.ts): the ambient fill plus the direct light. */
+  uLight: { value: THREE.Vector3 };
 }
 
 export function flashUniforms(skin: BattleSkin): FlashUniforms {
   return {
     uFlash: { value: Array.from({ length: FLASH_LIGHTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uFlashColor: { value: v3(skin.grade.muzzleLight) },
+    uLight: { value: new THREE.Vector3(1, 1, 1) },
   };
 }
 
 const FLASH_GLSL = /* glsl */ `
 uniform vec4 uFlash[${FLASH_LIGHTS}];
 uniform vec3 uFlashColor;
+uniform vec3 uLight;
 // Warm light from the muzzle bursts: each is a point with a radius of about five units and a quick falloff.
 vec3 flashAdd(vec3 p) {
   vec3 a = vec3(0.0);
@@ -122,7 +126,7 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
           float b = texture2D(uGrass, turn * uv * 0.37 + vec2(0.37, 0.71)).a;
           photo = mix(a, b, 0.35 + 0.3 * vnoise(uv * 0.55));
         }
-        float n = clamp(0.5 + (photo - 0.5) * 1.15 + (macro - 0.5) * 0.9, 0.0, 1.0);
+        float n = clamp(0.5 + (photo - 0.5) * 1.7 + (macro - 0.5) * 0.9, 0.0, 1.0);
         vec3 col = mix(uLow, uHigh, n);
         vec2 st = vWorld.xy / uStage + 0.5;
         // Worn earth between the lines, and along the very edge of the slice.
@@ -136,6 +140,7 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
         col = mix(col, min(col * 1.35 + 0.03, vec3(0.9)), rim * 0.4);
         // Valley mist pooling toward the horizon.
         col = mix(col, uMistColor, uMistAmt * smoothstep(0.3, 1.0, st.y));
+        col *= uLight;
         col += flashAdd(vec3(vWorld.xy, 0.5));
         gl_FragColor = vec4(clampLuma(col, uCeil), 1.0);
       }
@@ -268,6 +273,7 @@ export function spriteMaterial(flash: FlashUniforms, texture: THREE.Texture | nu
         float l = dot(c, vec3(0.299, 0.587, 0.114));
         c = mix(c, vec3(l), uDesat);
         c = mix(c, uMist.rgb, uMist.a);
+        c *= uLight;
         c += flashAdd(vWorld + vec3(0.0, 0.0, 0.4));
         c = mix(c, vec3(0.95, 0.9, 0.78), uHot * 0.55);
         gl_FragColor = vec4(min(c, vec3(0.95)), 1.0);
@@ -408,7 +414,7 @@ export function tiltShiftMaterial(): THREE.ShaderMaterial {
       tDiffuse: { value: null },
       uTexel: { value: new THREE.Vector2(1, 1) },
       uBlur: { value: 0.8 },
-      uFocus: { value: new THREE.Vector2(0.28, 0.66) },
+      uFocus: { value: new THREE.Vector2(0.1, 0.78) },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -479,6 +485,129 @@ export function seaMaterial(): THREE.ShaderMaterial {
         float edge = smoothstep(0.82, 0.96, vUv.y + (vnoise(vec2(vWorld.x * 2.0 - uTime * 0.4, 1.0)) - 0.5) * 0.1);
         c = mix(c, uFoam, edge * 0.85);
         gl_FragColor = vec4(clampLuma(c, 0.92), 1.0);
+      }
+    `,
+  });
+}
+
+// --- Backdrop, bands and links -------------------------------------------------------------------------------------
+
+/**
+ * The painted backdrop behind the slice: a sky gradient from the campaign's light, a sun (or moon and stars) placed by its direction, slow
+ * drifting cloud layers, and a tree-line silhouette on the horizon. It stands upright behind the table, so a camera that looks down at 35 degrees
+ * still sees it. Colours are held under 0.95.
+ */
+export function backdropMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthWrite: false,
+    uniforms: {
+      uZenith: { value: new THREE.Vector3() },
+      uHorizon: { value: new THREE.Vector3() },
+      uTree: { value: new THREE.Vector3() },
+      uCloud: { value: new THREE.Vector3() },
+      uSunDir: { value: new THREE.Vector3(0, 0, 1) },
+      uSunColor: { value: new THREE.Vector3(1, 1, 1) },
+      uNight: { value: 0 },
+      uTime: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      ${NOISE_GLSL}
+      uniform vec3 uZenith;
+      uniform vec3 uHorizon;
+      uniform vec3 uTree;
+      uniform vec3 uCloud;
+      uniform vec3 uSunDir;
+      uniform vec3 uSunColor;
+      uniform float uNight;
+      uniform float uTime;
+      varying vec3 vWorld;
+      void main() {
+        float h = clamp((vWorld.z + 1.0) / 26.0, 0.0, 1.0);
+        vec3 c = mix(uHorizon, uZenith, smoothstep(0.0, 0.8, h));
+        // The light's place on the painted sky: across by its east-west lean, up by its elevation.
+        vec2 sunAt = vec2(uSunDir.x * 38.0, 2.0 + uSunDir.z * 22.0);
+        float sd = distance(vec2(vWorld.x, vWorld.z), sunAt);
+        float disc = 1.0 - smoothstep(uNight > 0.5 ? 1.4 : 1.1, uNight > 0.5 ? 1.7 : 1.5, sd);
+        float glow = exp(-sd * 0.12) * 0.28;
+        c += uSunColor * (glow + disc * 0.75);
+        // Stars at night.
+        vec2 sc = floor(vec2(vWorld.x, vWorld.z) * 2.4);
+        float star = step(0.992, hash21(sc * 1.7 + 3.0)) * uNight * smoothstep(0.15, 0.5, h);
+        c += vec3(0.8, 0.85, 0.95) * star * 0.8;
+        // Two drifting layers of cloud.
+        vec2 p1 = vec2(vWorld.x * 0.05 + uTime * 0.012, vWorld.z * 0.1);
+        vec2 p2 = vec2(vWorld.x * 0.11 - uTime * 0.02 + 5.0, vWorld.z * 0.2 + 2.0);
+        float n1 = smoothstep(0.52, 0.8, fbm(p1 * 2.0)) * smoothstep(0.1, 0.35, h) * (1.0 - smoothstep(0.7, 1.0, h));
+        float n2 = smoothstep(0.55, 0.85, fbm(p2 * 2.0)) * smoothstep(0.05, 0.25, h) * 0.7;
+        float shade = 0.82 + 0.18 * fbm(p1 * 5.0 + 9.0);
+        c = mix(c, uCloud * shade, clamp(n1 * 0.75 + n2 * 0.5, 0.0, 0.85));
+        // The tree line.
+        float ridge = 0.012 + 0.03 * vnoise(vec2(vWorld.x * 0.9, 1.0)) + 0.02 * vnoise(vec2(vWorld.x * 3.1, 4.0));
+        float tree = 1.0 - smoothstep(ridge - 0.004, ridge, h);
+        c = mix(c, uTree, tree);
+        gl_FragColor = vec4(min(c, vec3(0.95)), 1.0);
+      }
+    `,
+  });
+}
+
+/** A rank's band across the ground: faint at rest, brightening in a pulse while its salvo runs. */
+export function bandMaterial(color: string): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uColor: { value: v3(color) }, uAlpha: { value: 0.07 }, uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uAlpha;
+      varying vec2 vUv;
+      void main() {
+        float edge = smoothstep(0.0, 0.06, vUv.x) * smoothstep(1.0, 0.94, vUv.x);
+        float line = 1.0 - smoothstep(0.0, 0.03, min(vUv.x, 1.0 - vUv.x));
+        float a = uAlpha * edge + line * uAlpha * 1.6 * step(0.5, fract(vUv.y * 22.0));
+        gl_FragColor = vec4(uColor, min(a, 0.6));
+      }
+    `,
+  });
+}
+
+/** The dashed brass link on the ground between a paired artillery piece and its infantry. */
+export function linkMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uColor: { value: v3("#AAA25D") }, uLength: { value: 1 } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uLength;
+      varying vec2 vUv;
+      void main() {
+        if (fract(vUv.x * uLength * 5.0) > 0.55) {
+          discard;
+        }
+        gl_FragColor = vec4(uColor, 0.9);
       }
     `,
   });

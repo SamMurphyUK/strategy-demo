@@ -9,6 +9,7 @@ import { loadLandmark } from "../landmarkModels";
 import { battleVisuals, getBattleVisualRev } from "../skins/battleVisualConfig";
 import { hexToRgb, type BattleSkin, type BattleTerrain } from "../skins/battleSkin";
 import { blendPresets, cameraPose } from "./battleCamera";
+import { skyAt, type SkyMode, type SkyState } from "./battleSky";
 import { diffSnapshots, pickTarget, snapshotOf, type FeedUnit, type StageEvent, type StageSnapshot } from "./battleFeed";
 import {
   HitStop,
@@ -26,7 +27,10 @@ import {
 import {
   STAGE_DEPTH,
   STAGE_WIDTH,
+  COLUMN_GAP,
   airPose,
+  columnOf,
+  columnX,
   depthDesat,
   depthMist,
   depthScale,
@@ -36,7 +40,10 @@ import {
   type LaneSlot,
 } from "./battleLanes";
 import {
+  backdropMaterial,
+  bandMaterial,
   burstMaterial,
+  linkMaterial,
   discShadowMaterial,
   flashUniforms,
   FLASH_LIGHTS,
@@ -68,6 +75,9 @@ export interface StageOptions {
   bombard?: boolean;
   /** A transport lands the attacker's soldiers into their rank columns, then leaves. */
   amphibious?: boolean;
+  /** The battle's current phase name (ATK_RANK_1 ... DEF_RANK_4), read-only: the active column's band and plate pulse. */
+  getPhase?: () => string;
+  skyMode?: SkyMode;
 }
 
 const SMOKE_POOL = 240;
@@ -191,6 +201,13 @@ export class BattleStageEngine {
   private targetW = 0;
   private targetH = 0;
   private disposed = false;
+  private sky: SkyState;
+  private readonly backdrop = backdropMaterial();
+  private readonly table = new THREE.Group();
+  private bands: { material: THREE.ShaderMaterial; side: "attacker" | "defender"; rank: number }[] = [];
+  private plates: { material: SpriteMaterial; side: "attacker" | "defender"; rank: number }[] = [];
+  private plateTextures = new Map<string, THREE.CanvasTexture>();
+  private landmarkShared: ReturnType<typeof sharedUniforms> | null = null;
   /** A test aid: `?stagespeed=8` runs the stage's clock faster, for a slow machine. 1 otherwise. */
   private readonly speed = Math.max(1, Number(new URLSearchParams(window.location.search).get("stagespeed")) || 1);
   private sea: THREE.ShaderMaterial | null = null;
@@ -203,7 +220,18 @@ export class BattleStageEngine {
     this.skin = opts.skin;
     this.flash = flashUniforms(opts.skin);
     this.rng = mulberry(opts.seed);
+    this.sky = skyAt(opts.skyMode ?? "day", 0);
     this.scene.add(this.root);
+    this.root.add(this.table);
+    // The painted backdrop stands behind the slice.
+    const backdropGeometry = new THREE.PlaneGeometry(110, 60);
+    backdropGeometry.rotateX(Math.PI / 2);
+    const backdropMesh = new THREE.Mesh(backdropGeometry, this.backdrop);
+    backdropMesh.position.set(0, 9.5, 24);
+    backdropMesh.renderOrder = -5;
+    backdropMesh.frustumCulled = false;
+    this.root.add(backdropMesh);
+    this.resources.push(backdropGeometry, this.backdrop);
     this.scene.background = new THREE.Color(0, 0, 0);
     (this.scene.background as THREE.Color).setRGB(0.085, 0.07, 0.06, THREE.NoColorSpace);
 
@@ -405,6 +433,7 @@ export class BattleStageEngine {
         deadAt: -1,
       });
     }
+    this.buildTable(units);
     this.scatterKey = "";
     if (this.epoch < 0 && this.units.size > 0) {
       this.epoch = this.time;
@@ -478,6 +507,7 @@ export class BattleStageEngine {
         return;
       }
       const shared = sharedUniforms();
+      this.landmarkShared = shared;
       shared.uSunDir.value.set(...this.skin.grade.sunDir).normalize();
       const sun = hexToRgb(this.skin.grade.sunColor);
       shared.uSunColor.value.set(sun[0], sun[1], sun[2]);
@@ -746,6 +776,8 @@ export class BattleStageEngine {
       this.buildScatter();
     }
 
+    this.updateSky();
+    this.updateTable();
     this.poseUnits(state);
     this.poseShips();
     if (this.sea) {
@@ -758,6 +790,189 @@ export class BattleStageEngine {
     this.pose(camera, aspect);
   }
 
+
+
+  // --- The table furniture: rank plates, dice, bands, the key, and the pair links ----------------------------------
+
+  /** A painted plate: the rank's Roman numeral over a die face with the pips that hit lit (rank n hits on d6 <= n, so n of 6). */
+  private plateTexture(rank: number): THREE.CanvasTexture {
+    const key = `r${rank}`;
+    const known = this.plateTextures.get(key);
+    if (known) {
+      return known;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    const INK = "#4B3D44";
+    const BRASS = "#AAA25D";
+    const CREAM = "#DDCF99";
+    // The numeral plate.
+    ctx.fillStyle = INK;
+    ctx.fillRect(4, 4, 56, 38);
+    ctx.fillStyle = BRASS;
+    ctx.fillRect(4, 4, 56, 3);
+    ctx.fillRect(4, 39, 56, 3);
+    ctx.fillRect(4, 4, 3, 38);
+    ctx.fillRect(57, 4, 3, 38);
+    ctx.fillStyle = CREAM;
+    ctx.font = "bold 26px 'Courier New', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(["I", "II", "III", "IV"][rank - 1], 32, 24);
+    // The die: six pip places, the first `rank` of them lit.
+    ctx.fillStyle = INK;
+    ctx.fillRect(12, 50, 40, 40);
+    ctx.fillStyle = CREAM;
+    ctx.fillRect(14, 52, 36, 36);
+    const pips: [number, number][] = [
+      [22, 59], [42, 59], [22, 70], [42, 70], [22, 81], [42, 81],
+    ];
+    pips.forEach(([px, py], i) => {
+      ctx.fillStyle = i < rank ? INK : "#C9BB8A";
+      ctx.fillRect(px - 3, py - 3, 6, 6);
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    this.plateTextures.set(key, texture);
+    this.resources.push(texture);
+    return texture;
+  }
+
+  private keyTexture(): THREE.CanvasTexture {
+    const known = this.plateTextures.get("key");
+    if (known) {
+      return known;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 160;
+    canvas.height = 40;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#4B3D44";
+    ctx.fillRect(0, 0, 160, 40);
+    ctx.fillStyle = "#AAA25D";
+    ctx.fillRect(0, 0, 160, 3);
+    ctx.fillRect(0, 37, 160, 3);
+    ctx.fillStyle = "#DDCF99";
+    ctx.font = "bold 10px 'Courier New', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("HITS ON d6 \u2264 RANK", 80, 14);
+    ctx.fillText("I=1  II=2  III=3  IV=4", 80, 28);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    this.plateTextures.set("key", texture);
+    this.resources.push(texture);
+    return texture;
+  }
+
+  private clearTable(): void {
+    this.table.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+      }
+    });
+    this.table.clear();
+    this.bands = [];
+    this.plates = [];
+  }
+
+  private buildTable(units: readonly FeedUnit[]): void {
+    this.clearTable();
+    const lipD = this.opts.coastal ? 0.135 : 0.08;
+    const lipY = toWorld(0, lipD)[1];
+    const mist = v3(this.skin.grade.valleyMist);
+    for (const side of ["attacker", "defender"] as const) {
+      for (let col = 0; col < 4; col++) {
+        const rank = side === "attacker" ? 4 - col : col + 1;
+        const x = columnX(side, col);
+        const bandGeometry = new THREE.PlaneGeometry(COLUMN_GAP * 0.92, STAGE_DEPTH * 0.58);
+        const bandMat = bandMaterial("#AAA25D");
+        const band = new THREE.Mesh(bandGeometry, bandMat);
+        band.position.set(x, toWorld(0, 0.43)[1], 0.008);
+        band.renderOrder = 1;
+        this.table.add(band);
+        this.bands.push({ material: bandMat, side, rank });
+        const plateMat = spriteMaterial(this.flash, this.plateTexture(rank), mist);
+        const plate = new THREE.Mesh(this.standeeGeometry(0.95, 1.45, 0, 0.725), plateMat);
+        plate.position.set(x, lipY, 0);
+        plate.renderOrder = 7;
+        this.table.add(plate);
+        this.plates.push({ material: plateMat, side, rank });
+      }
+    }
+    // The key on the lip, between the two armies.
+    const keyMat = spriteMaterial(this.flash, this.keyTexture(), mist);
+    const key = new THREE.Mesh(this.standeeGeometry(3.4, 0.85, 0, 0.425), keyMat);
+    key.position.set(0, lipY, 0);
+    key.renderOrder = 7;
+    this.table.add(key);
+    // The dashed brass link on the ground between a paired artillery piece and the infantry it lifts to rank 2.
+    for (const u of units) {
+      const mate = u.pairedWithUid ? this.units.get(u.pairedWithUid) : undefined;
+      const self = this.units.get(u.uid);
+      if (!mate || !self || u.type !== "artillery") {
+        continue;
+      }
+      const [ax, ay] = toWorld(self.slot.x, self.slot.d);
+      const [bx, by] = toWorld(mate.slot.x, mate.slot.d);
+      const len = Math.max(0.1, Math.hypot(bx - ax, by - ay));
+      const mat = linkMaterial();
+      mat.uniforms.uLength.value = len;
+      const link = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.1), mat);
+      link.position.set((ax + bx) / 2, (ay + by) / 2, 0.03);
+      link.rotation.z = Math.atan2(by - ay, bx - ax);
+      link.renderOrder = 3;
+      this.table.add(link);
+    }
+    void columnOf;
+  }
+
+  private updateTable(): void {
+    const phase = this.opts.getPhase?.() ?? "";
+    const pulse = 0.5 + 0.5 * Math.sin(this.real * 8);
+    for (const b of this.bands) {
+      const active = phase === `${b.side === "attacker" ? "ATK" : "DEF"}_RANK_${b.rank}`;
+      b.material.uniforms.uAlpha.value = active ? 0.2 + 0.16 * pulse : 0.07;
+    }
+    for (const p of this.plates) {
+      const active = phase === `${p.side === "attacker" ? "ATK" : "DEF"}_RANK_${p.rank}`;
+      p.material.uniforms.uHot.value = active ? 0.35 + 0.65 * pulse : 0;
+    }
+  }
+
+  /** The campaign's sun and sky for this moment of the battle: the light on every surface, the backdrop, and the landmark's own light. */
+  private updateSky(): void {
+    const s = (this.sky = skyAt(this.opts.skyMode ?? "day", this.time));
+    this.flash.uLight.value.set(s.light[0], s.light[1], s.light[2]);
+    const u = this.backdrop.uniforms;
+    u.uZenith.value.set(...s.zenith);
+    u.uHorizon.value.set(...s.horizon);
+    u.uTree.value.set(...s.tree);
+    u.uCloud.value.set(...s.cloud);
+    u.uSunDir.value.set(...s.dir);
+    u.uSunColor.value.set(...s.color);
+    u.uNight.value = s.night;
+    u.uTime.value = this.time;
+    const sh = this.landmarkShared;
+    if (sh) {
+      sh.uSunDir.value.set(...s.dir).normalize();
+      sh.uSunColor.value.set(...s.color);
+      sh.uAmbient.value.set(...s.ambient);
+      sh.uDirect.value = s.direct;
+    }
+  }
 
   // --- The sea strip's ships ---------------------------------------------------------------------------------------
 
@@ -892,18 +1107,20 @@ export class BattleStageEngine {
       u.uHot.value = Math.max(0, 1 - (this.time - view.hotT) / 0.14);
       view.mesh.visible = view.fade > 0.02;
       // The contact shadow disc: under the unit's feet, or on the ground below an aircraft, offset away from the sun.
-      const sun = this.skin.grade.sunDir;
+      const sun = this.sky.dir;
+      const shadowK = Math.min(1.3, 0.5 + this.sky.shadow * 1.7);
+      const lean = Math.min(1.2, 0.25 / Math.max(0.3, sun[2]));
       if (lane === "air") {
         const g = groundShadow(x, d, h, sun);
         const [sx, sy] = toWorld(g.x, g.d);
         view.disc.position.set(sx, sy, 0.02);
         view.disc.scale.set(view.sheet.width * 0.32 * scale, view.sheet.width * 0.14 * scale, 1);
       } else {
-        view.disc.position.set(wx - sun[0] * 0.06, wy - sun[1] * 0.06, 0.02);
+        view.disc.position.set(wx - sun[0] * lean * 0.5, wy - sun[1] * lean * 0.5, 0.02);
         view.disc.scale.set(view.sheet.width * 0.3 * scale, view.sheet.width * 0.13 * scale, 1);
       }
       view.disc.visible = view.fade > 0.2;
-      view.discMaterial.uniforms.uOpacity.value = (lane === "air" ? 0.32 : 0.55) * view.fade;
+      view.discMaterial.uniforms.uOpacity.value = (lane === "air" ? 0.32 : 0.55) * shadowK * view.fade;
     }
     if (this.landmarkDisc) {
       this.landmarkDisc.visible = true;

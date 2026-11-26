@@ -118,8 +118,8 @@ export const BATTLE_SKINS: Readonly<Record<BattleSkinId, BattleSkin>> = Object.f
       bevel: 0.09,
     },
     palettes: {
-      plains: { low: "#7D7B62", high: "#8E9F7D", worn: "#846D59" },
-      bocage: { low: "#5B7D73", high: "#8E9F7D", worn: "#7D7B62" },
+      plains: { low: "#7D7B62", high: "#AAA25D", worn: "#846D59" },
+      bocage: { low: "#7D7B62", high: "#8E9F7D", worn: "#846D59" },
       urban: { low: "#645355", high: "#A99C8D", worn: "#4B3D44" },
       mountain: { low: "#7D7B62", high: "#A88A5E", worn: "#645355" },
     },

@@ -63,7 +63,7 @@ const PX_PER_STAGE_UNIT = 1280 / STAGE_WIDTH;
 export const COLUMN_GAP = 105 / PX_PER_STAGE_UNIT;
 const ATTACKER_X0 = (102 - 640) / PX_PER_STAGE_UNIT;
 const DEFENDER_X0 = (862 - 640) / PX_PER_STAGE_UNIT;
-const ROW_GAP = 0.085;
+const ROW_GAP = 0.1;
 const ROW_D0 = 0.17;
 const DEFAULT_RANK: Record<string, number> = { infantry: 1, mech_infantry: 1, aa: 1, aaa: 1, artillery: 2, tank: 3, armor: 3, fighter: 3, tactical_bomber: 3, strategic_bomber: 4 };
 
@@ -101,11 +101,17 @@ export function columnOf(side: Side, rank: number): number {
   return side === "attacker" ? 4 - r : r - 1;
 }
 
+/** x of a column's centre, before any row stagger. */
+export function columnX(side: Side, col: number): number {
+  return side === "attacker" ? ATTACKER_X0 + col * COLUMN_GAP : DEFENDER_X0 + col * COLUMN_GAP;
+}
+
 /** Position of a column and row on the stage. Odd rows stand a little further out, so the ranks do not form a grid. */
 export function rankSlot(side: Side, col: number, row: number): { x: number; d: number } {
   const out = row % 2 === 1 ? 0.2 : 0;
   const x = side === "attacker" ? ATTACKER_X0 + col * COLUMN_GAP - out : DEFENDER_X0 + col * COLUMN_GAP + out;
-  return { x, d: Math.min(0.66, ROW_D0 + row * ROW_GAP) };
+  // A small stagger in depth between neighbouring columns, so the rows do not read as a grid.
+  return { x, d: Math.min(0.68, ROW_D0 + row * ROW_GAP + (col % 2) * 0.035) };
 }
 
 /** Where the airspace's Nth aircraft of a side starts, as a phase round its loop, and its altitude. */

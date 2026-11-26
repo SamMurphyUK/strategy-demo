@@ -18,6 +18,7 @@ import {
 } from "../skins/battleVisualConfig";
 import type { FeedUnit } from "./battleFeed";
 import { hashString, landmarkFor, terrainFor, type TerrainInput } from "./battleScatter";
+import { skyModeFor } from "./battleSky";
 import { BattleStageEngine } from "./battleStageEngine";
 
 export interface BattleStageProps {
@@ -32,6 +33,8 @@ export interface BattleStageProps {
   coastal?: boolean;
   bombard?: boolean;
   amphibious?: boolean;
+  /** The battle's phase name, read-only, for the active column's pulse. */
+  getPhase?: () => string;
 }
 
 function Driver({ engine }: { engine: BattleStageEngine }) {
@@ -115,7 +118,7 @@ function LookPanel({ skinId }: { skinId: string }) {
 }
 
 export default function BattleStage(props: BattleStageProps) {
-  const { getUnits, regionId, regionName, theater, scene, attackerFaction, defenderFaction, coastal, bombard, amphibious } = props;
+  const { getUnits, regionId, regionName, theater, scene, attackerFaction, defenderFaction, coastal, bombard, amphibious, getPhase } = props;
   const skinId = battleSkinFor(theater, scene?.kind === "land" ? scene.biome : undefined);
   const [engine, setEngine] = useState<BattleStageEngine | null>(null);
 
@@ -132,6 +135,8 @@ export default function BattleStage(props: BattleStageProps) {
       coastal,
       bombard,
       amphibious,
+      getPhase,
+      skyMode: skyModeFor(theater, new URLSearchParams(window.location.search).get("sky")),
     });
     setEngine(next);
     return () => {

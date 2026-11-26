@@ -457,6 +457,7 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   const attackerUnitsRef = useRef<CombatUnit[]>([]);
   const defenderUnitsRef = useRef<CombatUnit[]>([]);
   // What the 3D stage reads of the battle: both sides' units, read-only (see viewport3d/battle/battleFeed.ts).
+  const getStagePhase = useCallback((): string => battlePhaseRef.current, []);
   const getStageUnits = useCallback((): readonly CombatUnit[] => [...attackerUnitsRef.current, ...defenderUnitsRef.current], []);
   attackerUnitsRef.current = attackerUnits;
   defenderUnitsRef.current = defenderUnits;
@@ -5370,8 +5371,9 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
                 regionName={match?.regionName ?? (sandboxRegionId || undefined)}
                 theater={currentTheater}
                 scene={match?.scene ?? sceneForRegion(sandboxRegionId) ?? undefined}
-                coastal={(() => { const sc = match?.scene ?? sceneForRegion(sandboxRegionId); return sc?.kind === 'land' ? sc.coastal : false; })()}
+                coastal={(() => { const sc = match?.scene ?? sceneForRegion(sandboxRegionId); return sc?.kind === 'land' ? sc.coastal : currentTheater === 'normandy'; })()}
                 bombard={match?.bombard ?? currentTheater === 'normandy'}
+                getPhase={getStagePhase}
                 amphibious={match?.amphibious ?? new URLSearchParams(window.location.search).get('amphibious') === '1'}
                 attackerFaction={outcomeFactionId(match?.attackerFaction, currentTheater, 'attacker')}
                 defenderFaction={outcomeFactionId(match?.defenderFaction, currentTheater, 'defender')}
