@@ -202,6 +202,12 @@ export interface MapVisualConfig {
   /** How far a ship's shadow stretches across the water, as a share of what the sun would throw. 0 is none; low is a reflection. */
   /** How deep the shadows drawn on the monuments go. 1 is the plain shade. */
   landmarkShadowStrength: number;
+  /** The recess wash of the city landmarks: a deeper, hue-shifted wash pooled in the crevices and under the eaves. 0 is none. */
+  landmarkWashStrength: number;
+  /** The drybrush edge highlight on the landmark ridges, domes and spires. 0 is none. */
+  landmarkDrybrushStrength: number;
+  /** The dark earth and stone contact shade across the foot of each landmark. 0 is none. */
+  landmarkGroundAO: number;
   /** How much of its cliff an island keeps: 1 stands as tall as the continents, lower sits lower in the sea. A territory can take its own (see islandOverrides.ts). */
   islandElevationScale: number;
   /** The thick monsoon mist over the Southeast Asian jungles, hugging the canopy. 0 is none. */
@@ -393,6 +399,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   microSpriteTiltDeg: 10,
   tiltShiftStrength: 1,
   landmarkShadowStrength: 1.7,
+  landmarkWashStrength: 0.7,
+  landmarkDrybrushStrength: 0.6,
+  landmarkGroundAO: 0.7,
   islandElevationScale: 0.6,
   seaJungleMistStrength: 1,
   microBirdsWeight: 1,
@@ -579,6 +588,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   microSpriteTiltDeg: [0, 20],
   tiltShiftStrength: [0, 2],
   landmarkShadowStrength: [1, 3],
+  landmarkWashStrength: [0, 1.5],
+  landmarkDrybrushStrength: [0, 1.5],
+  landmarkGroundAO: [0, 1.5],
   islandElevationScale: [0.15, 1],
   seaJungleMistStrength: [0, 2],
   microBirdsWeight: [0, 2],

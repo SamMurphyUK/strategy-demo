@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { LANDMARKS } from "./placements";
+import { classOfName, writeCurvature, writeMaterialClasses } from "./landmarkFinish";
 import { PART_FIXED } from "./propMeshes";
 
 const urls = import.meta.glob("../../../assets/models/landmarks/landmark_*_solo.glb", {
@@ -47,6 +48,8 @@ function boardPart(mesh: THREE.Mesh): THREE.BufferGeometry {
   out.setAttribute("position", new THREE.BufferAttribute(new Float32Array(position.array), 3));
   out.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   out.setAttribute("aPart", new THREE.BufferAttribute(new Float32Array(count).fill(PART_FIXED), 1));
+  // The material class, from its name where it has one and from each vertex colour where it has not (see landmarkFinish.ts).
+  writeMaterialClasses(out, classOfName(material ? String((material as THREE.Material).name ?? "") : ""));
   out.rotateX(Math.PI / 2);
   out.computeVertexNormals();
   geometry.dispose();
@@ -76,6 +79,8 @@ export function loadLandmark(id: string): Promise<THREE.BufferGeometry | null> {
           const merged = parts.length > 0 ? mergeGeometries(parts, false) : null;
           parts.forEach((part) => part.dispose());
           if (merged) {
+            // Where the surface is a recess and where it is a ridge, for the wash and the drybrush.
+            writeCurvature(merged);
             // How high up the monument each vertex is, from 0 at the base to 1 at the spire: the reveal rises by it.
             const at = merged.getAttribute("position");
             let low = Infinity;

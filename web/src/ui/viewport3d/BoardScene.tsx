@@ -1651,6 +1651,7 @@ export function BoardScene(props: BoardSceneProps) {
     // The surfaces catch the sun harder the sliders say, and the board's tooth and sheen come in over the close zoom.
     kit.landmarkLook.uLandmarkSpec.value = mapVisuals.landmarkRimStrength;
     kit.landmarkLook.uLandmarkShadow.value = mapVisuals.landmarkShadowStrength;
+    kit.landmarkLook.uLandmarkFinish.value.set(mapVisuals.landmarkWashStrength, mapVisuals.landmarkDrybrushStrength, mapVisuals.landmarkGroundAO);
     kit.plinthLook.uLandmarkSpec.value = mapVisuals.plinthSpecular;
     const boardSheen = mapVisuals.boardSheenStrength * Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35));
     kit.landTop.uniforms.uBoardSheen.value = boardSheen;

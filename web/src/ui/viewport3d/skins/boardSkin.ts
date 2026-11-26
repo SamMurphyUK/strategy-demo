@@ -74,6 +74,9 @@ export const BOARD_SKINS: Readonly<Record<BoardSkinId, BoardSkin>> = Object.free
       "sandSubsurfaceAmber",
       "snowDriftBleed",
       "crestPowderStrength",
+      "landmarkWashStrength",
+      "landmarkDrybrushStrength",
+      "landmarkGroundAO",
     ],
   },
 });

@@ -1081,6 +1081,11 @@ varying float vGone;
 // Where the surface is and which way it faces, in the board's space, for the specular.
 varying vec3 vN;
 varying vec3 vWorld;
+// The miniature finish of a city landmark: its material class (0 for a model with none) and its curvature (see landmarkFinish.ts).
+attribute float aMat;
+attribute float aCurve;
+varying float vMat;
+varying float vCurve;
 #endif
 // The model point in the board's space: an optional part folds away, and everything rises with uGrow.
 // A prop on a sculpted range stands on it: aRise is the range's two shapes at its foot (see mountainRelief.ts).
@@ -1096,6 +1101,8 @@ vec3 propPoint() {
   #ifdef LANDMARK
   vNormY = aNormY;
   vGone = aGone;
+  vMat = aMat;
+  vCurve = aCurve;
   #else
   p.xy *= mix(0.35, 1.0, uGrow);
   p.z *= uGrow;
@@ -1150,10 +1157,12 @@ export interface LandmarkUniforms {
   uLandmarkSpec: { value: number };
   /** How deep the shadows drawn on a monument go. 1 is the plain shade. */
   uLandmarkShadow: { value: number };
+  /** The miniature finish: the crevice wash, the drybrush edges, and the ground shade at the foot. */
+  uLandmarkFinish: { value: THREE.Vector3 };
 }
 
 export function landmarkUniforms(): LandmarkUniforms {
-  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 }, uLandmarkShadow: { value: 1 } };
+  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 }, uLandmarkShadow: { value: 1 }, uLandmarkFinish: { value: new THREE.Vector3(0, 0, 0) } };
 }
 
 /** Trees, peaks, and buildings. With `landmark` it is a city landmark, at a fixed size and revealed from the ground up. */
@@ -1236,6 +1245,10 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
       varying vec3 vWorld;
       uniform float uLandmarkSpec;
       uniform float uLandmarkShadow;
+      // The finish: the crevice wash, the drybrush on the edges, and the dark at the foot.
+      uniform vec3 uLandmarkFinish;
+      varying float vMat;
+      varying float vCurve;
       uniform vec3 uSunDir;
       uniform vec3 uSunColor;
       uniform float uDirect;
@@ -1265,7 +1278,32 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
         c *= mix(vec3(1.0), mix(vec3(0.82, 0.9, 1.06), vec3(1.07, 1.0, 0.9), keyed), clamp(uLandmarkSpec, 0.0, 1.0));
         float glint = pow(max(dot(sn, normalize(uSunDir + sv)), 0.0), 38.0);
         float rim = pow(1.0 - max(dot(sn, sv), 0.0), 3.0) * clamp(dot(sn, uSunDir) + 0.35, 0.0, 1.0);
-        c += uSunColor * (glint * 0.55 + rim * 0.3) * uLandmarkSpec * uDirect;
+        // How glossy each material is, from matte stone and brick to satin timber and metal and the warm sheen of gilding.
+        float matteStone = step(0.5, vMat) * step(vMat, 1.5);
+        float matteBrick = step(1.5, vMat) * step(vMat, 2.5);
+        float satinMetal = step(2.5, vMat) * step(vMat, 3.5);
+        float satinTimber = step(3.5, vMat) * step(vMat, 4.5);
+        float gilded = step(4.5, vMat);
+        float finish = step(0.5, vMat);
+        float gloss = 1.0 - finish + matteStone * 0.3 + matteBrick * 0.18 + satinMetal * 1.15 + satinTimber * 0.7 + gilded * 1.35;
+        c += uSunColor * (glint * 0.55 * gloss + rim * 0.3) * uLandmarkSpec * uDirect;
+        if (finish > 0.5) {
+          // The miniature finish. The recesses, and the faces that look down, pool a wash of a deeper, hue-shifted colour (warm ochre in
+          // stone, burnt umber in brick, cool shadow in metal, deep brown under timber eaves, warm bronze in gilding). The ridges that face
+          // up catch a drybrush edge. The foot of the building sits in a dark earth and stone contact shadow. A fine grain breaks stone and brick.
+          vec3 washTone = matteStone * vec3(0.8, 0.66, 0.48) + matteBrick * vec3(0.56, 0.36, 0.27) + satinMetal * vec3(0.58, 0.64, 0.7) + satinTimber * vec3(0.52, 0.34, 0.26) + gilded * vec3(0.72, 0.54, 0.3);
+          float down = max(-sn.z, 0.0);
+          float recess = clamp(max(vCurve, 0.0) + down * 0.6, 0.0, 1.0);
+          c = mix(c, c * washTone, recess * clamp(uLandmarkFinish.x, 0.0, 1.5) * 0.7);
+          float ridge = clamp(max(-vCurve, 0.0), 0.0, 1.0) * smoothstep(0.15, 0.85, sn.z + 0.25 * keyed);
+          c = mix(c, min(c * 1.28 + vec3(0.05, 0.04, 0.02), vec3(0.92)), ridge * clamp(uLandmarkFinish.y, 0.0, 1.5) * 0.65);
+          float grain = (fract(sin(dot(floor(vWorld.xy * 46.0 + vWorld.z * 31.0), vec2(127.1, 311.7))) * 43758.5453) - 0.5);
+          c *= 1.0 + grain * 0.07 * (matteStone + matteBrick * 1.4);
+          float foot = 1.0 - smoothstep(0.0, 0.12, vNormY);
+          c = mix(c, c * vec3(0.46, 0.41, 0.37), foot * clamp(uLandmarkFinish.z, 0.0, 1.5) * 0.85);
+          // White marble and gilding never reach the bloom: the finish is held at 0.92.
+          c = min(c, vec3(0.92));
+        }
         c = min(c, vec3(0.95));
         float shown = lmAlpha(vNormY) * (1.0 - vGone);
         if (shown < lmBayer(gl_FragCoord.xy)) {
