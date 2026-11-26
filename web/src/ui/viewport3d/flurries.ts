@@ -2,7 +2,8 @@
 // weather's snow share. They stand above the ground (never under it), are never tone mapped, and cost one draw call.
 import * as THREE from "three";
 
-export const FLURRY_POOL = 320;
+/** The pool, a half again as many flakes as it was at 320, so the powder is thick at the closest zoom. */
+export const FLURRY_POOL = 480;
 const REACH = 40;
 
 export interface FlurryParams {

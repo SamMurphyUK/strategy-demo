@@ -84,6 +84,8 @@ export function writePlinths(
   overSea?: (x: number, y: number) => boolean,
   /** How far a stack's base is faded out, 0 to 1: the bases of a fight fade away as it begins. */
   goneFor?: (regionId: string, key: string) => number,
+  /** How far the ground has been lowered at a point, in world units (an island). The base stands that much lower. */
+  dropAt?: (x: number, y: number) => number,
 ): number {
   let count = 0;
   for (const layout of frame.layouts) {
@@ -109,6 +111,7 @@ export function writePlinths(
       out.matrices[m + 10] = radius * look.heightRatio;
       out.matrices[m + 12] = world.x;
       out.matrices[m + 13] = -world.y;
+      out.matrices[m + 14] = -(dropAt?.(world.x, world.y) ?? 0);
       out.matrices[m + 15] = 1;
       out.colors.set(rgb(factionPalette(counter.slot.entry.faction_id).primary), count * 3);
       const under = riseAt(world.x, world.y);

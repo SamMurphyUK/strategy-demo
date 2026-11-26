@@ -692,6 +692,8 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
       uSwellTime: { value: 0 },
       uFrontAt: { value: 0 },
       uSurgeFoam: { value: 0 },
+      /** How dark the cliff is in its own shade. */
+      uCliffShade: { value: 0.6 },
       uRockHigh: { value: blend(MILITARY.brown, MILITARY.tan, 0.28) },
       uRockLow: { value: blend(MILITARY.taupe, MILITARY.brown, 0.2) },
       uRockWet: { value: blend(MILITARY.taupe, MILITARY.charcoal, 0.6) },
@@ -717,6 +719,7 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
       ${WATER_Y_GLSL}
       uniform float uSwellTime;
       uniform float uSurgeFoam;
+      uniform float uCliffShade;
       varying vec2 vMapXY;
       uniform vec3 uRockHigh;
       uniform vec3 uRockLow;
@@ -760,7 +763,11 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
         ndl += (cut.x - 0.502) * 3.0 * uSurface.x;
         #endif
         // The cliffs in view face the viewer and away from the sun. A fill from the near side keeps the strata readable.
-        vec3 light = lit(stepped(ndl * 1.15)) + vec3(0.14, 0.14, 0.16) * max(-n.y, 0.0) * uRelief;
+        vec3 light = lit(stepped(ndl * 1.15)) + vec3(0.14, 0.14, 0.16) * max(-n.y, 0.0) * uRelief * max(0.0, 1.0 - uCliffShade * 0.5);
+        // Shade of its own: the foot of the wall sits in the dark where the water meets it, and the face turned from the sun goes deeper.
+        float foot = 1.0 - smoothstep(0.0, 0.7, vHeight);
+        float away = 1.0 - smoothstep(-0.2, 0.5, ndl);
+        rock *= 1.0 - uCliffShade * (0.34 * foot + 0.22 * away);
         gl_FragColor = vec4(rock * light, 1.0);
       }
     `,

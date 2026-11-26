@@ -79,7 +79,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { microSpriteLean, unitLean } from "./boardTune";
+import { microAlpha, microSpriteLean, unitLean } from "./boardTune";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { waterY } from "../viewport3d/skins/waterSwell";
@@ -161,6 +161,8 @@ export interface TerrainScene {
    * cleared, and the base map, cliffs, and terrain stamps are left out.
    */
   backdrop?: boolean;
+  /** With a 3D board under the canvas: how far the water lies below the land, in world units. A sea zone's coast is outlined at the foot of the cliff. */
+  cliffDrop?: number;
 }
 
 export interface PlacedCounter {
@@ -1052,7 +1054,9 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
       ctx.fill(path, "evenodd");
       ctx.lineWidth = width * px;
       ctx.strokeStyle = color;
-      ctx.stroke(path);
+      if (!strokeSeaAtCliffFoot(ctx, s, id)) {
+        ctx.stroke(path);
+      }
     }
   }
 
@@ -1062,6 +1066,61 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
 
   drawFrontlines(ctx, s.frontlines ?? []);
   drawBattleScars(ctx, s.scars ?? [], px, (s.unitFade ?? 0) <= 0);
+}
+
+/**
+ * A sea zone's outline, drawn where the water meets the cliff and not along the top of it. The coast stretches of the outline are
+ * moved down the screen by the cliff's height; the borders with other sea zones are on the water already and stay. Returns false
+ * when it does not apply (a land territory, a flat map, or no true shape yet), so the caller strokes the path as before.
+ */
+function strokeSeaAtCliffFoot(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string): boolean {
+  const drop = s.cliffDrop ?? 0;
+  const shape = s.shapes?.get(regionId);
+  const land = s.land;
+  const region = s.regions.find((item) => item.id === regionId);
+  if (!(drop > 0) || !shape || !land || region?.type !== "sea") {
+    return false;
+  }
+  const { sx, sy } = projectionScales(s.view.k);
+  const ratio = sx > 0 ? Math.min(1, sy / sx) : 1;
+  // The cliff's face on the screen, in pixels, and that in world y.
+  const facePx = drop * Math.sqrt(Math.max(0, 1 - ratio * ratio)) * s.view.k;
+  const shiftY = sy > 0 ? facePx / sy : 0;
+  const probe = 0.7;
+  for (const polygon of shape) {
+    for (const ring of polygon) {
+      const n = ring.length;
+      if (n < 2) {
+        continue;
+      }
+      // A segment is coast when land lies close to it on either side.
+      const coast: boolean[] = [];
+      for (let i = 0; i < n; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % n];
+        const mx = (a[0] + b[0]) / 2;
+        const my = (a[1] + b[1]) / 2;
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const nx = -(b[1] - a[1]) / len;
+        const ny = (b[0] - a[0]) / len;
+        coast.push(landMaskAt(land, { x: mx + nx * probe, y: my + ny * probe }) || landMaskAt(land, { x: mx - nx * probe, y: my - ny * probe }));
+      }
+      ctx.beginPath();
+      let open = false;
+      for (let i = 0; i < n; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % n];
+        const dy = coast[i] ? shiftY : 0;
+        if (!open || (i > 0 && coast[i] !== coast[i - 1])) {
+          ctx.moveTo(a[0], a[1] + dy);
+        }
+        ctx.lineTo(b[0], b[1] + dy);
+        open = true;
+      }
+      ctx.stroke();
+    }
+  }
+  return true;
 }
 
 /** Hover wash on the arrow layer, so a pointer move does not repaint the coast. */
@@ -1082,7 +1141,9 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
     ctx.fill(path, "evenodd");
     ctx.lineWidth = 2 * px;
     ctx.strokeStyle = HOVER_COLOR;
-    ctx.stroke(path);
+    if (!strokeSeaAtCliffFoot(ctx, scene, regionId)) {
+      ctx.stroke(path);
+    }
   }
   ctx.restore();
 }
@@ -1352,8 +1413,16 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         items.push({
           worldY,
           paint: () => {
+            // At the closest zoom the factory, harbor and airfield badges fade away: the models stand there instead.
+            const shown = 1 - microAlpha(scene.view.k);
+            if (shown < 0.02) {
+              return;
+            }
             setScreenTransform(ctx, scene.dpr);
+            ctx.save();
+            ctx.globalAlpha *= shown;
             drawFacilityBadge(ctx, badge, facilitiesOf(layout.region), scene.dpr);
+            ctx.restore();
           },
         });
       }

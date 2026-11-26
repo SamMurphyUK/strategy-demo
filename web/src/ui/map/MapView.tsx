@@ -49,6 +49,7 @@ import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleSta
 import { borderPasses, microSpriteLean, unitLean } from "./boardTune";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
+import { SEA_DROP } from "../viewport3d/boardCamera";
 import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
 import { CoastTuner } from "./CoastTuner";
 import { getCoastTuneRev, subscribeCoastTune } from "./coastTuneStore";
@@ -121,6 +122,8 @@ export interface MapViewProps {
   travel?: readonly TravelPlan[];
   /** Territories whose fight has begun: the bases under their stacks fade away. */
   fighting?: readonly string[];
+  /** Territories whose harbor or airbase has been built in play, on top of those the map has. */
+  builtFacilities?: readonly { regionId: string; airbase: boolean; harbor: boolean }[];
   selectedRegionId: string;
   selectedStack: { regionId: string; key: string } | null;
   highlight: HighlightMode;
@@ -993,6 +996,7 @@ export function MapView(props: MapViewProps) {
             )
           : undefined,
       backdrop: boardGround,
+      cliffDrop: boardGround ? SEA_DROP * mapVisuals.terrainHeightScale : 0,
       scars: editor || boardGround
         ? []
         : (props.relief?.scars ?? []).flatMap((scar) => {

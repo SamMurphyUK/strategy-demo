@@ -12,7 +12,7 @@
 // shade, the glow, the outline, and the grain belong to the finishing passes in postStack.ts.
 // Each one that is off is not drawn, not allocated, and not in any shader.
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import * as THREE from "three";
 import type { BoardFrame, FigureCards } from "../map/boardLayer";
 import { stackOfFigure } from "../map/figureCards";
@@ -49,6 +49,10 @@ import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
 import { biomeAtMap } from "./geography";
 import { createMist } from "./mistField";
+import { type IslandCell, islandScale, lowerShare, makeLowerAt } from "./islandLowering";
+import { getIslandRevision, getIslandScales, subscribeIslandScales } from "../map/islandOverrides";
+import { facilityGeometry } from "./facilityModels";
+import { facilityKindOf } from "./placements";
 import { microAlpha } from "../map/boardTune";
 import { type BiomeWeather, dampWeather, sampleWeather } from "./biomeAtmosphere";
 import { createFlurries } from "./flurries";
@@ -128,6 +132,8 @@ export interface BoardSceneProps {
   look: BoardLook;
   /** Territories whose fight has begun: their bases fade away. */
   fighting?: readonly string[];
+  /** The islands, which can be lowered (see islandLowering.ts). Each is drawn as a slab of its own. */
+  islands?: readonly IslandCell[];
   /** The main menu is over the board: dim it. */
   dim: boolean;
   /** The viewer asked for less motion: the water, the smoke, and the sun hold still. */
@@ -434,7 +440,7 @@ const AIR_KIND = 2;
  * reaches from them, and where that picture is on the figure canvas. A ship stands on the water,
  * and an aircraft is lifted off the ground, so its shadow falls clear of it.
  */
-function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number, drop: number): number {
+function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, mask: HTMLCanvasElement, shift: number, drop: number, shipStretch: number): number {
   rig.kinds.clear();
   for (const layout of frame.layouts) {
     const sea = layout.region.type === "sea" ? SEA_KIND : 0;
@@ -462,10 +468,13 @@ function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, ma
     foot[count * 3] = world.x;
     foot[count * 3 + 1] = -world.y + (sea ? shift : 0);
     foot[count * 3 + 2] = (sea ? -drop : 0) + ((kind & AIR_KIND) !== 0 ? lift : 0);
+    // A ship rides low on the water, so its shadow is a short, soft one lying close to the hull, near a reflection: the card is
+    // squashed to a share of its height, and the sun throws it that much shorter.
+    const stretch = sea ? shipStretch : 1;
     box[count * 4] = (card.left - card.feetX) / perUnit;
-    box[count * 4 + 1] = (card.feetY - (card.top + card.h)) / perUnit;
+    box[count * 4 + 1] = ((card.feetY - (card.top + card.h)) / perUnit) * stretch;
     box[count * 4 + 2] = card.w / perUnit;
-    box[count * 4 + 3] = card.h / perUnit;
+    box[count * 4 + 3] = (card.h / perUnit) * stretch;
     sheet[count * 4] = (card.left * scale) / mask.width;
     sheet[count * 4 + 1] = 1 - ((card.top + card.h) * scale) / mask.height;
     sheet[count * 4 + 2] = ((card.left + card.w) * scale) / mask.width;
@@ -560,6 +569,38 @@ function PropField({ kind, model, instances, kit, patches, landmark }: PropField
 function Landmark({ mark, model, kit, patches }: { mark: BoardLandmark; model: THREE.BufferGeometry; kit: Kit; patches: readonly ReliefPatch[] }) {
   const instances = useMemo(() => [mark.instance], [mark.instance]);
   return <PropField kind="house" model={model} instances={instances} kit={kit} patches={patches} landmark />;
+}
+
+/**
+ * One island: a slab of its own, with its own cliff. It is drawn where the continents are, then lowered toward the sea by the share its
+ * scale takes off the cliff (see islandLowering.ts), read every frame so the slider moves it live. Its shadow slab is the same, once more.
+ */
+function IslandSlab({ cell, kit, top, caster }: { cell: IslandCell; kit: Kit; top: THREE.Material; caster: THREE.Material[] }) {
+  const geometry = useDisposable(
+    () => slabGeometry([cell.polygon], SEA_DROP),
+    (old) => old.dispose(),
+    [cell],
+  );
+  const main = useRef<THREE.Mesh>(null);
+  const cast = useRef<THREE.Mesh>(null);
+  const materials = useMemo(() => [top, kit.cliff], [top, kit]);
+  useFrame(() => {
+    const heightScale = mapVisuals.terrainHeightScale;
+    const drop = SEA_DROP * heightScale;
+    const share = lowerShare(islandScale(cell, getIslandScales(), mapVisuals.islandElevationScale));
+    for (const mesh of [main.current, cast.current]) {
+      if (mesh) {
+        mesh.position.z = -drop * (1 + share);
+        mesh.scale.z = heightScale;
+      }
+    }
+  });
+  return (
+    <>
+      <mesh ref={main} geometry={geometry} material={materials} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
+      <mesh ref={cast} geometry={geometry} material={caster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
+    </>
+  );
 }
 
 /** One sculpted range: a grid laid on the land, lifted in the shader, and the same grid for the sun's shadow map. */
@@ -677,6 +718,7 @@ function Smoke({ scars, chimneys, kit }: { scars: readonly BattleScar[]; chimney
 }
 
 const NO_PATCHES: readonly ReliefPatch[] = [];
+const NO_ISLANDS: readonly IslandCell[] = [];
 const NO_RELIEF = { dome: 0, ridge: 0 } as const;
 
 export function BoardScene(props: BoardSceneProps) {
@@ -868,10 +910,57 @@ export function BoardScene(props: BoardSceneProps) {
   kit.shared.uMask.value = maskTexture;
   kit.shared.uBounds.value.set(bounds.x, bounds.y, bounds.w, bounds.h);
 
+  const islands = props.islands ?? NO_ISLANDS;
+  // The continents are one slab. Each island is a slab of its own, so it can stand lower.
   const slab = useDisposable(
-    () => slabGeometry(land, SEA_DROP),
+    () => {
+      const taken = new Set(islands.map((cell) => cell.index));
+      return slabGeometry(land.filter((_, index) => !taken.has(index)), SEA_DROP);
+    },
     (old) => old.dispose(),
-    [land],
+    [land, islands],
+  );
+  // What the islands have been lowered by, read live. A change re-renders this component once (not the frame loop), and the trees and roofs
+  // on an island are laid again at their new height.
+  const lowerKey = useSyncExternalStore(
+    (listener) => {
+      const stops = [subscribeVisuals(listener), subscribeIslandScales(listener)];
+      return () => stops.forEach((stop) => stop());
+    },
+    () => `${getIslandRevision()}|${mapVisuals.islandElevationScale}|${mapVisuals.terrainHeightScale}`,
+  );
+  const lowerAt = useMemo(
+    () =>
+      makeLowerAt(
+        islands,
+        (cell) => islandScale(cell, getIslandScales(), mapVisuals.islandElevationScale),
+        () => SEA_DROP * mapVisuals.terrainHeightScale,
+      ),
+    [islands],
+  );
+  /** A list of props with the ground under each lowered with the islands. `absolute` marks those that stand on the water, not the ground. */
+  const lowered = <T extends PropInstance>(list: readonly T[], absolute = false): readonly T[] => {
+    if (islands.length === 0 || absolute) {
+      return list;
+    }
+    return list.map((prop) => {
+      const drop = lowerAt(prop.x, prop.y);
+      return drop > 0 ? { ...prop, lift: (prop.lift ?? 0) - drop } : prop;
+    });
+  };
+  const loweredProps = useMemo(
+    () => Object.fromEntries(PROP_KINDS.map((kind) => [kind, lowered(plan.props[kind])])) as Record<PropKind, readonly PropInstance[]>,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, lowerKey, lowerAt, islands],
+  );
+  const loweredMarks = useMemo(
+    () =>
+      (props.landmarks ?? []).map((mark) =>
+        // A harbor stands on the water, so the island's lowering does not move it.
+        facilityKindOf(mark.id) === "harbor" ? mark : { ...mark, instance: lowered([mark.instance])[0] },
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.landmarks, lowerKey, lowerAt, islands],
   );
   // The mist: where it can lie, found once, and a pool of ribbons spent on the sites near the camera.
   const mistSites = useMemo(
@@ -923,6 +1012,15 @@ export function BoardScene(props: BoardSceneProps) {
   const flurries = useDisposable(
     () => createFlurries(),
     (old) => old.dispose(),
+    [],
+  );
+  // The harbor and the airbase, as models of the same low-poly style as the houses and the factories.
+  const facilityModels = useDisposable(
+    () => ({ harbor: facilityGeometry("harbor"), airbase: facilityGeometry("airbase") }),
+    (old) => {
+      old.harbor.dispose();
+      old.airbase.dispose();
+    },
     [],
   );
   const mist = useDisposable(
@@ -1168,6 +1266,8 @@ export function BoardScene(props: BoardSceneProps) {
           const under = sampleReliefFields(patches, world.x, world.y);
           lift = (under.dome + (under.ridge - under.dome) * blend) * rise * scales.sx * upright;
         }
+        // An island has been lowered: the figures on it stand that much lower.
+        lift -= lowerAt(world.x, world.y) * scales.sx * upright;
         // A figure on a land stack stands on the top face of its base, so it is lifted by the base's height.
         if (bases && !stack?.naval) {
           lift += plinthRadius(tokenPx, frame.view.k, stack?.count ?? 1, look) * baseHeight * scales.sx * upright;
@@ -1306,7 +1406,7 @@ export function BoardScene(props: BoardSceneProps) {
     flurries.update({
       x: pose.target[0],
       y: -pose.target[1],
-      alpha: micro * weather.state.snow * Math.min(1, mapVisuals.windStrength * 1.2),
+      alpha: micro * weather.state.snow * Math.min(1, mapVisuals.windStrength * 1.2) * 1.25,
       seconds: now / 1000,
       windX: 1.6 * mapVisuals.windStrength,
       windY: 0.5 * mapVisuals.windStrength,
@@ -1336,6 +1436,7 @@ export function BoardScene(props: BoardSceneProps) {
         material.uniforms.uSwellTime.value = swellNow;
         material.uniforms.uFrontAt.value = kit.water.uniforms.uFrontAt.value;
         material.uniforms.uSurgeFoam.value = mapVisuals.cliffSurgeFoam;
+        material.uniforms.uCliffShade.value = mapVisuals.cliffShadowStrength;
       }
     }
     // The waves and the shine keep a share of themselves with the camera all the way out.
@@ -1489,7 +1590,7 @@ export function BoardScene(props: BoardSceneProps) {
       rig.mask = canvasSlot(rig.mask, mask, store.paint);
       kit.cardCaster.uniforms.uFigures.value = rig.mask.texture;
       if (rig.paint !== store.paint) {
-        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift, drop);
+        rig.cards.geometry.instanceCount = layFigureCards(rig, frame, figures, mask, shift, drop, mapVisuals.shipShadowStretch);
         rig.paint = store.paint;
       }
       cards = rig.cards.geometry.instanceCount;
@@ -1532,6 +1633,7 @@ export function BoardScene(props: BoardSceneProps) {
         (x, y) => (patches.length > 0 ? sampleReliefFields(patches, x, y) : NO_RELIEF),
         (x, y) => !pointInMultiPolygon({ x, y }, land),
         (regionId, key) => baseGone(regionId, key),
+        (x, y) => lowerAt(x, y),
       );
       plinths.prop.count = placed;
       plinths.caster.count = placed;
@@ -1701,18 +1803,21 @@ export function BoardScene(props: BoardSceneProps) {
         <mesh ref={slabMain} geometry={slab} material={shogunTextures ? [shogunLand, kit.cliff] : [kit.landTop, kit.cliff]} position={[0, 0, -SEA_DROP]} frustumCulled={false} renderOrder={-1} />
         {/* The cliff once more, for the sun's shadow map only. */}
         <mesh ref={slabCast} geometry={slab} material={slabCaster} position={[0, 0, -SEA_DROP]} frustumCulled={false} layers={CASTER_LAYER} visible={false} />
+        {islands.map((cell) => (
+          <IslandSlab key={cell.index} cell={cell} kit={kit} top={shogunTextures ? shogunLand : kit.landTop} caster={slabCaster} />
+        ))}
         {patches.map((patch, i) => (
           <Range key={i} patch={patch} kit={kit} />
         ))}
         <Craters scars={scars} kit={kit} />
         {PROP_KINDS.map((kind) =>
-          plan.props[kind].length > 0 ? <PropField key={kind} kind={kind} instances={plan.props[kind]} kit={kit} patches={patches} /> : null,
+          loweredProps[kind].length > 0 ? <PropField key={kind} kind={kind} instances={loweredProps[kind]} kit={kit} patches={patches} /> : null,
         )}
-        {landmarkModels
-          ? (props.landmarks ?? []).map((mark) =>
-              landmarkModels[mark.id] ? <Landmark key={mark.id} mark={mark} model={landmarkModels[mark.id]} kit={kit} patches={patches} /> : null,
-            )
-          : null}
+        {loweredMarks.map((mark) => {
+          const kind = facilityKindOf(mark.id);
+          const model = kind ? facilityModels[kind] : (landmarkModels?.[mark.id] ?? null);
+          return model ? <Landmark key={mark.id} mark={mark} model={model} kit={kit} patches={patches} /> : null;
+        })}
         <Smoke scars={scars} chimneys={plan.chimneys} kit={kit} />
       </group>
     </>

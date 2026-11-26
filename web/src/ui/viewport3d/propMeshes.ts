@@ -26,7 +26,7 @@ const CHIMNEY: Rgb = [0.5, 0.33, 0.33];
 const SOOT: Rgb = [0.25, 0.21, 0.24];
 
 /** Paints a geometry one colour and one part, and gives it flat faces. */
-function part(source: THREE.BufferGeometry, color: Rgb, mode: number): THREE.BufferGeometry {
+export function part(source: THREE.BufferGeometry, color: Rgb, mode: number): THREE.BufferGeometry {
   const geometry = source.index ? source.toNonIndexed() : source;
   geometry.deleteAttribute("uv");
   geometry.deleteAttribute("normal");
@@ -45,15 +45,15 @@ function part(source: THREE.BufferGeometry, color: Rgb, mode: number): THREE.Buf
   return geometry;
 }
 
-const shadeOf = (value: number): Rgb => [value, value, value];
+export const shadeOf = (value: number): Rgb => [value, value, value];
 
 /** A cone standing on z = `base`. */
-function cone(radius: number, height: number, sides: number, base: number): THREE.BufferGeometry {
+export function cone(radius: number, height: number, sides: number, base: number): THREE.BufferGeometry {
   return new THREE.ConeGeometry(radius, height, sides, 1).rotateX(Math.PI / 2).translate(0, 0, base + height / 2);
 }
 
 /** A tapered post standing on z = `base`. */
-function post(top: number, bottom: number, height: number, sides: number, base = 0): THREE.BufferGeometry {
+export function post(top: number, bottom: number, height: number, sides: number, base = 0): THREE.BufferGeometry {
   return new THREE.CylinderGeometry(top, bottom, height, sides, 1).rotateX(Math.PI / 2).translate(0, 0, base + height / 2);
 }
 
@@ -74,7 +74,7 @@ function triangles(points: readonly (readonly [number, number, number])[]): THRE
 }
 
 /** A roof with its ridge along x: two slopes and two gable ends. */
-function gableRoof(halfLength: number, halfSpan: number, eaves: number, ridge: number, cx = 0): THREE.BufferGeometry[] {
+export function gableRoof(halfLength: number, halfSpan: number, eaves: number, ridge: number, cx = 0): THREE.BufferGeometry[] {
   const a: [number, number, number] = [cx - halfLength, -halfSpan, eaves];
   const b: [number, number, number] = [cx + halfLength, -halfSpan, eaves];
   const c: [number, number, number] = [cx + halfLength, halfSpan, eaves];

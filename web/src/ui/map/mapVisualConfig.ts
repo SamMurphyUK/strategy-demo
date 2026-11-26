@@ -199,6 +199,12 @@ export interface MapVisualConfig {
   microSpriteTiltDeg: number;
   /** The tilt-shift blur of the top and bottom of the frame in the micro tier. 0 is none. */
   tiltShiftStrength: number;
+  /** How far a ship's shadow stretches across the water, as a share of what the sun would throw. 0 is none; low is a reflection. */
+  shipShadowStretch: number;
+  /** How much of its cliff an island keeps: 1 stands as tall as the continents, lower sits lower in the sea. A territory can take its own (see islandOverrides.ts). */
+  islandElevationScale: number;
+  /** How dark the cliffs are in their own shade: the foot and the face turned from the sun. 0 is the old flat light. */
+  cliffShadowStrength: number;
   /** How deep the diorama surface's relief reads in the light. */
   dioramaNormalStrength: number;
   /** How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour. */
@@ -371,6 +377,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   microPitchDeg: 38,
   microSpriteTiltDeg: 10,
   tiltShiftStrength: 1,
+  shipShadowStretch: 0.28,
+  islandElevationScale: 0.6,
+  cliffShadowStrength: 0.6,
   dioramaNormalStrength: 0.7,
   albedoDetailStrength: 0.5,
   snowColdTint: 0.5,
@@ -547,6 +556,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   microPitchDeg: [30, 60],
   microSpriteTiltDeg: [0, 20],
   tiltShiftStrength: [0, 2],
+  shipShadowStretch: [0, 1],
+  islandElevationScale: [0.15, 1],
+  cliffShadowStrength: [0, 2],
   dioramaNormalStrength: [0, 2.5],
   albedoDetailStrength: [0, 1.5],
   snowColdTint: [0, 1],

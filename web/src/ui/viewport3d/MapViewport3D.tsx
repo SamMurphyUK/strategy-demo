@@ -15,7 +15,7 @@ import { Component, type ReactNode, useEffect, useMemo, useRef, useState, useSyn
 import type { BoardFrame, BoardLayer } from "../map/boardLayer";
 import { landColor } from "../map/boardTune";
 import { getBoardTune } from "../map/boardTuneStore";
-import { facilitiesOf, facilityAnchorOf, type Rect, type RegionShape, type Vec2 } from "../map/geometry";
+import { facilitiesOf, airAnchorOf, facilityAnchorOf, type Rect, type RegionShape, type Vec2 } from "../map/geometry";
 import { buildRegionPaths } from "../map/hitTest";
 import { landMaskAt } from "../map/landMask";
 import { bakeTerrain } from "../map/mapBake";
@@ -34,12 +34,16 @@ import {
   parsePlacements,
   PLACEMENTS_STORAGE_KEY,
   type Placements,
+  placeFacilities,
   placeLandmarks,
   serializePlacements,
 } from "./placements";
 import { BOARD_BAKE_SCALE, coastMaskCanvas } from "./boardTextures";
 import { planRoads, riverLines } from "./groundSheet";
 import { biomeAtMap } from "./geography";
+import { airbaseSite, type FacilitySite, harborSite } from "./facilitySites";
+import { islandCells } from "./islandLowering";
+import { SEA_DROP } from "./boardCamera";
 import { buildHillPatch, HILL_PEAK, buildReliefPatch, RELIEF_ZONES, sampleReliefFields } from "./mountainRelief";
 import { buildCoastField } from "./pixieSheet";
 import { climateZoneCanvas, regionIdCanvas } from "./pixieTextures";
@@ -248,6 +252,41 @@ export default function MapViewport3D(props: MapViewProps) {
     [geometry, placements],
   );
 
+  // The islands: polygons of the land small enough to be lowered, with the territories that stand on them.
+  const islands = useMemo(() => (land ? islandCells(land.polygons, geometry.regions) : []), [land, geometry]);
+
+  // The harbors and airbases: those the map has, and those that have been built. A harbor stands at the foot of a cliff, an airbase on the
+  // level ground by the air anchor. They are landmarks, so the placement editor moves them.
+  const builtKey = (props.builtFacilities ?? []).map((item) => `${item.regionId}:${item.airbase ? 1 : 0}${item.harbor ? 1 : 0}`).join("|");
+  const facilityMarks = useMemo(() => {
+    if (!land) {
+      return [];
+    }
+    const sheet = land.viewBox;
+    const isLand = (p: Vec2) => landMaskAt(land, { x: wrapWorldX(p.x, sheet), y: p.y });
+    const built = new Map((props.builtFacilities ?? []).map((item) => [item.regionId, item] as const));
+    const sites: FacilitySite[] = [];
+    for (const region of geometry.regions) {
+      if (region.type !== "land") {
+        continue;
+      }
+      const extra = built.get(region.id);
+      const shape = clipped?.get(region.id) ?? roughShape(region);
+      if (region.hasHarbour || extra?.harbor) {
+        const site = harborSite(region.id, facilityAnchorOf(region), isLand, (p) => pointInMultiPolygon(p, shape)) ?? harborSite(region.id, region.anchor, isLand, (p) => pointInMultiPolygon(p, shape));
+        if (site) {
+          sites.push(site);
+        }
+      }
+      if (region.hasAirbase || extra?.airbase) {
+        sites.push(airbaseSite(region.id, airAnchorOf(region)));
+      }
+    }
+    return placeFacilities(sites, placements, SEA_DROP * mapVisuals.terrainHeightScale - 0.12);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [land, geometry, clipped, placements, builtKey]);
+  const everyLandmark = useMemo(() => [...landmarks, ...facilityMarks], [landmarks, facilityMarks]);
+
   // The table under the pieces: the three sculpted ranges, the rivers, and the roads between the
   // capitals and the factories. Set dressing only, laid out once for a map.
   const table = useMemo<BoardTable | null>(() => {
@@ -330,7 +369,8 @@ export default function MapViewport3D(props: MapViewProps) {
     };
     const hills = buildHillPatch({
       box: sheet,
-      inside: (p) => isLand(p) && !rangeTaken(p),
+      // The hills lie on the continents: an island is lowered, and a hill on it would float.
+      inside: (p) => isLand(p) && !rangeTaken(p) && !islands.some((cell) => p.x >= cell.box.x0 && p.x <= cell.box.x1 && p.y >= cell.box.y0 && p.y <= cell.box.y1 && pointInMultiPolygon(p, [cell.polygon])),
       kind: (p) => {
         const biome = biomeAtMap(p);
         if (biome === "desert") {
@@ -353,7 +393,7 @@ export default function MapViewport3D(props: MapViewProps) {
       patches.push(hills);
     }
     return { patches, rivers, roads };
-  }, [land, geometry, clipped]);
+  }, [land, geometry, clipped, islands]);
 
   // Craters where the fighting is. The same marks the 2D map paints, so they sit in the same places.
   const scarKey = (props.relief?.scars ?? []).map((scar) => `${scar.regionId}:${scar.ember ? 1 : 0}:${craterCountFor(scar.attackers)}`).join("|");
@@ -432,7 +472,8 @@ export default function MapViewport3D(props: MapViewProps) {
           bake={bake}
           mask={mask}
           plan={placedPlan ?? plan}
-          landmarks={landmarks}
+          landmarks={everyLandmark}
+          islands={islands}
           scars={scars}
           look={look}
           dim={props.menuBackdrop === true}

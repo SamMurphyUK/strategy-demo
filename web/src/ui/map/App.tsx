@@ -567,6 +567,14 @@ export function App() {
       return [{ regionId: battle.region_id, attackerId: battle.attacker_faction_id || faction, origins, startMs: running?.startMs ?? null, durationMs: running?.durationMs ?? 1 }];
     });
   }, [session, state, phase, faction, version, walk, geometry]);
+  // The harbors and airbases built in play, so the board stands a model on each as it goes up.
+  const builtFacilities = useMemo(
+    () =>
+      Object.entries(state.regions)
+        .filter(([, region]) => region.airbase === true || region.harbor === true)
+        .map(([regionId, region]) => ({ regionId, airbase: region.airbase === true, harbor: region.harbor === true })),
+    [state, version],
+  );
   // Once the combat phase begins, the bases under every stack in a fight fade away, so the walk reads on bare ground.
   const fighting = useMemo<string[]>(() => {
     if (phase !== "combat" || faction === "") {
@@ -1116,6 +1124,7 @@ export function App() {
           stacks={editing ? editorStacks : stacks}
           travel={editing ? undefined : travel}
           fighting={editing ? undefined : fighting}
+          builtFacilities={editing ? undefined : builtFacilities}
           selectedRegionId={editing ? (editor.selected?.id ?? "") : selectedRegionId}
           selectedStack={!editing && selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
           highlight={editing ? NO_HIGHLIGHT : highlight}

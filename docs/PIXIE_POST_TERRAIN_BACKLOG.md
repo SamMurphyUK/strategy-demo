@@ -19,6 +19,11 @@ Saved from the camera pass. Items 1 is built (see `web/src/ui/viewport3d/boardCa
 7. **Central Asia visual character.** Break up the empty beige of Kazakhstan, Mongolia and the Silk Road with steppe grass-to-ochre FBM gradients, salt-pan and gravel-basin patches, terraced foothill ridges into the Tian Shan / Altai, and sparse nomadic / rock scatter.
 8. **`micro` zoom seabirds and flocks (later pass).** Height-aware boids with Perlin curl-noise flocks (`InstancedMesh`, wing-flap shader) over coastal cliffs, harbors and mountain passes, only when `uMicroAlpha > 0.3`.
 
+9. **Zoom-coupled IPC counter and cartographic stamp (`ipcStampMode`).**
+   - Strategic / icon (zoom below 3.8, `uDioramaAlpha = 0`): a crisp dark-ink stencil numeral (`#24201C`) with a 1px parchment halo, so it reads over snow and sand alike without looking like a neon sticker.
+   - Diorama / micro (`uDioramaAlpha > 0.3`): cross-fade the floating numeral into a flat, ground-projected embossed stamp at about 35 to 45% opacity, darkened into the grass and sand like a carved tabletop board. It returns to full contrast only on hover or selection of that territory, or while Alt / the tactical overlay toggle is held.
+   - Paired with #3: the flat airfield and harbor triangles give way to 3D runway and pier miniatures. (Built in the facilities pass: see `web/src/ui/viewport3d/facilityModels.ts`.)
+
 ## Open bugs carried with it
 
 - Attackers should walk from their origin to the battle on End Phase (not teleport). The hold-at-origin plan is in `web/src/ui/map/battleTravel.ts` but did not take effect in play; origins likely need to come from `state.phase_start_snapshot` instead of the captured orders.

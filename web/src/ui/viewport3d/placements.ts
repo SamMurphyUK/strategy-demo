@@ -6,6 +6,8 @@
 // edits still land on the same trees.
 import type { Vec2 } from "../map/geometry";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan } from "./propPlan";
+import { FACILITY_SCALE } from "./facilityModels";
+import type { FacilitySite } from "./facilitySites";
 
 /** The edit to one object. All zero and unlocked is no edit. */
 export interface Edit {
@@ -29,7 +31,7 @@ export const NO_EDIT: Readonly<Edit> = Object.freeze({ dx: 0, dy: 0, dz: 0, mult
 export const SIZE_STEP = 1.1;
 export const SIZE_MIN = 0.25;
 export const SIZE_MAX = 6;
-export const LIFT_MIN = -2;
+export const LIFT_MIN = -12;
 export const LIFT_MAX = 24;
 export const TURN_STEP = Math.PI / 12;
 
@@ -275,3 +277,39 @@ export function serializePlacements(placements: Placements): PlacementFile {
 
 export const PLACEMENTS_STORAGE_KEY = "strategy-demo.placements";
 export const PLACEMENTS_ROUTE = "/__dev/placements";
+
+// --- Harbors and airbases ----------------------------------------------------------------------
+
+/** The id a facility has as a landmark: `harbor:<territory>` or `airbase:<territory>`. */
+export function facilityId(kind: FacilitySite["kind"], regionId: string): string {
+  return `${kind}:${regionId}`;
+}
+
+/** The kind of facility a landmark id names, or null for a city landmark. */
+export function facilityKindOf(id: string): FacilitySite["kind"] | null {
+  return id.startsWith("harbor:") ? "harbor" : id.startsWith("airbase:") ? "airbase" : null;
+}
+
+/**
+ * Every harbor and airbase as a landmark: standing where its site puts it, moved like any landmark by the placement editor.
+ * `deckLift` is how far the harbor's deck stands below the land (the cliff's height, less a hair), so the quay sits on the water.
+ */
+export function placeFacilities(sites: readonly FacilitySite[], placements: Placements, deckLift: number): PlacedLandmark[] {
+  return sites.map((site) => {
+    const id = facilityId(site.kind, site.regionId);
+    const key = landmarkKey(id);
+    const scale = FACILITY_SCALE[site.kind];
+    const base: PropInstance = {
+      x: site.x,
+      y: site.y,
+      scale,
+      height: scale,
+      turn: site.turn,
+      lift: site.kind === "harbor" ? -deckLift : 0,
+      tint: [1, 1, 1],
+      snow: 0,
+    };
+    const label = `${site.kind === "harbor" ? "Harbor" : "Airbase"}, ${site.regionId}`;
+    return { id, key, spec: { id, label, region: site.regionId }, instance: applyEdit(base, placements[key]) };
+  });
+}
