@@ -1054,7 +1054,8 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
       ctx.fill(path, "evenodd");
       ctx.lineWidth = width * px;
       ctx.strokeStyle = color;
-      if (!strokeSeaAtCliffFoot(ctx, s, id)) {
+      // A hovered sea zone is outlined at the foot of the cliff; a selected one keeps the old rule, from the top of the cliff.
+      if (id === s.selectedRegionId || !strokeSeaAtCliffFoot(ctx, s, id)) {
         ctx.stroke(path);
       }
     }
