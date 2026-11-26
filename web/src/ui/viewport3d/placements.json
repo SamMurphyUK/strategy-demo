@@ -17,6 +17,30 @@
       "dturn": -0.262,
       "locked": false
     },
+    "landmark:calcutta": {
+      "dx": 11,
+      "dy": 2,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:chungking": {
+      "dx": -8,
+      "dy": 0,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:honolulu": {
+      "dx": 2,
+      "dy": 3,
+      "dz": 0,
+      "mult": 1,
+      "dturn": -0.262,
+      "locked": false
+    },
     "landmark:leningrad": {
       "dx": -4,
       "dy": -23,
@@ -31,6 +55,14 @@
       "dz": 0,
       "mult": 0.751,
       "dturn": 0,
+      "locked": false
+    },
+    "landmark:manila": {
+      "dx": -7,
+      "dy": 0,
+      "dz": 0,
+      "mult": 0.683,
+      "dturn": 1.31,
       "locked": false
     },
     "landmark:moscow": {
@@ -50,9 +82,9 @@
       "locked": false
     },
     "landmark:paris": {
-      "dx": 1,
-      "dy": 5,
-      "dz": 13,
+      "dx": -6,
+      "dy": 11,
+      "dz": 0,
       "mult": 0.909,
       "dturn": 1.048,
       "locked": false
@@ -65,12 +97,44 @@
       "dturn": 0,
       "locked": false
     },
+    "landmark:san_francisco": {
+      "dx": -13,
+      "dy": 16,
+      "dz": -2,
+      "mult": 0.826,
+      "dturn": 0.262,
+      "locked": false
+    },
+    "landmark:shanghai": {
+      "dx": -1,
+      "dy": 17,
+      "dz": -1,
+      "mult": 1,
+      "dturn": 0.524,
+      "locked": false
+    },
     "landmark:stalingrad": {
       "dx": 7,
       "dy": 2,
       "dz": 0,
       "mult": 1.464,
       "dturn": -0.267,
+      "locked": false
+    },
+    "landmark:sydney": {
+      "dx": 7,
+      "dy": 0,
+      "dz": 1,
+      "mult": 1,
+      "dturn": 0,
+      "locked": false
+    },
+    "landmark:tokyo": {
+      "dx": 4,
+      "dy": 6,
+      "dz": 0,
+      "mult": 1,
+      "dturn": 0.262,
       "locked": false
     },
     "landmark:washington": {

@@ -136,7 +136,7 @@ export interface LandmarkSpec {
   region: string;
 }
 
-/** The ten landmarks in assets/models/landmarks, each standing in its city's territory. */
+/** The eighteen landmarks in assets/models/landmarks, each standing in its city's territory. */
 export const LANDMARKS: readonly LandmarkSpec[] = [
   { id: "berlin", label: "Berlin", region: "Germany" },
   { id: "paris", label: "Paris", region: "France" },
@@ -148,6 +148,14 @@ export const LANDMARKS: readonly LandmarkSpec[] = [
   { id: "ottawa", label: "Ottawa", region: "Canada" },
   { id: "cairo", label: "Cairo", region: "Egypt" },
   { id: "rome", label: "Rome", region: "Italy" },
+  { id: "calcutta", label: "Calcutta", region: "India" },
+  { id: "chungking", label: "Chungking", region: "Szechwan" },
+  { id: "honolulu", label: "Honolulu", region: "Hawaii" },
+  { id: "manila", label: "Manila", region: "Philippine Islands" },
+  { id: "san_francisco", label: "San Francisco", region: "West Coast" },
+  { id: "shanghai", label: "Shanghai", region: "Kiangsu" },
+  { id: "sydney", label: "Sydney", region: "East Australia" },
+  { id: "tokyo", label: "Tokyo", region: "Japan" },
 ];
 
 /**
@@ -157,6 +165,32 @@ export const LANDMARKS: readonly LandmarkSpec[] = [
  * covering the stack beside it.
  */
 export const LANDMARK_SCALE = 8;
+/**
+ * How far through its reveal a landmark is at a zoom: 0 up to `from`, 1 from `to`, a straight run
+ * between. The base fades in over the first stretch of it (see landmarkBaseShare) and the monument
+ * rises over the rest, so every landmark is whole and solid by `to`.
+ */
+export function landmarkReveal(zoom: number, from: number, to: number): number {
+  const span = Math.max(0.05, to - from);
+  return Math.min(1, Math.max(0, (zoom - from) / span));
+}
+
+/** Zoom the base takes to fade in, before the monument starts to rise. The rest of the window is the rise. */
+export const LANDMARK_BASE_ZOOM = 0.4;
+
+/**
+ * The share of the reveal the base takes before the monument starts to rise: a fixed stretch of
+ * zoom, so a longer window makes the rise slower and leaves the base as quick as it was. At most half.
+ */
+export function landmarkBaseShare(from: number, to: number): number {
+  return Math.min(0.5, LANDMARK_BASE_ZOOM / Math.max(0.05, to - from));
+}
+
+/** How far up a landmark's height the reveal has risen, 0 to 1, at a point of the reveal. */
+export function landmarkRise(reveal: number, baseShare: number): number {
+  return Math.min(1, Math.max(0, (reveal - baseShare) / (1 - baseShare)));
+}
+
 /** How far north of the territory's unit anchor a landmark stands by default, in world units. */
 export const LANDMARK_NORTH = 12;
 

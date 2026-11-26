@@ -3,7 +3,11 @@ import {
   applyEdit,
   applyPlacements,
   LANDMARK_NORTH,
+  LANDMARK_BASE_ZOOM,
+  landmarkBaseShare,
   LANDMARK_SCALE,
+  landmarkReveal,
+  landmarkRise,
   LANDMARKS,
   NO_EDIT,
   nudge,
@@ -72,9 +76,10 @@ describe("placement edits", () => {
 });
 
 describe("landmarks", () => {
-  it("has the ten cities, each with a distinct territory", () => {
-    expect(LANDMARKS).toHaveLength(10);
-    expect(new Set(LANDMARKS.map((spec) => spec.region)).size).toBe(10);
+  it("has the eighteen cities, each with a distinct territory", () => {
+    expect(LANDMARKS).toHaveLength(18);
+    expect(new Set(LANDMARKS.map((spec) => spec.region)).size).toBe(18);
+    expect(new Set(LANDMARKS.map((spec) => spec.id)).size).toBe(18);
   });
 
   it("stands each in its territory, north of the anchor, and skips a territory the map lacks", () => {
@@ -104,5 +109,51 @@ describe("saving", () => {
     const out = parsePlacements({ items: { "pine:1": { dx: "x", mult: 99, locked: true }, "bad key": { dx: 1 }, "pine:2": 5 } });
     expect(Object.keys(out)).toEqual(["pine:1"]);
     expect(out["pine:1"]).toMatchObject({ dx: 0, mult: SIZE_MAX, locked: true });
+  });
+});
+
+describe("the landmark reveal", () => {
+  const FROM = 4.4;
+  const TO = 7;
+
+  it("is nothing until the zoom reaches `from`, whole from `to`, and a straight run between", () => {
+    expect(landmarkReveal(3.0, FROM, TO)).toBe(0);
+    expect(landmarkReveal(FROM, FROM, TO)).toBe(0);
+    expect(landmarkReveal((FROM + TO) / 2, FROM, TO)).toBeCloseTo(0.5, 9);
+    expect(landmarkReveal(TO, FROM, TO)).toBe(1);
+    expect(landmarkReveal(9, FROM, TO)).toBe(1);
+  });
+
+  it("starts later than the sprite reveal and does not finish until near the closest zoom", () => {
+    expect(FROM).toBeGreaterThan(3.8);
+    expect(TO).toBeGreaterThanOrEqual(6.5);
+    expect(TO).toBeLessThanOrEqual(7.48);
+  });
+
+  it("fades the base in over a fixed bit of zoom, and raises the monument slowly over the rest", () => {
+    expect(LANDMARK_BASE_ZOOM).toBeCloseTo(0.4, 9);
+    const share = landmarkBaseShare(FROM, TO);
+    expect(share * (TO - FROM)).toBeCloseTo(LANDMARK_BASE_ZOOM, 9);
+    // A longer window leaves the base as quick and makes the rise slower.
+    expect(landmarkBaseShare(FROM, TO + 2)).toBeLessThan(share);
+    expect(landmarkRise(landmarkReveal(FROM + LANDMARK_BASE_ZOOM, FROM, TO), share)).toBeCloseTo(0, 9);
+    const mid = landmarkRise(landmarkReveal(5.7, FROM, TO), share);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+    expect(landmarkRise(landmarkReveal(TO, FROM, TO), share)).toBe(1);
+  });
+
+  it("caps the base at half the window, so the rise always has room", () => {
+    expect(landmarkBaseShare(4, 4.4)).toBe(0.5);
+  });
+
+  it("is whole and solid before the closest zoom, and never runs backward", () => {
+    let last = 0;
+    for (let k = 1; k <= 7.5; k += 0.05) {
+      const reveal = landmarkReveal(k, FROM, TO);
+      expect(reveal).toBeGreaterThanOrEqual(last);
+      last = reveal;
+    }
+    expect(landmarkReveal(7.4, FROM, TO)).toBe(1);
   });
 });

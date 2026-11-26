@@ -297,6 +297,72 @@ function CopyPreset() {
 }
 
 /** Picture controls for the campaign board. Z opens the panel that holds this. */
+
+/**
+ * Hides every setting that does not match `query`, and every heading, note, and fold with nothing
+ * left under it, and opens the folds that still show something. A match is in the setting's name or
+ * its tip. With an empty query everything is shown again, and the folds go back as they were.
+ */
+function filterSettings(root: HTMLElement, query: string): void {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const folds = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.tune-fold"));
+  for (const fold of folds) {
+    const open = fold.dataset.wasOpen;
+    if (words.length === 0) {
+      fold.style.display = "";
+      if (open !== undefined) {
+        fold.open = open === "1";
+        delete fold.dataset.wasOpen;
+      }
+      for (const child of Array.from(fold.children)) {
+        if (child.tagName !== "SUMMARY") {
+          (child as HTMLElement).style.display = "";
+        }
+      }
+      continue;
+    }
+    if (open === undefined) {
+      fold.dataset.wasOpen = fold.open ? "1" : "0";
+    }
+    let any = false;
+    let heading: HTMLElement | null = null;
+    let headingHasMatch = false;
+    const closeGroup = () => {
+      if (heading) {
+        heading.style.display = headingHasMatch ? "" : "none";
+      }
+    };
+    for (const child of Array.from(fold.children) as HTMLElement[]) {
+      if (child.tagName === "SUMMARY") {
+        continue;
+      }
+      if (child.tagName === "H3") {
+        closeGroup();
+        heading = child;
+        headingHasMatch = false;
+        continue;
+      }
+      if (child.tagName === "LABEL") {
+        const text = `${child.textContent ?? ""} ${child.getAttribute("title") ?? ""} ${child.querySelector("input")?.getAttribute("aria-label") ?? ""}`.toLowerCase();
+        const match = words.every((word) => text.includes(word));
+        child.style.display = match ? "" : "none";
+        if (match) {
+          any = true;
+          headingHasMatch = true;
+        }
+      } else {
+        // A note, or a row of buttons: out of the way while searching.
+        child.style.display = "none";
+      }
+    }
+    closeGroup();
+    fold.style.display = any ? "" : "none";
+    if (any) {
+      fold.open = true;
+    }
+  }
+}
+
 export function BoardLookPanel() {
   const tune = useSyncExternalStore(subscribeBoardTune, getBoardTune, getBoardTune);
   useSyncExternalStore(subscribeVisuals, getVisualRev, getVisualRev);
@@ -310,9 +376,27 @@ export function BoardLookPanel() {
     setBoardTune({ ...tune, ...patch, look: "custom" });
   };
 
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLElement>(null);
+  const rev = useSyncExternalStore(subscribeVisuals, getVisualRev, getVisualRev);
+  useEffect(() => {
+    if (rootRef.current) {
+      filterSettings(rootRef.current, query);
+    }
+  }, [query, rev]);
+
   return (
-    <section aria-label="Board look">
+    <section aria-label="Board look" ref={rootRef}>
       <h2>Board</h2>
+      <input
+        type="search"
+        className="tune-search"
+        placeholder="Search settings"
+        aria-label="Search the board look settings"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        style={{ width: "100%", boxSizing: "border-box", margin: "4px 0 8px" }}
+      />
       <Fold title="Camera" startOpen>
         <p className="muted">
           The ground holds the zoomed-out squash until the start zoom, then shortens in a straight line to the zoomed-in squash. 0 is flat. 15 is the shipped tip.
@@ -626,25 +710,36 @@ export function BoardLookPanel() {
         <Flag name="enablePixelFoam" label="Shallows foam" title="The pale dithered shallows along the coast. Off, the sea stays its deep colour to the shore." />
         <Num name="pixelFoamReach" label="Foam reach" title="How much of the shelf stays pale. 1 is the whole shelf; 0.7 takes it in by 30%." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enablePixelFoam} />
         <Num name="pixelFoamBleed" label="Foam bleed" title="How far the edge of the shallows breathes in and out. 0 is a fixed edge." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enablePixelFoam} />
+        <Flag name="regionalPaletteDetail" label="Climate palettes" title="Each territory takes the palette of its climate: temperate, boreal, arid, or tropical. Off, the whole land is one temperate ramp." />
+
+        <h3>Waves</h3>
+        <p className="muted">The rings of surf, the invisible wave front that sweeps the board and rocks the ships (it draws nothing), and the ships' own heave. The loop and the rocking are the two to tune.</p>
         <Num name="seaWaveRings" label="Wave rings" title="The rings of surf that roll in around the coast. 0 is none." />
+        <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
+        <Num name="waveLoopSeconds" label="Wave loop" title="Seconds for the invisible wave front to sweep the board and come round again." unit="s" />
+        <Num name="waveDirectionDeg" label="Wave direction" title="The direction the front travels, in degrees: 0 runs west to east, 90 north to south." unit="deg" />
+        <Num name="navalWaveRockAmp" label="Wave rock" title="How hard a wave front rocks a ship, in roll and pitch, as it crosses it. 0 is no rocking." />
+        <Num name="subRockFactor" label="Sub rock" title="A submarine's share of a surface ship's rocking. 0.8 is 20% less." />
+        <Num name="navalIdleBobAmp" label="Ship heave" title="How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level." />
+        <Num name="navalSubmergeDepth" label="Ship depth" title="How far a ship's hull sits below the water, in world units. 0 floats on the surface." />
+
+        <h3>Sea shine</h3>
         <Num name="seaSheenStrength" label="Sea shine" title="Brightness of the sun glitter on the sea. 0 is none." />
         <Num name="seaFarVisibility" label="Far shine" title="How much of the waves and the glitter is left with the camera zoomed all the way out. 0 is none, 1 is all of it." />
         <Num name="seaSheenRadius" label="Shine radius" title="Size of the patch of sea the sun glitter gathers in. 1 is the old size; 0.7 is 30% smaller." />
         <Num name="seaSheenFarRadius" label="Far radius" title="The shine radius as a share of itself with the camera zoomed all the way out. 0.9 is a further 10% smaller." />
         <Num name="seaSheenSpacing" label="Shine spacing" title="Distance between glints. 1 is the old spacing; 1.2 is 20% wider. It widens more as the camera rises." />
+        <Num name="seaSheenFrequency" label="Shine frequency" title="How often the sea glints: how many are lit at once, and how fast each one flickers. 1 is the usual, 2 twice as many and twice as quick, 0 none." />
         <Num name="seaSheenScatter" label="Shine scatter" title="How far the glints and the edge of the patch are scattered off a regular grid." />
-        <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
+
+        <h3>Land height</h3>
         <Num name="terrainHeightScale" label="Land height" title="How high the land stands above the sea: the ceiling of the land and the height of its cliffs. 1 is as shipped." />
-        <Num name="mountainReliefHeight" label="Range rise" title="A multiplier on how far the sculpted ranges rise off the land. 1 is the range height as set." />
-        <Num name="navalIdleBobAmp" label="Ship heave" title="How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level." />
-        <Num name="navalWaveRockAmp" label="Wave rock" title="How hard a wave front rocks a ship, in roll and pitch, as it crosses it. 0 is no rocking." />
-        <Num name="waveLoopSeconds" label="Wave loop" title="Seconds for the invisible wave front to sweep the board and come round again." unit="s" />
-        <Num name="waveDirectionDeg" label="Wave direction" title="The direction the front travels, in degrees: 0 runs west to east, 90 north to south." unit="deg" />
-        <Num name="waveGlintStrength" label="Swell glint" title="Strength of the faint glint that runs along the wave front over the open sea, a moment before it rocks the ships. 0 is none." />
-        <Num name="subRockFactor" label="Sub rock" title="A submarine's share of a surface ship's rocking. 0.8 is 20% less." />
-        <Num name="navalSubmergeDepth" label="Ship depth" title="How far a ship's hull sits below the water, in world units. 0 floats on the surface." />
+
+        <h3>Detailed sprites</h3>
         <Num name="detailedSpriteBaseScale" label="Sprite size" title="Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace." />
         <Num name="detailedSpriteWorldLock" label="Sprite world lock" title="How far the detailed sprites follow the board as the camera comes in. 1 is steady in world space, like the terrain and landmarks; 0 holds their size on screen." />
+
+        <h3>Soft land</h3>
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
         <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
@@ -652,12 +747,18 @@ export function BoardLookPanel() {
         <Num name="softLandSaturation" label="Soft colour" title="Colour left on the soft land. 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandValueBand" label="Soft light" title="Light and shade left on the soft land. 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandBrush" label="Brush" title="How far brush strokes wander the soft bands. 0 is clean bands." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
-        <Flag name="regionalPaletteDetail" label="Climate palettes" title="Each territory takes the palette of its climate: temperate, boreal, arid, or tropical. Off, the whole land is one temperate ramp." />
+
+        <h3>Landmarks</h3>
+        <p className="muted">The city landmarks stand at a fixed size on the board and rise out of it as the camera comes in: the base fades in first, then the monument builds from the ground up.</p>
+        <Num name="landmarkRevealFrom" label="Reveal from" title="The zoom where the city landmarks begin to appear. Their bases fade in first." />
+        <Num name="landmarkRevealTo" label="Reveal to" title="The zoom where every landmark is whole and solid. Keep it under the closest zoom." />
+        <Num name="landmarkRevealBand" label="Reveal band" title="Height of the soft band at the top of a rising landmark, as a share of its height." />
 
         <h3>Mountains</h3>
         <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />
         <Flag name="enableScatteredRocks" label="Loose rock models" title="Loose peak and boulder models along the world's ranges" />
         <Num name="mountainPeakHeight" label="Height" title="Height of the tallest summit, in world units. Held under two fifths of an infantry figure." off={!mapVisuals.enableShogunMountains} />
+        <Num name="mountainReliefHeight" label="Range rise" title="A multiplier on how far the sculpted ranges rise off the land. 1 is the range height as set." />
         <Num name="mountainRidgeSharpness" label="Ridges" title="0 is a smooth dome. 1 is a ridged massif." off={!mapVisuals.enableShogunMountains} />
         <Num name="mountainSnowLine" label="Snow line" title="Share of the summit's height where the snow is half on" off={!mapVisuals.enableShogunMountains} />
         <Num name="mountainSnowBlend" label="Snow blend" title="How gradually the snow comes on. Small is a hard line." off={!mapVisuals.enableShogunMountains} />

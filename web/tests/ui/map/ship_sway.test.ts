@@ -138,15 +138,3 @@ describe("the rocking", () => {
     expect(peakRoll({ rockAmp: 0, bobAmp: 0 })).toBe(0);
   });
 });
-
-describe("the wave front the sea glint follows", () => {
-  it("is the same line the ships are struck by: progress along the sweep is the front's position", () => {
-    for (const degrees of [0, 90, 37]) {
-      const sweep = frontSweep(degrees);
-      for (const t of [0, 3.3, 9.9, 17.1]) {
-        const progress = (t % 20) / 20;
-        expect(frontPosition(t, 20, degrees)).toBeCloseTo(sweep.from + (sweep.to - sweep.from) * progress, 9);
-      }
-    }
-  });
-});

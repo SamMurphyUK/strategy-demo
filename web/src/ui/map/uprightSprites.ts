@@ -31,7 +31,7 @@ import type { Rect, Vec2 } from "./geometry";
 import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
 import { squadOffsets } from "./zoomLod";
-import { landShareOf, seaLandOpacity, spriteScreenBox } from "./seaOverlap";
+import { shouldFadeAtShore, spriteScreenBox } from "./seaOverlap";
 
 const CHARCOAL = MILITARY.charcoal;
 const STEEL = MILITARY.steel;
@@ -895,8 +895,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
             pixelScale,
             pose.face,
           );
-          const share = landShareOf(box, 8, 5, paint.landAt);
-          if (seaLandOpacity(share) != null) {
+          if (shouldFadeAtShore(box, paint.landAt)) {
             figure.shoreFade = true;
           }
         }

@@ -75,6 +75,22 @@ export function loadLandmark(id: string): Promise<THREE.BufferGeometry | null> {
           });
           const merged = parts.length > 0 ? mergeGeometries(parts, false) : null;
           parts.forEach((part) => part.dispose());
+          if (merged) {
+            // How high up the monument each vertex is, from 0 at the base to 1 at the spire: the reveal rises by it.
+            const at = merged.getAttribute("position");
+            let low = Infinity;
+            let high = -Infinity;
+            for (let i = 0; i < at.count; i++) {
+              low = Math.min(low, at.getZ(i));
+              high = Math.max(high, at.getZ(i));
+            }
+            const span = Math.max(high - low, 1e-6);
+            const norm = new Float32Array(at.count);
+            for (let i = 0; i < at.count; i++) {
+              norm[i] = (at.getZ(i) - low) / span;
+            }
+            merged.setAttribute("aNormY", new THREE.BufferAttribute(norm, 1));
+          }
           merged?.computeBoundingSphere();
           return merged;
         })

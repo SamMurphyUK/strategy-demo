@@ -666,8 +666,6 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uPixFoam: pixie.uPixFoam,
       uPixShips: pixie.uPixShips,
       uPixShipN: pixie.uPixShipN,
-      uWaveSweepProgress: pixie.uWaveSweepProgress,
-      uWaveSweep: pixie.uWaveSweep,
       uBake: shared.uBake,
       uMask: shared.uMask,
       uBounds: shared.uBounds,
@@ -692,6 +690,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uSheenFar: { value: 0 },
       /** Patch size, glint spacing, scatter, and how often a breaking wave pops. */
       uSheenShape: { value: new THREE.Vector4(0.7, 1.2, 0.7, 0.5) },
+      /** How many glints are lit at once, and how fast each flickers: 1 is the usual, 2 twice as many and twice as quick, 0 none. */
+      uSheenFreq: { value: 1 },
       /** The middle of the view, and one over its half reach each way: the glitter gathers under the sun. */
       uEye: { value: new THREE.Vector4(0, 0, 1, 1) },
     },
@@ -719,6 +719,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uniform vec4 uEye;
       uniform float uSheenFar;
       uniform vec4 uSheenShape;
+      uniform float uSheenFreq;
       // Height of the swell at a scene point: two long sets crossing.
       float seaHeight(vec2 p) {
         float h = vnoise(p * 0.42 + vec2(uTime * 0.09, uTime * 0.05)) * 0.6;
@@ -779,8 +780,6 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
         foam = max(foam, smoothstep(0.3 + lap, 0.42 + lap, edge) * (0.55 + 0.45 * vnoise(mw * 2.2 + uTime * 0.3)));
         foam = floor(foam * 3.0 + 0.5) / 3.0;
         c = mix(c, uFoam, foam * uWater);
-        // The wave front, seen over the open sea a moment before it rocks the ships. uPixFoam.w is the setting.
-        c += uSunColor * seaSwellGlint(tx, footW) * (1.0 - shore) * uWater * uDirect * 0.5;
 
         // The cliff's shadow on the water, and glints where the sun still reaches.
         #ifdef SUN_SHADOW
@@ -866,6 +865,11 @@ attribute vec3 aFlag;
 attribute vec2 aRise;
 uniform float uGrow;
 uniform vec4 uMountain;
+#ifdef LANDMARK
+// How high up the monument a vertex is, from 0 at its base to 1 at its spire.
+attribute float aNormY;
+varying float vNormY;
+#endif
 // The model point in the board's space: an optional part folds away, and everything rises with uGrow.
 // A prop on a sculpted range stands on it: aRise is the range's two shapes at its foot (see mountainRelief.ts).
 vec3 propPoint() {
@@ -875,21 +879,74 @@ vec3 propPoint() {
   if ((aPart > 2.5 && aFlag.x < 0.5) || (uMountain.x > 0.0 && aFlag.z < 0.01 && rise > 0.4)) {
     p = vec3(0.0);
   }
+  // A tree grows from the board as the camera comes in. A landmark does not: it stands at its own size, and
+  // is revealed by its height instead (see LANDMARK_REVEAL).
+  #ifdef LANDMARK
+  vNormY = aNormY;
+  #else
   p.xy *= mix(0.35, 1.0, uGrow);
   p.z *= uGrow;
+  #endif
   vec3 at = (instanceMatrix * vec4(p, 1.0)).xyz;
   at.z += rise * uMountain.x;
   return at;
 }
 `;
 
-/** Trees, peaks, and buildings. */
-export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
+/**
+ * The reveal of a city landmark, from `uLandmarkReveal` 0 to 1. The first share of it fades the base in
+ * (the lowest tenth of the monument: its plinth), and the rest raises the monument from the base up: a
+ * vertex shows once the rising height has passed it, and the top of that height is a soft band.
+ */
+const LANDMARK_REVEAL = /* glsl */ `
+#ifdef LANDMARK
+varying float vNormY;
+uniform float uLandmarkReveal;
+uniform float uLandmarkBand;
+const float LM_PLINTH = 0.1;
+uniform float uLandmarkBaseShare;
+// The base takes the first stretch of the window (a fixed bit of zoom), the monument the rest.
+float lmAlpha(float y) {
+  float base = smoothstep(0.0, uLandmarkBaseShare, uLandmarkReveal);
+  if (y < LM_PLINTH) {
+    return base;
+  }
+  float rise = clamp((uLandmarkReveal - uLandmarkBaseShare) / (1.0 - uLandmarkBaseShare), 0.0, 1.0);
+  float top = rise * (1.0 + uLandmarkBand);
+  return 1.0 - smoothstep(top - uLandmarkBand, top, y);
+}
+float lmBayer2(vec2 a) {
+  a = mod(floor(a), 2.0);
+  return fract(a.x * 0.5 + a.y * 0.75);
+}
+// A 4 by 4 ordered threshold, so the fade is made of whole pixels: the chart's own dither.
+float lmBayer(vec2 p) {
+  return lmBayer2(0.5 * p) * 0.25 + lmBayer2(p) + 0.03125;
+}
+#endif
+`;
+
+/** What a landmark's materials share: how far through its reveal it is, and how soft the top of it is. */
+export interface LandmarkUniforms {
+  uLandmarkReveal: { value: number };
+  uLandmarkBand: { value: number };
+  /** The share of the reveal the base takes before the monument rises. */
+  uLandmarkBaseShare: { value: number };
+}
+
+export function landmarkUniforms(): LandmarkUniforms {
+  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 } };
+}
+
+/** Trees, peaks, and buildings. With `landmark` it is a city landmark, at a fixed size and revealed from the ground up. */
+export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexColors: true,
+    defines: landmark ? { LANDMARK: 1 } : {},
     uniforms: {
       ...lightUniforms(shared),
       ...sunUniforms(shared),
+      ...(landmark ?? {}),
       uBake: shared.uBake,
       uBounds: shared.uBounds,
       uMountain: shared.uMountain,
@@ -951,6 +1008,7 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
     `,
     fragmentShader: /* glsl */ `
       ${SUN_FRAGMENT}
+      ${LANDMARK_REVEAL}
       #ifdef SUN_SHADOW
       varying float vSunFacing;
       #endif
@@ -959,6 +1017,15 @@ export function propMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
         vec3 c = vColor;
         #ifdef SUN_SHADOW
         c *= mix(vec3(1.0), uSunTint, sunShade(vSun) * vSunFacing);
+        #endif
+        #ifdef LANDMARK
+        float shown = lmAlpha(vNormY);
+        if (shown < lmBayer(gl_FragCoord.xy)) {
+          discard;
+        }
+        // A warm edge where the monument is still rising, and held under 1.0 so it never reaches the bloom.
+        float edge = shown < 0.999 ? shown * (1.0 - shown) * 4.0 : 0.0;
+        c = mix(c, min(c + vec3(0.16, 0.1, 0.03), vec3(0.97)), edge);
         #endif
         gl_FragColor = vec4(c, 1.0);
       }
@@ -997,10 +1064,12 @@ function shadowStencil(material: THREE.ShaderMaterial): THREE.ShaderMaterial {
 const SHADOW_COLOR = blend(MILITARY.charcoal, MILITARY.plum, 0.25).multiplyScalar(0.55);
 
 /** A prop's shadow: the model laid flat on the land along the sun's ray. It stops at the coast. */
-export function propShadowMaterial(shared: SharedUniforms): THREE.ShaderMaterial {
+export function propShadowMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms): THREE.ShaderMaterial {
   return shadowStencil(
     new THREE.ShaderMaterial({
+      defines: landmark ? { LANDMARK: 1 } : {},
       uniforms: {
+        ...(landmark ?? {}),
         uGrow: { value: 0 },
         // The flattened shadow lies on level ground. It is the stand-in for boards with no shadow map.
         uMountain: { value: new THREE.Vector4(0, 0, 0, 0) },
@@ -1023,6 +1092,7 @@ export function propShadowMaterial(shared: SharedUniforms): THREE.ShaderMaterial
       `,
       fragmentShader: /* glsl */ `
         ${SHEET}
+        ${LANDMARK_REVEAL}
         uniform sampler2D uMask;
         uniform float uShadowAlpha;
         uniform vec3 uColor;
@@ -1031,6 +1101,11 @@ export function propShadowMaterial(shared: SharedUniforms): THREE.ShaderMaterial
           if (texture2D(uMask, sheetUv(vMap)).r < 0.5) {
             discard;
           }
+          #ifdef LANDMARK
+          if (lmAlpha(vNormY) < 0.5) {
+            discard;
+          }
+          #endif
           gl_FragColor = vec4(uColor, uShadowAlpha);
         }
       `,
@@ -1073,17 +1148,33 @@ export function cliffCasterMaterial(): THREE.ShaderMaterial {
 }
 
 /** Trees, peaks, and buildings, as the sun sees them. `uGrow` is the prop material's, so they rise together. */
-export function propCasterMaterial(grow: { value: number }, mountain: { value: THREE.Vector4 }): THREE.ShaderMaterial {
+export function propCasterMaterial(
+  grow: { value: number },
+  mountain: { value: THREE.Vector4 },
+  landmark?: LandmarkUniforms,
+): THREE.ShaderMaterial {
   return caster(
     new THREE.ShaderMaterial({
-      uniforms: { uGrow: grow, uMountain: mountain },
+      defines: landmark ? { LANDMARK: 1 } : {},
+      uniforms: { uGrow: grow, uMountain: mountain, ...(landmark ?? {}) },
       vertexShader: /* glsl */ `
         ${PROP_VERTEX}
         void main() {
           gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(propPoint(), 1.0);
         }
       `,
-      fragmentShader: CASTER_FRAGMENT,
+      // The same height cut as the building's own, so its shadow grows as it does.
+      fragmentShader: /* glsl */ `
+        ${LANDMARK_REVEAL}
+        void main() {
+          #ifdef LANDMARK
+          if (lmAlpha(vNormY) < 0.5) {
+            discard;
+          }
+          #endif
+          gl_FragColor = vec4(1.0);
+        }
+      `,
     }),
   );
 }

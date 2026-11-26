@@ -215,16 +215,21 @@ function seamSpan(plate: HTMLCanvasElement, row: number): readonly [number, numb
  * Draws a figure's picture in its box. With `sink` pixels of hull below the water, the picture is cut
  * there, and a one pixel line of foam is drawn across the hull where it meets the water.
  */
-function drawPlate(ctx: CanvasRenderingContext2D, plate: HTMLCanvasElement, box: StampBox, sink: number): void {
+function drawPlate(ctx: CanvasRenderingContext2D, plate: HTMLCanvasElement, box: StampBox, sink: number, shared = false): void {
+  // The scratch canvas the shore fade draws into is only ever as big as the biggest figure so far, so its
+  // picture is the box's size at its top left, not the whole canvas. A plate is the box's size already.
+  const srcW = shared ? box.w : plate.width;
+  const srcH = shared ? box.h : plate.height;
   const cut = Math.min(Math.max(0, Math.round(sink)), Math.floor(box.h * 0.3));
   if (cut <= 0) {
-    ctx.drawImage(plate, 0, 0, box.w, box.h);
+    ctx.drawImage(plate, 0, 0, srcW, srcH, 0, 0, box.w, box.h);
     return;
   }
   const keep = box.h - cut;
-  const source = Math.max(1, Math.round((plate.height * keep) / box.h));
-  ctx.drawImage(plate, 0, 0, plate.width, source, 0, 0, box.w, keep);
-  const span = seamSpan(plate, source - 1);
+  const source = Math.max(1, Math.round((srcH * keep) / box.h));
+  ctx.drawImage(plate, 0, 0, srcW, source, 0, 0, box.w, keep);
+  // The scratch canvas is reused for every figure, so its rows cannot be remembered.
+  const span = shared ? null : seamSpan(plate, source - 1);
   if (span) {
     const share = box.w / plate.width;
     ctx.save();
@@ -259,6 +264,7 @@ export function shownFigureStamps(units: readonly VehicleSvgUnit[], dpr: number,
   for (const unit of units) {
     const box = figureStampBox(unit, dpr);
     const part = unit.parts[0];
+    // The whole picture, even where a ship's inland part is faded: its outline covers all of the ship.
     const plate = shown.get(unit.id);
     if (!box || !part || !plate) {
       continue;
@@ -308,7 +314,7 @@ export function stampFigures(
     const tilt = unit.tiltDeg ? Math.max(0.2, Math.cos((unit.tiltDeg * Math.PI) / 180)) : 1;
     const turn = unit.turnDeg ? (unit.turnDeg * Math.PI) / 180 : 0;
     placeFigure(ctx, box, feetY, lean * tilt, turn, Math.round(unit.x * dpr));
-    drawPlate(ctx, faded ?? plate, box, (unit.submergePx ?? 0) * dpr);
+    drawPlate(ctx, faded ?? plate, box, (unit.submergePx ?? 0) * dpr, faded != null);
   }
   ctx.restore();
   ctx.globalAlpha = fade;

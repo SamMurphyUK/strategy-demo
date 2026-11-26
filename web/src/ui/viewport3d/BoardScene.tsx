@@ -56,6 +56,8 @@ import {
   OUTLINE_SLOTS,
   OVERLAY_SLOTS,
   pixieUniforms,
+  type LandmarkUniforms,
+  landmarkUniforms,
   propCasterMaterial,
   propMaterial,
   propShadowMaterial,
@@ -74,7 +76,7 @@ import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
 import { loadLandmarks } from "./landmarkModels";
-import { frontDirection, frontSweep } from "../map/shipSway";
+import { landmarkBaseShare, landmarkReveal } from "./placements";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
@@ -224,6 +226,12 @@ interface Kit {
   water: THREE.ShaderMaterial;
   prop: THREE.ShaderMaterial;
   propShadow: THREE.ShaderMaterial;
+  /** The city landmarks: a fixed size, revealed from the ground up (see boardMaterials.ts). */
+  landmark: THREE.ShaderMaterial;
+  landmarkShadow: THREE.ShaderMaterial;
+  landmarkCaster: THREE.ShaderMaterial;
+  /** How far through its reveal a landmark is, and how soft the top of it is. */
+  landmarkLook: LandmarkUniforms;
   unitShadow: THREE.ShaderMaterial;
   crater: THREE.ShaderMaterial;
   smoke: THREE.ShaderMaterial;
@@ -240,6 +248,7 @@ function createKit(): Kit {
   const ground = groundUniforms();
   const pixie = pixieUniforms();
   const prop = propMaterial(shared);
+  const landmarkLook = landmarkUniforms();
   return {
     shared,
     ground,
@@ -251,11 +260,15 @@ function createKit(): Kit {
     water: waterMaterial(shared, SEA_DROP, pixie),
     prop,
     propShadow: propShadowMaterial(shared),
+    landmark: propMaterial(shared, landmarkLook),
+    landmarkShadow: propShadowMaterial(shared, landmarkLook),
+    landmarkLook,
     unitShadow: unitShadowMaterial(),
     crater: craterMaterial(shared),
     smoke: smokeMaterial(shared),
     cliffCaster: cliffCasterMaterial(),
     propCaster: propCasterMaterial(prop.uniforms.uGrow, shared.uMountain),
+    landmarkCaster: propCasterMaterial(prop.uniforms.uGrow, shared.uMountain, landmarkLook),
     cardCaster: cardCasterMaterial(),
     noCaster: new THREE.MeshBasicMaterial({ visible: false }),
   };
@@ -270,6 +283,9 @@ function disposeKit(kit: Kit): void {
     kit.water,
     kit.prop,
     kit.propShadow,
+    kit.landmark,
+    kit.landmarkShadow,
+    kit.landmarkCaster,
     kit.unitShadow,
     kit.crater,
     kit.smoke,
@@ -450,6 +466,8 @@ interface PropFieldProps {
   kind: PropKind;
   /** A model of its own, in place of the kind's. Cloned, so the caller keeps it. */
   model?: THREE.BufferGeometry;
+  /** A city landmark: it keeps one size and is revealed from the ground up, not grown from the board like a tree. */
+  landmark?: boolean;
   instances: readonly PropInstance[];
   kit: Kit;
   /** The sculpted ranges. A prop on one stands on it. */
@@ -457,7 +475,7 @@ interface PropFieldProps {
 }
 
 /** Every prop of one kind as a single instanced draw, and their shadows as a second. */
-function PropField({ kind, model, instances, kit, patches }: PropFieldProps) {
+function PropField({ kind, model, instances, kit, patches, landmark }: PropFieldProps) {
   const field = useDisposable(
     () => {
       const geometry = model ? model.clone() : propGeometry(kind);
@@ -487,9 +505,14 @@ function PropField({ kind, model, instances, kit, patches }: PropFieldProps) {
         return mesh;
       };
       // The same instances once more, for the sun's shadow map only.
-      const caster = make(kit.propCaster, 0, false);
+      const caster = make(landmark ? kit.landmarkCaster : kit.propCaster, 0, false);
       caster.layers.set(CASTER_LAYER);
-      return { geometry, prop: make(kit.prop, 0, true), shadow: make(kit.propShadow, 1, false), caster };
+      return {
+        geometry,
+        prop: make(landmark ? kit.landmark : kit.prop, 0, true),
+        shadow: make(landmark ? kit.landmarkShadow : kit.propShadow, 1, false),
+        caster,
+      };
     },
     (old) => {
       old.geometry.dispose();
@@ -511,7 +534,7 @@ function PropField({ kind, model, instances, kit, patches }: PropFieldProps) {
 /** One landmark: a single prop with a model of its own. */
 function Landmark({ mark, model, kit, patches }: { mark: BoardLandmark; model: THREE.BufferGeometry; kit: Kit; patches: readonly ReliefPatch[] }) {
   const instances = useMemo(() => [mark.instance], [mark.instance]);
-  return <PropField kind="house" model={model} instances={instances} kit={kit} patches={patches} />;
+  return <PropField kind="house" model={model} instances={instances} kit={kit} patches={patches} landmark />;
 }
 
 /** One sculpted range: a grid laid on the land, lifted in the shader, and the same grid for the sun's shadow map. */
@@ -961,6 +984,7 @@ export function BoardScene(props: BoardSceneProps) {
       setDefine(material, "BASES_ONLY", kernel !== null ? basesOnly : null);
     }
     setDefine(kit.prop, "SUN_SHADOW", kernel);
+    setDefine(kit.landmark, "SUN_SHADOW", kernel);
     setDefine(post.grade, "SUN_SHADOW", kernel);
     kit.cardCaster.colorWrite = basesOnly !== null;
     if (!sunMap && rig.target) {
@@ -1071,13 +1095,7 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixGrid.value.set(chart.coarse, chart.fine, chart.share, chart.dither);
       chartNow.uPixShade.value.set(chart.contrast, chart.steps, chart.saturation, chart.rim);
       chartNow.uPixSea.value.set(chart.seaSteps, PIXIE_SHELF_WIDTH * Math.max(chart.foamReach, 0.02), coastField?.reach ?? 1, chart.regional ? 1 : 0);
-      chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, mapVisuals.waveGlintStrength);
-      // The wave front that rocks the ships, drawn as a faint glint on the open sea. It reads the same clock the ships do.
-      const sweep = frontSweep(mapVisuals.waveDirectionDeg);
-      const direction = frontDirection(mapVisuals.waveDirectionDeg);
-      const loop = Math.max(0.5, mapVisuals.waveLoopSeconds);
-      chartNow.uWaveSweepProgress.value = (((performance.now() / 1000) % loop) + loop) % loop / loop;
-      chartNow.uWaveSweep.value.set(sweep.from, sweep.to, direction.x, direction.y);
+      chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
       chartNow.uPixSoft.value.set(chart.soft, chart.brush, chart.softDither, chart.softSat);
       chartNow.uPixSoft2.value.set(chart.softBand, 0, 0, 0);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
@@ -1166,6 +1184,7 @@ export function BoardScene(props: BoardSceneProps) {
       // The glitter keeps to the sun path at every zoom, so it is still there close in, where the eye alone would miss it.
       water.uSheenFar.value = Math.min(1, SHEEN_PATH + (1 - tilt) * mapVisuals.seaFarVisibility * (1 - SHEEN_PATH));
       // The patch is smaller by the radius, and a further share smaller with the camera all the way out.
+      water.uSheenFreq.value = mapVisuals.seaSheenFrequency;
       water.uSheenShape.value.set(
         mapVisuals.seaSheenRadius * (1 - (1 - tilt) * (1 - mapVisuals.seaSheenFarRadius)),
         mapVisuals.seaSheenSpacing * (1 + 0.25 * (1 - tilt)),
@@ -1234,6 +1253,11 @@ export function BoardScene(props: BoardSceneProps) {
 
     kit.prop.uniforms.uGrow.value = detail.props;
     kit.propShadow.uniforms.uGrow.value = detail.props;
+    // The landmarks are revealed by the zoom itself: the base over the first part of the window, the monument over the rest.
+    const reveal = landmarkReveal(frame.view.k, mapVisuals.landmarkRevealFrom, mapVisuals.landmarkRevealTo);
+    kit.landmarkLook.uLandmarkReveal.value = reveal;
+    kit.landmarkLook.uLandmarkBand.value = mapVisuals.landmarkRevealBand;
+    kit.landmarkLook.uLandmarkBaseShare.value = landmarkBaseShare(mapVisuals.landmarkRevealFrom, mapVisuals.landmarkRevealTo);
     kit.smoke.uniforms.uSmoke.value = detail.smoke;
     kit.smoke.uniforms.uCamUp.value.set(0, Math.cos(pose.pitch), Math.sin(pose.pitch));
     // With the sculpted ranges on the board, the loose rock models are put away unless they are asked for.
@@ -1241,7 +1265,11 @@ export function BoardScene(props: BoardSceneProps) {
     for (const child of board.current.children) {
       const material = (child as THREE.Mesh).material;
       const standing = detail.props > 0.001 && (rocks || child.userData.rock !== true);
-      if (material === kit.prop) {
+      if (material === kit.landmark) {
+        child.visible = reveal > 0.001;
+      } else if (material === kit.landmarkShadow) {
+        child.visible = reveal > 0.001 && shared.uShadowAlpha.value > 0.004;
+      } else if (material === kit.prop) {
         child.visible = standing;
       } else if (material === kit.propShadow) {
         child.visible = standing && shared.uShadowAlpha.value > 0.004;
@@ -1274,6 +1302,7 @@ export function BoardScene(props: BoardSceneProps) {
         child.visible =
           casting &&
           (material !== kit.propCaster || (detail.props > 0.001 && (rocks || child.userData.rock !== true))) &&
+          (material !== kit.landmarkCaster || reveal > 0.001) &&
           (material !== kit.mountainCaster || ranges !== null);
       }
     }

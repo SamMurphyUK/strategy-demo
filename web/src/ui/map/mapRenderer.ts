@@ -1489,9 +1489,15 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
   const lod = scene.lod ?? 0;
   setScreenTransform(ctx, dpr);
   const markers = new Map(game.combatMarkers.map((m) => [m.regionId, m.count]));
+  // A territory's pieces stand at slots that can be far from its anchor, so a big territory is drawn while any one
+  // of its counters is on screen, not only while its anchor is. Otherwise a token vanishes at the screen's edge
+  // while the board still draws its shadow.
   const visible = (layout: RegionLayout) => {
     const { anchor } = layout;
-    return anchor.x >= -80 && anchor.y >= -80 && anchor.x <= scene.width + 80 && anchor.y <= scene.height + 80;
+    if (anchor.x >= -80 && anchor.y >= -80 && anchor.x <= scene.width + 80 && anchor.y <= scene.height + 80) {
+      return true;
+    }
+    return layout.counters.some((c) => c.x >= -80 && c.y >= -80 && c.x <= scene.width + 80 && c.y <= scene.height + 80);
   };
   const drawShield = (layout: RegionLayout) => {
     const { region, anchor } = layout;

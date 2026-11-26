@@ -47,10 +47,6 @@ export interface PixieUniforms {
   /** Each ship afloat on screen: map x, map y, and the radius of its mark. For the next pass (hull bounce and sway). */
   uPixShips: { value: Float32Array };
   uPixShipN: { value: number };
-  /** How far round its loop the wave front is, from 0 to 1. The ships are rocked by the same line (see shipSway.ts). */
-  uWaveSweepProgress: { value: number };
-  /** Where the front starts and ends along its direction, in world units, and the direction itself. */
-  uWaveSweep: { value: THREE.Vector4 };
 }
 
 /** Slots in the sea shader's ship list. */
@@ -79,8 +75,6 @@ export function pixieUniforms(): PixieUniforms {
     uPixUnitN: { value: 0 },
     uPixShips: { value: new Float32Array(PIXIE_SHIP_SLOTS * 3) },
     uPixShipN: { value: 0 },
-    uWaveSweepProgress: { value: 0 },
-    uWaveSweep: { value: new THREE.Vector4(0, 1, 1, 0) },
   };
 }
 
@@ -333,8 +327,6 @@ uniform vec4 uPixSea;
 uniform vec4 uPixFoam;
 uniform vec3 uPixShips[${PIXIE_SHIP_SLOTS}];
 uniform float uPixShipN;
-uniform float uWaveSweepProgress;
-uniform vec4 uWaveSweep;
 // 1 where the skin mirrors the sky on the sea, and where it tints the swell. The chart keeps its depth bands flat.
 const float SKIN_SKY = 0.0;
 const float SKIN_SWELL = 0.0;
@@ -365,17 +357,6 @@ float seaShipNear(vec2 mapPoint) {
     near = max(near, 1.0 - smoothstep(s.z, s.z * 2.0, distance(mapPoint, s.xy)));
   }
   return near;
-}
-// A faint glint, one texel wide, along the wave front that rocks the ships: it is the same line, so the swell
-// is seen coming a moment before it arrives. The glint is broken into points that come and go, and a
-// ghost of it trails a little behind. foot is the point measured from the cliff foot, in map units.
-float seaSwellGlint(SeaTexel t, vec2 foot) {
-  float front = mix(uWaveSweep.x, uWaveSweep.y, uWaveSweepProgress);
-  float away = dot(foot, uWaveSweep.zw) - front;
-  float line = step(abs(away), t.e * 0.5);
-  float ghost = step(abs(away + t.e * 3.0), t.e * 0.5);
-  float flick = hash21(t.cell + floor(uTime * 3.0) * 7.0);
-  return (line * step(0.5, flick) + ghost * step(0.82, flick) * 0.5) * uPixFoam.w;
 }
 // The sea colour at a map point m, measured from the cliff foot as foot.
 vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
@@ -412,12 +393,12 @@ float seaGlints(SeaTexel t, vec2 m, float glare) {
           float cellSize = t.e * 2.6 * uSheenShape.y;
           vec2 q = mat2(0.891, 0.454, -0.454, 0.891) * t.at / cellSize;
           vec2 base = floor(q);
-          float chance = min(0.8, 0.5 * glare);
+          float chance = min(0.9, 0.5 * glare * uSheenFreq);
           for (int j = -1; j <= 1; j++) {
             for (int i = -1; i <= 1; i++) {
               vec2 id = base + vec2(float(i), float(j));
               vec2 pt = id + 0.5 + (vec2(hash21(id + 3.1), hash21(id + 9.7)) - 0.5) * (0.5 + 0.5 * uSheenShape.z);
-              float on = step(hash21(id + floor(uTime * 2.2 + hash21(id.yx) * 3.0) * 17.0), chance);
+              float on = step(hash21(id + floor(uTime * 2.2 * max(uSheenFreq, 0.3) + hash21(id.yx) * 3.0) * 17.0), chance);
               vec2 gap = abs((q - pt) * cellSize);
               dashes = max(dashes, on * step(max(gap.x, gap.y), t.e * 0.55));
             }

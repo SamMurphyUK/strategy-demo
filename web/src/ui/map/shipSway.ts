@@ -28,7 +28,7 @@ export const SWAY_BOB_PX = 1.6;
 /** Roll and pitch left between waves, in degrees. Near zero: the ship is all but level in a calm. */
 export const CALM_ROLL_DEG = 0.12;
 /** Greatest roll and pitch a wave front sets off at full amount, in degrees. */
-export const ROCK_ROLL_DEG = 3.4;
+export const ROCK_ROLL_DEG = 1.36;
 export const ROCK_PITCH_DEG = 2.6;
 
 /** How the rocking is shaped: seconds to rise to its crest, seconds for the swing to fade to a third, and its rate. */

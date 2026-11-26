@@ -179,6 +179,8 @@ export interface MapVisualConfig {
   seaSheenSpacing: number;
   /** How far the glints and the edge of the patch are scattered off a regular grid. */
   seaSheenScatter: number;
+  /** How often the sea glints: how many are lit at once, and how fast each one flickers. 1 is the usual, 2 twice as many and twice as quick, 0 none. */
+  seaSheenFrequency: number;
   /** How often a breaking wave throws a glint where the sun could catch it. 0 is never. */
   seaSheenPops: number;
   /** At sprite zoom the land eases from the pixel chart to a soft posterized wash, so the figures stand out. */
@@ -203,6 +205,11 @@ export interface MapVisualConfig {
   /** How far a ship's hull sits below the water, in world units. 0 floats on the surface. */
   navalSubmergeDepth: number;
   /** How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level whatever this is. */
+  /** The zoom where the city landmarks begin to appear, and where they are whole. The base fades in over the first part, the monument rises over the rest. */
+  landmarkRevealFrom: number;
+  landmarkRevealTo: number;
+  /** Height of the soft band at the top of a rising landmark, as a share of its height. */
+  landmarkRevealBand: number;
   navalIdleBobAmp: number;
   /** How hard a wave front rocks a ship (roll and pitch) as it crosses it. 0 is no rocking. */
   navalWaveRockAmp: number;
@@ -212,8 +219,6 @@ export interface MapVisualConfig {
   waveDirectionDeg: number;
   /** A submarine's share of a surface ship's rocking. 0.8 is 20% less. */
   subRockFactor: number;
-  /** Strength of the faint glint that runs along the wave front over the open sea, a moment before it rocks the ships. 0 is none. */
-  waveGlintStrength: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
   regionalPaletteDetail: boolean;
 }
@@ -301,6 +306,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaSheenFarRadius: 0.9,
   seaSheenSpacing: 1.2,
   seaSheenScatter: 0.7,
+  seaSheenFrequency: 1,
   seaSheenPops: 0.5,
   enableSoftLand: true,
   softLandFrom: 3.8,
@@ -314,12 +320,14 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   terrainHeightScale: 1,
   mountainReliefHeight: 1,
   navalSubmergeDepth: 0.6,
+  landmarkRevealFrom: 4.4,
+  landmarkRevealTo: 7,
+  landmarkRevealBand: 0.08,
   navalIdleBobAmp: 0.66,
   navalWaveRockAmp: 1,
   waveLoopSeconds: 20,
   waveDirectionDeg: 0,
   subRockFactor: 0.8,
-  waveGlintStrength: 0.5,
   regionalPaletteDetail: true,
 });
 
@@ -447,6 +455,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   seaSheenFarRadius: [0.5, 1.2],
   seaSheenSpacing: [0.5, 3],
   seaSheenScatter: [0, 1],
+  seaSheenFrequency: [0, 4],
   seaSheenPops: [0, 1],
   softLandFrom: [0.5, 6],
   softLandTo: [1, 8],
@@ -459,12 +468,14 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   terrainHeightScale: [0.3, 2],
   mountainReliefHeight: [0, 3],
   navalSubmergeDepth: [0, 3],
+  landmarkRevealFrom: [1, 8],
+  landmarkRevealTo: [1.5, 9],
+  landmarkRevealBand: [0.01, 0.4],
   navalIdleBobAmp: [0, 3],
   navalWaveRockAmp: [0, 3],
   waveLoopSeconds: [5, 60],
   waveDirectionDeg: [0, 360],
   subRockFactor: [0, 1],
-  waveGlintStrength: [0, 2],
 });
 
 const FRIENDLY_STYLES: readonly FriendlyBorderStyle[] = ["subtle-dashed", "solid", "hidden"];
