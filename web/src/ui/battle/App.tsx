@@ -5366,13 +5366,13 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
             <React.Suspense fallback={null}>
               <BattleStage3D
                 getUnits={getStageUnits}
-                regionId={match?.scene?.regionId}
-                regionName={match?.regionName}
+                regionId={match?.scene?.regionId ?? (sandboxRegionId || undefined)}
+                regionName={match?.regionName ?? (sandboxRegionId || undefined)}
                 theater={currentTheater}
-                scene={match?.scene}
-                coastal={match?.scene?.kind === 'land' ? match.scene.coastal : false}
+                scene={match?.scene ?? sceneForRegion(sandboxRegionId) ?? undefined}
+                coastal={(() => { const sc = match?.scene ?? sceneForRegion(sandboxRegionId); return sc?.kind === 'land' ? sc.coastal : false; })()}
                 bombard={match?.bombard ?? currentTheater === 'normandy'}
-                amphibious={match?.amphibious ?? false}
+                amphibious={match?.amphibious ?? new URLSearchParams(window.location.search).get('amphibious') === '1'}
                 attackerFaction={outcomeFactionId(match?.attackerFaction, currentTheater, 'attacker')}
                 defenderFaction={outcomeFactionId(match?.defenderFaction, currentTheater, 'defender')}
               />

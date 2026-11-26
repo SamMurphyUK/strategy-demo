@@ -191,6 +191,8 @@ export class BattleStageEngine {
   private targetW = 0;
   private targetH = 0;
   private disposed = false;
+  /** A test aid: `?stagespeed=8` runs the stage's clock faster, for a slow machine. 1 otherwise. */
+  private readonly speed = Math.max(1, Number(new URLSearchParams(window.location.search).get("stagespeed")) || 1);
   private sea: THREE.ShaderMaterial | null = null;
   private epoch = -1;
   private ships: Ship[] = [];
@@ -494,7 +496,7 @@ export class BattleStageEngine {
       geo.setAttribute("aRise", new THREE.InstancedBufferAttribute(new Float32Array(2), 2));
       geo.setAttribute("aGone", new THREE.InstancedBufferAttribute(new Float32Array(1), 1));
       const mesh = new THREE.InstancedMesh(geo, material, 1);
-      const size = 4.6;
+      const size = 3.4;
       BAYER_DUMMY.position.set(...toWorld(0, 0.86));
       BAYER_DUMMY.scale.setScalar(size);
       BAYER_DUMMY.rotation.set(0, 0, 0);
@@ -718,7 +720,7 @@ export class BattleStageEngine {
 
   /** Advances the stage by `delta` seconds and poses the camera. */
   update(delta: number, camera: THREE.PerspectiveCamera, aspect: number): void {
-    const dt = Math.min(0.05, Math.max(0, delta));
+    const dt = Math.min(0.05 * this.speed, Math.max(0, delta) * this.speed);
     this.real += dt;
     const step = this.hitStop.advance(dt);
     this.time += step;
@@ -776,7 +778,7 @@ export class BattleStageEngine {
     const seaY = -STAGE_DEPTH / 2 + STAGE_DEPTH * 0.045;
     if (this.opts.coastal && this.opts.bombard) {
       this.ships.push(this.makeShip("battleship"));
-      const fake = { x: -7.4, y: seaY, z: 0.5, scale: 1.25, fireT: -9, slot: { facing: 1, lane: "front" } } as unknown as UnitView;
+      const fake = { x: -7.4, y: seaY, z: 0.5, scale: 0.9, fireT: -9, slot: { facing: 1, lane: "front" } } as unknown as UnitView;
       this.gunship = fake;
       for (let i = 0; i < 3; i++) {
         this.pending.push({
@@ -823,7 +825,7 @@ export class BattleStageEngine {
         x = this.transportX(t);
       }
       ship.group.position.set(x, y, Math.sin(this.time * 1.6 + x) * 0.04);
-      ship.group.scale.setScalar(ship.kind === "battleship" ? 1.25 : 1);
+      ship.group.scale.setScalar(ship.kind === "battleship" ? 0.9 : 1);
       ship.group.visible = x > -11.5;
       ship.material.uniforms.uFade.value = 1;
     }
