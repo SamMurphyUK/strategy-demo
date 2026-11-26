@@ -49,6 +49,10 @@ import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
 import { biomeAtMap } from "./geography";
 import { createMist } from "./mistField";
+import { type BiomeWeather, dampWeather, sampleWeather } from "./biomeAtmosphere";
+import { createFlurries } from "./flurries";
+import { buildForestSheet } from "./forestSheet";
+import { type BiomeTextures, haveBiomes, loadBiomeTextures } from "./terrainTextures";
 import { dioramaFade } from "./skins/dioramaPbr";
 import { jungleSites, valleySites } from "./mistPlacement";
 import {
@@ -75,7 +79,7 @@ import {
 } from "./boardMaterials";
 import { clearTexture, dataSheetTexture, grainTexture, overlayTexture, sheetTexture } from "./boardTextures";
 import { buildCoverSheet, buildGroundSheet, grainTile } from "./groundSheet";
-import { reliefBuffers, type ReliefPatch, sampleMountainHeight, sampleReliefFields } from "./mountainRelief";
+import { HILL_PEAK, reliefBuffers, type ReliefPatch, sampleMountainHeight, sampleReliefFields } from "./mountainRelief";
 import { buildPixieSheet, type CoastField, PIXIE_INK, PIXIE_SHELF_WIDTH } from "./pixieSheet";
 import { idSheetTexture } from "./pixieTextures";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
@@ -580,6 +584,15 @@ function Range({ patch, kit }: { patch: ReliefPatch; kit: Kit }) {
     (old) => old.geometry.dispose(),
     [patch, kit],
   );
+  // The hills are read at a share of the mountains' height, which the slider sets: the mesh and the JS that stands pieces on it follow it.
+  useFrame(() => {
+    if (patch.hills) {
+      const share = mapVisuals.terrainHillRelief / HILL_PEAK;
+      patch.scale = share;
+      range.ground.scale.z = share;
+      range.caster.scale.z = share;
+    }
+  });
   return (
     <>
       <primitive object={range.ground} />
@@ -866,6 +879,51 @@ export function BoardScene(props: BoardSceneProps) {
   );
   // How far each base has faded, by stack, and the last frame's time.
   const baseFade = useRef({ values: new Map<string, number>(), last: 0 }).current;
+  // The photographed biome sets load once, in the background. Until they are in, the shader keeps its soft stand-in.
+  useEffect(() => {
+    let alive = true;
+    let loaded: BiomeTextures | null = null;
+    loadBiomeTextures(Math.min(8, gl.capabilities.getMaxAnisotropy())).then((sets) => {
+      loaded = sets;
+      if (!alive) {
+        for (const texture of [sets.sand, sets.grass, sets.snow]) {
+          texture?.dispose();
+        }
+        return;
+      }
+      if (haveBiomes(sets)) {
+        kit.ground.uDioSand.value = sets.sand;
+        kit.ground.uDioGrass.value = sets.grass;
+        kit.ground.uDioSnow.value = sets.snow;
+        invalidate();
+      }
+    });
+    return () => {
+      alive = false;
+      kit.ground.uDioSand.value = null;
+      kit.ground.uDioGrass.value = null;
+      kit.ground.uDioSnow.value = null;
+      for (const texture of loaded ? [loaded.sand, loaded.grass, loaded.snow] : []) {
+        texture?.dispose();
+      }
+    };
+  }, [kit, gl, invalidate]);
+  // How dense the woods stand, for the ground under them (see forestSheet.ts).
+  const forestTexture = useDisposable(
+    () => {
+      const sheet = buildForestSheet(bounds, plan.props);
+      return dataSheetTexture(sheet.data, sheet.width, sheet.height, 1);
+    },
+    (old) => old.dispose(),
+    [plan, bounds],
+  );
+  // Weather: the damped biome under the camera, and the pool of snow flurries.
+  const weather = useRef({ state: { desert: 0, snow: 0 } as BiomeWeather, last: 0 }).current;
+  const flurries = useDisposable(
+    () => createFlurries(),
+    (old) => old.dispose(),
+    [],
+  );
   const mist = useDisposable(
     () => createMist(),
     (old) => old.dispose(),
@@ -1116,7 +1174,9 @@ export function BoardScene(props: BoardSceneProps) {
         return lift;
       };
     }
-    const grain = table ? surfaceLook(mapVisuals) : null;
+    // The repeating 256 by 256 grain tile is retired: it striped the desert and made static of the snow. The ground's grain is now
+    // the photographed sets of the diorama surface (see skins/dioramaPbr.ts), which are read without a visible repeat.
+    const grain = null as ReturnType<typeof surfaceLook> | null;
     const rivers = table && table.rivers.length > 0 ? riverLook(mapVisuals) : null;
     const roads = table && table.roads.length > 0 ? roadLook(mapVisuals, raw.closeness) : null;
     const earth = kit.ground;
@@ -1227,11 +1287,26 @@ export function BoardScene(props: BoardSceneProps) {
     kit.water.uniforms.uDrop.value = drop;
     sea.current.scale.set(pose.halfWidth * 2 + 60, (pose.halfHeight * 2) / cosPitch + 80, 1);
     kit.water.uniforms.uShift.value = shift;
+    const micro = Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35));
+    // The weather of the ground under the camera: read over a wide ring and damped, so crossing a border never snaps the colour.
+    const weatherDt = Math.min(0.25, Math.max(0, (now - weather.last) / 1000));
+    weather.last = now;
+    weather.state = dampWeather(weather.state, sampleWeather(biomeAtMap, { x: pose.target[0], y: -pose.target[1] }), weatherDt, 4);
+    post.grade.uniforms.uBiome.value.set(weather.state.desert * mapVisuals.desertHeatHaze * micro * 0.8, weather.state.snow * mapVisuals.snowColdTint * micro * 0.6);
+    flurries.update({
+      x: pose.target[0],
+      y: -pose.target[1],
+      alpha: micro * weather.state.snow * Math.min(1, mapVisuals.windStrength * 1.2),
+      seconds: now / 1000,
+      windX: 1.6 * mapVisuals.windStrength,
+      windY: 0.5 * mapVisuals.windStrength,
+      groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0),
+    });
     mist.update(
       {
         x: pose.target[0],
         y: -pose.target[1],
-        micro: Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35)),
+        micro,
         weight: mapVisuals.microMistWeight,
         seconds: performance.now() / 1000,
         groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0),
@@ -1273,7 +1348,9 @@ export function BoardScene(props: BoardSceneProps) {
       (gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"));
     kit.smoke.uniforms.uGlow.value = glowing ? EMBER_GLOW : 1;
     // The close-up surface comes in over the chart from zoom 3.8 to 4.3, and only on the pixel chart: below that it is the chart alone.
-    earth.uDiorama.value.set(chart ? dioramaFade(frame.view.k) * mapVisuals.dioramaPbrBlend : 0, mapVisuals.dioramaTileScale, mapVisuals.dioramaNormalStrength, 0);
+    earth.uDiorama.value.set(chart ? dioramaFade(frame.view.k) * mapVisuals.dioramaPbrBlend : 0, mapVisuals.dioramaTileScale, mapVisuals.dioramaNormalStrength, earth.uDioSand.value && earth.uDioGrass.value && earth.uDioSnow.value ? 1 : 0);
+    earth.uForest.value = forestTexture;
+    earth.uDioLook.value.set(mapVisuals.albedoDetailStrength, mapVisuals.snowColdTint, mapVisuals.desertHeatHaze, mapVisuals.forestUnderstoryTint);
     earth.uSnowLook.value.set(glowing && ranges ? ranges.snowGlow * SNOW_GLOW : 0, ranges?.fade ?? 0);
     earth.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
 
@@ -1602,6 +1679,7 @@ export function BoardScene(props: BoardSceneProps) {
   return (
     <>
       <primitive object={mist.mesh} />
+      <primitive object={flurries.points} />
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />

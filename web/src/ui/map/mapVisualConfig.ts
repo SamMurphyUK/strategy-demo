@@ -193,6 +193,18 @@ export interface MapVisualConfig {
   dioramaTileScale: number;
   /** How deep the diorama surface's relief reads in the light. */
   dioramaNormalStrength: number;
+  /** How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour. */
+  albedoDetailStrength: number;
+  /** The cold slate-blue the shade of snow takes. */
+  snowColdTint: number;
+  /** The warm amber haze and shimmer over the desert. */
+  desertHeatHaze: number;
+  /** How far the ground darkens and enriches under dense trees. */
+  forestUnderstoryTint: number;
+  /** How strongly the wind drives the snow flurries and the haze. */
+  windStrength: number;
+  /** The height of the broad rolling hills, as a share of the mountains' height. 0 is flat. */
+  terrainHillRelief: number;
   softLandTo: number;
   /** What is left of the dither, the colour, and the light and shade once the land is soft. 1 is as strategic. */
   softLandDither: number;
@@ -348,6 +360,12 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   dioramaPbrBlend: 0.85,
   dioramaTileScale: 1,
   dioramaNormalStrength: 0.7,
+  albedoDetailStrength: 0.5,
+  snowColdTint: 0.5,
+  desertHeatHaze: 0.5,
+  forestUnderstoryTint: 0.5,
+  windStrength: 0.5,
+  terrainHillRelief: 0.2,
   softLandTo: 5.6,
   softLandDither: 0.1,
   softLandSaturation: 0.58,
@@ -514,6 +532,12 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   dioramaPbrBlend: [0, 1],
   dioramaTileScale: [0.3, 3],
   dioramaNormalStrength: [0, 2.5],
+  albedoDetailStrength: [0, 1.5],
+  snowColdTint: [0, 1],
+  desertHeatHaze: [0, 1],
+  forestUnderstoryTint: [0, 1],
+  windStrength: [0, 2],
+  terrainHillRelief: [0, 0.5],
   softLandTo: [1, 8],
   softLandDither: [0, 1],
   softLandSaturation: [0, 1.2],

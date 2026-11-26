@@ -192,7 +192,8 @@ LandSkinOut skinLand() {
         // The soft land reads the ground where the pixel is, not at the middle of its texel, so its washes have no steps.
         // A range keeps the pixel chart, its height map and its light: only the flat land goes soft, and a range's foot eases into it.
         #ifdef RELIEF
-        float softK = 1.0 - smoothstep(0.02, 0.3, vRise);
+        // The hills, low and broad, are flat land that rolls: only the foot of a range (above the hills) holds the pixel look.
+        float softK = 1.0 - smoothstep(0.26, 0.5, vRise);
         #else
         float softK = 1.0;
         #endif

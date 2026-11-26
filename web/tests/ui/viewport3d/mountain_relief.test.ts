@@ -32,8 +32,8 @@ function site(over: Partial<ReliefSite> = {}): ReliefSite {
 
 describe("the sculpted places", () => {
   it("are the great ranges, and nowhere else", () => {
-    expect(RELIEF_ZONES.map((zone) => zone.name)).toEqual(["Switzerland", "Himalayas", "Persia", "Caucasus", "Rockies", "Urals"]);
-    expect(RELIEF_ZONES.filter((zone) => zone.region).map((zone) => zone.region)).toEqual(["Persia", "Caucus", "Central US", "Novo"]);
+    expect(RELIEF_ZONES.map((zone) => zone.name)).toEqual(["Switzerland", "Himalayas", "Persia", "Rockies"]);
+    expect(RELIEF_ZONES.filter((zone) => zone.region).map((zone) => zone.region)).toEqual(["Persia", "Central US"]);
     for (const zone of RELIEF_ZONES) {
       expect(zone.rise).toBeGreaterThan(0);
       expect(zone.rise).toBeLessThanOrEqual(1);
@@ -257,5 +257,16 @@ describe("a range as a mesh", () => {
     expect(buffers.slopes[i * 4 + 1]).toBeCloseTo(north, 6);
     // The far corner of the box is level ground.
     expect(Array.from(buffers.slopes.slice(0, 4))).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe("the rolling hills", () => {
+  it("stay under the snow line and the foot of a range, whatever the slider", async () => {
+    const { buildHillPatch, HILL_PEAK } = await import("../../../src/ui/viewport3d/mountainRelief");
+    const patch = buildHillPatch({ box: { x: 0, y: 0, w: 60, h: 40 }, inside: () => true, kind: () => ({ swell: 1, dune: 0.5 }), step: 1, salt: 3 })!;
+    expect(patch.hills).toBe(true);
+    const top = Math.max(...patch.fields);
+    expect(top).toBeCloseTo(HILL_PEAK, 5);
+    expect(top).toBeLessThan(0.26);
   });
 });

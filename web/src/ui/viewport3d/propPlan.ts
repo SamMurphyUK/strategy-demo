@@ -122,6 +122,16 @@ function smooth(t: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * How a wood is clumped into copses: a multiplier on the chance a cell grows a tree. A slow noise draws the copses (about
+ * twenty units across), and a ramp through it makes a dense heart, a feathered edge, and open clearings between them.
+ */
+export function copseFactor(x: number, y: number): number {
+  const copse = patchNoise(x * 0.09, y * 0.09, 23) * 0.7 + patchNoise(x * 0.23, y * 0.23, 29) * 0.3;
+  const t = Math.min(1, Math.max(0, (copse - 0.36) / 0.2));
+  return 0.06 + 1.5 * t * t * (3 - 2 * t);
+}
+
 /** Smooth noise in [0, 1], for forest patches. */
 export function patchNoise(x: number, y: number, salt: number): number {
   const ix = Math.floor(x);
@@ -399,6 +409,8 @@ export function planProps(input: PlanInput): PropPlan {
         const patch = patchNoise(p.x * 0.045, p.y * 0.045, 7) * 0.65 + patchNoise(p.x * 0.13, p.y * 0.13, 11) * 0.35;
         // Bare below the threshold, full a little above it.
         chance *= Math.min(1, Math.max(0, (patch - cover.patchy) / 0.08));
+        // Woods stand in copses, thick at the heart of each and thinning to an open edge, with clearings between.
+        chance *= copseFactor(p.x, p.y);
       }
       if (cellHash(ix, iy, 3) >= chance) {
         continue;

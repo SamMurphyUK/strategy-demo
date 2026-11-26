@@ -263,6 +263,14 @@ export interface GroundUniforms {
   uSnowLook: { value: THREE.Vector2 };
   /** The close-up surface: how far it has come in over the chart, its tile scale, and the strength of its relief. */
   uDiorama: { value: THREE.Vector4 };
+  /** Albedo detail strength, snow cold tint, desert heat haze, forest understory tint. */
+  uDioLook: { value: THREE.Vector4 };
+  /** The packed biome sets (see terrainTextures.ts). Null until loaded: the shader then uses its soft stand-in. */
+  uDioSand: { value: THREE.Texture | null };
+  uDioGrass: { value: THREE.Texture | null };
+  uDioSnow: { value: THREE.Texture | null };
+  /** How dense the trees stand, one byte a texel over the board (see forestSheet.ts). */
+  uForest: { value: THREE.Texture | null };
 }
 
 export function groundUniforms(): GroundUniforms {
@@ -277,6 +285,11 @@ export function groundUniforms(): GroundUniforms {
     uToEye: { value: new THREE.Vector3(0, 0, 1) },
     uSnowLook: { value: new THREE.Vector2(0, 1) },
     uDiorama: { value: new THREE.Vector4(0, 1, 1, 0) },
+    uDioLook: { value: new THREE.Vector4(0.5, 0.5, 0.5, 0.5) },
+    uDioSand: { value: null },
+    uDioGrass: { value: null },
+    uDioSnow: { value: null },
+    uForest: { value: null },
   };
 }
 
@@ -521,52 +534,66 @@ export function landTopMaterial(
         c *= 1.0 + (bump - 0.5) * 0.24 * depth * uRelief;
         #endif
 
-        // The close-up surface comes in over the chart: tufted grass, rippled sand, crusted snow and slate, read in world space,
-        // so the flat land gains a real slope, a roughness, and cavities that hold shade. Nothing is drawn below the diorama zoom.
+        // The close-up surface comes in over the chart: meadow, sand and snow read in world space from the photographed sets (or a
+        // soft stand-in), so flat land gains a real slope, a roughness and a grain. Only their luminance touches the colour, so the
+        // palette hues hold. Nothing is drawn below the diorama zoom.
         float dioBlend = 0.0;
         float dioSnow = skin.biome.z;
         float dioSand = skin.biome.y;
         float roughNow = 1.0;
+        float peakSnow = 0.0;
+        #ifdef RELIEF
+        peakSnow = skin.snowy * smoothstep(0.5, 0.7, vRise);
+        #endif
         #ifdef PIXIE
         if (uDiorama.x > 0.002) {
           dioBlend = uDiorama.x;
-          vec3 dq = vec3(vScene * uDiorama.y, 0.0);
-          vec4 dw = vec4(skin.biome, 0.0);
-          vec3 faces = vec3(0.0, 0.0, 1.0);
+          vec2 duv = vScene * (0.1 * uDiorama.y);
+          DioSample ground = dioMix(duv, skin.biome);
+          float rockW = 0.0;
           #ifdef RELIEF
           // A range reads as slate: its foot and its steep faces, on all three axes, with the slope itself coming in.
           vec3 slopeN = normalize(vec3(-vSlope * 2.4, 1.0));
           float dioFoot = smoothstep(0.08, 0.4, vRise);
           float dioSteep = smoothstep(0.1, 0.45, 1.0 - slopeN.z);
-          float rockW = clamp(max(dioFoot, dioSteep) * (1.0 - skin.biome.z * 0.6), 0.0, 1.0);
-          faces = pow(abs(slopeN), vec3(4.0));
+          rockW = clamp(max(dioFoot, dioSteep) * (1.0 - skin.biome.z * 0.6), 0.0, 1.0);
+          vec3 faces = pow(abs(slopeN), vec3(4.0));
           faces /= max(dot(faces, vec3(1.0)), 1e-3);
-          dq.z = vRise * uMountain.x * uDiorama.y;
-          dw *= (1.0 - rockW);
-          dw.w = rockW;
-          n = normalize(n + vec3(-vSlope * 2.4, 0.0) * rockW * dioBlend);
-          #endif
+          vec3 dq = vec3(vScene * uDiorama.y, vRise * uMountain.x * uDiorama.y);
           float de = 0.02;
-          float h0 = dioHeight(dq, dw, faces);
-          vec2 slopeH = vec2(dioHeight(dq + vec3(de, 0.0, 0.0), dw, faces) - h0, dioHeight(dq + vec3(0.0, de, 0.0), dw, faces) - h0) / de;
-          // The height is held to a spread of about a half, so the relief reads the same on every kind of ground.
-          n = normalize(n + vec3(-slopeH * uDiorama.z * dioBlend * 0.5, 0.0));
-          roughNow = dioRough(dq, dw);
-          float wsum = max(dw.x + dw.y + dw.z + dw.w, 1e-3);
-          // The cavities hold shade, and the tips of the grass and the crests of the dunes catch a warm light.
-          c *= 1.0 + (h0 - 0.5) * 1.3 * dioBlend * min(uDiorama.z, 1.5);
-          c = mix(c, c * vec3(1.1, 1.05, 0.88), smoothstep(0.55, 0.92, h0) * (dw.x + dw.y) / wsum * dioBlend * uDirect);
+          float r0 = dioRock(dq, faces);
+          vec2 rockSlope = vec2(dioRock(dq + vec3(de, 0.0, 0.0), faces) - r0, dioRock(dq + vec3(0.0, de, 0.0), faces) - r0) / de;
+          n = normalize(n + vec3(-vSlope * 2.4, 0.0) * rockW * dioBlend);
+          ground.slope = mix(ground.slope, -rockSlope * 0.5, rockW);
+          ground.detail = mix(ground.detail, (r0 - 0.5) * 1.6, rockW);
+          ground.rough = mix(ground.rough, 0.85, rockW);
+          #endif
+          n = normalize(n + vec3(ground.slope * uDiorama.z * dioBlend * 0.9, 0.0));
+          roughNow = ground.rough;
+          // The albedo keeps its palette: only the photograph's centred luminance moves it, so the cavities hold shade.
+          c *= 1.0 + ground.detail * uDioLook.x * dioBlend;
+          // Sand: the troughs go warm golden ochre and never grey. Meadow: smooth patches of warm sage against cool forest slate.
+          // Snow: soft drifts, and the wind-swept crests show the dark earth.
+          float trough = smoothstep(0.0, -0.6, ground.detail) * skin.biome.y;
+          c = mix(c, c * vec3(1.1, 0.9, 0.6), trough * dioBlend * 0.7);
+          float meadow = vnoise(vScene * 0.035 + 7.0) * 0.6 + vnoise(vScene * 0.09 + 2.0) * 0.4;
+          c *= mix(vec3(1.0), mix(vec3(0.9, 0.96, 1.02), vec3(1.06, 1.03, 0.92), smoothstep(0.35, 0.65, meadow)), skin.biome.x * dioBlend * 0.6);
+          // Under a wood the ground is darker and richer, so the trees are rooted in it and not stood on it.
+          vec2 forestAt = vec2((vScene.x - uBounds.x) / uBounds.z, (-vScene.y - uBounds.y) / uBounds.w);
+          float woods = texture2D(uForest, forestAt).r * (1.0 - skin.biome.y) * (1.0 - skin.biome.z) * (1.0 - rockW);
+          c *= mix(vec3(1.0), vec3(0.74, 0.82, 0.7), woods * uDioLook.w * 1.6 * dioBlend);
+          float drift = vnoise(vScene * 0.06 + 31.0) * 0.55 + vnoise(vScene * 0.17 + 5.0) * 0.3 + vnoise(vScene * 0.5) * 0.15;
+          float bare = (1.0 - smoothstep(0.22, 0.42, drift)) * skin.biome.z * (1.0 - rockW);
+          c = mix(c, vec3(0.40, 0.34, 0.31) * (0.9 + 0.2 * ground.detail), bare * dioBlend * 0.5);
         }
         #endif
         c *= lit(dot(n, uSunDir));
         // A tactile surface under the overhead sun: a fine tooth in the colour, and a low satin sheen from a tilted micro
         // normal. It comes in with the zoom, and goes the moment the slider does.
         if (uBoardSheen > 0.001) {
-          vec2 tooth = vScene * 13.0;
-          vec3 microN = normalize(vec3((vnoise(tooth) - 0.5) * 0.7, (vnoise(tooth + 17.3) - 0.5) * 0.7, 1.0));
-          c *= 1.0 + (vnoise(vScene * 31.0) - 0.5) * 0.1 * uBoardSheen;
-          float satin = pow(max(dot(microN, normalize(uSunDir + vec3(0.0, 0.0, 1.0))), 0.0), 16.0);
-          c += uSunColor * satin * 0.07 * uBoardSheen * uDirect;
+          // A low satin return from the surface's own normal. No overlay of noise: the grain is the ground's, not a filter.
+          float satin = pow(max(dot(n, normalize(uSunDir + vec3(0.0, 0.0, 1.0))), 0.0), 16.0);
+          c += uSunColor * satin * 0.05 * uBoardSheen * uDirect;
         }
         c *= 1.0 - cloudShade(sceneAt);
         // Alpha carries the light that reaches the ground, for the pieces painted over it (see gradeMaterial).
@@ -608,11 +635,13 @@ export function landTopMaterial(
           float shin = mix(72.0, 5.0, roughNow);
           float spec = pow(max(dot(n, normalize(uSunDir + uToEye)), 0.0), shin) * (1.0 - roughNow) * 0.5;
           c += uSunColor * spec * uDirect * lightShare * dioBlend;
-          c = mix(c, c * vec3(0.8, 0.9, 1.1), (1.0 - towardSun) * dioSnow * dioBlend);
-          c = mix(c, min(c, vec3(${SAND_CEILING.toFixed(2)})), dioSand * dioBlend);
-          c = mix(min(c, vec3(1.0)), c, dioSnow);
-          c *= 1.0 + ${(SNOW_PEAK - 1).toFixed(2)} * dioSnow * smoothstep(0.55, 0.95, towardSun) * lightShare * uDirect * dioBlend;
+          c = mix(c, c * vec3(0.8, 0.9, 1.1), (1.0 - towardSun) * dioSnow * dioBlend * clamp(uDioLook.y * 2.0, 0.0, 2.0));
+          // Only a snow summit may go past white, and by a hair. Low snow, sand and everything else stay under the bloom.
+          c *= 1.0 + ${(SNOW_PEAK - 1).toFixed(2)} * peakSnow * smoothstep(0.55, 0.95, towardSun) * lightShare * uDirect * dioBlend;
         }
+        // Nothing but a snow peak is allowed above ${SAND_CEILING.toFixed(2)}: the desert, the grass and the low snow are held under the bloom's threshold,
+        // so the post stack never turns them into glowing white streaks.
+        c = min(c, vec3(mix(${SAND_CEILING.toFixed(2)}, ${SNOW_PEAK.toFixed(2)}, peakSnow)));
         #endif
         #ifdef PIXIE
         // Shade stops at warm slate umber. Nothing on the chart goes to black, so a dark piece still reads on it.
@@ -1615,6 +1644,8 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uExact: { value: 1 },
       uSaturation: { value: 0.86 },
       uWarm: { value: 0 },
+      /** The biome's colour grade: warm amber over the desert, cool slate over the snow. Colour only. */
+      uBiome: { value: new THREE.Vector2(0, 0) },
       uDusk: { value: 0 },
       uDim: { value: 0 },
     },
@@ -1630,6 +1661,7 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uniform float uExact;
       uniform float uSaturation;
       uniform float uWarm;
+      uniform vec2 uBiome;
       uniform float uDusk;
       uniform float uDim;
       varying vec2 vUv;
@@ -1734,6 +1766,9 @@ export function gradeMaterial(): THREE.ShaderMaterial {
         c = mix(vec3(grey), c, uSaturation);
         // Close in, a touch of warmth, the colour of a lamp over a table.
         c *= mix(vec3(1.0), vec3(1.035, 1.0, 0.955), uWarm);
+        // Desert: a warm amber haze. Winter: a diffused, cool slate-blue overcast. Both are a tint and nothing more, and move slowly.
+        c *= mix(vec3(1.0), vec3(1.07, 1.0, 0.86), uBiome.x);
+        c = mix(c, vec3(dot(c, vec3(0.299, 0.587, 0.114))) * vec3(0.9, 0.97, 1.1) + c * 0.15, uBiome.y);
         // The dusk look: thinner colour, harder contrast, a cold cast.
         vec3 dusk = (mix(vec3(grey), c, 0.75) - 0.5) * 1.12 + 0.5;
         c = mix(c, dusk * vec3(0.9, 0.96, 1.07), uDusk);

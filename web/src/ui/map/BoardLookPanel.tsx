@@ -751,6 +751,12 @@ export function BoardLookPanel() {
         <Num name="dioramaPbrBlend" label="Diorama surface" title="How far the tiled grass, sand, snow and slate surface comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart." />
         <Num name="dioramaTileScale" label="Diorama tile scale" title="The repeats of the diorama surface against the shipped size." />
         <Num name="dioramaNormalStrength" label="Diorama relief" title="How deep the diorama surface's relief reads in the light." />
+        <Num name="albedoDetailStrength" label="Palette detail" title="How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour." />
+        <Num name="terrainHillRelief" label="Rolling hills" title="The height of the broad rolling hills, dune ridges and basins, as a share of the mountains' height. 0 is flat." />
+        <Num name="forestUnderstoryTint" label="Woods ground tint" title="How far the ground darkens and enriches under dense trees." />
+        <Num name="desertHeatHaze" label="Desert haze" title="The warm amber haze over the desert, close in." />
+        <Num name="snowColdTint" label="Snow cold tint" title="The cool slate-blue overcast over the snow, and the cold in its shade." />
+        <Num name="windStrength" label="Wind" title="How strongly the wind drives the snow flurries." />
         <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandDither" label="Soft dither" title="Dither left on the soft land. 0 is none, 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />

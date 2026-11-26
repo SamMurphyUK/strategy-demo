@@ -32,11 +32,10 @@ export const RELIEF_ZONES: readonly ReliefZone[] = [
   { name: "Switzerland", gap: { seed: { x: 279, y: 221.5 }, box: { x: 267, y: 213, w: 24, h: 17 } }, rise: 0.8, step: 0.3 },
   { name: "Himalayas", gap: { seed: { x: 451, y: 278 }, box: { x: 426, y: 257, w: 50, h: 40 } }, rise: 1, step: 0.5 },
   { name: "Persia", region: "Persia", rise: 0.68, step: 0.5 },
-  // The great ranges the sculpted three left out. Each is the whole territory the range lies in, with a level clearing
-  // round every point its pieces use.
-  { name: "Caucasus", region: "Caucus", rise: 0.78, step: 0.5 },
+  // The Caucasus and the Urals are left out for now: a whole territory raised for either threw a long white ridge across
+  // Russia ("Caucus" is a tall narrow territory by Moscow). They need a boxed zone like the Alps, placed by eye.
+  // The Rockies are a whole territory, with a level clearing round every point its pieces use.
   { name: "Rockies", region: "Central US", rise: 0.74, step: 0.5 },
-  { name: "Urals", region: "Novo", rise: 0.62, step: 0.5 },
 ];
 
 /** The ground is level within this distance of a point the pieces use, in world units. */
@@ -75,6 +74,10 @@ export interface ReliefPatch {
   rows: number;
   /** Two numbers a node: the dome and the ridged massif. */
   fields: Float32Array;
+  /** The gentle rolling hills of the continent, not a range (see buildHillPatch). */
+  hills?: boolean;
+  /** A share the fields are read at, for the hills' slider. Absent is 1. */
+  scale?: number;
 }
 
 function smooth(value: number): number {
@@ -344,7 +347,8 @@ export function sampleReliefField(patch: ReliefPatch, x: number, y: number): { d
     at(ix + 1, iy, channel) * fx * (1 - fy) +
     at(ix, iy + 1, channel) * (1 - fx) * fy +
     at(ix + 1, iy + 1, channel) * fx * fy;
-  return { dome: read(0), ridge: read(1) };
+  const scale = patch.scale ?? 1;
+  return { dome: read(0) * scale, ridge: read(1) * scale };
 }
 
 /** The two shapes at a map point over every patch. Zones do not overlap, so the first that answers is it. */
@@ -414,4 +418,82 @@ export function reliefBuffers(patch: ReliefPatch): ReliefBuffers {
     }
   }
   return { positions, fields, slopes, indices: new Uint32Array(indices) };
+}
+
+export interface HillSite {
+  /** A box that holds the whole land. */
+  box: Rect;
+  /** True where the ground may roll: land that no range takes. */
+  inside(p: Vec2): boolean;
+  /** What the ground is at a point: how much it swells (0 to 1) and how much of it is dune ridge (0 to 1). */
+  kind(p: Vec2): { swell: number; dune: number };
+  step: number;
+  salt: number;
+}
+
+/** The field value of the highest hill. The slider (`terrainHillRelief`) is a share of the mountains' height: it reads the fields at share / HILL_PEAK. */
+export const HILL_PEAK = 0.2;
+
+/** The hills climb from the land's edge, and from the foot of a range, over this distance. */
+export const HILL_EDGE = 5;
+
+/**
+ * The broad, gentle swells of the continent: rolling hills, desert dune ridges, and highland basins, from layered noise and
+ * what the ground is. The fields are normalised to 1 at the highest rise; the slider reads them at a share of the mountains'
+ * height (see ReliefPatch.scale). The land's edges and the feet of the ranges stay level, so a coast or a border never meets
+ * a wall, and the ranges carry the tall spikes.
+ */
+export function buildHillPatch(site: HillSite): ReliefPatch | null {
+  const { step, box } = site;
+  const columns = Math.ceil(box.w / step) + 3;
+  const rows = Math.ceil(box.h / step) + 3;
+  const originX = box.x - step;
+  const originY = box.y - step;
+  const mask = new Uint8Array(columns * rows);
+  for (let iy = 1; iy < rows - 1; iy++) {
+    for (let ix = 1; ix < columns - 1; ix++) {
+      if (site.inside({ x: originX + ix * step, y: originY + iy * step })) {
+        mask[iy * columns + ix] = 1;
+      }
+    }
+  }
+  const depth = insideDistance(mask, columns, rows);
+  const fields = new Float32Array(columns * rows * 2);
+  let top = 0;
+  for (let iy = 0; iy < rows; iy++) {
+    for (let ix = 0; ix < columns; ix++) {
+      const i = iy * columns + ix;
+      if (!mask[i]) {
+        continue;
+      }
+      const x = originX + ix * step;
+      const y = originY + iy * step;
+      const ground = smooth((Math.max(0, depth[i] - 1) * step) / HILL_EDGE);
+      if (ground <= 0) {
+        continue;
+      }
+      const kind = site.kind({ x, y });
+      // Three octaves of swell: a broad one, a rolling one, and a small undulation.
+      const swell = noise(x * 0.035, y * 0.035, site.salt) * 0.55 + noise(x * 0.09, y * 0.09, site.salt + 3) * 0.33 + noise(x * 0.22, y * 0.22, site.salt + 7) * 0.12;
+      // Dune ridges lie across the wind, long and low, and wander with a slow noise.
+      const t = (x * 0.8 + y * 0.6) * 0.42 + noise(x * 0.05, y * 0.05, site.salt + 11) * 3.4;
+      const dune = 0.5 + 0.5 * Math.sin(t);
+      const height = ground * (kind.swell * (0.25 + 0.75 * swell) + kind.dune * 0.7 * dune * (0.45 + 0.55 * swell));
+      if (height <= 0) {
+        continue;
+      }
+      fields[i * 2] = height;
+      fields[i * 2 + 1] = height;
+      top = Math.max(top, height);
+    }
+  }
+  if (top <= 0) {
+    return null;
+  }
+  // The highest hill stands at HILL_PEAK, well under the snow line and the foot of a range, so the shaders never mistake a hill
+  // for a mountain (no snow on it, no rock). The slider reads the fields at a share of that (see ReliefPatch.scale).
+  for (let i = 0; i < fields.length; i++) {
+    fields[i] = (fields[i] / top) * HILL_PEAK;
+  }
+  return { originX, originY, step, columns, rows, fields, hills: true, scale: 1 };
 }

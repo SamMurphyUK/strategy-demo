@@ -39,7 +39,8 @@ import {
 } from "./placements";
 import { BOARD_BAKE_SCALE, coastMaskCanvas } from "./boardTextures";
 import { planRoads, riverLines } from "./groundSheet";
-import { buildReliefPatch, RELIEF_ZONES } from "./mountainRelief";
+import { biomeAtMap } from "./geography";
+import { buildHillPatch, HILL_PEAK, buildReliefPatch, RELIEF_ZONES, sampleReliefFields } from "./mountainRelief";
 import { buildCoastField } from "./pixieSheet";
 import { climateZoneCanvas, regionIdCanvas } from "./pixieTextures";
 import { planProps, townSites } from "./propPlan";
@@ -322,6 +323,35 @@ export default function MapViewport3D(props: MapViewProps) {
       });
       return patch ? [patch] : [];
     });
+    // The broad hills lie over the land the ranges leave, from a coarse grid, and the tall ranges carry the spikes.
+    const rangeTaken = (p: Vec2) => {
+      const field = sampleReliefFields(patches, p.x, p.y);
+      return field.dome > 0 || field.ridge > 0;
+    };
+    const hills = buildHillPatch({
+      box: sheet,
+      inside: (p) => isLand(p) && !rangeTaken(p),
+      kind: (p) => {
+        const biome = biomeAtMap(p);
+        if (biome === "desert") {
+          return { swell: 0.35, dune: 1 };
+        }
+        if (biome === "tundra" || biome === "ice") {
+          return { swell: 0.5, dune: 0 };
+        }
+        if (biome === "steppe" || biome === "savanna" || biome === "scrub") {
+          return { swell: 0.8, dune: 0.15 };
+        }
+        // Forest, taiga, jungle and the temperate lowlands: the fullest swell.
+        return { swell: 1, dune: 0 };
+      },
+      step: 1.5,
+      salt: 101,
+    });
+    if (hills) {
+      hills.scale = mapVisuals.terrainHillRelief / HILL_PEAK;
+      patches.push(hills);
+    }
     return { patches, rivers, roads };
   }, [land, geometry, clipped]);
 

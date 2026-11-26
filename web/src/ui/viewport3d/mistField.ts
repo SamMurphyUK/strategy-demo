@@ -87,9 +87,9 @@ export function createMist(): MistField {
         float soft = 1.0 - smoothstep(0.25, 1.0, length(c));
         float wisp = 0.55 + 0.45 * vn(vUv * vec2(5.0, 2.0) + vDrift * 1.5 + uTime * 0.04 + vMist.y * 20.0);
         float a = soft * wisp * vMist.z * uMicroAlpha * ${MAX_ALPHA.toFixed(2)};
-        // Cool grey-blue in the valleys, a warm damp cream over the jungle. Held under the bloom's threshold.
+        // Cool grey-blue in the valleys, a warm damp cream over the jungle. Held at 0.92 or under, so the bloom never lights a ribbon.
         vec3 tint = mix(vec3(0.80, 0.87, 0.93), vec3(0.93, 0.89, 0.74), vMist.x);
-        gl_FragColor = vec4(min(tint, vec3(0.95)), a);
+        gl_FragColor = vec4(min(tint, vec3(0.92)), a);
       }
     `,
   });

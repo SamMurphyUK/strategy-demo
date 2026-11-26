@@ -17,6 +17,8 @@ import { PART_FIXED, PART_TINT } from "./propMeshes";
 
 /** Sides of every round part. Enough to read as round at the size of a base, few enough to stay faceted. */
 const SIDES = 32;
+/** How far the wall runs below the footing, against the base's height. */
+const SKIRT = 1.2;
 
 function rgbOf(hex: string): [number, number, number] {
   return [Number.parseInt(hex.slice(1, 3), 16) / 255, Number.parseInt(hex.slice(3, 5), 16) / 255, Number.parseInt(hex.slice(5, 7), 16) / 255];
@@ -52,7 +54,8 @@ function ring(inner: number, outer: number, z: number): THREE.BufferGeometry {
 /** The base: radius 1, height 1, standing on z = 0. */
 export function plinthGeometry(bevel = 0.11): THREE.BufferGeometry {
   // The wall narrows a little toward the top, the way a turned base does.
-  const wall = new THREE.CylinderGeometry(0.97, 1, 1, SIDES, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5);
+  // The wall runs on below the footing as a skirt, so on a slope the downhill edge never floats. The base stays upright.
+  const wall = new THREE.CylinderGeometry(0.97, 1, 1 + SKIRT, SIDES, 1, true).rotateX(Math.PI / 2).translate(0, 0, (1 - SKIRT) / 2);
   const parts = [
     part(wall, rgbOf(PLINTH_EBONY), PART_FIXED),
     // The top face, and the pale bevel round its edge, a hair above it so the two never fight.

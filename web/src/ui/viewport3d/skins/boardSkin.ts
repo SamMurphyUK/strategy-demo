@@ -61,6 +61,12 @@ export const BOARD_SKINS: Readonly<Record<BoardSkinId, BoardSkin>> = Object.free
       "dioramaPbrBlend",
       "dioramaTileScale",
       "dioramaNormalStrength",
+      "albedoDetailStrength",
+      "snowColdTint",
+      "desertHeatHaze",
+      "forestUnderstoryTint",
+      "windStrength",
+      "terrainHillRelief",
     ],
   },
 });
