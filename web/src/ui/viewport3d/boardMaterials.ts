@@ -826,7 +826,15 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
         // Shade of its own: the foot of the wall sits in the dark where the water meets it, and the face turned from the sun goes deeper.
         float foot = 1.0 - smoothstep(0.0, 0.8, vHeight);
         float away = 1.0 - smoothstep(-0.2, 0.55, ndl);
-        rock *= 1.0 - clamp(uCliffShade * (0.4 * foot + 0.3 * away), 0.0, 0.85);
+        // In the chart's own style: the shade is cut into three flat steps, and one step runs into the next by a 4 by 4 ordered dither of whole
+        // texels laid on the wall, not a smooth gradient.
+        float shadeWant = clamp(uCliffShade * (0.4 * foot + 0.3 * away), 0.0, 0.85);
+        vec2 shadeTexel = floor(vec2(vAlong, vHeight * uDrop) * 3.0);
+        vec2 sb = mod(shadeTexel, 2.0);
+        vec2 sc = mod(floor(shadeTexel * 0.5), 2.0);
+        float shadeBay = (fract(sb.x * 0.5 + sb.y * 0.75) + fract(sc.x * 0.5 + sc.y * 0.75) * 0.25) * 0.8 + 0.03;
+        float shadeStep = floor(shadeWant * 3.0 + shadeBay) / 3.0;
+        rock *= 1.0 - shadeStep;
         gl_FragColor = vec4(rock * light, 1.0);
       }
     `,
