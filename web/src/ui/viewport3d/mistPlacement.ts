@@ -115,7 +115,8 @@ export function hazeOf(lon: number, lat: number): "europe" | "africa" | null {
   if (lon >= -10 && lon <= 40 && lat >= 36 && lat <= 62) {
     return "europe";
   }
-  if (lon >= -18 && lon <= 52 && lat >= -35 && lat <= 9) {
+  // Africa's haze keeps to the middle, where the trees cluster (the Congo basin and the forest belt), with a drift north toward the desert.
+  if (lon >= 6 && lon <= 36 && lat >= -9 && lat <= 13) {
     return "africa";
   }
   return null;

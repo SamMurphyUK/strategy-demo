@@ -79,7 +79,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { microAlpha, microSpriteLean, unitLean } from "./boardTune";
+import { facilityBadgeAlpha, microSpriteLean, unitLean } from "./boardTune";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { waterY } from "../viewport3d/skins/waterSwell";
@@ -1413,8 +1413,9 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         items.push({
           worldY,
           paint: () => {
-            // At the closest zoom the factory, harbor and airfield badges fade away: the models stand there instead.
-            const shown = 1 - microAlpha(scene.view.k);
+            // The factory, harbor and airfield badges fade slowly away as the camera comes in, and are gone at the closest zoom: the models
+            // stand there instead.
+            const shown = facilityBadgeAlpha(scene.view.k);
             if (shown < 0.02) {
               return;
             }

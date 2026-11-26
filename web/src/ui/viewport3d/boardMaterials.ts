@@ -691,9 +691,14 @@ export function landTopMaterial(
         // Quartz glitter in the sand: each grain has its own micro-facet normal, read against the half vector from the sun to the eye, and only
         // the brightest few of the grains (about 4%) catch it. They push a hair past white (about 1.04) and no more; the sand itself stays under 0.9.
         if (dioSand > 0.05 && dioBlend > 0.002 && uDioLook2.y > 0.001) {
-          vec2 grain = floor(vScene * 38.0);
+          // The grains lie on a lattice turned diagonal and stretched across the foreshortening, each at a jittered place and round, so the
+          // glitter shows no square grid and runs on a slant with the perspective, never straight down the screen.
+          vec2 gp = mat2(0.82, 0.57, -0.57, 0.82) * vScene * vec2(30.0, 58.0);
+          vec2 grain = floor(gp);
+          vec2 jit = (vec2(hash21(grain + 1.7), hash21(grain + 4.1)) - 0.5) * 0.7;
+          float round_ = 1.0 - smoothstep(0.1, 0.3, length(fract(gp) - 0.5 - jit));
           vec3 microN = normalize(vec3((hash21(grain) - 0.5) * 1.5, (hash21(grain + 7.3) - 0.5) * 1.5, 1.0));
-          float spark = pow(max(dot(microN, normalize(uSunDir + uToEye)), 0.0), 48.0) * step(0.96, hash21(grain + 13.1));
+          float spark = pow(max(dot(microN, normalize(uSunDir + uToEye)), 0.0), 48.0) * step(0.96, hash21(grain + 13.1)) * round_;
           c = min(c + uSunColor * spark * 0.9 * uDioLook2.y * dioSand * dioBlend * uDirect * lightShare, vec3(1.04));
         }
         #endif

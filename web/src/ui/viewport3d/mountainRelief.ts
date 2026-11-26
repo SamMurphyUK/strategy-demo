@@ -478,7 +478,10 @@ export function buildHillPatch(site: HillSite): ReliefPatch | null {
       // Dune ridges lie across the wind, long and low, and wander with a slow noise.
       // The crest lines are not straight: the direction they run turns slowly with the ground, a randomised sine wanders them off their line, the
       // phase is pushed by the swell so the ridges follow the hills, and a slow noise cuts natural breaks in them.
-      const turn = (noise(x * 0.028, y * 0.028, site.salt + 13) - 0.5) * 1.9 + 0.65;
+      // The crests run on a slant: their direction on the map is 0.3 to 0.85 radians off the x axis, so with the board's foreshortening they
+      // read as diagonals across the screen and never straight down it. The direction wanders with the ground within that.
+      const crestDir = 0.3 + noise(x * 0.028, y * 0.028, site.salt + 13) * 0.55;
+      const turn = crestDir + Math.PI / 2;
       const along = x * Math.cos(turn) + y * Math.sin(turn);
       const across = -x * Math.sin(turn) + y * Math.cos(turn);
       const wander = Math.sin(across * 0.11 + noise(x * 0.04, y * 0.04, site.salt + 17) * 6) * 2.6 + Math.sin(across * 0.27 + along * 0.05 + site.salt) * 1.1;

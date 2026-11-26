@@ -137,8 +137,8 @@ export function createMist(): MistField {
         matrix.makeRotationZ((site.seed - 0.5) * 1.2).scale(size).setPosition(site.x, -site.y, z);
         mesh.setMatrixAt(i, matrix);
         const edge = 1 - Math.min(1, Math.hypot(site.x - params.x, site.y - params.y) / REACH);
-        // Europe's haze is light, sub-Saharan Africa's heavy.
-        const strength = haze === "europe" ? 0.42 : haze === "africa" ? 1.5 : dense ? Math.min(1.6, params.monsoon) : 1;
+        // Europe's haze is light; Africa's is a faint one, kept to the middle of the continent.
+        const strength = haze === "europe" ? 0.42 : haze === "africa" ? 0.3 : dense ? Math.min(1.6, params.monsoon) : 1;
         mist.setXYZ(i, haze === "africa" ? 4 : haze === "europe" ? 3 : dense ? 2 : jungle ? 1 : 0, site.seed, Math.min(1, edge * 2.2) * strength);
       });
       mesh.instanceMatrix.needsUpdate = true;

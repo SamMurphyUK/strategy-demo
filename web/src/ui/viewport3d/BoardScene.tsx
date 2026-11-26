@@ -58,6 +58,7 @@ import { type BiomeWeather, dampWeather, sampleWeather } from "./biomeAtmosphere
 import { createFlurries } from "./flurries";
 import { createBirds } from "./birdFlock";
 import { createPowder } from "./crestPowder";
+import { createClouds } from "./mountainCloud";
 import { buildForestSheet } from "./forestSheet";
 import { type BiomeTextures, haveBiomes, loadBiomeTextures } from "./terrainTextures";
 import { dioramaFade } from "./skins/dioramaPbr";
@@ -439,6 +440,7 @@ function disposeSunRig(rig: SunRig): void {
 
 const SEA_KIND = 1;
 const AIR_KIND = 2;
+const SHIP_KIND = 4;
 
 /**
  * Lays one card for each standing figure: where its feet are on the board, how far its picture
@@ -450,7 +452,7 @@ function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, ma
   for (const layout of frame.layouts) {
     const sea = layout.region.type === "sea" ? SEA_KIND : 0;
     for (const counter of layout.counters) {
-      rig.kinds.set(`${layout.region.id}|${layout.copyDx}|${counter.slot.key}`, sea | (counter.domain === "air" ? AIR_KIND : 0));
+      rig.kinds.set(`${layout.region.id}|${layout.copyDx}|${counter.slot.key}`, sea | (counter.domain === "air" ? AIR_KIND : 0) | (counter.domain === "sea" ? SHIP_KIND : 0));
     }
   }
   const dpr = frame.dpr > 0 ? frame.dpr : 1;
@@ -470,8 +472,9 @@ function layFigureCards(rig: SunRig, frame: BoardFrame, figures: FigureCards, ma
     const world = screenToWorld(frame.view, { x: card.feetX / dpr, y: card.feetY / dpr });
     const kind = rig.kinds.get(stackOfFigure(card.id)) ?? 0;
     const sea = (kind & SEA_KIND) !== 0;
-    // A ship casts no sun shadow: it is drawn with a faint flat one under the hull instead (see uprightSprites.ts).
-    if (sea) {
+    // A ship casts no sun shadow: it has a faint, fixed, flat one under the hull instead (see uprightSprites.ts). An aircraft above the sea
+    // keeps the sun's shadow, falling on the water.
+    if ((kind & SHIP_KIND) !== 0) {
       continue;
     }
     foot[count * 3] = world.x;
@@ -984,7 +987,8 @@ export function BoardScene(props: BoardSceneProps) {
   );
   // The mist: where it can lie, found once, and a pool of ribbons spent on the sites near the camera.
   const mistSites = useMemo(
-    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? []), ...hazeSites(bounds, (x, y) => { const place = mapToLonLat({ x, y }); return hazeOf(place.lon, place.lat); }, (x, y) => pointInMultiPolygon({ x, y }, land))],
+    // The valley mist is retired: the mountains' mist is a traveling cloud (see mountainCloud.ts), which does not pop.
+    () => [...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? []), ...hazeSites(bounds, (x, y) => { const place = mapToLonLat({ x, y }); return hazeOf(place.lon, place.lat); }, (x, y) => pointInMultiPolygon({ x, y }, land))],
     [patches, bounds, land, props.mistExtra],
   );
   // How far each base has faded, by stack, and the last frame's time.
@@ -1045,6 +1049,11 @@ export function BoardScene(props: BoardSceneProps) {
   );
   const birds = useDisposable(
     () => createBirds(),
+    (old) => old.dispose(),
+    [],
+  );
+  const clouds = useDisposable(
+    () => createClouds(),
     (old) => old.dispose(),
     [],
   );
@@ -1443,6 +1452,14 @@ export function BoardScene(props: BoardSceneProps) {
       kit.ground.uTheater1.value.copy(THEATERS.pacificEast);
       kit.ground.uTheater2.value.copy(THEATERS.pacificWest);
     }
+    clouds.update({
+      x: pose.target[0],
+      y: -pose.target[1],
+      alpha: micro * mapVisuals.microMistWeight * 1.4,
+      seconds: now / 1000,
+      dt: weatherDt,
+      groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0) - lowerAt(x, y),
+    });
     powder.update({
       x: pose.target[0],
       y: -pose.target[1],
@@ -1873,6 +1890,7 @@ export function BoardScene(props: BoardSceneProps) {
       <primitive object={flurries.points} />
       <primitive object={birds.mesh} />
       <primitive object={powder.points} />
+      <primitive object={clouds.mesh} />
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />

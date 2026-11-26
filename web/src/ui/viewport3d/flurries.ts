@@ -2,8 +2,8 @@
 // weather's snow share. They stand above the ground (never under it), are never tone mapped, and cost one draw call.
 import * as THREE from "three";
 
-/** The pool, a half again as many flakes as it was at 320, so the powder is thick at the closest zoom. */
-export const FLURRY_POOL = 480;
+/** The pool: 700 flakes, up from 320 by a half and then by 45% again, so the powder is thick at the closest zoom. */
+export const FLURRY_POOL = 700;
 const REACH = 40;
 
 export interface FlurryParams {
@@ -45,7 +45,7 @@ export function createFlurries(): Flurries {
     vertexShader: /* glsl */ `
       void main() {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = 2.5;
+        gl_PointSize = 3.0;
       }
     `,
     fragmentShader: /* glsl */ `

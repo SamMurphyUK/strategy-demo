@@ -234,6 +234,16 @@ function nearShare(distance: number, from: number, to: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** The zoom the facility badges begin to fade at (the sprites' arrival), and where they are gone. */
+export const FACILITY_FADE_FROM = 3.8;
+export const FACILITY_FADE_TO = 7.0;
+
+/** How much of the factory, harbor and airfield badges is left at a zoom: whole up to the sprites' arrival, then a slow fade to nothing. */
+export function facilityBadgeAlpha(k: number): number {
+  const t = clamp01((k - FACILITY_FADE_FROM) / (FACILITY_FADE_TO - FACILITY_FADE_FROM));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 /** uMicroAlpha at a zoom: 0 outside the micro tier, 1 close in. */
 export function microAlpha(k: number): number {
   return nearShare(cameraDistance(k), MICRO_ALPHA_FROM, MICRO_ALPHA_TO);
