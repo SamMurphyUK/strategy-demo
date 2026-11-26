@@ -29,6 +29,10 @@ export function dioramaFade(k: number): number {
 export const DIORAMA_GLSL = /* glsl */ `
 uniform vec4 uDiorama;
 uniform vec4 uDioLook;
+uniform vec4 uDioLook2;
+uniform vec4 uTheater0;
+uniform vec4 uTheater1;
+uniform vec4 uTheater2;
 uniform sampler2D uDioSand;
 uniform sampler2D uDioGrass;
 uniform sampler2D uDioSnow;
@@ -64,6 +68,15 @@ DioSample dioFetch(sampler2D t, vec2 uv) {
   return s;
 }
 
+// Broad sweeping dune swells: a long, low undulation the fine ripple rides on. Its slope is what gives silky sand its form.
+vec2 dioSwell(vec2 uv) {
+  float e = 0.05;
+  float h = vnoise(uv * 0.9 + 3.0) * 0.65 + vnoise(uv * 2.1) * 0.35;
+  float hx = vnoise((uv + vec2(e, 0.0)) * 0.9 + 3.0) * 0.65 + vnoise((uv + vec2(e, 0.0)) * 2.1) * 0.35;
+  float hy = vnoise((uv + vec2(0.0, e)) * 0.9 + 3.0) * 0.65 + vnoise((uv + vec2(0.0, e)) * 2.1) * 0.35;
+  return vec2(hx - h, hy - h) / e;
+}
+
 // The three kinds of ground blended by their shares (grass, sand, snow).
 DioSample dioMix(vec2 uv, vec3 w) {
   DioSample o;
@@ -86,9 +99,10 @@ DioSample dioMix(vec2 uv, vec3 w) {
     if (real) {
       d = dioFetch(uDioSand, uv * 1.4);
     }
-    o.slope += d.slope * w.y;
+    // Silky: the photographed ripple is held to a faint 0.18 of its relief, over the broad sweeping swell.
+    o.slope += (d.slope * 0.18 + dioSwell(uv) * 0.32) * w.y;
     o.rough += d.rough * w.y;
-    o.detail += d.detail * w.y * 0.8;
+    o.detail += d.detail * w.y * 0.4;
   }
   if (w.z > 0.002) {
     DioSample n = dioSoft(uv);

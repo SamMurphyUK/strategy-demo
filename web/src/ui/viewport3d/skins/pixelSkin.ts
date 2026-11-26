@@ -174,7 +174,7 @@ export const PIXEL_LAND_DECLS = /* glsl */ `
 
 /** The land's colour from the pixel chart. `skinLand` is what the land material asks for. */
 export const PIXEL_LAND_SKIN = /* glsl */ `
-struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; vec3 biome; };
+struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; vec3 biome; float frost; };
 LandSkinOut skinLand() {
   // Where the cloud's shadow is read: the chart reads it at the middle of a texel.
   vec2 sceneAt = vec2(0.0);
@@ -320,6 +320,8 @@ LandSkinOut skinLand() {
   float dry = zoneShare.z;
   float snowShare = snowy;
   result.biome = vec3((1.0 - dry) * (1.0 - snowShare), dry * (1.0 - snowShare), snowShare);
+  // The frost before it is cut into texels: the close-up feathers the snow's edge by it.
+  result.frost = frost;
   return result;
 }
 `;
@@ -363,6 +365,8 @@ float seaShipNear(vec2 mapPoint) {
   }
   return near;
 }
+// The tropics: the map y of the northern and the southern tropic, and how strong the turquoise lagoon is (see seaBase).
+uniform vec3 uTropic;
 // The sea colour at a map point m, measured from the cliff foot as foot.
 vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         // Depth by the distance to the coast, in flat bands: pale on the shelf, steel teal in the
@@ -380,6 +384,9 @@ vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, t.e)), 0.0).rgb;
         float seam = step(0.5, ids.b) * max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)));
         c = mix(c, PIX_SEAM, seam * 0.55);
+        // In the tropics the shallows by the coast are a translucent turquoise-teal lagoon before the sea drops to deep navy.
+        float lagoon = (1.0 - smoothstep(0.0, uPixSea.y * 0.5, away)) * smoothstep(uTropic.x - 5.0, uTropic.x + 5.0, m.y) * (1.0 - smoothstep(uTropic.y - 5.0, uTropic.y + 5.0, m.y));
+        c = mix(c, vec3(0.17, 0.66, 0.63) * (0.9 + 0.1 * fbm(foot * 0.3)), lagoon * uTropic.z);
   return c;
 }
 // Where the surf is read: the pixel itself, not the middle of its texel, so its rings stay smooth.

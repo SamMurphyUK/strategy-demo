@@ -17,6 +17,10 @@ export interface MistParams {
   micro: number;
   /** The slider. */
   weight: number;
+  /** The slider for the monsoon mist over Southeast Asia. */
+  monsoon: number;
+  /** How high the canopy stands over the ground, in world units. */
+  canopy: number;
   seconds: number;
   /** The height the ground stands at a map point, in world units. */
   groundAt: (x: number, y: number) => number;
@@ -59,9 +63,11 @@ export function createMist(): MistField {
         // A curl of a slow stream function: the ribbons swirl without gathering or thinning.
         float t = uTime * (0.08 + aMist.y * 0.05);
         vec2 q = centre.xy * 0.21 + aMist.y * 9.0;
+        // Two octaves of the curl: the slow swirl, and a finer billow riding on it.
+        vec2 q2 = centre.xy * 0.55 + aMist.y * 4.0;
         vec2 curl = vec2(
-          cos(q.y + t) * cos(q.x * 0.8 - t * 0.7) * 0.8,
-          sin(q.x * 0.8 - t * 0.7) * sin(q.y + t) * 0.8
+          cos(q.y + t) * cos(q.x * 0.8 - t * 0.7) * 0.8 + cos(q2.y * 1.3 - t * 1.6) * sin(q2.x + t * 1.2) * 0.35,
+          sin(q.x * 0.8 - t * 0.7) * sin(q.y + t) * 0.8 + sin(q2.x * 1.1 + t * 1.4) * cos(q2.y - t) * 0.35
         );
         vDrift = curl;
         vec4 world = instanceMatrix * vec4(position, 1.0);
@@ -87,9 +93,11 @@ export function createMist(): MistField {
         float soft = 1.0 - smoothstep(0.25, 1.0, length(c));
         float wisp = 0.55 + 0.45 * vn(vUv * vec2(5.0, 2.0) + vDrift * 1.5 + uTime * 0.04 + vMist.y * 20.0);
         float a = soft * wisp * vMist.z * uMicroAlpha * ${MAX_ALPHA.toFixed(2)};
-        // Cool grey-blue in the valleys, a warm damp cream over the jungle. Held at 0.92 or under, so the bloom never lights a ribbon.
-        vec3 tint = mix(vec3(0.80, 0.87, 0.93), vec3(0.93, 0.89, 0.74), vMist.x);
-        gl_FragColor = vec4(min(tint, vec3(0.92)), a);
+        // Cool grey-blue in the valleys, a warm damp cream over the jungle, and over the monsoon jungles a thick humid olive-parchment (#D6DEC8).
+        // Held at 0.88 or under, so the bloom never lights a ribbon.
+        vec3 tint = mix(vec3(0.80, 0.87, 0.93), vec3(0.93, 0.89, 0.74), min(vMist.x, 1.0));
+        tint = mix(tint, vec3(0.839, 0.871, 0.784), step(1.5, vMist.x));
+        gl_FragColor = vec4(min(tint, vec3(0.88)), a);
       }
     `,
   });
@@ -104,7 +112,7 @@ export function createMist(): MistField {
   return {
     mesh,
     update(params, sites) {
-      const alpha = params.micro * params.weight;
+      const alpha = params.micro * Math.max(params.weight, params.monsoon);
       material.uniforms.uTime.value = params.seconds;
       material.uniforms.uMicroAlpha.value = alpha;
       if (alpha <= 0.004 || sites.length === 0) {
@@ -115,15 +123,17 @@ export function createMist(): MistField {
       mesh.count = picked.length;
       picked.forEach((site, i) => {
         const jungle = site.kind === "jungle";
+        const dense = site.dense === true;
         const ground = params.groundAt(site.x, site.y);
-        // Valley mist lies on the trough floor so the ridges stand out of it; jungle mist hangs a little over the canopy.
-        const z = jungle ? 0.85 + site.seed * 0.2 : Math.max(0, ground) + 0.5 + site.seed * 0.4;
-        const width = (jungle ? 16 : 11) * (0.8 + site.seed * 0.6);
+        // Valley mist lies on the trough floor so the ridges stand out of it; jungle mist hangs a little over the canopy, and the monsoon mist
+        // hugs just above the tree tops, on the ground's own height.
+        const z = dense ? Math.max(0, ground) + params.canopy + site.seed * 0.25 : jungle ? 0.85 + site.seed * 0.2 : Math.max(0, ground) + 0.5 + site.seed * 0.4;
+        const width = (dense ? 21 : jungle ? 16 : 11) * (0.8 + site.seed * 0.6);
         size.set(width, width * (0.32 + site.seed * 0.12), 1);
         matrix.makeRotationZ((site.seed - 0.5) * 1.2).scale(size).setPosition(site.x, -site.y, z);
         mesh.setMatrixAt(i, matrix);
         const edge = 1 - Math.min(1, Math.hypot(site.x - params.x, site.y - params.y) / REACH);
-        mist.setXYZ(i, jungle ? 1 : 0, site.seed, Math.min(1, edge * 2.2));
+        mist.setXYZ(i, dense ? 2 : jungle ? 1 : 0, site.seed, Math.min(1, edge * 2.2) * (dense ? Math.min(1.6, params.monsoon) : 1));
       });
       mesh.instanceMatrix.needsUpdate = true;
       mist.needsUpdate = true;

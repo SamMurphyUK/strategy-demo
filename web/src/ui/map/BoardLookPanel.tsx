@@ -772,6 +772,13 @@ export function BoardLookPanel() {
         <Num name="dioramaTileScale" label="Diorama tile scale" title="The repeats of the diorama surface against the shipped size." />
         <Num name="microPitchDeg" label="Micro camera angle" title="Degrees above the horizon the camera looks from at the closest zoom. Lower is a more dramatic diorama angle." unit="deg" />
         <Num name="microSpriteTiltDeg" label="Micro figure lean" title="How far the 2D figures lean back more in the micro tier, so they stand against the horizon." unit="deg" />
+        <Num name="seaJungleMistStrength" label="Jungle monsoon mist" title="The thick humid mist over the Southeast Asian jungles, hugging just above the canopy. 0 is none." />
+        <Num name="microBirdsWeight" label="Birds" title="How many birds wheel over the close-up board. 0 is none." />
+        <Num name="canopyBiomeContrast" label="Theater contrast" title="How far apart the theaters look: emerald and lime Pacific jungle against dry olive and acacia-gold Africa. 0 is one look." />
+        <Num name="sandGlintStrength" label="Sand glitter" title="The glitter of quartz grains in the desert sand, close in. 0 is none." />
+        <Num name="sandSubsurfaceAmber" label="Sand amber bounce" title="The warm terracotta-amber bounce in the shade of the dunes, so sand never goes muddy." />
+        <Num name="snowDriftBleed" label="Snow drift bleed" title="How far the snow feathers into the flat land beside it, and bares the earth at its fringe. 0 is the chart's hard edge." />
+        <Num name="crestPowderStrength" label="Crest powder" title="Sand and snow powder blown off the crests and ridges, close in. 0 is none." />
         <Num name="islandElevationScale" label="Island height" title="How much of its cliff an island keeps. 1 stands as tall as the continents; lower sits lower in the sea, so the Pacific atolls are not pillars." />
         <IslandRegionHeight />
         <Num name="cliffShadowStrength" label="Cliff shadow" title="How dark the cliffs are in their own shade: the foot where the water meets the wall, and the face turned from the sun. 0 is the old flat light." />

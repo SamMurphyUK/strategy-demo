@@ -67,6 +67,13 @@ export const BOARD_SKINS: Readonly<Record<BoardSkinId, BoardSkin>> = Object.free
       "forestUnderstoryTint",
       "windStrength",
       "terrainHillRelief",
+      "seaJungleMistStrength",
+      "microBirdsWeight",
+      "canopyBiomeContrast",
+      "sandGlintStrength",
+      "sandSubsurfaceAmber",
+      "snowDriftBleed",
+      "crestPowderStrength",
     ],
   },
 });

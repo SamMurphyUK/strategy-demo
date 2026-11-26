@@ -169,3 +169,21 @@ describe("prop plan", () => {
     expect(townSites([{ id: "islet", ipc: 5, factory: 2, anchor, contains: tiny }], tiny, [anchor])).toHaveLength(0);
   });
 });
+
+describe("theater canopy tints", () => {
+  it("puts the Pacific and Africa in their own colours, and leaves the rest alone", async () => {
+    const { theaterOf, theaterTint } = await import("../../../src/ui/viewport3d/propPlan");
+    expect(theaterOf(120, 5)).toBe("pacific");
+    expect(theaterOf(-170, 0)).toBe("pacific");
+    expect(theaterOf(30, -5)).toBe("africa");
+    expect(theaterOf(10, 50)).toBe("other");
+    const own: [number, number, number] = [0.4, 0.4, 0.4];
+    expect(theaterTint(own, "other", 0.5, 1)).toEqual(own);
+    expect(theaterTint(own, "pacific", 0.5, 0)).toEqual(own);
+    const jade = theaterTint(own, "pacific", 0, 1);
+    const gold = theaterTint(own, "africa", 1, 1);
+    expect(jade[1]).toBeGreaterThan(jade[0]);
+    expect(jade[1]).toBeGreaterThan(jade[2]);
+    expect(gold[0]).toBeGreaterThan(gold[2]);
+  });
+});

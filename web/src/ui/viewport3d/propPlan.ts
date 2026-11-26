@@ -4,7 +4,7 @@
 // Nothing here is a rule. Props keep clear of the points the pieces use (unit anchors, unit slots,
 // facility badges), stay off the coast, and are small next to a counter.
 import type { Rect, Vec2 } from "../map/geometry";
-import { type Biome, biomeAtMap, crestPoints, MOUNTAIN_RANGES, type MountainRange } from "./geography";
+import { type Biome, biomeAtMap, mapToLonLat, crestPoints, MOUNTAIN_RANGES, type MountainRange } from "./geography";
 
 export type PropKind = "pine" | "broadleaf" | "acacia" | "palm" | "rock" | "dune" | "peak" | "house" | "factory";
 
@@ -59,6 +59,8 @@ export interface PlanInput {
   ranges?: readonly MountainRange[];
   /** Ground cover at a point. Defaults to the world's. */
   biomeAt?(p: Vec2): Biome;
+  /** 0 to 1: how far the theaters' crowns differ (see theaterTint). Absent is 0, one look. */
+  canopyContrast?: number;
 }
 
 /** Where the factory model's chimneys stand, in model units. The second is mirrored in x. */
@@ -182,6 +184,44 @@ function shade(tint: Rgb, roll: number, spread = 0.2): Rgb {
   return [Math.min(1, tint[0] * f), Math.min(1, tint[1] * f), Math.min(1, tint[2] * f)];
 }
 
+/** Rich emerald-jade and mossy-lime crowns for the Pacific and Southeast Asian jungles. */
+const PACIFIC_JADE: Rgb = [0.16, 0.5, 0.36];
+const PACIFIC_LIME: Rgb = [0.42, 0.6, 0.2];
+/** Sun-bleached olive-sage and warm acacia-gold crowns for Sub-Saharan and East Africa. */
+const AFRICA_SAGE: Rgb = [0.5, 0.54, 0.36];
+const AFRICA_GOLD: Rgb = [0.74, 0.6, 0.27];
+
+export type Theater = "pacific" | "africa" | "other";
+
+/** The theater of a place, from its longitude and latitude. */
+export function theaterOf(lon: number, lat: number): Theater {
+  if (lat >= -26 && lat <= 26 && (lon >= 92 || lon <= -140)) {
+    return "pacific";
+  }
+  if (lat >= -36 && lat <= 22 && lon >= -20 && lon <= 55) {
+    return "africa";
+  }
+  return "other";
+}
+
+/**
+ * A crown's tint by theater: Pacific and Southeast Asian jungles go rich emerald-jade and mossy-lime, Africa's go dry olive-sage and
+ * acacia-gold. `contrast` is how far the crown moves toward its theater's colours, and a roll picks between the pair. Other places,
+ * and everything that is not foliage, keep their own tint.
+ */
+export function theaterTint(tint: Rgb, theater: Theater, roll: number, contrast: number): Rgb {
+  if (theater === "other" || contrast <= 0) {
+    return tint;
+  }
+  const pair = theater === "pacific" ? [PACIFIC_JADE, PACIFIC_LIME] : [AFRICA_SAGE, AFRICA_GOLD];
+  const target = mix(pair[0], pair[1], roll);
+  // Keep the crown's own light and dark: the target's hue at the tint's brightness.
+  const own = (tint[0] + tint[1] + tint[2]) / 3;
+  const goal = (target[0] + target[1] + target[2]) / 3 || 1;
+  const lit: Rgb = [Math.min(1, target[0] * (own / goal)), Math.min(1, target[1] * (own / goal)), Math.min(1, target[2] * (own / goal))];
+  return mix(tint, lit, Math.min(1, contrast));
+}
+
 function dress(kind: PropKind, biome: Biome, p: Vec2, rolls: readonly [number, number, number, number]): PropInstance {
   const [a, b, c, d] = rolls;
   const base = { x: p.x, y: p.y, turn: c * Math.PI * 2, snow: 0 };
@@ -279,6 +319,7 @@ export function planProps(input: PlanInput): PropPlan {
   const { bounds } = input;
   const biomeOf = input.biomeAt ?? biomeAtMap;
   const props = emptyProps();
+  const contrast = input.canopyContrast ?? 0;
   const chimneys: SmokeStack[] = [];
   const wrapX = (x: number) => bounds.x + ((((x - bounds.x) % bounds.w) + bounds.w) % bounds.w);
   const inside = (p: Vec2, margin: number): boolean =>
@@ -420,7 +461,12 @@ export function planProps(input: PlanInput): PropPlan {
       if (!inside(p, margin) || reserved.near(p.x, p.y, kind === "dune" ? PEAK_CLEARANCE : TREE_CLEARANCE) || built.near(p.x, p.y, 0.5)) {
         continue;
       }
-      props[kind].push(dress(kind, biome, p, [cellHash(ix, iy, 5), cellHash(ix, iy, 6), cellHash(ix, iy, 8), cellHash(ix, iy, 9)]));
+      const dressed = dress(kind, biome, p, [cellHash(ix, iy, 5), cellHash(ix, iy, 6), cellHash(ix, iy, 8), cellHash(ix, iy, 9)]);
+      if (contrast > 0 && (kind === "pine" || kind === "broadleaf" || kind === "palm" || kind === "acacia")) {
+        const place = mapToLonLat(p);
+        dressed.tint = theaterTint(dressed.tint, theaterOf(place.lon, place.lat), cellHash(ix, iy, 12), contrast);
+      }
+      props[kind].push(dressed);
     }
   }
   return { props, chimneys };

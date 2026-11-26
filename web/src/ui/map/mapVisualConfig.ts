@@ -203,6 +203,20 @@ export interface MapVisualConfig {
   shipShadowStretch: number;
   /** How much of its cliff an island keeps: 1 stands as tall as the continents, lower sits lower in the sea. A territory can take its own (see islandOverrides.ts). */
   islandElevationScale: number;
+  /** The thick monsoon mist over the Southeast Asian jungles, hugging the canopy. 0 is none. */
+  seaJungleMistStrength: number;
+  /** How many birds wheel over the close-up board, and how loud their flocks are. 0 is none. */
+  microBirdsWeight: number;
+  /** How far apart the theaters' trees and ground are: emerald Pacific jungle against dry olive and gold Africa. 0 is one look. */
+  canopyBiomeContrast: number;
+  /** The glitter of quartz grains in the desert sand, close in. 0 is none. */
+  sandGlintStrength: number;
+  /** The warm terracotta-amber bounce in the shade of the dunes. 0 is plain shade. */
+  sandSubsurfaceAmber: number;
+  /** How far the snow feathers out into the flat land beside it, and bares the earth at its fringe. 0 is the chart's hard edge. */
+  snowDriftBleed: number;
+  /** The sand and snow powder blown off the crests, close in. 0 is none. */
+  crestPowderStrength: number;
   /** How dark the cliffs are in their own shade: the foot and the face turned from the sun. 0 is the old flat light. */
   cliffShadowStrength: number;
   /** How deep the diorama surface's relief reads in the light. */
@@ -379,6 +393,13 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   tiltShiftStrength: 1,
   shipShadowStretch: 0.28,
   islandElevationScale: 0.6,
+  seaJungleMistStrength: 1,
+  microBirdsWeight: 1,
+  canopyBiomeContrast: 0.7,
+  sandGlintStrength: 0.6,
+  sandSubsurfaceAmber: 0.6,
+  snowDriftBleed: 0.7,
+  crestPowderStrength: 0.6,
   cliffShadowStrength: 0.6,
   dioramaNormalStrength: 0.7,
   albedoDetailStrength: 0.5,
@@ -558,6 +579,13 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   tiltShiftStrength: [0, 2],
   shipShadowStretch: [0, 1],
   islandElevationScale: [0.15, 1],
+  seaJungleMistStrength: [0, 2],
+  microBirdsWeight: [0, 2],
+  canopyBiomeContrast: [0, 1],
+  sandGlintStrength: [0, 2],
+  sandSubsurfaceAmber: [0, 1.5],
+  snowDriftBleed: [0, 1.5],
+  crestPowderStrength: [0, 2],
   cliffShadowStrength: [0, 2],
   dioramaNormalStrength: [0, 2.5],
   albedoDetailStrength: [0, 1.5],

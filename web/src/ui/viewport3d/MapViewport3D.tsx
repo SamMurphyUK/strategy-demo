@@ -43,6 +43,7 @@ import { planRoads, riverLines } from "./groundSheet";
 import { biomeAtMap } from "./geography";
 import { airbaseSite, type FacilitySite, harborSite } from "./facilitySites";
 import { islandCells } from "./islandLowering";
+import { monsoonSites } from "./mistPlacement";
 import { SEA_DROP } from "./boardCamera";
 import { buildHillPatch, HILL_PEAK, buildReliefPatch, RELIEF_ZONES, sampleReliefFields } from "./mountainRelief";
 import { buildCoastField } from "./pixieSheet";
@@ -237,7 +238,7 @@ export default function MapViewport3D(props: MapViewProps) {
       isLand,
       keepClear,
     );
-    return planProps({ bounds: sheet, isLand, keepClear, towns });
+    return planProps({ bounds: sheet, isLand, keepClear, towns, canopyContrast: mapVisuals.canopyBiomeContrast });
   }, [land, geometry, clipped]);
 
   // The plan with the editor's edits laid on it, and the landmarks where they stand.
@@ -254,6 +255,23 @@ export default function MapViewport3D(props: MapViewProps) {
 
   // The islands: polygons of the land small enough to be lowered, with the territories that stand on them.
   const islands = useMemo(() => (land ? islandCells(land.polygons, geometry.regions) : []), [land, geometry]);
+
+  // The monsoon mist over the Southeast Asian jungles: dense ribbons spread over those territories' land.
+  const monsoon = useMemo(() => {
+    if (!land) {
+      return [];
+    }
+    const sheet = land.viewBox;
+    return monsoonSites(
+      geometry.regions
+        .filter((region) => region.type === "land")
+        .map((region) => {
+          const shape = clipped?.get(region.id) ?? roughShape(region);
+          return { id: region.id, box: region.bounds, contains: (p: Vec2) => pointInMultiPolygon(p, shape) };
+        }),
+      (x, y) => landMaskAt(land, { x: wrapWorldX(x, sheet), y }),
+    );
+  }, [land, geometry, clipped]);
 
   // The harbors and airbases: those the map has, and those that have been built. A harbor stands at the foot of a cliff, an airbase on the
   // level ground by the air anchor. They are landmarks, so the placement editor moves them.
@@ -474,6 +492,7 @@ export default function MapViewport3D(props: MapViewProps) {
           plan={placedPlan ?? plan}
           landmarks={everyLandmark}
           islands={islands}
+          mistExtra={monsoon}
           scars={scars}
           look={look}
           dim={props.menuBackdrop === true}

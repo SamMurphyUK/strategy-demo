@@ -47,7 +47,7 @@ import { projectionScales, screenToWorld } from "../map/viewMath";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
 import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
-import { biomeAtMap } from "./geography";
+import { biomeAtMap, lonLatToMap } from "./geography";
 import { createMist } from "./mistField";
 import { type IslandCell, islandScale, lowerShare, makeLowerAt } from "./islandLowering";
 import { getIslandRevision, getIslandScales, subscribeIslandScales } from "../map/islandOverrides";
@@ -56,10 +56,12 @@ import { facilityKindOf } from "./placements";
 import { microAlpha } from "../map/boardTune";
 import { type BiomeWeather, dampWeather, sampleWeather } from "./biomeAtmosphere";
 import { createFlurries } from "./flurries";
+import { createBirds } from "./birdFlock";
+import { createPowder } from "./crestPowder";
 import { buildForestSheet } from "./forestSheet";
 import { type BiomeTextures, haveBiomes, loadBiomeTextures } from "./terrainTextures";
 import { dioramaFade } from "./skins/dioramaPbr";
-import { jungleSites, valleySites } from "./mistPlacement";
+import { jungleSites, type MistSite, valleySites } from "./mistPlacement";
 import {
   cardCasterMaterial,
   cliffCasterMaterial,
@@ -134,6 +136,8 @@ export interface BoardSceneProps {
   fighting?: readonly string[];
   /** The islands, which can be lowered (see islandLowering.ts). Each is drawn as a slab of its own. */
   islands?: readonly IslandCell[];
+  /** Extra mist sites: the dense monsoon mist over Southeast Asia (see mistPlacement.ts). */
+  mistExtra?: readonly MistSite[];
   /** The main menu is over the board: dim it. */
   dim: boolean;
   /** The viewer asked for less motion: the water, the smoke, and the sun hold still. */
@@ -719,6 +723,19 @@ function Smoke({ scars, chimneys, kit }: { scars: readonly BattleScar[]; chimney
 
 const NO_PATCHES: readonly ReliefPatch[] = [];
 const NO_ISLANDS: readonly IslandCell[] = [];
+
+/** The theaters as boxes on the map, and the tropics' latitudes as map y (see boardMaterials.ts). Fixed by the map's projection. */
+function boxOfLonLat(lon0: number, lat0: number, lon1: number, lat1: number): THREE.Vector4 {
+  const a = lonLatToMap(lon0, lat0);
+  const b = lonLatToMap(lon1, lat1);
+  return new THREE.Vector4(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y));
+}
+const THEATERS = {
+  africa: boxOfLonLat(-20, 22, 55, -36),
+  pacificEast: boxOfLonLat(92, 26, 180, -26),
+  pacificWest: boxOfLonLat(-180, 26, -140, -26),
+};
+const TROPICS = { north: lonLatToMap(0, 23).y, south: lonLatToMap(0, -23).y };
 const NO_RELIEF = { dome: 0, ridge: 0 } as const;
 
 export function BoardScene(props: BoardSceneProps) {
@@ -964,8 +981,8 @@ export function BoardScene(props: BoardSceneProps) {
   );
   // The mist: where it can lie, found once, and a pool of ribbons spent on the sites near the camera.
   const mistSites = useMemo(
-    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land))],
-    [patches, bounds, land],
+    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? [])],
+    [patches, bounds, land, props.mistExtra],
   );
   // How far each base has faded, by stack, and the last frame's time.
   const baseFade = useRef({ values: new Map<string, number>(), last: 0 }).current;
@@ -1021,6 +1038,16 @@ export function BoardScene(props: BoardSceneProps) {
       old.harbor.dispose();
       old.airbase.dispose();
     },
+    [],
+  );
+  const birds = useDisposable(
+    () => createBirds(),
+    (old) => old.dispose(),
+    [],
+  );
+  const powder = useDisposable(
+    () => createPowder(),
+    (old) => old.dispose(),
     [],
   );
   const mist = useDisposable(
@@ -1403,6 +1430,47 @@ export function BoardScene(props: BoardSceneProps) {
     weather.last = now;
     weather.state = dampWeather(weather.state, sampleWeather(biomeAtMap, { x: pose.target[0], y: -pose.target[1] }), weatherDt, 4);
     post.grade.uniforms.uBiome.value.set(weather.state.desert * mapVisuals.desertHeatHaze * micro * 0.8, weather.state.snow * mapVisuals.snowColdTint * micro * 0.6);
+    {
+      // The close-up looks: snow bleed, sand glitter, sand amber, and the theaters' contrast; the theaters as boxes on the map, and the
+      // turquoise lagoon of the tropics; and the desert's heat shimmer, which rides up the frame.
+      kit.ground.uDioLook2.value.set(mapVisuals.snowDriftBleed, mapVisuals.sandGlintStrength, mapVisuals.sandSubsurfaceAmber, mapVisuals.canopyBiomeContrast);
+      kit.water.uniforms.uTropic.value.set(TROPICS.north, TROPICS.south, dioramaFade(frame.view.k) * mapVisuals.canopyBiomeContrast * 0.85);
+      post.grade.uniforms.uShimmer.value.set(weather.state.desert * mapVisuals.desertHeatHaze * micro, now / 1000);
+      kit.ground.uTheater0.value.copy(THEATERS.africa);
+      kit.ground.uTheater1.value.copy(THEATERS.pacificEast);
+      kit.ground.uTheater2.value.copy(THEATERS.pacificWest);
+    }
+    powder.update({
+      x: pose.target[0],
+      y: -pose.target[1],
+      alpha: micro * mapVisuals.crestPowderStrength * Math.max(weather.state.desert, weather.state.snow),
+      seconds: now / 1000,
+      dt: weatherDt,
+      windX: 1.6 * Math.max(0.2, mapVisuals.windStrength),
+      windY: 0.5 * Math.max(0.2, mapVisuals.windStrength),
+      groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0) - lowerAt(x, y),
+      kindAt: (x, y) => {
+        const biome = biomeAtMap({ x, y });
+        return biome === "desert" ? "sand" : biome === "tundra" || biome === "ice" ? "snow" : null;
+      },
+      threshold: 0.06,
+    });
+    birds.update({
+      x: pose.target[0],
+      y: -pose.target[1],
+      micro,
+      weight: mapVisuals.microBirdsWeight,
+      seconds: now / 1000,
+      dt: weatherDt,
+      windX: 1.6 * mapVisuals.windStrength,
+      windY: 0.5 * mapVisuals.windStrength,
+      groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0) - lowerAt(x, y),
+      // Near water: the flock's own point on land, with water within a few units of it.
+      coastAt: (x, y) => {
+        const here = pointInMultiPolygon({ x, y }, land);
+        return !here || !pointInMultiPolygon({ x: x + 7, y }, land) || !pointInMultiPolygon({ x: x - 7, y }, land) || !pointInMultiPolygon({ x, y: y + 7 }, land) || !pointInMultiPolygon({ x, y: y - 7 }, land);
+      },
+    });
     flurries.update({
       x: pose.target[0],
       y: -pose.target[1],
@@ -1418,8 +1486,11 @@ export function BoardScene(props: BoardSceneProps) {
         y: -pose.target[1],
         micro,
         weight: mapVisuals.microMistWeight,
+        monsoon: mapVisuals.seaJungleMistStrength,
+        // Just over the tree tops: a tree stands a little over a unit tall.
+        canopy: 1.5,
         seconds: performance.now() / 1000,
-        groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0),
+        groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0) - lowerAt(x, y),
       },
       mistSites,
     );
@@ -1792,6 +1863,8 @@ export function BoardScene(props: BoardSceneProps) {
     <>
       <primitive object={mist.mesh} />
       <primitive object={flurries.points} />
+      <primitive object={birds.mesh} />
+      <primitive object={powder.points} />
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />

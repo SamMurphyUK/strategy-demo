@@ -3,6 +3,7 @@
 // Two kinds. Valley mist pools in the low ground between tall ridges of the sculpted ranges, so the peaks stand out of it.
 // Jungle mist hangs over the tropical land a little above the tree tops, warm. Sites are found once, with the table;
 // each frame the pool of ribbons is spent on the sites nearest the camera's target (see mistField.ts).
+import type { Vec2 } from "../map/geometry";
 import type { ReliefPatch } from "./mountainRelief";
 import { sampleReliefField } from "./mountainRelief";
 
@@ -12,12 +13,14 @@ export interface MistSite {
   x: number;
   y: number;
   kind: MistKind;
+  /** The thick monsoon mist of the Southeast Asian jungles: bigger, denser, and just over the canopy. */
+  dense?: boolean;
   /** 0 to 1, fixed per site: size, speed, and phase of the drift. */
   seed: number;
 }
 
 /** Ribbons in the pool. */
-export const MIST_POOL = 48;
+export const MIST_POOL = 72;
 const VALLEY_STEP = 4;
 const JUNGLE_STEP = 14;
 
@@ -66,6 +69,38 @@ export function jungleSites(bounds: { x: number; y: number; w: number; h: number
       const jy = y + (hash2(y, x) - 0.5) * JUNGLE_STEP * 0.8;
       if (isJungle(jx, jy)) {
         out.push({ x: jx, y: jy, kind: "jungle", seed: hash2(jx, jy) });
+      }
+    }
+  }
+  return out;
+}
+
+/** The territories of Southeast Asia and the western Pacific whose jungles lie under monsoon mist, by words in their ids. */
+export const MONSOON_NAMES: readonly string[] = ["burma", "indo", "siam", "thailand", "mala", "sumatra", "java", "borneo", "new guinea", "new_guinea", "philippine", "celebes"];
+
+export function isMonsoonRegion(id: string): boolean {
+  const lower = id.toLowerCase();
+  return MONSOON_NAMES.some((name) => lower.includes(name));
+}
+
+/** Dense mist sites: a grid over each monsoon territory, where the caller says it is land and jungle. */
+export function monsoonSites(
+  regions: readonly { id: string; box: { x: number; y: number; w: number; h: number }; contains(p: Vec2): boolean }[],
+  isLand: (x: number, y: number) => boolean,
+  step = 6,
+): MistSite[] {
+  const out: MistSite[] = [];
+  for (const region of regions) {
+    if (!isMonsoonRegion(region.id)) {
+      continue;
+    }
+    for (let y = region.box.y + step / 2; y < region.box.y + region.box.h; y += step) {
+      for (let x = region.box.x + step / 2; x < region.box.x + region.box.w; x += step) {
+        const jx = x + (hash2(x, y) - 0.5) * step * 0.8;
+        const jy = y + (hash2(y, x) - 0.5) * step * 0.8;
+        if (isLand(jx, jy) && region.contains({ x: jx, y: jy })) {
+          out.push({ x: jx, y: jy, kind: "jungle", dense: true, seed: hash2(jx, jy) });
+        }
       }
     }
   }

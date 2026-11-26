@@ -271,6 +271,12 @@ export interface GroundUniforms {
   uDioSnow: { value: THREE.Texture | null };
   /** How dense the trees stand, one byte a texel over the board (see forestSheet.ts). */
   uForest: { value: THREE.Texture | null };
+  /** Snow drift bleed, sand glint, sand amber, canopy contrast. */
+  uDioLook2: { value: THREE.Vector4 };
+  /** The theaters as boxes on the map (min x, min y, max x, max y): Africa, and the Pacific on either side of the date line. */
+  uTheater0: { value: THREE.Vector4 };
+  uTheater1: { value: THREE.Vector4 };
+  uTheater2: { value: THREE.Vector4 };
 }
 
 export function groundUniforms(): GroundUniforms {
@@ -290,6 +296,10 @@ export function groundUniforms(): GroundUniforms {
     uDioGrass: { value: null },
     uDioSnow: { value: null },
     uForest: { value: null },
+    uDioLook2: { value: new THREE.Vector4(0.7, 0.6, 0.6, 0.7) },
+    uTheater0: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTheater1: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTheater2: { value: new THREE.Vector4(0, 0, 0, 0) },
   };
 }
 
@@ -394,6 +404,14 @@ export function landTopMaterial(
       ${LIGHT}
       ${SUN_FRAGMENT}
       ${DIORAMA_GLSL}
+      // 1 inside a box of the map (min x, min y, max x, max y), easing to 0 over a few units outside it.
+      float theaterMask(vec2 p, vec4 box) {
+        if (box.z <= box.x) {
+          return 0.0;
+        }
+        vec2 inside = smoothstep(box.xy - 6.0, box.xy + 6.0, p) * (1.0 - smoothstep(box.zw - 6.0, box.zw + 6.0, p));
+        return inside.x * inside.y;
+      }
       #ifndef SURFACE
       uniform vec3 uToEye;
       #endif
@@ -545,6 +563,8 @@ export function landTopMaterial(
         #ifdef RELIEF
         peakSnow = skin.snowy * smoothstep(0.5, 0.7, vRise);
         #endif
+        // Flat snow drifts catch a soft bloom too, a little (about 1.04); the summits a hair more.
+        peakSnow = max(peakSnow, skin.snowy * 0.85);
         #ifdef PIXIE
         if (uDiorama.x > 0.002) {
           dioBlend = uDiorama.x;
@@ -574,8 +594,10 @@ export function landTopMaterial(
           c *= 1.0 + ground.detail * uDioLook.x * dioBlend;
           // Sand: the troughs go warm golden ochre and never grey. Meadow: smooth patches of warm sage against cool forest slate.
           // Snow: soft drifts, and the wind-swept crests show the dark earth.
+          // The shade of a dune is terracotta-amber bounce, never muddy: the troughs and the lee slopes go warm.
           float trough = smoothstep(0.0, -0.6, ground.detail) * skin.biome.y;
-          c = mix(c, c * vec3(1.1, 0.9, 0.6), trough * dioBlend * 0.7);
+          float lee = smoothstep(0.0, 0.5, -dot(ground.slope, normalize(uSunDir.xy + vec2(1e-4)))) * skin.biome.y;
+          c = mix(c, c * vec3(1.14, 0.82, 0.5), clamp(trough + lee * 0.8, 0.0, 1.0) * dioBlend * 0.75 * uDioLook2.z);
           float meadow = vnoise(vScene * 0.035 + 7.0) * 0.6 + vnoise(vScene * 0.09 + 2.0) * 0.4;
           c *= mix(vec3(1.0), mix(vec3(0.9, 0.96, 1.02), vec3(1.06, 1.03, 0.92), smoothstep(0.35, 0.65, meadow)), skin.biome.x * dioBlend * 0.6);
           // Under a wood the ground is darker and richer, so the trees are rooted in it and not stood on it.
@@ -585,6 +607,30 @@ export function landTopMaterial(
           float drift = vnoise(vScene * 0.06 + 31.0) * 0.55 + vnoise(vScene * 0.17 + 5.0) * 0.3 + vnoise(vScene * 0.5) * 0.15;
           float bare = (1.0 - smoothstep(0.22, 0.42, drift)) * skin.biome.z * (1.0 - rockW);
           c = mix(c, vec3(0.40, 0.34, 0.31) * (0.9 + 0.2 * ground.detail), bare * dioBlend * 0.5);
+          // Snow feathers into the flat land beside it: a soft drift of white past the chart's edge, and at its own fringe the wind-swept grass
+          // and earth show through in patches.
+          float bleed = uDioLook2.x * dioBlend;
+          float edgeNoise = vnoise(vScene * 0.12 + 4.0) * 0.6 + vnoise(vScene * 0.4) * 0.4;
+          float feather = smoothstep(0.34, 0.54, skin.frost + (edgeNoise - 0.5) * 0.24) * (1.0 - skin.snowy) * (1.0 - skin.biome.y);
+          c = mix(c, PIX_SNOW, feather * bleed * 0.7);
+          float fringe = skin.snowy * (1.0 - smoothstep(0.56, 0.76, skin.frost + (edgeNoise - 0.5) * 0.3));
+          c = mix(c, vec3(0.44, 0.4, 0.31) * (0.92 + 0.16 * ground.detail), fringe * step(0.42, edgeNoise) * bleed * 0.7);
+          // The theaters. Pacific jungle goes emerald, a basalt interior and a narrow warm sand fringe by the shore; Africa's savanna goes golden
+          // with terracotta patches, and its dunes amber. Each is a box on the map with a soft edge, and the slider sets how far.
+          vec2 mapP = vec2(vUv.x * uBounds.z + uBounds.x, (1.0 - vUv.y) * uBounds.w + uBounds.y);
+          float pacific = max(theaterMask(mapP, uTheater1), theaterMask(mapP, uTheater2));
+          float africa = theaterMask(mapP, uTheater0);
+          float contrast = uDioLook2.w * dioBlend;
+          float coastNear = 1.0 - min(min(pixLand(mapP + vec2(1.6, 0.0)), pixLand(mapP - vec2(1.6, 0.0))), min(pixLand(mapP + vec2(0.0, 1.6)), pixLand(mapP - vec2(0.0, 1.6))));
+          float inland = min(min(pixLand(mapP + vec2(5.0, 0.0)), pixLand(mapP - vec2(5.0, 0.0))), min(pixLand(mapP + vec2(0.0, 5.0)), pixLand(mapP - vec2(0.0, 5.0))));
+          c *= mix(vec3(1.0), vec3(0.78, 1.1, 0.84), pacific * skin.biome.x * contrast * 0.7);
+          float basalt = smoothstep(0.6, 0.78, vnoise(mapP * 0.5 + 9.0) * 0.6 + vnoise(mapP * 1.3) * 0.4) * inland * pacific;
+          c = mix(c, vec3(0.22, 0.2, 0.22) * (0.9 + 0.2 * ground.detail), basalt * contrast * 0.5);
+          c = mix(c, vec3(0.86, 0.76, 0.52), coastNear * pacific * contrast * 0.8);
+          float terracotta = smoothstep(0.6, 0.76, vnoise(mapP * 0.3 + 21.0) * 0.6 + vnoise(mapP * 0.8) * 0.4);
+          c *= mix(vec3(1.0), vec3(1.12, 1.0, 0.72), africa * skin.biome.x * contrast * 0.6);
+          c = mix(c, vec3(0.72, 0.42, 0.3), terracotta * africa * (skin.biome.x + skin.biome.y * 0.5) * contrast * 0.3);
+          c *= mix(vec3(1.0), vec3(1.08, 0.95, 0.78), africa * skin.biome.y * contrast * 0.6);
         }
         #endif
         c *= lit(dot(n, uSunDir));
@@ -641,7 +687,15 @@ export function landTopMaterial(
         }
         // Nothing but a snow peak is allowed above ${SAND_CEILING.toFixed(2)}: the desert, the grass and the low snow are held under the bloom's threshold,
         // so the post stack never turns them into glowing white streaks.
-        c = min(c, vec3(mix(${SAND_CEILING.toFixed(2)}, ${SNOW_PEAK.toFixed(2)}, peakSnow)));
+        c = min(c, vec3(mix(mix(${SAND_CEILING.toFixed(2)}, 0.9, dioSand), ${SNOW_PEAK.toFixed(2)}, peakSnow)));
+        // Quartz glitter in the sand: each grain has its own micro-facet normal, read against the half vector from the sun to the eye, and only
+        // the brightest few of the grains (about 4%) catch it. They push a hair past white (about 1.04) and no more; the sand itself stays under 0.9.
+        if (dioSand > 0.05 && dioBlend > 0.002 && uDioLook2.y > 0.001) {
+          vec2 grain = floor(vScene * 38.0);
+          vec3 microN = normalize(vec3((hash21(grain) - 0.5) * 1.5, (hash21(grain + 7.3) - 0.5) * 1.5, 1.0));
+          float spark = pow(max(dot(microN, normalize(uSunDir + uToEye)), 0.0), 48.0) * step(0.96, hash21(grain + 13.1));
+          c = min(c + uSunColor * spark * 0.9 * uDioLook2.y * dioSand * dioBlend * uDirect * lightShare, vec3(1.04));
+        }
         #endif
         #ifdef PIXIE
         // Shade stops at warm slate umber. Nothing on the chart goes to black, so a dark piece still reads on it.
@@ -806,6 +860,8 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uShift: { value: 0 },
       uDrop: { value: drop },
       uWater: { value: 0 },
+      /** Map y of the northern and southern tropics, and the strength of the turquoise lagoon. */
+      uTropic: { value: new THREE.Vector3(0, 0, 0) },
       /** Swell height, the loop in seconds, and the front's direction in board terms. */
       uSwell: { value: new THREE.Vector4(0, 20, 1, 0) },
       /** The clock the ships' sprites keep, so the water and the hulls ride the same wave. */
@@ -1653,6 +1709,8 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uWarm: { value: 0 },
       /** The biome's colour grade: warm amber over the desert, cool slate over the snow. Colour only. */
       uBiome: { value: new THREE.Vector2(0, 0) },
+      /** Heat-haze shimmer over the desert: its strength, and the clock. A faint sideways ripple that rises up the frame. */
+      uShimmer: { value: new THREE.Vector2(0, 0) },
       /** Tilt-shift: strength, the focal plane's height on screen (0 bottom, 1 top), and the share of the top and of the bottom that blur. */
       uTiltShift: { value: new THREE.Vector4(0, 0.5, 0.18, 0.12) },
       uDusk: { value: 0 },
@@ -1671,6 +1729,7 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uniform float uSaturation;
       uniform float uWarm;
       uniform vec2 uBiome;
+      uniform vec2 uShimmer;
       uniform vec4 uTiltShift;
       uniform float uDusk;
       uniform float uDim;
@@ -1761,7 +1820,12 @@ export function gradeMaterial(): THREE.ShaderMaterial {
         return texture2D(map, vUv);
       }
       void main() {
-        vec4 scene = texture2D(uScene, vUv);
+        vec2 sceneUv = vUv;
+        if (uShimmer.x > 0.001) {
+          // Rising heat: the picture ripples sideways by a fraction of a pixel, the ripple travelling up the frame, stronger low down.
+          sceneUv.x += sin(vUv.y * 95.0 - uShimmer.y * 2.2 + vUv.x * 7.0) * 0.0011 * uShimmer.x * (1.0 - vUv.y * 0.6);
+        }
+        vec4 scene = texture2D(uScene, sceneUv);
         // Tilt-shift: in the micro tier the top and bottom of the frame go gently soft, about a focal plane that follows the ground
         // under the camera's target. Only the 3D scene is blurred: the figures, tokens and lines are drawn over it, and stay sharp.
         if (uTiltShift.x > 0.001) {
