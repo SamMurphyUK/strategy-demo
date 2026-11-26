@@ -80,10 +80,12 @@ export interface BattleSkin {
     /** The valley-mist tint the rear lanes lean toward. */
     valleyMist: string;
     sunColor: string;
-    /** Sun direction, from the ground to the sun. */
+    /** Sun direction, from the ground to the sun: x across, y into the scene, z up. */
     sunDir: readonly [number, number, number];
     ambient: string;
     muzzleLight: string;
+    /** How far the scatter sprites are pulled onto the fading-16 strip, 0 to 1. */
+    scatterPull: number;
   };
   camera: Readonly<Record<"establishing" | "exchange" | "overhead", CameraPreset>>;
   /** The scatter mapping per terrain. */
@@ -126,9 +128,10 @@ export const BATTLE_SKINS: Readonly<Record<BattleSkinId, BattleSkin>> = Object.f
       smokeLumaCeiling: 0.88,
       valleyMist: "#A9B4A8",
       sunColor: "#DDCF99",
-      sunDir: [-0.45, 0.8, 0.4],
+      sunDir: [-0.45, 0.4, 0.8],
       ambient: "#8C7C79",
       muzzleLight: "#E7B766",
+      scatterPull: 0.7,
     },
     camera: {
       establishing: { pitchDeg: 35, fovDeg: 35, lookX: 0, lookZ: 0.42, zoom: 1 },

@@ -115,6 +115,7 @@ export function BattleScreen({ game, battle, regionName, onExit, spectating = fa
       regionName,
       scene: sceneForRegion(battle.region_id) ?? undefined,
       attackerFaction: battle.attacker_faction_id,
+      amphibious: battle.attackers.some((u) => u.amphibious),
       defenderFaction: battle.defender_faction_id,
       attackerIpc: game.session.state.getFactionIpc(battle.attacker_faction_id),
       defenderIpc: game.session.state.getFactionIpc(battle.defender_faction_id),

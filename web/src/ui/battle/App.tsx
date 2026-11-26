@@ -78,6 +78,8 @@ import type {BattleMatch, MatchHit, MatchRound, MatchUnit} from './match';
 import {holdsReturnGlide, planeWasShotDown} from './sortieReturn';
 import {sfxMuted, soundManager, subscribeSfx, toggleSfx} from '../../audio/sound_manager';
 import {battleClothColor, battleThemeFor, outcomeFactionId, setBattleThemeQuiet, startBattleTheme, stopBattleTheme} from './battleTheme';
+// The 3D tabletop stage (`?view=3d` or `?battle3d=1`). Loaded on demand so Three.js stays out of the 2D battle bundle.
+const BattleStage3D = React.lazy(() => import('../viewport3d/battle/BattleStage'));
 import {flagMotifForFaction} from './flagMotif';
 import {UnitToken} from '../theme/tokens/UnitToken';
 import {rosterName} from '../theme/factionRoster';
@@ -269,6 +271,13 @@ function ipcLost(units: CombatUnit[]): number {
 /** Without `match` this is the standalone sandbox. With it, the engine decides the battle. */
 export default function App({ match, playSignal = 0 }: { match?: BattleMatch; playSignal?: number } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The 3D stage draws the battlefield and units; the 2D canvas keeps running the battle and paints only the HUD over it.
+  const stage3dRef = useRef(
+    (() => {
+      const q = new URLSearchParams(window.location.search);
+      return q.get('battle3d') === '1' || q.get('view') === '3d';
+    })(),
+  );
   const battleVectorRef = useRef<SVGSVGElement>(null);
   const battleVectorStage = useRef<VehicleStage | null>(null);
   const stepperRef = useRef<ReturnType<typeof createFixedStepper>>(undefined);
@@ -447,6 +456,8 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
   // Simulation Refs (to ensure zero-lag 60fps physics & particles)
   const attackerUnitsRef = useRef<CombatUnit[]>([]);
   const defenderUnitsRef = useRef<CombatUnit[]>([]);
+  // What the 3D stage reads of the battle: both sides' units, read-only (see viewport3d/battle/battleFeed.ts).
+  const getStageUnits = useCallback((): readonly CombatUnit[] => [...attackerUnitsRef.current, ...defenderUnitsRef.current], []);
   attackerUnitsRef.current = attackerUnits;
   defenderUnitsRef.current = defenderUnits;
 
@@ -4604,6 +4615,14 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
       ctx.restore();
     });
 
+    // The 3D stage draws the battlefield, so the 2D world is wiped here and only the HUD below is kept over it.
+    if (stage3dRef.current) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.restore();
+    }
+
     // 10. TACTICAL DICE TRAY (Faded out during Victory Sequence)
     if (!isVictoryCheer) {
       const trayX = 490;
@@ -5343,14 +5362,36 @@ export default function App({ match, playSignal = 0 }: { match?: BattleMatch; pl
             width: `min(100%, calc(100vh * ${canvasWidth} / ${canvasHeight}))`,
           }}
         >
+          {stage3dRef.current && (
+            <React.Suspense fallback={null}>
+              <BattleStage3D
+                getUnits={getStageUnits}
+                regionId={match?.scene?.regionId}
+                regionName={match?.regionName}
+                theater={currentTheater}
+                scene={match?.scene}
+                coastal={match?.scene?.kind === 'land' ? match.scene.coastal : false}
+                bombard={match?.bombard ?? currentTheater === 'normandy'}
+                amphibious={match?.amphibious ?? false}
+                attackerFaction={outcomeFactionId(match?.attackerFaction, currentTheater, 'attacker')}
+                defenderFaction={outcomeFactionId(match?.defenderFaction, currentTheater, 'defender')}
+              />
+            </React.Suspense>
+          )}
           <canvas
             ref={canvasRef}
             width={canvasWidth}
             height={canvasHeight}
             onClick={handleCanvasClick}
             className="block h-full w-full cursor-crosshair drop-shadow-2xl"
+            style={stage3dRef.current ? {position: 'relative', zIndex: 1} : undefined}
           />
-          <svg ref={battleVectorRef} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true" />
+          <svg
+            ref={battleVectorRef}
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            style={stage3dRef.current ? {visibility: 'hidden'} : undefined}
+            aria-hidden="true"
+          />
         </div>
 
         {/* EARLY AA ATTACK CASUALTY ALLOCATION MODAL */}

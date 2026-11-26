@@ -55,24 +55,27 @@ export function desaturate(rgb: readonly [number, number, number], amount: numbe
   return [rgb[0] + (l - rgb[0]) * amount, rgb[1] + (l - rgb[1]) * amount, rgb[2] + (l - rgb[2]) * amount];
 }
 
-/** The lane's mid depth and the rows it spreads over. */
-const LANE_D: Record<Exclude<Lane, "air">, { d: number; spread: number }> = {
-  front: { d: 0.3, spread: 0.1 },
-  rear: { d: 0.6, spread: 0.07 },
-};
-
-/** Where the first column of a lane stands from the centre, and the gap between columns. */
-const LANE_X: Record<Exclude<Lane, "air">, { from: number; gap: number }> = {
-  front: { from: 1.9, gap: 1.12 },
-  rear: { from: 3.4, gap: 1.3 },
-};
-
-const ROWS = 3;
+// The layout keeps the original 2D battle's model (App.tsx getUnitScreenPos, rules.ts resolveRanks): the columns are the four hit ranks.
+// The attacker stands on the left with colIndex = 4 - rank (rank 4 outermost), the defender on the right mirrored with colIndex = rank - 1.
+// Columns are 105 px apart on a 1280 px board, which is 1.477 stage units; units of one rank stack as rows. Depth scale and desaturation
+// are applied on top by lane (see depthScale) and never change who stands where.
+const PX_PER_STAGE_UNIT = 1280 / STAGE_WIDTH;
+export const COLUMN_GAP = 105 / PX_PER_STAGE_UNIT;
+const ATTACKER_X0 = (102 - 640) / PX_PER_STAGE_UNIT;
+const DEFENDER_X0 = (862 - 640) / PX_PER_STAGE_UNIT;
+const ROW_GAP = 0.085;
+const ROW_D0 = 0.17;
+const DEFAULT_RANK: Record<string, number> = { infantry: 1, mech_infantry: 1, aa: 1, aaa: 1, artillery: 2, tank: 3, armor: 3, fighter: 3, tactical_bomber: 3, strategic_bomber: 4 };
 
 export interface LaneUnit {
   uid: string;
   type: string;
   side: Side;
+  /** The engine's effective hit rank, 1 to 4. Absent takes the type's usual rank. */
+  effectiveRank?: number;
+  colIndex?: number;
+  rowIndex?: number;
+  pairedWithUid?: string;
 }
 
 export interface LaneSlot {
@@ -85,24 +88,24 @@ export interface LaneSlot {
   y: number;
   /** +1 faces right (the attacker), -1 faces left (the defender). */
   facing: 1 | -1;
+  /** The unit's place among its side's lane, and how many the lane holds. The airspace's loops are spread by them. */
+  index: number;
+  count: number;
+  /** The hit rank the unit fires in. Aircraft keep it for firing order. */
+  rank: number;
 }
 
-/** Position on the stage of the Nth member of a ground lane. Column-major, three rows deep, outward from the line. */
-export function groundSlot(lane: Exclude<Lane, "air">, side: Side, index: number): { x: number; d: number } {
-  const row = index % ROWS;
-  const col = Math.floor(index / ROWS);
-  const { from, gap } = LANE_X[lane];
-  const { d, spread } = LANE_D[lane];
-  // The rows stagger: the middle row stands a half gap further out, so the ranks do not form a grid.
-  const stagger = row === 1 ? gap * 0.5 : 0;
-  const dist = from + col * gap + stagger;
-  const x = side === "attacker" ? -dist : dist;
-  return { x, d: d + (row - 1) * spread };
+/** The column of a rank: the attacker's rank 4 is outermost, the defender's rank 1 is. */
+export function columnOf(side: Side, rank: number): number {
+  const r = Math.min(4, Math.max(1, Math.round(rank)));
+  return side === "attacker" ? 4 - r : r - 1;
 }
 
-/** A stable order for a lane: by type, then uid, so a unit keeps its place while others fall. */
-function ordered(units: readonly LaneUnit[]): LaneUnit[] {
-  return [...units].sort((a, b) => (a.type === b.type ? (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0) : a.type < b.type ? -1 : 1));
+/** Position of a column and row on the stage. Odd rows stand a little further out, so the ranks do not form a grid. */
+export function rankSlot(side: Side, col: number, row: number): { x: number; d: number } {
+  const out = row % 2 === 1 ? 0.2 : 0;
+  const x = side === "attacker" ? ATTACKER_X0 + col * COLUMN_GAP - out : DEFENDER_X0 + col * COLUMN_GAP + out;
+  return { x, d: Math.min(0.66, ROW_D0 + row * ROW_GAP) };
 }
 
 /** Where the airspace's Nth aircraft of a side starts, as a phase round its loop, and its altitude. */
@@ -124,34 +127,58 @@ export function airPose(side: Side, index: number, count: number, seconds: numbe
   return { x, d, y, bank: -Math.sin(a) * 0.38, facing: vx >= 0 ? 1 : -1 };
 }
 
-/** The whole layout: one slot per unit, in the lanes the unit types decide. Aircraft get their loop's start. */
+/** A stable order: by uid, so a unit keeps its place while others fall. */
+function ordered(units: readonly LaneUnit[]): LaneUnit[] {
+  return [...units].sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+}
+
+/**
+ * The whole layout, driven by the engine's ranks, columns and rows. Ground units stand in their rank's column and row; an artillery piece
+ * paired with an infantry stands beside it, just behind. Aircraft keep their high loops and their rank (for the firing order).
+ */
 export function layoutLanes(units: readonly LaneUnit[]): LaneSlot[] {
   const slots: LaneSlot[] = [];
+  const byUid = new Map<string, LaneSlot>();
   for (const side of ["attacker", "defender"] as const) {
-    const mine = units.filter((u) => u.side === side);
-    for (const lane of ["front", "rear"] as const) {
-      ordered(mine.filter((u) => laneOf(u.type) === lane)).forEach((u, i) => {
-        const p = groundSlot(lane, side, i);
-        slots.push({ uid: u.uid, lane, side, x: p.x, d: p.d, y: 0, facing: side === "attacker" ? 1 : -1 });
-      });
-    }
-    const air = ordered(mine.filter((u) => laneOf(u.type) === "air"));
+    const mine = ordered(units.filter((u) => u.side === side));
+    const counts = new Map<number, number>();
+    const ground = mine.filter((u) => laneOf(u.type) !== "air");
+    ground.forEach((u, i) => {
+      const rank = u.effectiveRank ?? DEFAULT_RANK[u.type] ?? 1;
+      const col = u.colIndex ?? columnOf(side, rank);
+      const row = u.rowIndex ?? counts.get(col) ?? 0;
+      counts.set(col, (counts.get(col) ?? 0) + 1);
+      const p = rankSlot(side, col, row);
+      const slot: LaneSlot = { uid: u.uid, lane: laneOf(u.type), side, x: p.x, d: p.d, y: 0, facing: side === "attacker" ? 1 : -1, index: i, count: ground.length, rank };
+      slots.push(slot);
+      byUid.set(u.uid, slot);
+    });
+    const air = mine.filter((u) => laneOf(u.type) === "air");
     air.forEach((u, i) => {
       const p = airPose(side, i, air.length, 0);
-      slots.push({ uid: u.uid, lane: "air", side, x: p.x, d: p.d, y: p.y, facing: side === "attacker" ? 1 : -1 });
+      const rank = u.effectiveRank ?? DEFAULT_RANK[u.type] ?? 3;
+      slots.push({ uid: u.uid, lane: "air", side, x: p.x, d: p.d, y: p.y, facing: side === "attacker" ? 1 : -1, index: i, count: air.length, rank });
     });
+  }
+  // A paired artillery piece stands beside its infantry, a little further back from the line.
+  for (const u of units) {
+    const slot = byUid.get(u.uid);
+    const mate = u.pairedWithUid ? byUid.get(u.pairedWithUid) : undefined;
+    if (slot && mate && u.type === "artillery") {
+      slot.x = mate.x + (u.side === "attacker" ? -0.62 : 0.62);
+      slot.d = mate.d + 0.03;
+    }
   }
   return slots;
 }
 
-/** Stage coordinates to world coordinates: x across, y up, z toward the camera (the front lip is +z). */
-export function toWorld(x: number, d: number, y = 0): [number, number, number] {
-  return [x, y, (0.5 - d) * STAGE_DEPTH];
+/** Stage coordinates to world coordinates, z up as the board is: x across, y into the scene (the front lip is -y, the horizon +y), z up. */
+export function toWorld(x: number, d: number, height = 0): [number, number, number] {
+  return [x, (d - 0.5) * STAGE_DEPTH, height];
 }
 
-/** The ground point a high unit's shadow falls on, from the sun's direction (toward the sun, y up). Pure. */
-export function groundShadow(x: number, d: number, y: number, sunDir: readonly [number, number, number]): { x: number; d: number } {
-  const k = y / Math.max(0.2, sunDir[1]);
-  // The shadow lies away from the sun, in world z, so in d it moves the opposite way.
-  return { x: x - sunDir[0] * k, d: d + (sunDir[2] * k) / STAGE_DEPTH };
+/** The ground point a high unit's shadow falls on, from the sun's direction (toward the sun: x, y into the scene, z up). Pure. */
+export function groundShadow(x: number, d: number, height: number, sunDir: readonly [number, number, number]): { x: number; d: number } {
+  const k = height / Math.max(0.2, sunDir[2]);
+  return { x: x - sunDir[0] * k, d: d - (sunDir[1] * k) / STAGE_DEPTH };
 }

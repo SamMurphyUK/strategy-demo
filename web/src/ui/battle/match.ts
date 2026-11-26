@@ -50,6 +50,10 @@ export interface BattleMatch {
    * Sandbox stand-in for the outro numbers. A map battle ignores these and counts
    * the IPC of units destroyed in the fight.
    */
+  /** The attackers came off a transport (the engine's `amphibious` flag). The 3D stage shows the landing. */
+  amphibious?: boolean;
+  /** A shore bombardment opens the battle. The 3D stage shows the offshore battleship's salvo. */
+  bombard?: boolean;
   attackerIpc: number;
   defenderIpc: number;
   attackers: MatchUnit[];
