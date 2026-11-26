@@ -2,6 +2,7 @@
 // Frontline segments are cached until ownership or the region outlines change.
 import type { GameState } from "../../engine/model/game_state";
 import type { Vec2 } from "./geometry";
+import { RegionUnitDisplay } from "../../engine/presentation/region_unit_display";
 import { isSeamEdge, type Seam } from "./mapBakeMath";
 
 export interface ReliefRegion {
@@ -17,10 +18,17 @@ export interface FrontlineSegment {
   y2: number;
 }
 
+/** How many craters and smoke columns a fight leaves, by the units attacking: 1 for a lone attacker, 2 from 8, 3 from 15, 4 from 20. */
+export function craterCountFor(attackers: number): number {
+  return attackers >= 20 ? 4 : attackers >= 15 ? 3 : attackers >= 8 ? 2 : 1;
+}
+
 export interface ScarTarget {
   regionId: string;
   /** Ember at the plume base during combat move and combat. */
   ember: boolean;
+  /** The units attacking the territory: the more, the more craters and smoke (see craterCountFor). */
+  attackers: number;
 }
 
 export interface CraterMark {
@@ -223,7 +231,16 @@ export function scarTargets(state: GameState): ScarTarget[] {
       ids.add(regionId);
     }
   }
-  return [...ids].sort().map((regionId) => ({ regionId, ember: emberPhase }));
+  // The units sent in: the orders on their way, or, once they have arrived, the pool that is fighting.
+  const sent = new Map<string, number>();
+  for (const order of state.phase_orders) {
+    sent.set(order.toRegionId, (sent.get(order.toRegionId) ?? 0) + Math.max(0, order.count));
+  }
+  return [...ids].sort().map((regionId) => ({
+    regionId,
+    ember: emberPhase,
+    attackers: Math.max(sent.get(regionId) ?? 0, RegionUnitDisplay.combatPoolUnitCount(state, regionId, state.current_faction_id)),
+  }));
 }
 
 function hashId(id: string): number {
@@ -256,9 +273,10 @@ function clearOf(x: number, y: number, avoid: readonly Vec2[]): boolean {
   return true;
 }
 
-function placeCraters(regionId: string, anchor: Vec2, avoid: readonly Vec2[]): CraterMark[] {
+function placeCraters(regionId: string, anchor: Vec2, avoid: readonly Vec2[], inside?: (p: Vec2) => boolean, wanted?: number): CraterMark[] {
+  const within = (x: number, y: number) => inside === undefined || inside({ x, y });
   const rand = mulberry32(hashId(regionId));
-  const count = 2 + (hashId(regionId) % 2);
+  const count = wanted ?? 2 + (hashId(regionId) % 2);
   const marks: CraterMark[] = [];
   for (let i = 0; i < count; i++) {
     let x = anchor.x + 16;
@@ -268,18 +286,32 @@ function placeCraters(regionId: string, anchor: Vec2, avoid: readonly Vec2[]): C
       const dist = SCAR_CLEARANCE + 4 + rand() * 18 + attempt;
       x = anchor.x + Math.cos(angle) * dist;
       y = anchor.y + Math.sin(angle) * dist;
-      if (clearOf(x, y, avoid) && marks.every((mark) => clearOf(x, y, [mark]))) {
+      if (within(x, y) && clearOf(x, y, avoid) && marks.every((mark) => clearOf(x, y, [mark]))) {
         break;
       }
     }
-    if (!clearOf(x, y, avoid) || !marks.every((mark) => clearOf(x, y, [mark]))) {
+    if (!within(x, y) || !clearOf(x, y, avoid) || !marks.every((mark) => clearOf(x, y, [mark]))) {
       for (let step = 1; step <= 8; step++) {
         const fx = anchor.x + SCAR_CLEARANCE + 6 + step * 6;
         const fy = anchor.y + (i % 2 === 0 ? 1 : -1) * (SCAR_CLEARANCE + 4 + step * 4);
-        if (clearOf(fx, fy, avoid) && marks.every((mark) => clearOf(fx, fy, [mark]))) {
+        if (within(fx, fy) && clearOf(fx, fy, avoid) && marks.every((mark) => clearOf(fx, fy, [mark]))) {
           x = fx;
           y = fy;
           break;
+        }
+      }
+    }
+    // A territory too small or too narrow for the usual reach: search every direction at growing distance for ground inside it.
+    if (!within(x, y)) {
+      search: for (let dist = 4; dist <= 40; dist += 3) {
+        for (let a = 0; a < 16; a++) {
+          const sx = anchor.x + Math.cos((a / 16) * Math.PI * 2 + i) * dist;
+          const sy = anchor.y + Math.sin((a / 16) * Math.PI * 2 + i) * dist;
+          if (within(sx, sy) && marks.every((mark) => clearOf(sx, sy, [mark]))) {
+            x = sx;
+            y = sy;
+            break search;
+          }
         }
       }
     }
@@ -326,8 +358,12 @@ export function battleScarDescriptors(
   anchor: Vec2,
   avoid: readonly Vec2[],
   ember: boolean,
+  /** Whether a world point is on the territory being fought over: craters are laid only there. */
+  inside?: (p: Vec2) => boolean,
+  /** How many craters to lay (see craterCountFor). Absent, two or three. */
+  wanted?: number,
 ): ScarFrame[] {
-  const craters = placeCraters(regionId, anchor, avoid);
+  const craters = placeCraters(regionId, anchor, avoid, inside, wanted);
   const main = craters[0];
   return [0, 1, 2, 3].map((frame) => {
     const column = smokeColumn(main, frame, ember);

@@ -82,6 +82,7 @@ import { landMaskAt } from "./landMask";
 import { unitLean } from "./boardTune";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
+import { waterY } from "../viewport3d/skins/waterSwell";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
 import { buildSurfCoast, cliffLift, ringSpan, surfLocalPx, type SurfSample, type SurfTune } from "./coastRelief";
 import {
@@ -99,7 +100,7 @@ import { pointInMultiPolygon, type MultiPolygon } from "./regionClip";
 import type { ShoreVeil } from "../../art/fieldVehicleStage";
 import type { ShoreStencil } from "./figureSheet";
 import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
-import { plinthFactor } from "../viewport3d/plinthPlacement";
+import { plinthFactor, unitBaseShare } from "../viewport3d/plinthPlacement";
 import { drawHoldCircles } from "./shipHold";
 import {
   type MapLod,
@@ -1381,6 +1382,8 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             ctx.scale(1, lean);
             ctx.translate(-counter.x, -counter.y);
           }
+          // An aircraft over open water has no base: no model under it, no footprint, nothing flat.
+          const noBase = counter.domain === "air" && scene.land != null && !landMaskAt(scene.land, screenToWorld(copyView, counter));
           drawUprightStack(ctx, {
             unitType: entry.unit_type_id,
             factionId: entry.faction_id,
@@ -1390,10 +1393,14 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             tokenPx,
             spriteScale: game.unitScale,
             contactAo: mapVisuals.contactAoStrength,
+            vehicleScale: mapVisuals.vehicleDioramaScale,
+            noBase,
             plinth3D:
-              game.plinths3D && counter.domain !== "sea"
+              game.plinths3D && counter.domain !== "sea" && !noBase
                 ? {
-                    factor: plinthFactor(entry.count, { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus }),
+                    factor:
+                      plinthFactor(entry.count, { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus }) *
+                      unitBaseShare(entry.unit_type_id, { vehicleRadius: mapVisuals.vehiclePlinthRadius }),
                     spread: mapVisuals.squadSpread,
                     // How much the ground is foreshortened here: the base is a disc, and shows as this ellipse.
                     ratio: projectionScales(scene.view.k).sy / projectionScales(scene.view.k).sx,
@@ -1414,6 +1421,17 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
                   }
                 : undefined,
             submergePx: counter.domain === "sea" ? mapVisuals.navalSubmergeDepth * scene.view.k * 0.55 : 0,
+            waterRisePx:
+              counter.domain === "sea" && game.idleTime != null
+                ? waterY(world.x, world.y, {
+                    amp: mapVisuals.waterSwellAmp,
+                    seconds: game.idleTime,
+                    loopSeconds: mapVisuals.waveLoopSeconds,
+                    directionDeg: mapVisuals.waveDirectionDeg,
+                  }) *
+                  scene.view.k *
+                  0.55
+                : 0,
             dpr: scene.dpr,
             selected,
             unmoved: game.isUnmoved(layout.region.id, entry),

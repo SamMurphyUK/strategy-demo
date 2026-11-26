@@ -1,8 +1,8 @@
 // The unit transform inspector: press T with a unit selected. It moves the detailed figures on their
-// bases, by preset, for all units, one faction, or one unit type, and for a stack of one, two, or
-// three and more. The presets are kept in this browser, and the JSON can be copied or downloaded to
+// bases, by preset, kept for each faction's each unit type and chosen from the stack it is on, the same for
+// a stack of any size. The presets are kept in this browser, and the JSON can be copied or downloaded to
 // lock a set in for a future build.
-import { useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { getUnitTransformRev, getUnitTransforms, resetUnitPresets, setUnitPreset, subscribeUnitTransforms } from "./unitTransformStore";
 import {
   bucketOf,
@@ -10,10 +10,9 @@ import {
   NO_TRANSFORM,
   presetKey,
   serializeTransforms,
-  type StackBucket,
   TRANSFORM_RANGES,
-  type TransformScope,
   type UnitTransform,
+  unitId,
 } from "./unitTransforms";
 
 export interface TransformTarget {
@@ -32,17 +31,7 @@ const FIELDS: readonly { key: keyof UnitTransform; label: string; unit: string; 
   { key: "rot", label: "Rotate", unit: "deg", step: 1 },
 ];
 
-const SCOPES: readonly { id: TransformScope; label: string }[] = [
-  { id: "all", label: "All units" },
-  { id: "faction", label: "Faction" },
-  { id: "archetype", label: "Unit type" },
-];
 
-const BUCKETS: readonly { id: StackBucket; label: string }[] = [
-  { id: 1, label: "1 unit" },
-  { id: 2, label: "2 units" },
-  { id: 3, label: "3+ units" },
-];
 
 const panel = {
   position: "fixed",
@@ -79,7 +68,7 @@ export function UnitTransformInspector({ target, onClose }: { target: TransformT
             x
           </button>
         </div>
-        <p style={{ margin: "8px 0 0" }}>Point at a unit, or click one, then press T. The stack's name shows here.</p>
+        <p style={{ margin: "8px 0 0" }}>Point at a unit, or click one, then press T. What you set is kept for that faction's unit and shared by every stack of it.</p>
       </div>
     );
   }
@@ -87,10 +76,8 @@ export function UnitTransformInspector({ target, onClose }: { target: TransformT
 }
 
 function UnitTransformEditor({ target, onClose }: { target: TransformTarget; onClose(): void }) {
-  const [scope, setScope] = useState<TransformScope>("archetype");
-  const [bucket, setBucket] = useState<StackBucket>(bucketOf(target.count));
-  const id = scope === "faction" ? target.factionId : target.unitType;
-  const key = presetKey(scope, id, bucket);
+  // One preset for each faction's each unit type, picked from the stack: no scope to choose.
+  const key = presetKey("unit", unitId(target.factionId, target.unitType), bucketOf(target.count));
   const set = getUnitTransforms();
   const current = set.presets[key] ?? NO_TRANSFORM;
   const json = JSON.stringify(serializeTransforms(set), null, 2);
@@ -120,30 +107,7 @@ function UnitTransformEditor({ target, onClose }: { target: TransformTarget; onC
         </button>
       </div>
       <div style={{ marginBottom: 6, opacity: 0.85 }}>{target.label}</div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-        {SCOPES.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            style={{ ...button, background: scope === item.id ? "#ddcf99" : "#4b3d44", color: scope === item.id ? "#2b2124" : "#e9dfc9" }}
-            onClick={() => setScope(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-        {BUCKETS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            style={{ ...button, background: bucket === item.id ? "#ddcf99" : "#4b3d44", color: bucket === item.id ? "#2b2124" : "#e9dfc9" }}
-            onClick={() => setBucket(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <div style={{ marginBottom: 6, opacity: 0.6 }}>Editing: {target.factionId} / {target.unitType}</div>
       {FIELDS.map((field) => {
         const [low, high] = TRANSFORM_RANGES[field.key];
         return (
@@ -180,7 +144,7 @@ function UnitTransformEditor({ target, onClose }: { target: TransformTarget; onC
           Save
         </button>
       </div>
-      <div style={{ marginTop: 6, opacity: 0.6 }}>The unit type beats the faction, and the faction beats all units. Each stack size has its own.</div>
+      <div style={{ marginTop: 6, opacity: 0.6 }}>Saved for this faction's {target.unitType}, and shared by every stack of it, whatever its size.</div>
     </div>
   );
 }

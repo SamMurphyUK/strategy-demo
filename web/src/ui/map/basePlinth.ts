@@ -43,17 +43,21 @@ export function mixHex(a: string, b: string, t: number): string {
     .join("")}`.toUpperCase();
 }
 
-/** Ebony for the wall of the disc, walnut for its top, and the pale edge a bevel catches. */
-export const PLINTH_EBONY = mixHex(MILITARY.charcoal, "#000000", 0.42);
-export const PLINTH_WALNUT = mixHex(MILITARY.charcoal, MILITARY.brown, 0.22);
-export const PLINTH_BEVEL = mixHex(MILITARY.brown, MILITARY.tan, 0.35);
-/** The pale line round a base's outer and inner rim. Light enough to part it from dark ground. */
-export const PLINTH_EDGE = mixHex(PLINTH_BEVEL, MILITARY.cream, 0.45);
-export const PLINTH_BRASS =mixHex(MILITARY.brass, MILITARY.cream, 0.18);
+/**
+ * A heavy wargame base, all of it from the 16-colour strip and all of it dark: ebony for the wall, smoked walnut for the
+ * top, and a desaturated gunmetal for the bevelled rim, so the rim reads as a machined edge and not as a pale disc.
+ */
+export const PLINTH_EBONY = mixHex(MILITARY.charcoal, "#000000", 0.5);
+export const PLINTH_WALNUT = mixHex(mixHex(MILITARY.charcoal, MILITARY.brown, 0.2), "#000000", 0.12);
+export const PLINTH_BEVEL = mixHex(mixHex(MILITARY.steel, MILITARY.charcoal, 0.55), "#000000", 0.06);
+/** The line round a base's outer and inner rim: a little lighter than the bevel, still muted. */
+export const PLINTH_EDGE = mixHex(PLINTH_BEVEL, MILITARY.feldgrau, 0.3);
+/** The ring let into the top: a dull bronze, not bright brass. */
+export const PLINTH_BRASS = mixHex(MILITARY.taupe, MILITARY.brown, 0.4);
 
 /** The colour of the inner ring: the faction's own at 0, brass at 1. */
 export function plinthRingColor(faction: string, brass: number): string {
-  return mixHex(mixHex(faction, MILITARY.cream, 0.3), PLINTH_BRASS, brass);
+  return mixHex(mixHex(faction, MILITARY.charcoal, 0.3), PLINTH_BRASS, brass);
 }
 
 export interface PlinthParts {

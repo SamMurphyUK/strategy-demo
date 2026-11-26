@@ -59,6 +59,12 @@ export interface UprightPaint {
   spriteScale?: number;
   /** How far a ship's hull sits below the water, in CSS pixels. Absent is none. */
   submergePx?: number;
+  /** How high the live water stands at this ship, in CSS pixels (see waterSwell.ts): the crest that overwashes the hull. */
+  waterRisePx?: number;
+  /** Vehicles and aircraft are drawn at this share of their size in the close-up. */
+  vehicleScale?: number;
+  /** An aircraft over open water has no base at all. */
+  noBase?: boolean;
   /** The base under this stack is a model on the board: its size against a single unit's, the formation's spread, and the ground's squash. */
   plinth3D?: { factor: number; spread: number; ratio: number };
   /** The soft dark footprint under each figure on its base, 0 to 1. */
@@ -292,6 +298,28 @@ function regionIsHostile(
     if (other !== "" && !sameTeam(other, factionId)) return true;
   }
   return false;
+}
+
+/** Vehicles and aircraft, drawn smaller in the close-up so they do not dwarf a city's landmark. */
+const VEHICLE_SCALED = new Set(["tank", "armor", "mech_infantry", "artillery", "aa", "aaa", "fighter", "tactical_bomber", "strategic_bomber", "tac_bomber", "bomber"]);
+/** How much of a base's ring shows where it passes in front of its own unit: a trace, so it never cuts across the figure. */
+const UNMOVED_OVER_ALPHA = 0.2;
+
+/**
+ * The ring round a base: dotted and pale for a stack not yet moved, solid and gold for the selected one. Both are the same
+ * ring, at the same size, just outside the base's rim.
+ */
+function strokeBaseRing(target: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, alpha: number, selected: boolean): void {
+  target.save();
+  target.globalAlpha *= alpha;
+  target.beginPath();
+  target.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
+  target.lineWidth = selected ? 2.5 : 1.5;
+  target.strokeStyle = selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
+  target.setLineDash(selected ? [] : [4, 3]);
+  target.stroke();
+  target.setLineDash([]);
+  target.restore();
 }
 
 const STILL_UNITS = new Set(["artillery", "aa", "aaa"]);
@@ -794,7 +822,7 @@ function placedSquad(count: number, step: number): { x: number; y: number }[] {
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
   const { x, y } = paint;
-  const figureScale = uprightScale(paint.unitType) * (paint.spriteScale ?? 1);
+  const figureScale = uprightScale(paint.unitType) * (paint.spriteScale ?? 1) * (VEHICLE_SCALED.has(paint.unitType) ? (paint.vehicleScale ?? 1) : 1);
   // A ship is drawn once however many stand in the stack, where units draw a small squad. The count is a badge.
   const naval = SEA_UNITS.has(paint.unitType);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);
@@ -829,7 +857,10 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   }
   if (paint.plinth && naval) {
     // A ship rides the water on a faint ring, not on a turned base.
-    drawWaterlineRing(ctx, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
+    // The ring rides flush on the water, up on a crest and down in a trough.
+    drawWaterlineRing(ctx, { x, y: y - (paint.waterRisePx ?? 0), rx, ry, color: factionPalette(paint.factionId).primary });
+  } else if (paint.noBase) {
+    // Over open water an aircraft has nothing to stand on.
   } else if (paint.plinth3D) {
     // The base is a model the board draws under this stack (see plinthMeshes.ts), so the canvas draws none.
   } else if (paint.plinth) {
@@ -851,6 +882,10 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     ctx.stroke();
   }
 
+  // The ring is drawn full strength round the base, behind the figure; where the figure stands over it, only a trace of it is drawn again (below).
+  if (paint.unmoved || paint.selected) {
+    strokeBaseRing(ctx, x, y, rx, ry, 1, paint.selected);
+  }
   const color = factionPalette(paint.factionId).primary;
   const pose = facingPose(paint.aim ?? 0);
   const sheet = !clip && typeof ctx.drawImage === "function" ? spriteSheet(paint.unitType, paint.factionId, 1) : null;
@@ -910,8 +945,13 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
         if (move.tilt + sway.pitch * 4 !== 0) {
           figure.tiltDeg = move.tilt + sway.pitch * 4;
         }
-        if (naval && paint.plinth && (paint.submergePx ?? 0) > 0) {
-          figure.submergePx = paint.submergePx;
+        if (naval && paint.plinth) {
+          // The cut is the water's surface. A crest lifts it up the hull, the heave of the ship lowers it again, and a lower
+          // vertical offset in the inspector (or a deeper slider) leaves more of the hull under it.
+          const under = Math.max(0, (paint.submergePx ?? 0) + (paint.waterRisePx ?? 0) - sway.bob - move.dz);
+          if (under > 0) {
+            figure.submergePx = under;
+          }
         }
         if (SEA_UNITS.has(paint.unitType) && paint.landAt) {
           const box = spriteScreenBox(
@@ -981,13 +1021,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
       drawHoldCircles(target, x, y, paint.tokenPx, true, paint.holds);
     }
     if (paint.selected || paint.unmoved) {
-      target.beginPath();
-      target.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
-      target.lineWidth = paint.selected ? 2.5 : 1.5;
-      target.strokeStyle = paint.selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
-      target.setLineDash(paint.selected ? [] : [4, 3]);
-      target.stroke();
-      target.setLineDash([]);
+      strokeBaseRing(target, x, y, rx, ry, UNMOVED_OVER_ALPHA, paint.selected);
     }
     target.restore();
   };
@@ -1008,13 +1042,7 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
     drawHoldCircles(ctx, x, y, paint.tokenPx, true, paint.holds);
   }
   if (!asVector && (paint.selected || paint.unmoved)) {
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx + 3, ry + 2.5, 0, 0, Math.PI * 2);
-    ctx.lineWidth = paint.selected ? 2.5 : 1.5;
-    ctx.strokeStyle = paint.selected ? SELECTED_COLOR : "rgba(221, 207, 153, 0.9)";
-    ctx.setLineDash(paint.selected ? [] : [4, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    strokeBaseRing(ctx, x, y, rx, ry, UNMOVED_OVER_ALPHA, paint.selected);
   }
   ctx.restore();
 }

@@ -23,7 +23,7 @@ import { ownersSignature } from "../map/mapBakeMath";
 import { mapVisuals, subscribeVisuals } from "../map/mapVisualConfig";
 import { MapView, type MapViewProps } from "../map/MapView";
 import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regionClip";
-import { battleScarDescriptors } from "../map/terrainRelief";
+import { battleScarDescriptors, craterCountFor } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { wrapWorldX } from "../map/viewMath";
 import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
@@ -326,7 +326,7 @@ export default function MapViewport3D(props: MapViewProps) {
   }, [land, geometry, clipped]);
 
   // Craters where the fighting is. The same marks the 2D map paints, so they sit in the same places.
-  const scarKey = (props.relief?.scars ?? []).map((scar) => `${scar.regionId}:${scar.ember ? 1 : 0}`).join("|");
+  const scarKey = (props.relief?.scars ?? []).map((scar) => `${scar.regionId}:${scar.ember ? 1 : 0}:${craterCountFor(scar.attackers)}`).join("|");
   const reliefRef = useRef(props.relief);
   reliefRef.current = props.relief;
   const scars = useMemo<BattleScar[]>(
@@ -336,7 +336,16 @@ export default function MapViewport3D(props: MapViewProps) {
         if (!region || region.type !== "land") {
           return [];
         }
-        const marks = battleScarDescriptors(region.id, region.anchor, [region.anchor, ...slotsOf(region)], scar.ember)[0];
+        const marks = battleScarDescriptors(
+          region.id,
+          region.anchor,
+          [region.anchor, ...slotsOf(region)],
+          scar.ember,
+          // On the territory being fought over, and not across its border.
+          (p) => pointInMultiPolygon(p, clipped?.get(region.id) ?? roughShape(region)),
+          // The more units attack it, the more it is torn up.
+          craterCountFor(scar.attackers),
+        )[0];
         return marks ? [{ craters: marks.craters, ember: scar.ember }] : [];
       }),
     [scarKey, geometry, clipped],
@@ -397,6 +406,7 @@ export default function MapViewport3D(props: MapViewProps) {
           scars={scars}
           look={look}
           dim={props.menuBackdrop === true}
+          fighting={props.fighting}
           still={still}
           table={table}
           pixie={pixie}

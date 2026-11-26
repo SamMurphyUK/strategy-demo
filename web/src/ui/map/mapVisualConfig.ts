@@ -187,6 +187,12 @@ export interface MapVisualConfig {
   enableSoftLand: boolean;
   /** The zoom where the softening starts, and the zoom where it is whole. The icon tokens hold the full pixel chart up to 3.8, where the sprites arrive. */
   softLandFrom: number;
+  /** How far the world-space diorama surface (grass flock, sand ripples, snow, slate) comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart. */
+  dioramaPbrBlend: number;
+  /** The diorama surface's repeats, against the shipped size. */
+  dioramaTileScale: number;
+  /** How deep the diorama surface's relief reads in the light. */
+  dioramaNormalStrength: number;
   softLandTo: number;
   /** What is left of the dither, the colour, and the light and shade once the land is soft. 1 is as strategic. */
   softLandDither: number;
@@ -223,6 +229,10 @@ export interface MapVisualConfig {
   squadSpread: number;
   /** How hard the sun catches a base's bevel and rim: a crisp specular and a warm key against a cool shade. 0 is flat. */
   plinthSpecular: number;
+  /** How large vehicles and aircraft stand against the infantry line in the close-up diorama, 1 being the old size. */
+  vehicleDioramaScale: number;
+  /** The radius of a tank's or gun's base against an infantry base: tight to the treads. */
+  vehiclePlinthRadius: number;
   /** The same for the city landmarks: domes and spires catch the sun, and their shade runs cool. 0 is flat. */
   landmarkRimStrength: number;
   /** A fine tooth and a low satin sheen on the board, faded in as the camera comes in close. 0 is smooth. */
@@ -236,6 +246,12 @@ export interface MapVisualConfig {
   waveLoopSeconds: number;
   /** The direction the front travels, in degrees: 0 runs west to east, 90 north to south. */
   waveDirectionDeg: number;
+  /** Height of the ambient swell, in world units. The 20-second front stands taller than it. 0 is a flat sea. */
+  waterSwellAmp: number;
+  /** How much foam the swell throws up the cliff walls as its crest climbs them. 0 is none. */
+  cliffSurgeFoam: number;
+  /** How thick the valley and jungle mist lies, faded in with the close zoom. 0 is clear air. */
+  microMistWeight: number;
   /** A submarine's share of a surface ship's rocking. 0.8 is 20% less. */
   subRockFactor: number;
   /** Each territory takes the palette of its climate. Off, the whole land is one temperate ramp. */
@@ -273,8 +289,8 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   sunCycle: "animated",
   enableShogunMountains: true,
   enableScatteredRocks: false,
-  mountainPeakHeight: 1.1,
-  mountainRidgeSharpness: 0.62,
+  mountainPeakHeight: 6,
+  mountainRidgeSharpness: 0.85,
   mountainSnowLine: 0.64,
   mountainSnowBlend: 0.2,
   mountainSnowGlow: 0.22,
@@ -329,6 +345,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaSheenPops: 0.5,
   enableSoftLand: true,
   softLandFrom: 3.8,
+  dioramaPbrBlend: 0.85,
+  dioramaTileScale: 1,
+  dioramaNormalStrength: 0.7,
   softLandTo: 5.6,
   softLandDither: 0.1,
   softLandSaturation: 0.58,
@@ -348,7 +367,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   squadRadius2: 1.25,
   squadRadius3Plus: 1.45,
   squadSpread: 1,
-  plinthSpecular: 0.6,
+  plinthSpecular: 0.3,
+  vehicleDioramaScale: 0.75,
+  vehiclePlinthRadius: 0.72,
   landmarkRimStrength: 0.6,
   boardSheenStrength: 0.5,
   contactAoStrength: 0.5,
@@ -356,6 +377,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   navalWaveRockAmp: 1,
   waveLoopSeconds: 20,
   waveDirectionDeg: 0,
+  waterSwellAmp: 0.3,
+  cliffSurgeFoam: 0.7,
+  microMistWeight: 0.6,
   subRockFactor: 0.8,
   regionalPaletteDetail: true,
 });
@@ -442,7 +466,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   sunAzimuth: [-50, 50],
   unitRim: [0, 1],
   contactShadow: [0, 0.6],
-  mountainPeakHeight: [0, 2],
+  mountainPeakHeight: [0, 18],
   mountainRidgeSharpness: [0, 1],
   mountainSnowLine: [0, 1],
   mountainSnowBlend: [0.02, 0.6],
@@ -487,6 +511,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   seaSheenFrequency: [0, 4],
   seaSheenPops: [0, 1],
   softLandFrom: [0.5, 6],
+  dioramaPbrBlend: [0, 1],
+  dioramaTileScale: [0.3, 3],
+  dioramaNormalStrength: [0, 2.5],
   softLandTo: [1, 8],
   softLandDither: [0, 1],
   softLandSaturation: [0, 1.2],
@@ -506,6 +533,8 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   squadRadius3Plus: [1, 2.5],
   squadSpread: [0.3, 1.6],
   plinthSpecular: [0, 2],
+  vehicleDioramaScale: [0.4, 1.2],
+  vehiclePlinthRadius: [0.4, 1.2],
   landmarkRimStrength: [0, 2],
   boardSheenStrength: [0, 2],
   contactAoStrength: [0, 1],
@@ -513,6 +542,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   navalWaveRockAmp: [0, 3],
   waveLoopSeconds: [5, 60],
   waveDirectionDeg: [0, 360],
+  waterSwellAmp: [0, 1.2],
+  cliffSurgeFoam: [0, 1.5],
+  microMistWeight: [0, 1.5],
   subRockFactor: [0, 1],
 });
 
@@ -710,13 +742,11 @@ export function wantsFigureCards(config: Readonly<MapVisualConfig>): { shadows: 
 
 /** Height of an infantry figure on screen, in CSS pixels: the upright figure at its shipped scale. */
 export const INFANTRY_FIGURE_PX = 24 * 1.4;
-/** A summit stands no taller than this share of an infantry figure, so the ground never hides a piece. */
-export const MOUNTAIN_FIGURE_SHARE = 0.4;
-
-/** The tallest a summit may stand at a zoom, in world units. `k` is screen pixels per world unit. */
-export function mountainHeightCap(k: number): number {
-  return (MOUNTAIN_FIGURE_SHARE * INFANTRY_FIGURE_PX) / Math.max(k, 1e-6);
-}
+/**
+ * A summit is as tall as the slider says, scaled by how close the camera is. It is not held under any share
+ * of a figure any more: the great ranges stand well above the table, and a piece behind one is behind it,
+ * as it would be on a model. A figure on a slope is lifted onto it (see groundLift).
+ */
 
 export interface MountainLook {
   /** Height of the tallest summit now, in world units. */
@@ -735,7 +765,7 @@ export interface MountainLook {
  */
 export function mountainLook(config: Readonly<MapVisualConfig>, relief: number, k: number): MountainLook | null {
   const fade = Math.min(1, Math.max(0, relief));
-  const height = Math.min(config.mountainPeakHeight, mountainHeightCap(k)) * fade;
+  const height = config.mountainPeakHeight * fade;
   if (!config.enableShogunMountains || height <= 0.004) {
     return null;
   }

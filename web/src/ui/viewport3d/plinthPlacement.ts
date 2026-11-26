@@ -21,6 +21,8 @@ export interface PlinthBuffers {
   colors: Float32Array;
   /** Two each: the range's two shapes under the base (see mountainRelief.ts). */
   rises: Float32Array;
+  /** One each: 0 standing, up to 1 faded away (a dither in the shader). */
+  gone: Float32Array;
 }
 
 export function plinthBuffers(): PlinthBuffers {
@@ -28,6 +30,7 @@ export function plinthBuffers(): PlinthBuffers {
     matrices: new Float32Array(MAX_PLINTHS * 16),
     colors: new Float32Array(MAX_PLINTHS * 3),
     rises: new Float32Array(MAX_PLINTHS * 2),
+    gone: new Float32Array(MAX_PLINTHS),
   };
 }
 
@@ -36,6 +39,16 @@ export interface PlinthLook {
   heightRatio: number;
   pair: number;
   crowd: number;
+  /** A tracked vehicle's or gun's base against an infantry base's, so it hugs the treads. 1 is no change. */
+  vehicleRadius?: number;
+}
+
+/** Units on tracks or wheels with a long footprint: their base is drawn tight (see PlinthLook.vehicleRadius). */
+const TRACKED_UNITS: ReadonlySet<string> = new Set(["tank", "armor", "artillery", "aa", "aaa"]);
+
+/** How much of an infantry base's radius this unit type's base takes. */
+export function unitBaseShare(unitType: string, look: Pick<PlinthLook, "vehicleRadius">): number {
+  return TRACKED_UNITS.has(unitType) ? (look.vehicleRadius ?? 1) : 1;
 }
 
 /** The base's width against a single unit's, for a stack of `count`. */
@@ -44,8 +57,14 @@ export function plinthFactor(count: number, look: Pick<PlinthLook, "pair" | "cro
 }
 
 /** The base's radius, in world units, for a token `tokenPx` across at zoom `k` and a stack of `count`. */
-export function plinthRadius(tokenPx: number, k: number, count: number, look: Pick<PlinthLook, "pair" | "crowd">): number {
-  return (tokenPx / 2 / Math.max(k, 1e-6)) * PLINTH_WIDEN * plinthFactor(count, look);
+export function plinthRadius(
+  tokenPx: number,
+  k: number,
+  count: number,
+  look: Pick<PlinthLook, "pair" | "crowd" | "vehicleRadius">,
+  unitType = "",
+): number {
+  return (tokenPx / 2 / Math.max(k, 1e-6)) * PLINTH_WIDEN * plinthFactor(count, look) * unitBaseShare(unitType, look);
 }
 
 function rgb(hex: string): [number, number, number] {
@@ -61,6 +80,10 @@ export function writePlinths(
   frame: Pick<BoardFrame, "view" | "layouts" | "tokenPx" | "width" | "height">,
   look: PlinthLook,
   riseAt: (x: number, y: number) => { dome: number; ridge: number },
+  /** Whether a world point is open sea: an aircraft over it has no base. */
+  overSea?: (x: number, y: number) => boolean,
+  /** How far a stack's base is faded out, 0 to 1: the bases of a fight fade away as it begins. */
+  goneFor?: (regionId: string, key: string) => number,
 ): number {
   let count = 0;
   for (const layout of frame.layouts) {
@@ -75,7 +98,10 @@ export function writePlinths(
         continue;
       }
       const world = screenToWorld(frame.view, counter);
-      const radius = plinthRadius(frame.tokenPx, frame.view.k, counter.slot.entry.count, look);
+      if (counter.domain === "air" && overSea?.(world.x, world.y)) {
+        continue;
+      }
+      const radius = plinthRadius(frame.tokenPx, frame.view.k, counter.slot.entry.count, look, counter.slot.entry.unit_type_id);
       const m = count * 16;
       out.matrices.fill(0, m, m + 16);
       out.matrices[m] = radius;
@@ -88,6 +114,7 @@ export function writePlinths(
       const under = riseAt(world.x, world.y);
       out.rises[count * 2] = under.dome;
       out.rises[count * 2 + 1] = under.ridge;
+      out.gone[count] = goneFor?.(counter.regionId, counter.slot.key) ?? 0;
       count += 1;
     }
   }

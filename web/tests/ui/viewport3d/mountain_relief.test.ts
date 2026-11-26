@@ -30,10 +30,10 @@ function site(over: Partial<ReliefSite> = {}): ReliefSite {
   };
 }
 
-describe("the three sculpted places", () => {
-  it("are Switzerland, the Himalayas, and Persia, and nowhere else", () => {
-    expect(RELIEF_ZONES.map((zone) => zone.name)).toEqual(["Switzerland", "Himalayas", "Persia"]);
-    expect(RELIEF_ZONES.filter((zone) => zone.region).map((zone) => zone.region)).toEqual(["Persia"]);
+describe("the sculpted places", () => {
+  it("are the great ranges, and nowhere else", () => {
+    expect(RELIEF_ZONES.map((zone) => zone.name)).toEqual(["Switzerland", "Himalayas", "Persia", "Caucasus", "Rockies", "Urals"]);
+    expect(RELIEF_ZONES.filter((zone) => zone.region).map((zone) => zone.region)).toEqual(["Persia", "Caucus", "Central US", "Novo"]);
     for (const zone of RELIEF_ZONES) {
       expect(zone.rise).toBeGreaterThan(0);
       expect(zone.rise).toBeLessThanOrEqual(1);

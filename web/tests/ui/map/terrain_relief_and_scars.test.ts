@@ -108,7 +108,7 @@ describe("battle scars", () => {
     state.current_phase = "combat_move";
     state.phase_orders.push(order("attack", "east"));
     state.phase_orders.push(order("shuffle", "home"));
-    expect(scarTargets(state)).toEqual([{ regionId: "east", ember: true }]);
+    expect(scarTargets(state)).toMatchObject([{ regionId: "east", ember: true }]);
 
     state.current_phase = "noncombat_move";
     expect(scarTargets(state)).toEqual([]);
@@ -116,13 +116,13 @@ describe("battle scars", () => {
     state.current_phase = "combat";
     state.phase_orders = [];
     state.active_battle = { region_id: "east" } as ActiveBattle;
-    expect(scarTargets(state)).toEqual([{ regionId: "east", ember: true }]);
+    expect(scarTargets(state)).toMatchObject([{ regionId: "east", ember: true }]);
 
     state.active_battle = null;
     state.current_phase = "mobilize";
     state.noteTerritoryFought("east");
     state.noteTerritoryFought("ocean");
-    expect(scarTargets(state)).toEqual([{ regionId: "east", ember: false }]);
+    expect(scarTargets(state)).toEqual([{ regionId: "east", ember: false, attackers: 0 }]);
 
     const anchor = { x: 40, y: 40 };
     const avoid: Vec2[] = [anchor, { x: 52, y: 40 }];
@@ -150,5 +150,30 @@ describe("battle scars", () => {
     }
     expect(battleScarDescriptors("east", anchor, avoid, false)[0].ember).toBeNull();
     expect(battleScarDescriptors("east", anchor, avoid, true)).toEqual(frames);
+  });
+});
+
+describe("craters stay on the territory being fought over", () => {
+  it("lays every crater inside the territory, even a narrow one", () => {
+    const anchor = { x: 40, y: 40 };
+    // A strip 14 units wide: the usual reach of 16 to 30 units would fall outside it.
+    const inside = (p: Vec2) => p.x >= 30 && p.x <= 70 && p.y >= 33 && p.y <= 47;
+    for (const id of ["east", "west", "north", "south", "alpha", "beta"]) {
+      const frames = battleScarDescriptors(id, anchor, [anchor], true, inside);
+      for (const crater of frames[0].craters) {
+        expect(inside(crater)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("how torn up a fight leaves the ground", () => {
+  it("lays 1 crater for a lone attacker, 2 from 8, 3 from 15, and 4 from 20", async () => {
+    const { craterCountFor } = await import("../../../src/ui/map/terrainRelief");
+    expect([0, 1, 7, 8, 14, 15, 19, 20, 60].map(craterCountFor)).toEqual([1, 1, 1, 2, 2, 3, 3, 4, 4]);
+    const anchor = { x: 40, y: 40 };
+    for (const n of [1, 2, 3, 4]) {
+      expect(battleScarDescriptors("east", anchor, [anchor], true, undefined, n)[0].craters).toHaveLength(n);
+    }
   });
 });

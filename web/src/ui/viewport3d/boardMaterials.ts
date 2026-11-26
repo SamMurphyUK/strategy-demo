@@ -261,6 +261,8 @@ export interface GroundUniforms {
   uToEye: { value: THREE.Vector3 };
   /** How far sunlit snow goes above white, and how far the rock and snow have come in. */
   uSnowLook: { value: THREE.Vector2 };
+  /** The close-up surface: how far it has come in over the chart, its tile scale, and the strength of its relief. */
+  uDiorama: { value: THREE.Vector4 };
 }
 
 export function groundUniforms(): GroundUniforms {
@@ -274,6 +276,7 @@ export function groundUniforms(): GroundUniforms {
     uPixel: { value: 0.1 },
     uToEye: { value: new THREE.Vector3(0, 0, 1) },
     uSnowLook: { value: new THREE.Vector2(0, 1) },
+    uDiorama: { value: new THREE.Vector4(0, 1, 1, 0) },
   };
 }
 
@@ -282,6 +285,8 @@ const LINE_REACH = "2.5";
 
 export { pixieUniforms, PIXIE_UNIT_SLOTS, type PixieUniforms } from "./skins/pixelSkin";
 import { BAKED_LAND_SKIN, BAKED_SEA_SKIN } from "./skins/bakedSkin";
+import { WATER_Y_GLSL } from "./skins/waterSwell";
+import { DIORAMA_GLSL, SAND_CEILING, SNOW_PEAK } from "./skins/dioramaPbr";
 import { PIXEL_COMMON, PIXEL_LAND_DECLS, PIXEL_LAND_SKIN, PIXEL_SEA_SKIN, pixieUniforms, type PixieUniforms } from "./skins/pixelSkin";
 
 /**
@@ -375,6 +380,10 @@ export function landTopMaterial(
       ${NOISE}
       ${LIGHT}
       ${SUN_FRAGMENT}
+      ${DIORAMA_GLSL}
+      #ifndef SURFACE
+      uniform vec3 uToEye;
+      #endif
       uniform sampler2D uBake;
       uniform float uBias;
       uniform float uBoardSheen;
@@ -512,6 +521,43 @@ export function landTopMaterial(
         c *= 1.0 + (bump - 0.5) * 0.24 * depth * uRelief;
         #endif
 
+        // The close-up surface comes in over the chart: tufted grass, rippled sand, crusted snow and slate, read in world space,
+        // so the flat land gains a real slope, a roughness, and cavities that hold shade. Nothing is drawn below the diorama zoom.
+        float dioBlend = 0.0;
+        float dioSnow = skin.biome.z;
+        float dioSand = skin.biome.y;
+        float roughNow = 1.0;
+        #ifdef PIXIE
+        if (uDiorama.x > 0.002) {
+          dioBlend = uDiorama.x;
+          vec3 dq = vec3(vScene * uDiorama.y, 0.0);
+          vec4 dw = vec4(skin.biome, 0.0);
+          vec3 faces = vec3(0.0, 0.0, 1.0);
+          #ifdef RELIEF
+          // A range reads as slate: its foot and its steep faces, on all three axes, with the slope itself coming in.
+          vec3 slopeN = normalize(vec3(-vSlope * 2.4, 1.0));
+          float dioFoot = smoothstep(0.08, 0.4, vRise);
+          float dioSteep = smoothstep(0.1, 0.45, 1.0 - slopeN.z);
+          float rockW = clamp(max(dioFoot, dioSteep) * (1.0 - skin.biome.z * 0.6), 0.0, 1.0);
+          faces = pow(abs(slopeN), vec3(4.0));
+          faces /= max(dot(faces, vec3(1.0)), 1e-3);
+          dq.z = vRise * uMountain.x * uDiorama.y;
+          dw *= (1.0 - rockW);
+          dw.w = rockW;
+          n = normalize(n + vec3(-vSlope * 2.4, 0.0) * rockW * dioBlend);
+          #endif
+          float de = 0.02;
+          float h0 = dioHeight(dq, dw, faces);
+          vec2 slopeH = vec2(dioHeight(dq + vec3(de, 0.0, 0.0), dw, faces) - h0, dioHeight(dq + vec3(0.0, de, 0.0), dw, faces) - h0) / de;
+          // The height is held to a spread of about a half, so the relief reads the same on every kind of ground.
+          n = normalize(n + vec3(-slopeH * uDiorama.z * dioBlend * 0.5, 0.0));
+          roughNow = dioRough(dq, dw);
+          float wsum = max(dw.x + dw.y + dw.z + dw.w, 1e-3);
+          // The cavities hold shade, and the tips of the grass and the crests of the dunes catch a warm light.
+          c *= 1.0 + (h0 - 0.5) * 1.3 * dioBlend * min(uDiorama.z, 1.5);
+          c = mix(c, c * vec3(1.1, 1.05, 0.88), smoothstep(0.55, 0.92, h0) * (dw.x + dw.y) / wsum * dioBlend * uDirect);
+        }
+        #endif
         c *= lit(dot(n, uSunDir));
         // A tactile surface under the overhead sun: a fine tooth in the colour, and a low satin sheen from a tilted micro
         // normal. It comes in with the zoom, and goes the moment the slider does.
@@ -553,6 +599,20 @@ export function landTopMaterial(
         #if defined(RELIEF) && defined(PIXIE)
         // Snow on the ranges blooms: the lit side goes past white and the glow spreads from it, as on a Shogun II peak.
         c *= 1.0 + uSnowLook.x * snowy * (0.35 + 0.65 * smoothstep(-0.1, 0.5, level)) * lightShare * uDirect;
+        #endif
+        #ifdef PIXIE
+        if (dioBlend > 0.002) {
+          // A soft return from the roughness: wide and faint on grass and rock, tight on snow. Then the cold bounce in snow's shade,
+          // sand held under the bloom, and the lit crest of the snow pushed a hair past white, the only thing that is.
+          float towardSun = clamp(dot(n, uSunDir), 0.0, 1.0);
+          float shin = mix(72.0, 5.0, roughNow);
+          float spec = pow(max(dot(n, normalize(uSunDir + uToEye)), 0.0), shin) * (1.0 - roughNow) * 0.5;
+          c += uSunColor * spec * uDirect * lightShare * dioBlend;
+          c = mix(c, c * vec3(0.8, 0.9, 1.1), (1.0 - towardSun) * dioSnow * dioBlend);
+          c = mix(c, min(c, vec3(${SAND_CEILING.toFixed(2)})), dioSand * dioBlend);
+          c = mix(min(c, vec3(1.0)), c, dioSnow);
+          c *= 1.0 + ${(SNOW_PEAK - 1).toFixed(2)} * dioSnow * smoothstep(0.55, 0.95, towardSun) * lightShare * uDirect * dioBlend;
+        }
         #endif
         #ifdef PIXIE
         // Shade stops at warm slate umber. Nothing on the chart goes to black, so a dark piece still reads on it.
@@ -598,6 +658,11 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
       uTile: ground.uTile,
       uSurface: ground.uSurface,
       uDrop: { value: drop },
+      // The sea's swell, shared with the water (see skins/waterSwell.ts), and how much foam the surge leaves.
+      uSwell: { value: new THREE.Vector4(0, 20, 1, 0) },
+      uSwellTime: { value: 0 },
+      uFrontAt: { value: 0 },
+      uSurgeFoam: { value: 0 },
       uRockHigh: { value: blend(MILITARY.brown, MILITARY.tan, 0.28) },
       uRockLow: { value: blend(MILITARY.taupe, MILITARY.brown, 0.2) },
       uRockWet: { value: blend(MILITARY.taupe, MILITARY.charcoal, 0.6) },
@@ -608,7 +673,9 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
       varying vec3 vNormal;
       varying float vHeight;
       varying float vAlong;
+      varying vec2 vMapXY;
       void main() {
+        vMapXY = (modelMatrix * vec4(position, 1.0)).xy;
         vNormal = normal;
         vHeight = position.z / uDrop;
         vAlong = dot(position.xy, vec2(-normal.y, normal.x));
@@ -618,6 +685,10 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
     fragmentShader: /* glsl */ `
       ${NOISE}
       ${LIGHT}
+      ${WATER_Y_GLSL}
+      uniform float uSwellTime;
+      uniform float uSurgeFoam;
+      varying vec2 vMapXY;
       uniform vec3 uRockHigh;
       uniform vec3 uRockLow;
       uniform vec3 uRockWet;
@@ -628,8 +699,8 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
       #ifdef SURFACE
       uniform sampler2D uTile;
       uniform vec4 uSurface;
-      uniform float uDrop;
       #endif
+      uniform float uDrop;
       void main() {
         float wobble = vnoise(vec2(vAlong * 0.8, 3.0)) * 1.3;
         float band = floor(vHeight * 5.0 + wobble);
@@ -638,6 +709,19 @@ export function cliffMaterial(shared: SharedUniforms, drop: number, ground: Grou
         rock *= 0.95 + 0.1 * vnoise(vec2(vAlong * 3.0, vHeight * 2.0));
         rock = mix(rock, uRockWet, smoothstep(0.26, 0.04, vHeight));
         rock = mix(rock, uRockLip, step(0.92, vHeight) * 0.7);
+        // The swell climbs and leaves the wall: the rock stays dark where the water has just been, and a ragged band of
+        // foam rides the crest and widens as the front lifts it.
+        float rise = vHeight * uDrop;
+        vec2 mapAt = vec2(vMapXY.x, -vMapXY.y);
+        float surface = waterY(mapAt, uSwellTime);
+        float wetTo = max(surface, max(waterY(mapAt, uSwellTime - 1.4), waterY(mapAt, uSwellTime - 2.8)));
+        float wetBand = smoothstep(wetTo + 0.18, wetTo - 0.05, rise);
+        rock = mix(rock, uRockWet * 0.78, wetBand * 0.65 * clamp(uSwell.x * 3.0, 0.0, 1.0));
+        float surge = max(surface, 0.0);
+        float reach = 0.05 + surge * 0.9;
+        float ragged = 0.6 + 0.4 * vnoise(vec2(vAlong * 2.6 + uSwellTime * 0.7, rise * 3.0));
+        float foamBand = smoothstep(reach, 0.0, abs(rise - surface - reach * 0.3)) * ragged;
+        rock = mix(rock, vec3(0.93), clamp(foamBand * uSurgeFoam * clamp(surge * 4.0 + 0.15, 0.0, 1.0), 0.0, 1.0) * 0.9);
         vec3 n = normalize(vNormal);
         float ndl = dot(n, uSunDir);
         #ifdef SURFACE
@@ -686,6 +770,14 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       uShift: { value: 0 },
       uDrop: { value: drop },
       uWater: { value: 0 },
+      /** Swell height, the loop in seconds, and the front's direction in board terms. */
+      uSwell: { value: new THREE.Vector4(0, 20, 1, 0) },
+      /** The clock the ships' sprites keep, so the water and the hulls ride the same wave. */
+      uSwellTime: { value: 0 },
+      /** Where along its direction the front is now. */
+      uFrontAt: { value: 0 },
+      /** Share of the shoreline surge drawn as foam. */
+      uSurgeFoam: { value: 0 },
       uFoam: { value: blend(MILITARY.cream, MILITARY.sage, 0.38) },
       uWaveTint: { value: blend(MILITARY.spruce, MILITARY.sage, 0.4) },
       uTable: { value: blend(MILITARY.charcoal, MILITARY.brown, 0.22) },
@@ -708,10 +800,16 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
     },
     vertexShader: /* glsl */ `
       ${SUN_VERTEX}
+      ${WATER_Y_GLSL}
+      uniform float uSwellTime;
       varying vec2 vScene;
+      varying float vSwellY;
       void main() {
         vec4 world = modelMatrix * vec4(position, 1.0);
         vScene = world.xy;
+        // The sea rises and falls with the swell and the front. The board's y runs the other way from the map's.
+        vSwellY = waterY(vec2(world.x, -world.y), uSwellTime);
+        world.z += vSwellY;
         #ifdef SUN_SHADOW
         vSun = (uSunMatrix * world).xyz;
         #endif
@@ -880,6 +978,9 @@ uniform vec4 uMountain;
 // How high up the monument a vertex is, from 0 at its base to 1 at its spire.
 attribute float aNormY;
 varying float vNormY;
+// 0 for a monument or a base standing; up to 1 as a base is faded out (a per-instance dither, see plinthPlacement.ts).
+attribute float aGone;
+varying float vGone;
 // Where the surface is and which way it faces, in the board's space, for the specular.
 varying vec3 vN;
 varying vec3 vWorld;
@@ -897,6 +998,7 @@ vec3 propPoint() {
   // is revealed by its height instead (see LANDMARK_REVEAL).
   #ifdef LANDMARK
   vNormY = aNormY;
+  vGone = aGone;
   #else
   p.xy *= mix(0.35, 1.0, uGrow);
   p.z *= uGrow;
@@ -915,6 +1017,7 @@ vec3 propPoint() {
 const LANDMARK_REVEAL = /* glsl */ `
 #ifdef LANDMARK
 varying float vNormY;
+varying float vGone;
 uniform float uLandmarkReveal;
 uniform float uLandmarkBand;
 const float LM_PLINTH = 0.1;
@@ -1058,7 +1161,7 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
         float rim = pow(1.0 - max(dot(sn, sv), 0.0), 3.0) * clamp(dot(sn, uSunDir) + 0.35, 0.0, 1.0);
         c += uSunColor * (glint * 0.55 + rim * 0.3) * uLandmarkSpec * uDirect;
         c = min(c, vec3(0.95));
-        float shown = lmAlpha(vNormY);
+        float shown = lmAlpha(vNormY) * (1.0 - vGone);
         if (shown < lmBayer(gl_FragCoord.xy)) {
           discard;
         }
@@ -1141,7 +1244,7 @@ export function propShadowMaterial(shared: SharedUniforms, landmark?: LandmarkUn
             discard;
           }
           #ifdef LANDMARK
-          if (lmAlpha(vNormY) < 0.5) {
+          if (lmAlpha(vNormY) * (1.0 - vGone) < 0.5) {
             discard;
           }
           #endif
@@ -1207,7 +1310,7 @@ export function propCasterMaterial(
         ${LANDMARK_REVEAL}
         void main() {
           #ifdef LANDMARK
-          if (lmAlpha(vNormY) < 0.5) {
+          if (lmAlpha(vNormY) * (1.0 - vGone) < 0.5) {
             discard;
           }
           #endif

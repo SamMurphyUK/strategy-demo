@@ -113,9 +113,9 @@ describe("the turned base", () => {
     expect(wide.field.rx).toBeGreaterThan(0);
   });
 
-  it("makes the ring brass at full brass and the faction's own colour, lightened, at none", () => {
+  it("makes the ring brass at full brass and the faction's own colour, muted toward charcoal, at none", () => {
     expect(plinthRingColor("#5B7D73", 1)).toBe(PLINTH_BRASS);
-    expect(plinthRingColor("#5B7D73", 0)).toBe(mixHex("#5B7D73", "#DDCF99", 0.3));
+    expect(plinthRingColor("#5B7D73", 0)).toBe(mixHex("#5B7D73", "#4B3D44", 0.3));
     expect(plinthRingColor("#5B7D73", 0)).not.toBe(plinthRingColor("#9C524E", 0));
     expect(plinthRingColor("#5B7D73", 1)).toBe(plinthRingColor("#9C524E", 1));
   });

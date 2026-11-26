@@ -4,13 +4,14 @@
 
 /** The land's colour from the baked sheet. */
 export const BAKED_LAND_SKIN = /* glsl */ `
-struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; };
+struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; vec3 biome; };
 LandSkinOut skinLand() {
   LandSkinOut result;
   result.c = texture2D(uBake, vUv, uBias).rgb;
   result.sceneShift = vec2(0.0);
   result.snowy = 0.0;
   result.level = 0.0;
+  result.biome = vec3(1.0, 0.0, 0.0);
   return result;
 }
 `;

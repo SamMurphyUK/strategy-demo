@@ -174,7 +174,7 @@ export const PIXEL_LAND_DECLS = /* glsl */ `
 
 /** The land's colour from the pixel chart. `skinLand` is what the land material asks for. */
 export const PIXEL_LAND_SKIN = /* glsl */ `
-struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; };
+struct LandSkinOut { vec3 c; vec2 sceneShift; float snowy; float level; vec3 biome; };
 LandSkinOut skinLand() {
   // Where the cloud's shadow is read: the chart reads it at the middle of a texel.
   vec2 sceneAt = vec2(0.0);
@@ -315,6 +315,10 @@ LandSkinOut skinLand() {
   result.sceneShift = sceneAt;
   result.snowy = snowy;
   result.level = level;
+  // What the ground is, for the close-up surface: grass (temperate, boreal and tropical), sand (arid), and snow.
+  float dry = zoneShare.z;
+  float snowShare = snowy;
+  result.biome = vec3((1.0 - dry) * (1.0 - snowShare), dry * (1.0 - snowShare), snowShare);
   return result;
 }
 `;

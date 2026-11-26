@@ -27,11 +27,16 @@ export interface ReliefZone {
   step: number;
 }
 
-/** The three sculpted places. Points are map coordinates of demomap01.json. */
+/** The sculpted places. Points are map coordinates of demomap01.json. */
 export const RELIEF_ZONES: readonly ReliefZone[] = [
   { name: "Switzerland", gap: { seed: { x: 279, y: 221.5 }, box: { x: 267, y: 213, w: 24, h: 17 } }, rise: 0.8, step: 0.3 },
   { name: "Himalayas", gap: { seed: { x: 451, y: 278 }, box: { x: 426, y: 257, w: 50, h: 40 } }, rise: 1, step: 0.5 },
   { name: "Persia", region: "Persia", rise: 0.68, step: 0.5 },
+  // The great ranges the sculpted three left out. Each is the whole territory the range lies in, with a level clearing
+  // round every point its pieces use.
+  { name: "Caucasus", region: "Caucus", rise: 0.78, step: 0.5 },
+  { name: "Rockies", region: "Central US", rise: 0.74, step: 0.5 },
+  { name: "Urals", region: "Novo", rise: 0.62, step: 0.5 },
 ];
 
 /** The ground is level within this distance of a point the pieces use, in world units. */

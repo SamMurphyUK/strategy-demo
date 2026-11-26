@@ -33,6 +33,7 @@ import {
   type TerrainScene,
   TOKEN_PX,
 } from "./mapRenderer";
+import { applyTravel, type TravelPlan } from "./battleTravel";
 import type { OperationalOrder } from "./operationalArrows";
 import { BAKE_PAINT, type Baked, TerrainBake } from "./mapBake";
 import { sharedEdges } from "./mapBakeMath";
@@ -116,6 +117,10 @@ export interface MapViewProps {
   landError: string;
   owners: Record<string, string>;
   stacks: Record<string, StackEntry[]>;
+  /** Attackers on their way to a fight: they stand at their origin until the fight opens, then walk in (see battleTravel.ts). */
+  travel?: readonly TravelPlan[];
+  /** Territories whose fight has begun: the bases under their stacks fade away. */
+  fighting?: readonly string[];
   selectedRegionId: string;
   selectedStack: { regionId: string; key: string } | null;
   highlight: HighlightMode;
@@ -537,13 +542,20 @@ export function MapView(props: MapViewProps) {
   const paintW = size.w + (props.menuBackdrop ? MENU_MARGIN_X * 2 : 0);
   const paintH = size.h + (props.menuBackdrop ? MENU_MARGIN_Y * 2 : 0);
   const copies = visibleCopies(paintView, paintW, bounds, wrap);
-  const layouts = copies.flatMap((dx) =>
-    layoutRegions(geometry.regions, props.stacks, { ...paintView, x: paintView.x - dx }, unitScale, {
-      slotsFor,
-      categories: props.unitCategories,
-      copyDx: dx,
-    }),
-  );
+  const travelNow = performance.now();
+  const layouts = copies.flatMap((dx) => {
+    const copyView = { ...paintView, x: paintView.x - dx };
+    return applyTravel(
+      layoutRegions(geometry.regions, props.stacks, copyView, unitScale, {
+        slotsFor,
+        categories: props.unitCategories,
+        copyDx: dx,
+      }),
+      props.travel ?? [],
+      copyView,
+      travelNow,
+    );
+  });
   const bakeRef = useRef<{ rev: number; bake: TerrainBake } | null>(null);
   if (bakeRef.current?.rev !== BAKE_PAINT) {
     bakeRef.current = { rev: BAKE_PAINT, bake: new TerrainBake() };

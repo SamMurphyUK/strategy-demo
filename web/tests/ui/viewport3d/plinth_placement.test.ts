@@ -49,3 +49,14 @@ describe("the 3D bases", () => {
     expect(writePlinths(plinthBuffers(), frameOf(many), look, () => ({ dome: 0, ridge: 0 }))).toBe(MAX_PLINTHS);
   });
 });
+
+describe("vehicle bases and aircraft at sea", () => {
+  it("draws a tank's or gun's base tighter than an infantry base's", async () => {
+    const { plinthRadius } = await import("../../../src/ui/viewport3d/plinthPlacement");
+    const look = { pair: 1.25, crowd: 1.45, vehicleRadius: 0.7 };
+    const infantry = plinthRadius(30, 2, 1, look, "infantry");
+    expect(plinthRadius(30, 2, 1, look, "tank")).toBeCloseTo(infantry * 0.7, 9);
+    expect(plinthRadius(30, 2, 1, look, "artillery")).toBeCloseTo(infantry * 0.7, 9);
+    expect(plinthRadius(30, 2, 1, look, "fighter")).toBeCloseTo(infantry, 9);
+  });
+});

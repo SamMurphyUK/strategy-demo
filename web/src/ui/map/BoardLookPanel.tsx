@@ -722,6 +722,9 @@ export function BoardLookPanel() {
         <Num name="seaSheenPops" label="Wave pops" title="How often a breaking wave throws a glint where the sun could catch it. 0 is never." />
         <Num name="waveLoopSeconds" label="Wave loop" title="Seconds for the invisible wave front to sweep the board and come round again." unit="s" />
         <Num name="waveDirectionDeg" label="Wave direction" title="The direction the front travels, in degrees: 0 runs west to east, 90 north to south." unit="deg" />
+        <Num name="waterSwellAmp" label="Ocean swell" title="How high the sea heaves: the ambient swell, with the 20-second front standing taller. It lifts and drops the ships and climbs the cliffs. 0 is a flat sea." />
+        <Num name="cliffSurgeFoam" label="Cliff surge foam" title="How much foam the swell leaves up a cliff wall as its crest climbs it. 0 is none." />
+        <Num name="microMistWeight" label="Valley and jungle mist" title="How thick the mist lies between tall ridges and over the jungle, faded in with the close zoom. 0 is clear air." />
         <Num name="navalWaveRockAmp" label="Wave rock" title="How hard a wave front rocks a ship, in roll and pitch, as it crosses it. 0 is no rocking." />
         <Num name="subRockFactor" label="Sub rock" title="A submarine's share of a surface ship's rocking. 0.8 is 20% less." />
         <Num name="navalIdleBobAmp" label="Ship heave" title="How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level." />
@@ -745,6 +748,9 @@ export function BoardLookPanel() {
 
         <h3>Soft land</h3>
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
+        <Num name="dioramaPbrBlend" label="Diorama surface" title="How far the tiled grass, sand, snow and slate surface comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart." />
+        <Num name="dioramaTileScale" label="Diorama tile scale" title="The repeats of the diorama surface against the shipped size." />
+        <Num name="dioramaNormalStrength" label="Diorama relief" title="How deep the diorama surface's relief reads in the light." />
         <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandDither" label="Soft dither" title="Dither left on the soft land. 0 is none, 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
@@ -811,6 +817,8 @@ export function BoardLookPanel() {
         <Num name="squadRadius2" label="Pair base" title="A pair's base against a single unit's. 1.25 is a quarter wider." off={!mapVisuals.enable3DBases} />
         <Num name="squadRadius3Plus" label="Crowd base" title="The base of three or more against a single unit's. 1.45 is nearly half again as wide." off={!mapVisuals.enable3DBases} />
         <Num name="plinthSpecular" label="Base shine" title="How hard the sun catches a base's bevel and rim: a crisp specular and a warm key against a cool shade. 0 is flat." off={!mapVisuals.enable3DBases} />
+        <Num name="vehicleDioramaScale" label="Vehicle and aircraft size" title="How large tanks, guns and aircraft stand in the close-up, against their old size. Lower keeps them from dwarfing the landmarks." />
+        <Num name="vehiclePlinthRadius" label="Vehicle base radius" title="The radius of a tank's or gun's base against an infantry base's. Lower hugs the treads." off={!mapVisuals.enable3DBases} />
         <Num name="contactAoStrength" label="Contact shadow" title="The soft dark footprint under each figure on its base. 0 is none." off={!mapVisuals.enable3DBases} />
         <Num name="squadSpread" label="Squad spread" title="How far apart the figures of a pair or a crowd stand on their base. 1 is the shipped formation." off={!mapVisuals.enable3DBases} />
         <Flag name="enableBasePlinths" label="Turned bases" title="A dark wood base with a brass ring under each standing figure" />

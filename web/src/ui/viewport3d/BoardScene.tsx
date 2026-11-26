@@ -45,6 +45,12 @@ import { getDrawFlags } from "../map/renderDebug";
 import type { CraterMark } from "../map/terrainRelief";
 import { projectionScales, screenToWorld } from "../map/viewMath";
 import { boardPose, cameraOf, SEA_DROP, seaShift } from "./boardCamera";
+import { frontDirection, frontPosition } from "../map/shipSway";
+import { pointInMultiPolygon } from "../map/regionClip";
+import { biomeAtMap } from "./geography";
+import { createMist } from "./mistField";
+import { dioramaFade } from "./skins/dioramaPbr";
+import { jungleSites, valleySites } from "./mistPlacement";
 import {
   cardCasterMaterial,
   cliffCasterMaterial,
@@ -69,7 +75,7 @@ import {
 } from "./boardMaterials";
 import { clearTexture, dataSheetTexture, grainTexture, overlayTexture, sheetTexture } from "./boardTextures";
 import { buildCoverSheet, buildGroundSheet, grainTile } from "./groundSheet";
-import { reliefBuffers, type ReliefPatch, sampleReliefFields } from "./mountainRelief";
+import { reliefBuffers, type ReliefPatch, sampleMountainHeight, sampleReliefFields } from "./mountainRelief";
 import { buildPixieSheet, type CoastField, PIXIE_INK, PIXIE_SHELF_WIDTH } from "./pixieSheet";
 import { idSheetTexture } from "./pixieTextures";
 import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
@@ -115,6 +121,8 @@ export interface BoardSceneProps {
   plan: PropPlan;
   scars: readonly BattleScar[];
   look: BoardLook;
+  /** Territories whose fight has begun: their bases fade away. */
+  fighting?: readonly string[];
   /** The main menu is over the board: dim it. */
   dim: boolean;
   /** The viewer asked for less motion: the water, the smoke, and the sun hold still. */
@@ -851,8 +859,21 @@ export function BoardScene(props: BoardSceneProps) {
     (old) => old.dispose(),
     [land],
   );
+  // The mist: where it can lie, found once, and a pool of ribbons spent on the sites near the camera.
+  const mistSites = useMemo(
+    () => [...valleySites(patches), ...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land))],
+    [patches, bounds, land],
+  );
+  // How far each base has faded, by stack, and the last frame's time.
+  const baseFade = useRef({ values: new Map<string, number>(), last: 0 }).current;
+  const mist = useDisposable(
+    () => createMist(),
+    (old) => old.dispose(),
+    [],
+  );
   const plane = useDisposable(
-    () => new THREE.PlaneGeometry(1, 1),
+    // Cut finely enough that the swell and the front's crest read as a surface, not a sheet.
+    () => new THREE.PlaneGeometry(1, 1, 160, 100),
     (old) => old.dispose(),
     [],
   );
@@ -864,6 +885,7 @@ export function BoardScene(props: BoardSceneProps) {
       const buffers = plinthBuffers();
       geometry.setAttribute("aFlag", new THREE.InstancedBufferAttribute(new Float32Array(MAX_PLINTHS * 3), 3));
       geometry.setAttribute("aRise", new THREE.InstancedBufferAttribute(buffers.rises, 2));
+      geometry.setAttribute("aGone", new THREE.InstancedBufferAttribute(buffers.gone, 1));
       const matrices = new THREE.InstancedBufferAttribute(buffers.matrices, 16);
       const colors = new THREE.InstancedBufferAttribute(buffers.colors, 3);
       const make = (material: THREE.Material, tinted: boolean) => {
@@ -1205,6 +1227,32 @@ export function BoardScene(props: BoardSceneProps) {
     kit.water.uniforms.uDrop.value = drop;
     sea.current.scale.set(pose.halfWidth * 2 + 60, (pose.halfHeight * 2) / cosPitch + 80, 1);
     kit.water.uniforms.uShift.value = shift;
+    mist.update(
+      {
+        x: pose.target[0],
+        y: -pose.target[1],
+        micro: Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35)),
+        weight: mapVisuals.microMistWeight,
+        seconds: performance.now() / 1000,
+        groundAt: (x, y) => (patches.length > 0 ? sampleMountainHeight(patches, x, y, rise, ranges?.sharpness ?? 0) : 0),
+      },
+      mistSites,
+    );
+    {
+      // The swell: its height, the loop, and the front's direction (in map terms), and where the front is.
+      const dir = frontDirection(mapVisuals.waveDirectionDeg);
+      const swellNow = performance.now() / 1000;
+      kit.water.uniforms.uSwell.value.set(mapVisuals.waterSwellAmp, mapVisuals.waveLoopSeconds, dir.x, dir.y);
+      kit.water.uniforms.uSwellTime.value = swellNow;
+      kit.water.uniforms.uFrontAt.value = frontPosition(swellNow, mapVisuals.waveLoopSeconds, mapVisuals.waveDirectionDeg);
+      kit.water.uniforms.uSurgeFoam.value = mapVisuals.cliffSurgeFoam;
+      for (const material of [kit.cliff]) {
+        material.uniforms.uSwell.value.copy(kit.water.uniforms.uSwell.value);
+        material.uniforms.uSwellTime.value = swellNow;
+        material.uniforms.uFrontAt.value = kit.water.uniforms.uFrontAt.value;
+        material.uniforms.uSurgeFoam.value = mapVisuals.cliffSurgeFoam;
+      }
+    }
     // The waves and the shine keep a share of themselves with the camera all the way out.
     const seaShare = detail.water + (1 - detail.water) * mapVisuals.seaFarVisibility;
     kit.water.uniforms.uWater.value = seaShare;
@@ -1224,6 +1272,8 @@ export function BoardScene(props: BoardSceneProps) {
       (embers || glitter || snowfield) &&
       (gl.extensions.has("EXT_color_buffer_float") || gl.extensions.has("EXT_color_buffer_half_float"));
     kit.smoke.uniforms.uGlow.value = glowing ? EMBER_GLOW : 1;
+    // The close-up surface comes in over the chart from zoom 3.8 to 4.3, and only on the pixel chart: below that it is the chart alone.
+    earth.uDiorama.value.set(chart ? dioramaFade(frame.view.k) * mapVisuals.dioramaPbrBlend : 0, mapVisuals.dioramaTileScale, mapVisuals.dioramaNormalStrength, 0);
     earth.uSnowLook.value.set(glowing && ranges ? ranges.snowGlow * SNOW_GLOW : 0, ranges?.fade ?? 0);
     earth.uToEye.value.set(0, -Math.sin(pose.pitch), Math.cos(pose.pitch));
 
@@ -1377,17 +1427,31 @@ export function BoardScene(props: BoardSceneProps) {
     plinths.prop.visible = basesOn;
     plinths.caster.visible = basesOn && casting;
     if (basesOn) {
+      // The bases of a fight fade out as the combat phase begins, a little under half a second, so the armies walk on bare ground.
+      const fighting = new Set(live.current.fighting ?? []);
+      const step = 1 - Math.exp(-Math.min(0.1, Math.max(0.001, (now - baseFade.last) / 1000)) * 7);
+      baseFade.last = now;
+      const baseGone = (regionId: string, key: string) => {
+        const id = `${regionId}|${key}`;
+        const next = (baseFade.values.get(id) ?? 0) + ((fighting.has(regionId) ? 1 : 0) - (baseFade.values.get(id) ?? 0)) * step;
+        const value = Math.abs(next) < 0.004 ? 0 : next;
+        baseFade.values.set(id, value);
+        return value;
+      };
       const placed = writePlinths(
         plinths.buffers,
         frame,
-        { heightRatio: mapVisuals.plinthHeight, pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus },
+        { heightRatio: mapVisuals.plinthHeight, pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus, vehicleRadius: mapVisuals.vehiclePlinthRadius },
         (x, y) => (patches.length > 0 ? sampleReliefFields(patches, x, y) : NO_RELIEF),
+        (x, y) => !pointInMultiPolygon({ x, y }, land),
+        (regionId, key) => baseGone(regionId, key),
       );
       plinths.prop.count = placed;
       plinths.caster.count = placed;
       plinths.matrices.needsUpdate = true;
       plinths.colors.needsUpdate = true;
       (plinths.geometry.getAttribute("aRise") as THREE.InstancedBufferAttribute).needsUpdate = true;
+      (plinths.geometry.getAttribute("aGone") as THREE.InstancedBufferAttribute).needsUpdate = true;
       kit.plinthLook.uLandmarkReveal.value = Math.min(1, frame.unitFade);
     }
 
@@ -1537,6 +1601,7 @@ export function BoardScene(props: BoardSceneProps) {
 
   return (
     <>
+      <primitive object={mist.mesh} />
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />

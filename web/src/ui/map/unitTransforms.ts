@@ -1,12 +1,13 @@
 // How the detailed unit figures are moved on their bases, by preset. Pure.
 //
 // A preset is a small move for a figure: along x and y, up off the ground (z), a tilt toward or away
-// from the camera, and a turn. It is kept for a scope (all units, one faction, or one unit type) and
-// for a stack size (one unit, two, or three and more), so a pair can stand a little apart and a
-// crowd can spread. Of the presets that cover a stack, the most specific wins: the unit type, then
-// the faction, then all units.
+// from the camera, and a turn.
+// A preset is shared by every stack of its unit, whatever its size: a pair and a crowd use the one
+// move. The inspector keeps one for each faction's each unit type, chosen from the stack it is on. Of the
+// presets that cover a unit, the most specific wins: that faction's unit, the unit type, the faction, all units.
 
-export type TransformScope = "all" | "faction" | "archetype";
+/** `unit` is one faction's one unit type, which is what the inspector edits. The others are kept for older saves. */
+export type TransformScope = "all" | "faction" | "archetype" | "unit";
 /** 1 is one unit, 2 is a pair, 3 is three or more. */
 export type StackBucket = 1 | 2 | 3;
 
@@ -34,14 +35,20 @@ export const TRANSFORM_RANGES: Readonly<Record<keyof UnitTransform, readonly [nu
 
 export interface UnitTransformSet {
   version: 1;
-  /** Keyed `scope|id|bucket`: `all||1`, `faction|GER|2`, `archetype|tank|3`. */
+  /** Keyed `scope|id|1`: `unit|GER:tank|1` (what the inspector writes), `archetype|tank|1`, `faction|GER|1`, `all||1`. */
   presets: Record<string, UnitTransform>;
 }
 
 export const EMPTY_TRANSFORMS: UnitTransformSet = Object.freeze({ version: 1, presets: {} }) as UnitTransformSet;
 
-export function bucketOf(count: number): StackBucket {
-  return count >= 3 ? 3 : count >= 2 ? 2 : 1;
+/** Stack size does not change a preset: every size shares bucket 1. */
+export function bucketOf(_count: number): StackBucket {
+  return 1;
+}
+
+/** The id of a faction's unit type, for the `unit` scope. */
+export function unitId(factionId: string, unitType: string): string {
+  return `${factionId}:${unitType}`;
 }
 
 export function presetKey(scope: TransformScope, id: string, bucket: StackBucket): string {
@@ -56,6 +63,7 @@ export function isTransform(value: UnitTransform | undefined): boolean {
 export function resolveTransform(set: UnitTransformSet, factionId: string, unitType: string, count: number): Readonly<UnitTransform> {
   const bucket = bucketOf(count);
   return (
+    set.presets[presetKey("unit", unitId(factionId, unitType), bucket)] ??
     set.presets[presetKey("archetype", unitType, bucket)] ??
     set.presets[presetKey("faction", factionId, bucket)] ??
     set.presets[presetKey("all", "", bucket)] ??
@@ -92,8 +100,14 @@ export function parseTransforms(json: unknown): UnitTransformSet {
     return EMPTY_TRANSFORMS;
   }
   let set: UnitTransformSet = EMPTY_TRANSFORMS;
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!/^(all|faction|archetype)\|[A-Za-z0-9_-]*\|[123]$/.test(key) || typeof value !== "object" || value === null) {
+  // Presets saved per stack size are folded into the shared one: the single-unit preset wins, else the pair's, else the crowd's.
+  const entries = Object.entries(raw as Record<string, unknown>).sort(([a], [b]) => a.slice(-1).localeCompare(b.slice(-1)));
+  for (const [oldKey, value] of entries) {
+    const key = oldKey.replace(/\|[23]$/, "|1");
+    if (key !== oldKey && set.presets[key]) {
+      continue;
+    }
+    if (!/^(all|faction|archetype|unit)\|[A-Za-z0-9_:-]*\|[123]$/.test(key) || typeof value !== "object" || value === null) {
       continue;
     }
     const v = value as Record<string, unknown>;

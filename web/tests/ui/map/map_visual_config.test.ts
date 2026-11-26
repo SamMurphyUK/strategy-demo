@@ -14,8 +14,6 @@ import {
   grainAmount,
   INFANTRY_FIGURE_PX,
   mapVisuals,
-  MOUNTAIN_FIGURE_SHARE,
-  mountainHeightCap,
   mountainLook,
   outlineLook,
   parseVisuals,
@@ -297,17 +295,14 @@ describe("the table", () => {
     expect(sunPace(PLAIN_VISUALS)).toBe(1);
   });
 
-  it("keeps a summit under two fifths of an infantry figure at every zoom", () => {
-    expect(MOUNTAIN_FIGURE_SHARE).toBeLessThanOrEqual(0.4);
-    for (const k of [1.5, 3, 6, 12, 16, 24]) {
-      for (const peak of [0.5, 1.1, 2]) {
+  it("lets a summit stand as tall as the slider says at every zoom, with no cap", () => {
+    for (const k of [1.5, 3, 6, 12, 24]) {
+      for (const peak of [0.5, 6, 14]) {
         const look = mountainLook({ ...DEFAULT_VISUALS, mountainPeakHeight: peak }, 1, k)!;
-        // A world unit is k pixels up the screen at most, and less with the camera tipped.
-        expect(look.height * k).toBeLessThanOrEqual(0.4 * INFANTRY_FIGURE_PX + 1e-9);
-        expect(look.height).toBeLessThanOrEqual(peak);
+        expect(look.height).toBeCloseTo(peak, 9);
       }
     }
-    expect(mountainHeightCap(12)).toBeCloseTo((0.4 * 33.6) / 12, 9);
+    expect(DEFAULT_VISUALS.mountainPeakHeight).toBeGreaterThanOrEqual(4);
   });
 
   it("lowers the ranges to nothing as the board climbs to altitude", () => {

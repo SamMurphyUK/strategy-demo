@@ -1,3 +1,4 @@
+import type { TravelPlan } from "./battleTravel";
 import { stackLabel } from "./stackLabel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NEWMAP_PATH, factionIdFromDisplay, prepareSavedMap } from "../../content/game_scene_session_builder";
@@ -359,6 +360,10 @@ export function App() {
     cameraRef.current = camera;
   }, []);
   const openedCombat = useRef(false);
+  // The combat moves of this turn, kept past the end of the move phase: the attackers walk in from where they set out.
+  const combatOrders = useRef<{ toRegionId: string; fromRegionId: string; unitType: string; faction: string; bombard?: string }[]>([]);
+  const [walk, setWalk] = useState<{ regionId: string; startMs: number; durationMs: number } | null>(null);
+  const [, setWalkTick] = useState(0);
   const approachTicket = useRef(0);
 
   // Any phase or faction change invalidates an in-progress move or placement.
@@ -531,6 +536,60 @@ export function App() {
       count: RegionUnitDisplay.combatPoolUnitCount(state, regionId, faction),
     }));
   }, [state, phase, faction, version]);
+
+  if (phase === "combat_move" && state.phase_orders.length > 0) {
+    combatOrders.current = state.phase_orders.map((order) => ({
+      toRegionId: order.toRegionId,
+      fromRegionId: order.fromRegionId,
+      unitType: order.unitType,
+      faction: order.faction,
+      bombard: order.bombard,
+    }));
+  } else if (phase !== "combat_move" && phase !== "combat" && combatOrders.current.length > 0) {
+    combatOrders.current = [];
+  }
+  // Until a fight is opened its attackers stand at their origin; opening it sets them walking while the camera zooms.
+  const travel = useMemo<TravelPlan[]>(() => {
+    if (phase !== "combat" || faction === "") {
+      return [];
+    }
+    return session.getPendingBattles(faction).flatMap((battle) => {
+      const origins = combatOrders.current
+        .filter((order) => order.toRegionId === battle.region_id && order.faction === faction && !order.bombard && order.fromRegionId !== battle.region_id)
+        .flatMap((order) => {
+          const from = geometry.regions.find((region) => region.id === order.fromRegionId);
+          return from ? [{ unitType: order.unitType, from: from.anchor }] : [];
+        });
+      if (origins.length === 0) {
+        return [];
+      }
+      const running = walk?.regionId === battle.region_id ? walk : null;
+      return [{ regionId: battle.region_id, attackerId: battle.attacker_faction_id || faction, origins, startMs: running?.startMs ?? null, durationMs: running?.durationMs ?? 1 }];
+    });
+  }, [session, state, phase, faction, version, walk, geometry]);
+  // Once the combat phase begins, the bases under every stack in a fight fade away, so the walk reads on bare ground.
+  const fighting = useMemo<string[]>(() => {
+    if (phase !== "combat" || faction === "") {
+      return [];
+    }
+    const ids = session.getPendingBattles(faction).map((battle) => battle.region_id);
+    const open = state.active_battle?.region_id;
+    return open && !ids.includes(open) ? [...ids, open] : ids;
+  }, [session, state, phase, faction, version]);
+  useEffect(() => {
+    if (!walk) {
+      return;
+    }
+    let raf = 0;
+    const step = () => {
+      setWalkTick((n) => n + 1);
+      if (performance.now() - walk.startMs < walk.durationMs) {
+        raf = requestAnimationFrame(step);
+      }
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [walk]);
 
   const battleIcons = useMemo(() => {
     if (phase !== "combat" || faction === "") {
@@ -967,6 +1026,8 @@ export function App() {
         if (snap.width > 1 && snap.height > 1 && snap.fitK > 0) {
           const mode = openedCombat.current ? "pan" : "zoom";
           const goal = combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode, shape.anchor, window.devicePixelRatio || 1);
+          // The attackers set out as the camera does, and arrive as it does.
+          setWalk({ regionId, startMs: performance.now(), durationMs: mode === "pan" ? COMBAT_PAN_MS : COMBAT_ZOOM_MS });
           await camera.moveTo(goal, mode === "pan" ? COMBAT_PAN_MS : COMBAT_ZOOM_MS);
           if (ticket !== approachTicket.current) return;
           openedCombat.current = true;
@@ -1053,6 +1114,8 @@ export function App() {
           landError={landError}
           owners={editing ? editorOwners : owners}
           stacks={editing ? editorStacks : stacks}
+          travel={editing ? undefined : travel}
+          fighting={editing ? undefined : fighting}
           selectedRegionId={editing ? (editor.selected?.id ?? "") : selectedRegionId}
           selectedStack={!editing && selection?.kind === "stack" ? { regionId: selection.regionId, key: selection.key } : null}
           highlight={editing ? NO_HIGHLIGHT : highlight}
