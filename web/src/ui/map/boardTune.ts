@@ -4,6 +4,7 @@
 // squash is `far`. Above `end` it is `near`. 0 is a flat map. 0.15 is the shipped tip, which
 // pitches the camera about 32° from overhead.
 import type { FactionKey } from "../theme/factionPalette";
+import { mapVisuals } from "./mapVisualConfig";
 import { resolveFaction } from "../theme/factionPalette";
 import { MILITARY } from "../theme/militaryPalette";
 import { FACTION_TINT } from "./mapStyle";
@@ -188,11 +189,75 @@ function smooth(from: number, to: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** How much world Y shortens at this zoom. 0 is flat. */
+// --- The camera's distance, and the tiers it makes ----------------------------------------------------------------------
+//
+// The board's camera is orthographic, so it has a zoom (`k`, screen pixels per world unit) and no true distance. The notes speak
+// in a distance, and a distance is what this gives them: d = DISTANCE_K / k, chosen so the diorama cross-fade, which runs over
+// zoom 3.8 to 4.3, runs over distance 4.3 to 3.8 exactly. Every tier below is a distance, and `k` is what the camera holds.
+//
+//   strategic   d > 14        pure pixel chart: no diorama, no micro
+//   icon        7.5 to 14     stepped relief, icon readability
+//   diorama     3.8 to 7.5    the diorama surface comes in over 4.3 to 3.8
+//   micro       1.35 to 3.8   uMicroAlpha runs 0 to 1 over 3.6 to 2.4; the camera never goes nearer than 1.35
+
+/** 3.8 times 4.3: the zoom of the diorama's start times the zoom of its finish. */
+export const DISTANCE_K = 3.8 * 4.3;
+/** Distance of the camera for a zoom. */
+export function cameraDistance(k: number): number {
+  return DISTANCE_K / Math.max(k, 1e-6);
+}
+/** The zoom for a distance. */
+export function zoomForDistance(distance: number): number {
+  return DISTANCE_K / Math.max(distance, 1e-6);
+}
+/** Where the tiers begin, as distances. */
+export const TIER_STRATEGIC = 14;
+export const TIER_ICON = 7.5;
+export const TIER_DIORAMA = 3.8;
+/** uMicroAlpha is 0 at the first and 1 at the second. */
+export const MICRO_ALPHA_FROM = 3.6;
+export const MICRO_ALPHA_TO = 2.4;
+/** The camera dives to the low pitch over this stretch of distance. */
+const MICRO_PITCH_FROM = 3.6;
+const MICRO_PITCH_TO = 2.1;
+
+export type CameraTier = "strategic" | "icon" | "diorama" | "micro";
+
+export function cameraTier(k: number): CameraTier {
+  const d = cameraDistance(k);
+  return d > TIER_STRATEGIC ? "strategic" : d > TIER_ICON ? "icon" : d > TIER_DIORAMA ? "diorama" : "micro";
+}
+
+/** 0 up to the first distance, 1 from the second, an ease between. Distances fall as the camera nears. */
+function nearShare(distance: number, from: number, to: number): number {
+  const t = clamp01((from - distance) / (from - to));
+  return t * t * (3 - 2 * t);
+}
+
+/** uMicroAlpha at a zoom: 0 outside the micro tier, 1 close in. */
+export function microAlpha(k: number): number {
+  return nearShare(cameraDistance(k), MICRO_ALPHA_FROM, MICRO_ALPHA_TO);
+}
+
+/** Degrees above the horizon the camera looks from at a zoom, with the micro dive. Overhead is 90. */
+export function elevationDegrees(zoom: number, curve: TiltCurve): number {
+  return 90 - pitchDegrees(1 - groundSquash(zoom, curve));
+}
+
+/** How much world Y shortens at this zoom. 0 is flat. The micro dive takes it on to the low diorama angle. */
 export function groundSquash(zoom: number, curve: TiltCurve): number {
   const share = zoomShare(zoom, curve.start, curve.end);
-  const squash = curve.far + (curve.near - curve.far) * share;
+  const base = curve.far + (curve.near - curve.far) * share;
+  // A squash of 1 - sin(elevation) is a camera that high above the horizon.
+  const low = 1 - Math.sin((mapVisuals.microPitchDeg * Math.PI) / 180);
+  const dive = nearShare(cameraDistance(zoom), MICRO_PITCH_FROM, MICRO_PITCH_TO);
+  const squash = dive > 0 ? base + (Math.max(base, low) - base) * dive : base;
   return Math.min(0.8, Math.max(0, squash));
+}
+
+/** The figure's extra backward lean in the micro tier: a cosine foreshortening, 1 with no lean. */
+export function microSpriteLean(zoom: number): number {
+  return Math.cos((mapVisuals.microSpriteTiltDeg * microAlpha(zoom) * Math.PI) / 180);
 }
 
 /** `sy / sx` for the ground. 1 is flat. */

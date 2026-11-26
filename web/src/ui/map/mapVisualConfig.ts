@@ -191,6 +191,14 @@ export interface MapVisualConfig {
   dioramaPbrBlend: number;
   /** The diorama surface's repeats, against the shipped size. */
   dioramaTileScale: number;
+  /** The nearest the camera may come, in camera distance (see boardTune.ts). */
+  microMinDistance: number;
+  /** Degrees above the horizon the camera looks from at the closest zoom. */
+  microPitchDeg: number;
+  /** Extra backward lean of the 2D figures in the micro tier, in degrees. */
+  microSpriteTiltDeg: number;
+  /** The tilt-shift blur of the top and bottom of the frame in the micro tier. 0 is none. */
+  tiltShiftStrength: number;
   /** How deep the diorama surface's relief reads in the light. */
   dioramaNormalStrength: number;
   /** How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour. */
@@ -359,6 +367,10 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   softLandFrom: 3.8,
   dioramaPbrBlend: 0.85,
   dioramaTileScale: 1,
+  microMinDistance: 1.35,
+  microPitchDeg: 38,
+  microSpriteTiltDeg: 10,
+  tiltShiftStrength: 1,
   dioramaNormalStrength: 0.7,
   albedoDetailStrength: 0.5,
   snowColdTint: 0.5,
@@ -531,6 +543,10 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   softLandFrom: [0.5, 6],
   dioramaPbrBlend: [0, 1],
   dioramaTileScale: [0.3, 3],
+  microMinDistance: [1, 4],
+  microPitchDeg: [30, 60],
+  microSpriteTiltDeg: [0, 20],
+  tiltShiftStrength: [0, 2],
   dioramaNormalStrength: [0, 2.5],
   albedoDetailStrength: [0, 1.5],
   snowColdTint: [0, 1],

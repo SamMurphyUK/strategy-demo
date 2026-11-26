@@ -3,7 +3,8 @@
 import type { Rect, Vec2 } from "./geometry";
 import { MAX_BAKE_SCALE } from "./mapBakeMath";
 import { getTiltCurve } from "./boardTuneStore";
-import { groundRatio, groundSquash, zoomShare } from "./boardTune";
+import { groundRatio, groundSquash, zoomForDistance, zoomShare } from "./boardTune";
+import { mapVisuals } from "./mapVisualConfig";
 
 /** `x`, `y` is the world point at the canvas's top-left corner; `k` is screen pixels per world unit. */
 export interface View {
@@ -24,7 +25,8 @@ export const MAX_BAKE_MAGNIFICATION = 2;
 export function maxZoomK(fitK: number, dpr = 1): number {
   const relative = (fitK > 0 ? fitK : 1) * MAX_ZOOM_FACTOR;
   const sharp = (MAX_BAKE_SCALE * MAX_BAKE_MAGNIFICATION) / Math.max(dpr, 1);
-  return Math.min(relative, sharp);
+  // The camera never goes nearer than the micro floor, so it cannot clip into a mountain or a tall landmark.
+  return Math.min(relative, sharp, zoomForDistance(mapVisuals.microMinDistance));
 }
 /** How far a unit's on-screen size may drift from its size on the fitted map. */
 export const TOKEN_ZOOM_LIMIT = 0.1;

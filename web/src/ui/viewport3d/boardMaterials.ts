@@ -1646,6 +1646,8 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uWarm: { value: 0 },
       /** The biome's colour grade: warm amber over the desert, cool slate over the snow. Colour only. */
       uBiome: { value: new THREE.Vector2(0, 0) },
+      /** Tilt-shift: strength, the focal plane's height on screen (0 bottom, 1 top), and the share of the top and of the bottom that blur. */
+      uTiltShift: { value: new THREE.Vector4(0, 0.5, 0.18, 0.12) },
       uDusk: { value: 0 },
       uDim: { value: 0 },
     },
@@ -1662,6 +1664,7 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       uniform float uSaturation;
       uniform float uWarm;
       uniform vec2 uBiome;
+      uniform vec4 uTiltShift;
       uniform float uDusk;
       uniform float uDim;
       varying vec2 vUv;
@@ -1752,6 +1755,27 @@ export function gradeMaterial(): THREE.ShaderMaterial {
       }
       void main() {
         vec4 scene = texture2D(uScene, vUv);
+        // Tilt-shift: in the micro tier the top and bottom of the frame go gently soft, about a focal plane that follows the ground
+        // under the camera's target. Only the 3D scene is blurred: the figures, tokens and lines are drawn over it, and stay sharp.
+        if (uTiltShift.x > 0.001) {
+          float shift = uTiltShift.y - 0.5;
+          float top = smoothstep(1.0 - uTiltShift.z + shift, 1.0, vUv.y);
+          float bottom = 1.0 - smoothstep(0.0, uTiltShift.w + shift, vUv.y);
+          float blur = clamp(max(top, bottom), 0.0, 1.0) * uTiltShift.x;
+          if (blur > 0.004) {
+            vec2 texel = 1.0 / vec2(textureSize(uScene, 0));
+            float radius = blur * 4.5;
+            vec4 sum = scene;
+            float total = 1.0;
+            for (int i = 0; i < 8; i++) {
+              float a = float(i) * 0.785398 + 0.3;
+              float r = radius * (0.55 + 0.45 * float(i % 2));
+              sum += texture2D(uScene, vUv + vec2(cos(a), sin(a)) * r * texel);
+              total += 1.0;
+            }
+            scene = sum / total;
+          }
+        }
         vec3 c = scene.rgb;
         #ifdef BLOOM
         // With the glow on, the hot marks are brighter than white. Brought back by their own

@@ -79,7 +79,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { unitLean } from "./boardTune";
+import { microSpriteLean, unitLean } from "./boardTune";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { waterY } from "../viewport3d/skins/waterSwell";
@@ -1376,7 +1376,8 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             ctx.translate(0, -lift);
           }
           // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
-          const lean = unitLean(Math.min(scene.view.k, TACTICAL_IN), getBoardTune());
+          // In the micro tier the camera is low, and the figures lean back a few degrees more, so they stand against the horizon.
+          const lean = unitLean(Math.min(scene.view.k, TACTICAL_IN), getBoardTune()) * microSpriteLean(scene.view.k);
           if (lean !== 1) {
             ctx.translate(counter.x, counter.y);
             ctx.scale(1, lean);

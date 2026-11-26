@@ -46,7 +46,7 @@ import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
 import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
-import { borderPasses, unitLean } from "./boardTune";
+import { borderPasses, microSpriteLean, unitLean } from "./boardTune";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
 import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
@@ -799,7 +799,7 @@ export function MapView(props: MapViewProps) {
     // The sheet stamps one shared picture for each kind. Off, every figure is its own SVG node.
     const sheet = getDrawFlags().sheet;
     // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
-    const lean = unitLean(Math.min(scene?.view.k ?? live.current.view.k, TACTICAL_IN), getBoardTune());
+    const lean = unitLean(Math.min(scene?.view.k ?? live.current.view.k, TACTICAL_IN), getBoardTune()) * microSpriteLean(scene?.view.k ?? live.current.view.k);
     if (stage && cssW > 0 && cssH > 0) {
       stage.setShoreVeil(scene && !sheet ? shoreVeilFor(scene) : null);
       stage.sync(

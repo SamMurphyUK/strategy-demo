@@ -49,6 +49,7 @@ import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
 import { biomeAtMap } from "./geography";
 import { createMist } from "./mistField";
+import { microAlpha } from "../map/boardTune";
 import { type BiomeWeather, dampWeather, sampleWeather } from "./biomeAtmosphere";
 import { createFlurries } from "./flurries";
 import { buildForestSheet } from "./forestSheet";
@@ -1287,7 +1288,16 @@ export function BoardScene(props: BoardSceneProps) {
     kit.water.uniforms.uDrop.value = drop;
     sea.current.scale.set(pose.halfWidth * 2 + 60, (pose.halfHeight * 2) / cosPitch + 80, 1);
     kit.water.uniforms.uShift.value = shift;
-    const micro = Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35));
+    // uMicroAlpha: 0 above camera distance 3.6, 1 below 2.4 (see boardTune.ts). The mist, the flurries and the tilt-shift follow it.
+    const micro = microAlpha(frame.view.k);
+    {
+      // The focal plane is the ground under the camera's target: the target's screen height, lifted by the ground's own height there.
+      const targetMap = { x: pose.target[0], y: -pose.target[1] };
+      const liftPx = store.lift?.(targetMap, { naval: false, count: 1 }) ?? 0;
+      const focal = 0.5 + liftPx / Math.max(1, size.y);
+      const strength = micro > 0.25 ? Math.min(1, (micro - 0.25) / 0.35) * mapVisuals.tiltShiftStrength : 0;
+      post.grade.uniforms.uTiltShift.value.set(strength, focal, 0.18, 0.12);
+    }
     // The weather of the ground under the camera: read over a wide ring and damped, so crossing a border never snaps the colour.
     const weatherDt = Math.min(0.25, Math.max(0, (now - weather.last) / 1000));
     weather.last = now;

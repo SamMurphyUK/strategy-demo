@@ -750,6 +750,10 @@ export function BoardLookPanel() {
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
         <Num name="dioramaPbrBlend" label="Diorama surface" title="How far the tiled grass, sand, snow and slate surface comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart." />
         <Num name="dioramaTileScale" label="Diorama tile scale" title="The repeats of the diorama surface against the shipped size." />
+        <Num name="microPitchDeg" label="Micro camera angle" title="Degrees above the horizon the camera looks from at the closest zoom. Lower is a more dramatic diorama angle." unit="deg" />
+        <Num name="microSpriteTiltDeg" label="Micro figure lean" title="How far the 2D figures lean back more in the micro tier, so they stand against the horizon." unit="deg" />
+        <Num name="tiltShiftStrength" label="Tilt-shift" title="The soft blur of the top and bottom of the frame in the micro tier. 0 is none." />
+        <Num name="microMinDistance" label="Nearest camera" title="The nearest the camera may come, in camera distance. The tiers are 14, 7.5 and 3.8; micro ends here." />
         <Num name="dioramaNormalStrength" label="Diorama relief" title="How deep the diorama surface's relief reads in the light." />
         <Num name="albedoDetailStrength" label="Palette detail" title="How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour." />
         <Num name="terrainHillRelief" label="Rolling hills" title="The height of the broad rolling hills, dune ridges and basins, as a share of the mountains' height. 0 is flat." />
