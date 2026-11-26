@@ -11,8 +11,6 @@ import { factionPalette } from "../theme/factionPalette";
 export const MAX_PLINTHS = 512;
 /** The base's radius against the token's: the flat base is drawn this much wider than the disc. */
 export const PLINTH_WIDEN = 1.15;
-/** A base a little wider again for a pair or a crowd, so the figures have room. */
-export const PLINTH_CROWD = 0.12;
 /** Height of the base against its radius, at the shipped setting. */
 export const PLINTH_HEIGHT_RATIO = 0.22;
 
@@ -33,9 +31,21 @@ export function plinthBuffers(): PlinthBuffers {
   };
 }
 
+/** How the base's size follows the stack: the sliders' share of a single unit's base for a pair and for three or more. */
+export interface PlinthLook {
+  heightRatio: number;
+  pair: number;
+  crowd: number;
+}
+
+/** The base's width against a single unit's, for a stack of `count`. */
+export function plinthFactor(count: number, look: Pick<PlinthLook, "pair" | "crowd">): number {
+  return count >= 3 ? look.crowd : count >= 2 ? look.pair : 1;
+}
+
 /** The base's radius, in world units, for a token `tokenPx` across at zoom `k` and a stack of `count`. */
-export function plinthRadius(tokenPx: number, k: number, count: number): number {
-  return (tokenPx / 2 / Math.max(k, 1e-6)) * (PLINTH_WIDEN + (count >= 2 ? PLINTH_CROWD : 0));
+export function plinthRadius(tokenPx: number, k: number, count: number, look: Pick<PlinthLook, "pair" | "crowd">): number {
+  return (tokenPx / 2 / Math.max(k, 1e-6)) * PLINTH_WIDEN * plinthFactor(count, look);
 }
 
 function rgb(hex: string): [number, number, number] {
@@ -44,12 +54,12 @@ function rgb(hex: string): [number, number, number] {
 
 /**
  * Writes one base for each standing stack in the frame, and returns how many. `heightRatio` is the
- * base's height against its radius. `riseAt` reads the sculpted ranges, so a base on one stands on it.
+ * look carries the base's height against its radius and how much wider a pair and a crowd are. `riseAt` reads the sculpted ranges, so a base on one stands on it.
  */
 export function writePlinths(
   out: PlinthBuffers,
   frame: Pick<BoardFrame, "view" | "layouts" | "tokenPx" | "width" | "height">,
-  heightRatio: number,
+  look: PlinthLook,
   riseAt: (x: number, y: number) => { dome: number; ridge: number },
 ): number {
   let count = 0;
@@ -65,12 +75,12 @@ export function writePlinths(
         continue;
       }
       const world = screenToWorld(frame.view, counter);
-      const radius = plinthRadius(frame.tokenPx, frame.view.k, counter.slot.entry.count);
+      const radius = plinthRadius(frame.tokenPx, frame.view.k, counter.slot.entry.count, look);
       const m = count * 16;
       out.matrices.fill(0, m, m + 16);
       out.matrices[m] = radius;
       out.matrices[m + 5] = radius;
-      out.matrices[m + 10] = radius * heightRatio;
+      out.matrices[m + 10] = radius * look.heightRatio;
       out.matrices[m + 12] = world.x;
       out.matrices[m + 13] = -world.y;
       out.matrices[m + 15] = 1;

@@ -23,6 +23,7 @@ import { quickSvgFigure } from "../../art/quickSvgFigure";
 import { drawBasePlinth, drawWaterlineRing } from "./basePlinth";
 import { getUnitTransforms } from "./unitTransformStore";
 import { resolveTransform } from "./unitTransforms";
+import { formationOnBase } from "./squadFormation";
 import { shipSway, type SwayInput } from "./shipSway";
 import { bakeUnitSprite, SPRITE_BAKE } from "./figureGround";
 import type { PlinthLook } from "./mapVisualConfig";
@@ -58,6 +59,10 @@ export interface UprightPaint {
   spriteScale?: number;
   /** How far a ship's hull sits below the water, in CSS pixels. Absent is none. */
   submergePx?: number;
+  /** The base under this stack is a model on the board: its size against a single unit's, the formation's spread, and the ground's squash. */
+  plinth3D?: { factor: number; spread: number; ratio: number };
+  /** The soft dark footprint under each figure on its base, 0 to 1. */
+  contactAo?: number;
   /** What the swell and the wave front need to move a ship: its place, its ring, and the sliders. Naval units only. */
   swell?: Omit<SwayInput, "seconds" | "landShare" | "submarine">;
   dpr: number;
@@ -798,11 +803,13 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const clip = infantry ?? (resolved?.fallback ? null : resolved);
   const pixelScale = clip && clip.height > 0 ? (UPRIGHT_FIGURE_PX * figureScale) / clip.height : 1;
   const figureW = clip ? clip.width * pixelScale : 16 * figureScale;
-  const squad = naval ? [{ x: 0, y: 0 }] : placedSquad(paint.count, squadStep(figureW));
+  // On a base of the board's own, the figures stand in a formation that keeps every pair of boots inside the inner ring.
+  const baseR = paint.plinth3D ? radius * 1.15 * paint.plinth3D.factor : 0;
+  const squad = naval ? [{ x: 0, y: 0 }] : paint.plinth3D ? formationOnBase(paint.count, baseR, paint.plinth3D.spread, paint.plinth3D.ratio) : placedSquad(paint.count, squadStep(figureW));
   const badgeFrom = naval ? 1 : 3;
   const reach = squad.reduce((span, off) => Math.max(span, Math.abs(off.x)), 0);
-  const rx = radius * 1.15 + reach * 0.35;
-  const ry = Math.max(2, radius * 0.65 + reach * 0.08);
+  const rx = paint.plinth3D ? baseR : radius * 1.15 + reach * 0.35;
+  const ry = paint.plinth3D ? Math.max(2, baseR * paint.plinth3D.ratio) : Math.max(2, radius * 0.65 + reach * 0.08);
   ctx.save();
   const move = resolveTransform(getUnitTransforms(), paint.factionId, paint.unitType, paint.count);
   // A ship rides the swell: a bob and a roll, calmer in the lee of a cliff. It moves only while the picture is live.
@@ -823,6 +830,8 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   if (paint.plinth && naval) {
     // A ship rides the water on a faint ring, not on a turned base.
     drawWaterlineRing(ctx, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
+  } else if (paint.plinth3D) {
+    // The base is a model the board draws under this stack (see plinthMeshes.ts), so the canvas draws none.
   } else if (paint.plinth) {
     // The turned base of the 3D board (see basePlinth.ts).
     drawBasePlinth(ctx, paint.plinth, { x, y, rx, ry, color: factionPalette(paint.factionId).primary });
@@ -854,6 +863,26 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
   const frameBase = poseCount > 0 ? Math.floor((paint.idleTime ?? 0) / idleTick) % poseCount : 0;
   const staggerIdle = paint.unitType === "infantry" && poseName === "idle" && poseCount > 1;
   const asVector = campaignFrame != null && clip != null && poseCount > 0;
+  // A soft dark footprint under each figure where it stands on the base, so it sits on it and does not hover.
+  if (paint.plinth3D && (paint.contactAo ?? 0) > 0 && typeof ctx.createRadialGradient === "function") {
+    const squash = Math.max(0.25, paint.plinth3D.ratio) * 0.9;
+    const reachPx = Math.max(6, figureW * 0.55);
+    for (const spot of squad) {
+      const ax = x + spot.x + move.dx;
+      const ay = y + spot.y + move.dy;
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.scale(1, squash);
+      const shade = ctx.createRadialGradient(0, 0, 0, 0, 0, reachPx);
+      shade.addColorStop(0, `rgba(24, 16, 14, ${0.55 * (paint.contactAo ?? 0)})`);
+      shade.addColorStop(1, "rgba(24, 16, 14, 0)");
+      ctx.fillStyle = shade;
+      ctx.beginPath();
+      ctx.arc(0, 0, reachPx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
   withCrisp(ctx, paint.dpr, (at) => {
     const figures = squad.slice().sort((a, b) => a.y - b.y);
     for (let i = 0; i < figures.length; i += 1) {

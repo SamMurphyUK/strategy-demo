@@ -210,6 +210,25 @@ export interface MapVisualConfig {
   landmarkRevealTo: number;
   /** Height of the soft band at the top of a rising landmark, as a share of its height. */
   landmarkRevealBand: number;
+  /** The bases under land stacks are real models on the board, not flat drawings. Ships keep their ring. */
+  enable3DBases: boolean;
+  /** Height of a base against its radius. */
+  plinthHeight: number;
+  /** Width of the pale bevel round the top edge of a base, as a share of its radius. */
+  plinthBevel: number;
+  /** A pair's base, and a stack of three or more's, against a single unit's. */
+  squadRadius2: number;
+  squadRadius3Plus: number;
+  /** How far apart the figures of a pair or a crowd stand on their base. 1 is the shipped formation. */
+  squadSpread: number;
+  /** How hard the sun catches a base's bevel and rim: a crisp specular and a warm key against a cool shade. 0 is flat. */
+  plinthSpecular: number;
+  /** The same for the city landmarks: domes and spires catch the sun, and their shade runs cool. 0 is flat. */
+  landmarkRimStrength: number;
+  /** A fine tooth and a low satin sheen on the board, faded in as the camera comes in close. 0 is smooth. */
+  boardSheenStrength: number;
+  /** The soft dark footprint under each figure on its base. 0 is none. */
+  contactAoStrength: number;
   navalIdleBobAmp: number;
   /** How hard a wave front rocks a ship (roll and pitch) as it crosses it. 0 is no rocking. */
   navalWaveRockAmp: number;
@@ -323,6 +342,16 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   landmarkRevealFrom: 4.4,
   landmarkRevealTo: 7,
   landmarkRevealBand: 0.08,
+  enable3DBases: true,
+  plinthHeight: 0.22,
+  plinthBevel: 0.11,
+  squadRadius2: 1.25,
+  squadRadius3Plus: 1.45,
+  squadSpread: 1,
+  plinthSpecular: 0.6,
+  landmarkRimStrength: 0.6,
+  boardSheenStrength: 0.5,
+  contactAoStrength: 0.5,
   navalIdleBobAmp: 0.66,
   navalWaveRockAmp: 1,
   waveLoopSeconds: 20,
@@ -471,6 +500,15 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   landmarkRevealFrom: [1, 8],
   landmarkRevealTo: [1.5, 9],
   landmarkRevealBand: [0.01, 0.4],
+  plinthHeight: [0.05, 0.6],
+  plinthBevel: [0, 0.3],
+  squadRadius2: [1, 2],
+  squadRadius3Plus: [1, 2.5],
+  squadSpread: [0.3, 1.6],
+  plinthSpecular: [0, 2],
+  landmarkRimStrength: [0, 2],
+  boardSheenStrength: [0, 2],
+  contactAoStrength: [0, 1],
   navalIdleBobAmp: [0, 3],
   navalWaveRockAmp: [0, 3],
   waveLoopSeconds: [5, 60],

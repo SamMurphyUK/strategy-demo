@@ -1,4 +1,5 @@
 import { BOARD_SKINS, skinDisables, skinFor, skinOwner } from "../viewport3d/skins/boardSkin";
+import { toggleInspector } from "./unitTransformUi";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { FactionKey } from "../theme/factionPalette";
 import {
@@ -388,6 +389,9 @@ export function BoardLookPanel() {
   return (
     <section aria-label="Board look" ref={rootRef}>
       <h2>Board</h2>
+      <button type="button" onClick={toggleInspector} title="Open the unit transform inspector, to move the figures on their bases. The T key does the same." aria-label="Transform (T)">
+        Transform (T)
+      </button>
       <input
         type="search"
         className="tune-search"
@@ -749,6 +753,8 @@ export function BoardLookPanel() {
         <Num name="softLandBrush" label="Brush" title="How far brush strokes wander the soft bands. 0 is clean bands." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
 
         <h3>Landmarks</h3>
+        <Num name="landmarkRimStrength" label="Landmark shine" title="How hard the sun catches a landmark: a crisp specular on its domes and spires, and a cool shade. 0 is flat." />
+        <Num name="boardSheenStrength" label="Board sheen" title="A fine tooth and a low satin sheen on the board, faded in as the camera comes in close. 0 is smooth." />
         <p className="muted">The city landmarks stand at a fixed size on the board and rise out of it as the camera comes in: the base fades in first, then the monument builds from the ground up.</p>
         <Num name="landmarkRevealFrom" label="Reveal from" title="The zoom where the city landmarks begin to appear. Their bases fade in first." />
         <Num name="landmarkRevealTo" label="Reveal to" title="The zoom where every landmark is whole and solid. Keep it under the closest zoom." />
@@ -799,6 +805,14 @@ export function BoardLookPanel() {
         <Flag name="shadowOnBasesOnly" label="Figure shadows on bases only" title="A figure's shadow falls on bases and counters and leaves the ground clean" />
 
         <h3>Bases</h3>
+        <Flag name="enable3DBases" label="3D bases" title="The bases under land stacks are real models on the board, lit and shadowed by the sun. Ships keep their ring." />
+        <Num name="plinthHeight" label="Base height" title="Height of a base against its radius." off={!mapVisuals.enable3DBases} />
+        <Num name="plinthBevel" label="Base bevel" title="Width of the pale bevel round the top edge of a base, as a share of its radius." off={!mapVisuals.enable3DBases} />
+        <Num name="squadRadius2" label="Pair base" title="A pair's base against a single unit's. 1.25 is a quarter wider." off={!mapVisuals.enable3DBases} />
+        <Num name="squadRadius3Plus" label="Crowd base" title="The base of three or more against a single unit's. 1.45 is nearly half again as wide." off={!mapVisuals.enable3DBases} />
+        <Num name="plinthSpecular" label="Base shine" title="How hard the sun catches a base's bevel and rim: a crisp specular and a warm key against a cool shade. 0 is flat." off={!mapVisuals.enable3DBases} />
+        <Num name="contactAoStrength" label="Contact shadow" title="The soft dark footprint under each figure on its base. 0 is none." off={!mapVisuals.enable3DBases} />
+        <Num name="squadSpread" label="Squad spread" title="How far apart the figures of a pair or a crowd stand on their base. 1 is the shipped formation." off={!mapVisuals.enable3DBases} />
         <Flag name="enableBasePlinths" label="Turned bases" title="A dark wood base with a brass ring under each standing figure" />
         <Num name="plinthRimWidth" label="Rim" title="Width of the dark rim, as a share of the base" off={!mapVisuals.enableBasePlinths} />
         <Num name="plinthRoughness" label="Roughness" title="0 is polished, 1 is matt. Between, the rim carries a satin highlight." off={!mapVisuals.enableBasePlinths} />

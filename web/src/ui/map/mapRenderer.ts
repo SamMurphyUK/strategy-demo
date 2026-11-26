@@ -99,6 +99,7 @@ import { pointInMultiPolygon, type MultiPolygon } from "./regionClip";
 import type { ShoreVeil } from "../../art/fieldVehicleStage";
 import type { ShoreStencil } from "./figureSheet";
 import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
+import { plinthFactor } from "../viewport3d/plinthPlacement";
 import { drawHoldCircles } from "./shipHold";
 import {
   type MapLod,
@@ -1092,7 +1093,9 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
 export interface GameOverlay {
   layouts: RegionLayout[];
   /** How far the ground under a world point stands up the screen, in CSS pixels. Absent is flat. */
-  groundLift?(world: Vec2): number;
+  groundLift?(world: Vec2, stack?: { naval: boolean; count: number }): number;
+  /** The board draws the bases under land stacks in three dimensions, so the canvas draws none for them. */
+  plinths3D?: boolean;
   owners: Record<string, string>;
   selectedStack: { regionId: string; key: string } | null;
   isUnmoved(regionId: string, entry: StackEntry): boolean;
@@ -1367,7 +1370,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         paint: () => {
           setScreenTransform(ctx, scene.dpr);
           // A figure on a range stands on its slope: it is lifted by how far the ground there stands up the screen.
-          const lift = game.groundLift?.(world) ?? 0;
+          const lift = game.groundLift?.(world, { naval: counter.domain === "sea", count: entry.count }) ?? 0;
           if (lift !== 0) {
             ctx.translate(0, -lift);
           }
@@ -1386,6 +1389,16 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             y: counter.y,
             tokenPx,
             spriteScale: game.unitScale,
+            contactAo: mapVisuals.contactAoStrength,
+            plinth3D:
+              game.plinths3D && counter.domain !== "sea"
+                ? {
+                    factor: plinthFactor(entry.count, { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus }),
+                    spread: mapVisuals.squadSpread,
+                    // How much the ground is foreshortened here: the base is a disc, and shows as this ellipse.
+                    ratio: projectionScales(scene.view.k).sy / projectionScales(scene.view.k).sx,
+                  }
+                : undefined,
             swell:
               counter.domain === "sea"
                 ? {

@@ -1,5 +1,6 @@
 import { UnitTransformInspector, type TransformTarget } from "./UnitTransformInspector";
 import { getUnitTransformRev, subscribeUnitTransforms } from "./unitTransformStore";
+import { getInspectorOpen, setInspectorOpen, subscribeInspector, toggleInspector } from "./unitTransformUi";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DRAG_PITCH_OFFSET, dragPitchStep, soundManager } from "../../audio/sound_manager";
 import { factionPalette } from "../theme/factionPalette";
@@ -421,7 +422,9 @@ export function MapView(props: MapViewProps) {
   const [spriteClock, setSpriteClock] = useState(0);
   const [tuneOpen, setTuneOpen] = useState(false);
   // The unit transform inspector, opened with T while a unit is selected.
-  const [transformOpen, setTransformOpen] = useState(false);
+  const transformOpen = useSyncExternalStore(subscribeInspector, getInspectorOpen, getInspectorOpen);
+  // The stack the player last picked, for when nothing is selected: a unit can be picked in any phase, selected only in some.
+  const lastPicked = useRef<{ regionId: string; key: string } | null>(null);
   const unitTransformRev = useSyncExternalStore(subscribeUnitTransforms, getUnitTransformRev, getUnitTransformRev);
   const coastRev = useSyncExternalStore(subscribeCoastTune, getCoastTuneRev);
   const boardRev = useSyncExternalStore(subscribeBoardTune, getBoardTuneRev);
@@ -1061,6 +1064,7 @@ export function MapView(props: MapViewProps) {
       combatMarkers: props.combatMarkers,
       unitScale,
       groundLift: props.board?.groundLift,
+      plinths3D: props.board?.plinths3D === true,
       hoverStack,
       activeFactionId: props.activeFactionId ?? "",
       fuelFor: props.fuelFor,
@@ -1567,6 +1571,7 @@ export function MapView(props: MapViewProps) {
         p.onOpenInspector?.(picked.counter.regionId);
         return;
       }
+      lastPicked.current = { regionId: picked.counter.regionId, key: picked.counter.slot.key };
       p.onStackClick(picked.counter.regionId, picked.counter.slot.entry, picked.counter.slot.key);
       return;
     }
@@ -2109,11 +2114,10 @@ export function MapView(props: MapViewProps) {
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
       if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "t" || e.key === "T") && !typing && !isTextField(e.target)) {
-        // T opens the transform inspector for the selected unit, and closes it again. X is the placement editor's.
-        if (live.current.props.selectedStack || transformOpenRef.current) {
-          e.preventDefault();
-          setTransformOpen((open) => !open);
-        }
+        // T opens the transform inspector and closes it again. X is the placement editor's. It does not need a unit
+        // selected: it takes the selected one, else the one under the pointer, else the last one picked.
+        e.preventDefault();
+        toggleInspector();
         return;
       }
       if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "z" || e.key === "Z")) {
@@ -2198,12 +2202,13 @@ export function MapView(props: MapViewProps) {
 
   // The selected stack, for the transform inspector: whose it is, what it is, and how many.
   let transformTarget: TransformTarget | null = null;
-  if (transformOpen && props.selectedStack) {
+  const inspected = props.selectedStack ?? hoverStack ?? lastPicked.current;
+  if (transformOpen && inspected) {
     for (const layout of layouts) {
-      if (layout.region.id !== props.selectedStack.regionId) {
+      if (layout.region.id !== inspected.regionId) {
         continue;
       }
-      const counter = layout.counters.find((item) => item.slot.key === props.selectedStack?.key);
+      const counter = layout.counters.find((item) => item.slot.key === inspected.key);
       if (counter) {
         const entry = counter.slot.entry;
         transformTarget = {
@@ -2250,7 +2255,7 @@ export function MapView(props: MapViewProps) {
         }
       >
       {!editor && props.board?.node}
-      {transformTarget && <UnitTransformInspector target={transformTarget} onClose={() => setTransformOpen(false)} />}
+      {transformOpen && <UnitTransformInspector target={transformTarget} onClose={() => setInspectorOpen(false)} />}
       <canvas
         ref={canvasRef}
         className="map-canvas"

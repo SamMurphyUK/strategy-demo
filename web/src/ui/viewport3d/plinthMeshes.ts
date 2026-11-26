@@ -50,14 +50,14 @@ function ring(inner: number, outer: number, z: number): THREE.BufferGeometry {
 }
 
 /** The base: radius 1, height 1, standing on z = 0. */
-export function plinthGeometry(): THREE.BufferGeometry {
+export function plinthGeometry(bevel = 0.11): THREE.BufferGeometry {
   // The wall narrows a little toward the top, the way a turned base does.
   const wall = new THREE.CylinderGeometry(0.97, 1, 1, SIDES, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5);
   const parts = [
     part(wall, rgbOf(PLINTH_EBONY), PART_FIXED),
     // The top face, and the pale bevel round its edge, a hair above it so the two never fight.
     part(ring(0, 0.97, 1), rgbOf(PLINTH_WALNUT), PART_FIXED),
-    part(ring(0.86, 0.97, 1.004), rgbOf(PLINTH_BEVEL), PART_FIXED),
+    ...(bevel > 0.005 ? [part(ring(Math.max(0.64, 0.97 - bevel), 0.97, 1.004), rgbOf(PLINTH_BEVEL), PART_FIXED)] : []),
     // The brass ring let into the wood, and the faction's colour inside it.
     part(ring(0.62, 0.7, 1.008), rgbOf(PLINTH_BRASS), PART_FIXED),
     part(ring(0, 0.62, 1.012), [1, 1, 1], PART_TINT),

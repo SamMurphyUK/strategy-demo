@@ -67,6 +67,11 @@ function boxOf(shape: MultiPolygon): Rect {
   return x1 >= x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 0, h: 0 };
 }
 
+/** Whether the bases under land stacks are drawn by the board. */
+function basesSwitch(): boolean {
+  return mapVisuals.enable3DBases;
+}
+
 /** Whether the pixel chart is switched on. The one visual setting React is told about here. */
 function chartSwitch(): boolean {
   return mapVisuals.enableFauxPixelMap;
@@ -181,6 +186,7 @@ export default function MapViewport3D(props: MapViewProps) {
   // switched on. The switch is the one setting this component reads: it is on or off, and the
   // chart's numbers go to the shaders without a render.
   const chartOn = useSyncExternalStore(subscribeVisuals, chartSwitch, chartSwitch);
+  const bases3D = useSyncExternalStore(subscribeVisuals, basesSwitch, basesSwitch);
   const chartCoast = useMemo(
     () => (land && chartOn ? buildCoastField((p) => landMaskAt(land, p), land.viewBox) : null),
     [land, chartOn],
@@ -399,7 +405,7 @@ export default function MapViewport3D(props: MapViewProps) {
     </BoardBoundary>
   ) : null;
 
-  const board: BoardLayer = { node, active: ready && drawable, frame: layer.frame, touch: layer.touch, groundLift: (world) => store.lift?.(world) ?? 0 };
+  const board: BoardLayer = { node, active: ready && drawable, frame: layer.frame, touch: layer.touch, groundLift: (world, stack) => store.lift?.(world, stack) ?? 0, plinths3D: bases3D && ready };
   return (
     <>
       <MapView {...props} board={board} />

@@ -68,8 +68,25 @@ const button = {
   cursor: "pointer",
 } as const;
 
-export function UnitTransformInspector({ target, onClose }: { target: TransformTarget; onClose(): void }) {
+export function UnitTransformInspector({ target, onClose }: { target: TransformTarget | null; onClose(): void }) {
   useSyncExternalStore(subscribeUnitTransforms, getUnitTransformRev, getUnitTransformRev);
+  if (!target) {
+    return (
+      <div style={panel} role="dialog" aria-label="Unit transform inspector">
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <strong>UNIT TRANSFORM</strong>
+          <button type="button" style={button} onClick={onClose} title="Close (T)">
+            x
+          </button>
+        </div>
+        <p style={{ margin: "8px 0 0" }}>Point at a unit, or click one, then press T. The stack's name shows here.</p>
+      </div>
+    );
+  }
+  return <UnitTransformEditor target={target} onClose={onClose} />;
+}
+
+function UnitTransformEditor({ target, onClose }: { target: TransformTarget; onClose(): void }) {
   const [scope, setScope] = useState<TransformScope>("archetype");
   const [bucket, setBucket] = useState<StackBucket>(bucketOf(target.count));
   const id = scope === "faction" ? target.factionId : target.unitType;

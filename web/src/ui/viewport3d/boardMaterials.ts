@@ -318,6 +318,7 @@ export function landTopMaterial(
       uBounds: shared.uBounds,
       uMountain: shared.uMountain,
       uBias: { value: 0 },
+      uBoardSheen: { value: 0 },
       uSlate: { value: blend(MILITARY.spruce, MILITARY.taupe, 0.52) },
       uRock: { value: blend(MILITARY.feldgrau, MILITARY.bone, 0.3) },
       uSnow: { value: new THREE.Vector3(0.94, 0.94, 0.91) },
@@ -376,6 +377,7 @@ export function landTopMaterial(
       ${SUN_FRAGMENT}
       uniform sampler2D uBake;
       uniform float uBias;
+      uniform float uBoardSheen;
       varying vec2 vUv;
       varying vec2 vScene;
       #ifdef PIXIE
@@ -511,6 +513,15 @@ export function landTopMaterial(
         #endif
 
         c *= lit(dot(n, uSunDir));
+        // A tactile surface under the overhead sun: a fine tooth in the colour, and a low satin sheen from a tilted micro
+        // normal. It comes in with the zoom, and goes the moment the slider does.
+        if (uBoardSheen > 0.001) {
+          vec2 tooth = vScene * 13.0;
+          vec3 microN = normalize(vec3((vnoise(tooth) - 0.5) * 0.7, (vnoise(tooth + 17.3) - 0.5) * 0.7, 1.0));
+          c *= 1.0 + (vnoise(vScene * 31.0) - 0.5) * 0.1 * uBoardSheen;
+          float satin = pow(max(dot(microN, normalize(uSunDir + vec3(0.0, 0.0, 1.0))), 0.0), 16.0);
+          c += uSunColor * satin * 0.07 * uBoardSheen * uDirect;
+        }
         c *= 1.0 - cloudShade(sceneAt);
         // Alpha carries the light that reaches the ground, for the pieces painted over it (see gradeMaterial).
         float reach = 1.0;
@@ -869,6 +880,9 @@ uniform vec4 uMountain;
 // How high up the monument a vertex is, from 0 at its base to 1 at its spire.
 attribute float aNormY;
 varying float vNormY;
+// Where the surface is and which way it faces, in the board's space, for the specular.
+varying vec3 vN;
+varying vec3 vWorld;
 #endif
 // The model point in the board's space: an optional part folds away, and everything rises with uGrow.
 // A prop on a sculpted range stands on it: aRise is the range's two shapes at its foot (see mountainRelief.ts).
@@ -932,10 +946,12 @@ export interface LandmarkUniforms {
   uLandmarkBand: { value: number };
   /** The share of the reveal the base takes before the monument rises. */
   uLandmarkBaseShare: { value: number };
+  /** How hard the sun catches the surface: a specular rim and a warm key against a cool shade. */
+  uLandmarkSpec: { value: number };
 }
 
 export function landmarkUniforms(): LandmarkUniforms {
-  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 } };
+  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 } };
 }
 
 /** Trees, peaks, and buildings. With `landmark` it is a city landmark, at a fixed size and revealed from the ground up. */
@@ -1003,12 +1019,24 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
         vSun = (uSunMatrix * vec4(world.xyz + n * uSunTexel.w, 1.0)).xyz;
         vSunFacing = smoothstep(0.04, 0.3, dot(n, uSunDir));
         #endif
+        #ifdef LANDMARK
+        vN = n;
+        vWorld = world.xyz;
+        #endif
         gl_Position = projectionMatrix * viewMatrix * world;
       }
     `,
     fragmentShader: /* glsl */ `
       ${SUN_FRAGMENT}
       ${LANDMARK_REVEAL}
+      #ifdef LANDMARK
+      varying vec3 vN;
+      varying vec3 vWorld;
+      uniform float uLandmarkSpec;
+      uniform vec3 uSunDir;
+      uniform vec3 uSunColor;
+      uniform float uDirect;
+      #endif
       #ifdef SUN_SHADOW
       varying float vSunFacing;
       #endif
@@ -1019,13 +1047,24 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
         c *= mix(vec3(1.0), uSunTint, sunShade(vSun) * vSunFacing);
         #endif
         #ifdef LANDMARK
+        // A warm key against a cool shade, and the sun caught on an edge: a tight specular where a face turns
+        // to the sun and the eye together, and a rim where a face turns away from the eye. Held at 0.95 or under,
+        // so it stays out of the bloom.
+        vec3 sn = normalize(vN);
+        vec3 sv = normalize(cameraPosition - vWorld);
+        float keyed = clamp(dot(sn, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+        c *= mix(vec3(1.0), mix(vec3(0.82, 0.9, 1.06), vec3(1.07, 1.0, 0.9), keyed), clamp(uLandmarkSpec, 0.0, 1.0));
+        float glint = pow(max(dot(sn, normalize(uSunDir + sv)), 0.0), 38.0);
+        float rim = pow(1.0 - max(dot(sn, sv), 0.0), 3.0) * clamp(dot(sn, uSunDir) + 0.35, 0.0, 1.0);
+        c += uSunColor * (glint * 0.55 + rim * 0.3) * uLandmarkSpec * uDirect;
+        c = min(c, vec3(0.95));
         float shown = lmAlpha(vNormY);
         if (shown < lmBayer(gl_FragCoord.xy)) {
           discard;
         }
         // A warm edge where the monument is still rising, and held under 1.0 so it never reaches the bloom.
         float edge = shown < 0.999 ? shown * (1.0 - shown) * 4.0 : 0.0;
-        c = mix(c, min(c + vec3(0.16, 0.1, 0.03), vec3(0.97)), edge);
+        c = mix(c, min(c + vec3(0.16, 0.1, 0.03), vec3(0.95)), edge);
         #endif
         gl_FragColor = vec4(c, 1.0);
       }

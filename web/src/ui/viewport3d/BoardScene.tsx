@@ -77,6 +77,8 @@ import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/s
 import { type FrameEffects, PostStack } from "./postStack";
 import { loadLandmarks } from "./landmarkModels";
 import { landmarkBaseShare, landmarkReveal } from "./placements";
+import { MAX_PLINTHS, plinthBuffers, plinthRadius, writePlinths } from "./plinthPlacement";
+import { plinthGeometry } from "./plinthMeshes";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack } from "./propPlan";
@@ -94,7 +96,7 @@ export interface BoardStore {
   paint: number;
   invalidate: (() => void) | null;
   /** How far the ground under a world point stands up the screen, in CSS pixels: the sculpted ranges, as they are drawn now. */
-  lift?: ((world: Vec2) => number) | null;
+  lift?: ((world: Vec2, stack?: { naval: boolean; count: number }) => number) | null;
 }
 
 export interface BattleScar {
@@ -228,6 +230,10 @@ interface Kit {
   propShadow: THREE.ShaderMaterial;
   /** The city landmarks: a fixed size, revealed from the ground up (see boardMaterials.ts). */
   landmark: THREE.ShaderMaterial;
+  /** The turned bases under land stacks, and how far they are through fading in with the sprites. */
+  plinth: THREE.ShaderMaterial;
+  plinthCaster: THREE.ShaderMaterial;
+  plinthLook: LandmarkUniforms;
   landmarkShadow: THREE.ShaderMaterial;
   landmarkCaster: THREE.ShaderMaterial;
   /** How far through its reveal a landmark is, and how soft the top of it is. */
@@ -249,6 +255,7 @@ function createKit(): Kit {
   const pixie = pixieUniforms();
   const prop = propMaterial(shared);
   const landmarkLook = landmarkUniforms();
+  const plinthLook = landmarkUniforms();
   return {
     shared,
     ground,
@@ -261,6 +268,9 @@ function createKit(): Kit {
     prop,
     propShadow: propShadowMaterial(shared),
     landmark: propMaterial(shared, landmarkLook),
+    plinth: propMaterial(shared, plinthLook),
+    plinthCaster: propCasterMaterial(prop.uniforms.uGrow, shared.uMountain, plinthLook),
+    plinthLook,
     landmarkShadow: propShadowMaterial(shared, landmarkLook),
     landmarkLook,
     unitShadow: unitShadowMaterial(),
@@ -284,6 +294,8 @@ function disposeKit(kit: Kit): void {
     kit.prop,
     kit.propShadow,
     kit.landmark,
+    kit.plinth,
+    kit.plinthCaster,
     kit.landmarkShadow,
     kit.landmarkCaster,
     kit.unitShadow,
@@ -643,6 +655,7 @@ function Smoke({ scars, chimneys, kit }: { scars: readonly BattleScar[]; chimney
 }
 
 const NO_PATCHES: readonly ReliefPatch[] = [];
+const NO_RELIEF = { dome: 0, ridge: 0 } as const;
 
 export function BoardScene(props: BoardSceneProps) {
   const { store, land, bounds, bake, mask, plan, scars } = props;
@@ -843,6 +856,39 @@ export function BoardScene(props: BoardSceneProps) {
     (old) => old.dispose(),
     [],
   );
+  // The bases under land stacks: one instanced model, drawn for the sun and again for its shadow map.
+  const plinthBevel = mapVisuals.plinthBevel;
+  const plinths = useDisposable(
+    () => {
+      const geometry = plinthGeometry(plinthBevel);
+      const buffers = plinthBuffers();
+      geometry.setAttribute("aFlag", new THREE.InstancedBufferAttribute(new Float32Array(MAX_PLINTHS * 3), 3));
+      geometry.setAttribute("aRise", new THREE.InstancedBufferAttribute(buffers.rises, 2));
+      const matrices = new THREE.InstancedBufferAttribute(buffers.matrices, 16);
+      const colors = new THREE.InstancedBufferAttribute(buffers.colors, 3);
+      const make = (material: THREE.Material, tinted: boolean) => {
+        const mesh = new THREE.InstancedMesh(geometry, material, MAX_PLINTHS);
+        mesh.instanceMatrix = matrices;
+        if (tinted) {
+          mesh.instanceColor = colors;
+        }
+        mesh.count = 0;
+        mesh.frustumCulled = false;
+        mesh.renderOrder = 1;
+        mesh.visible = false;
+        return mesh;
+      };
+      const caster = make(kit.plinthCaster, false);
+      caster.layers.set(CASTER_LAYER);
+      return { geometry, buffers, matrices, colors, prop: make(kit.plinth, true), caster };
+    },
+    (old) => {
+      old.geometry.dispose();
+      old.prop.dispose();
+      old.caster.dispose();
+    },
+    [kit, plinthBevel],
+  );
   const unitShadows = useDisposable(
     () => {
       const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(2, 2), kit.unitShadow, MAX_UNIT_SHADOWS);
@@ -985,6 +1031,7 @@ export function BoardScene(props: BoardSceneProps) {
     }
     setDefine(kit.prop, "SUN_SHADOW", kernel);
     setDefine(kit.landmark, "SUN_SHADOW", kernel);
+    setDefine(kit.plinth, "SUN_SHADOW", kernel);
     setDefine(post.grade, "SUN_SHADOW", kernel);
     kit.cardCaster.colorWrite = basesOnly !== null;
     if (!sunMap && rig.target) {
@@ -1024,17 +1071,28 @@ export function BoardScene(props: BoardSceneProps) {
     // The slider multiplies how far the ranges rise, and the figures standing on them are lifted by the same amount.
     const rise = (ranges?.height ?? 0) * mapVisuals.mountainReliefHeight;
     shared.uMountain.value.set(rise, ranges?.sharpness ?? 0, ranges?.snowLine ?? 1, ranges?.snowBlend ?? 0.1);
-    if (rise > 0.001 && patches.length > 0) {
+    {
       const scales = projectionScales(frame.view.k);
       // A rise of one world unit shows as this many pixels up the screen: the vertical share of the tilt.
       const upright = Math.sqrt(Math.max(0, 1 - (scales.sy / scales.sx) ** 2));
       const blend = ranges?.sharpness ?? 0;
-      store.lift = (world) => {
-        const under = sampleReliefFields(patches, world.x, world.y);
-        return (under.dome + (under.ridge - under.dome) * blend) * rise * scales.sx * upright;
+      const onRange = rise > 0.001 && patches.length > 0;
+      const bases = mapVisuals.enable3DBases;
+      const look = { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus };
+      const baseHeight = mapVisuals.plinthHeight;
+      const tokenPx = frame.tokenPx;
+      store.lift = (world, stack) => {
+        let lift = 0;
+        if (onRange) {
+          const under = sampleReliefFields(patches, world.x, world.y);
+          lift = (under.dome + (under.ridge - under.dome) * blend) * rise * scales.sx * upright;
+        }
+        // A figure on a land stack stands on the top face of its base, so it is lifted by the base's height.
+        if (bases && !stack?.naval) {
+          lift += plinthRadius(tokenPx, frame.view.k, stack?.count ?? 1, look) * baseHeight * scales.sx * upright;
+        }
+        return lift;
       };
-    } else {
-      store.lift = null;
     }
     const grain = table ? surfaceLook(mapVisuals) : null;
     const rivers = table && table.rivers.length > 0 ? riverLook(mapVisuals) : null;
@@ -1257,6 +1315,12 @@ export function BoardScene(props: BoardSceneProps) {
     const reveal = landmarkReveal(frame.view.k, mapVisuals.landmarkRevealFrom, mapVisuals.landmarkRevealTo);
     kit.landmarkLook.uLandmarkReveal.value = reveal;
     kit.landmarkLook.uLandmarkBand.value = mapVisuals.landmarkRevealBand;
+    // The surfaces catch the sun harder the sliders say, and the board's tooth and sheen come in over the close zoom.
+    kit.landmarkLook.uLandmarkSpec.value = mapVisuals.landmarkRimStrength;
+    kit.plinthLook.uLandmarkSpec.value = mapVisuals.plinthSpecular;
+    const boardSheen = mapVisuals.boardSheenStrength * Math.min(1, Math.max(0, (raw.closeness - 0.55) / 0.35));
+    kit.landTop.uniforms.uBoardSheen.value = boardSheen;
+    kit.mountain.uniforms.uBoardSheen.value = boardSheen;
     kit.landmarkLook.uLandmarkBaseShare.value = landmarkBaseShare(mapVisuals.landmarkRevealFrom, mapVisuals.landmarkRevealTo);
     kit.smoke.uniforms.uSmoke.value = detail.smoke;
     kit.smoke.uniforms.uCamUp.value.set(0, Math.cos(pose.pitch), Math.sin(pose.pitch));
@@ -1305,6 +1369,26 @@ export function BoardScene(props: BoardSceneProps) {
           (material !== kit.landmarkCaster || reveal > 0.001) &&
           (material !== kit.mountainCaster || ranges !== null);
       }
+    }
+
+    // The bases under land stacks, as real models: placed where the flat ones were, lit by the sun, and casting. They fade in
+    // with the detailed figures, and the figures are lifted to stand on their top faces.
+    const basesOn = mapVisuals.enable3DBases && frame.unitFade > 0.001;
+    plinths.prop.visible = basesOn;
+    plinths.caster.visible = basesOn && casting;
+    if (basesOn) {
+      const placed = writePlinths(
+        plinths.buffers,
+        frame,
+        { heightRatio: mapVisuals.plinthHeight, pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus },
+        (x, y) => (patches.length > 0 ? sampleReliefFields(patches, x, y) : NO_RELIEF),
+      );
+      plinths.prop.count = placed;
+      plinths.caster.count = placed;
+      plinths.matrices.needsUpdate = true;
+      plinths.colors.needsUpdate = true;
+      (plinths.geometry.getAttribute("aRise") as THREE.InstancedBufferAttribute).needsUpdate = true;
+      kit.plinthLook.uLandmarkReveal.value = Math.min(1, frame.unitFade);
     }
 
     // A shadow under every counter. Fixed and faint from altitude, cast by the sun close in. Where
@@ -1456,6 +1540,8 @@ export function BoardScene(props: BoardSceneProps) {
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />
+        <primitive object={plinths.prop} />
+        <primitive object={plinths.caster} />
         <primitive object={rig.cards} />
       </group>
       <group ref={board}>

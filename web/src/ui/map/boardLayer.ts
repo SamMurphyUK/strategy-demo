@@ -86,5 +86,7 @@ export interface BoardLayer {
   /** The canvas draws the lines between sea zones. The water picture has none of its own. */
   seaBorders?: boolean;
   /** How far the ground under a world point stands up the screen, in CSS pixels. A figure there is lifted by it, so its base sits on the slope. */
-  groundLift?(world: Vec2): number;
+  groundLift?(world: Vec2, stack?: { naval: boolean; count: number }): number;
+  /** The bases under land stacks are drawn by the board, in three dimensions: the canvas leaves its flat ones off. */
+  plinths3D?: boolean;
 }
