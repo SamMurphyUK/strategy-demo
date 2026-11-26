@@ -18,6 +18,7 @@ import {
 } from "../skins/battleVisualConfig";
 import type { FeedUnit } from "./battleFeed";
 import { hashString, landmarkFor, terrainFor, type TerrainInput } from "./battleScatter";
+import BattleInspectors from "./BattleInspectors";
 import { skyModeFor } from "./battleSky";
 import { BattleStageEngine } from "./battleStageEngine";
 
@@ -163,6 +164,7 @@ export default function BattleStage(props: BattleStageProps) {
       </div>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 3 }}>
         <LookPanel skinId={skinId} />
+        <BattleInspectors />
       </div>
     </>
   );

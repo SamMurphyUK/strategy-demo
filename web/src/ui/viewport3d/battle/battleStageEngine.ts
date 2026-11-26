@@ -6,10 +6,13 @@ import { mapVisuals } from "../../map/mapVisualConfig";
 import { loadBiome } from "../terrainTextures";
 import { landmarkUniforms, propMaterial, sharedUniforms } from "../boardMaterials";
 import { loadLandmark } from "../landmarkModels";
-import { battleVisuals, getBattleVisualRev } from "../skins/battleVisualConfig";
+import { battleLook, battleVisuals, getBattleVisualRev } from "../skins/battleVisualConfig";
 import { hexToRgb, type BattleSkin, type BattleTerrain } from "../skins/battleSkin";
 import { blendPresets, cameraPose } from "./battleCamera";
-import { skyAt, type SkyMode, type SkyState } from "./battleSky";
+import { hourAt, skyAt, type SkyMode, type SkyState } from "./battleSky";
+import { trenchLineX, trenchHalfWidth } from "./battleZones";
+import { swellAt } from "./battleSea";
+import { frontPosition } from "../../map/shipSway";
 import { diffSnapshots, pickTarget, snapshotOf, type FeedUnit, type StageEvent, type StageSnapshot } from "./battleFeed";
 import {
   HitStop,
@@ -40,7 +43,10 @@ import {
   type LaneSlot,
 } from "./battleLanes";
 import {
-  backdropMaterial,
+  beachMaterial,
+  horizonBackdropMaterial,
+  shoreSeaMaterial,
+  trenchMaterial,
   bandMaterial,
   burstMaterial,
   linkMaterial,
@@ -50,7 +56,6 @@ import {
   type FlashUniforms,
   groundMaterial,
   rimMaterial,
-  seaMaterial,
   smokeMaterial,
   spriteMaterial,
   tiltShiftMaterial,
@@ -202,7 +207,9 @@ export class BattleStageEngine {
   private targetH = 0;
   private disposed = false;
   private sky: SkyState;
-  private readonly backdrop = backdropMaterial();
+  private readonly backdrop = horizonBackdropMaterial();
+  private backdropMesh!: THREE.Mesh;
+  private tableKey = "";
   private readonly table = new THREE.Group();
   private bands: { material: THREE.ShaderMaterial; side: "attacker" | "defender"; rank: number }[] = [];
   private plates: { material: SpriteMaterial; side: "attacker" | "defender"; rank: number }[] = [];
@@ -210,7 +217,6 @@ export class BattleStageEngine {
   private landmarkShared: ReturnType<typeof sharedUniforms> | null = null;
   /** A test aid: `?stagespeed=8` runs the stage's clock faster, for a slow machine. 1 otherwise. */
   private readonly speed = Math.max(1, Number(new URLSearchParams(window.location.search).get("stagespeed")) || 1);
-  private sea: THREE.ShaderMaterial | null = null;
   private epoch = -1;
   private ships: Ship[] = [];
   private gunship: UnitView | null = null;
@@ -220,17 +226,19 @@ export class BattleStageEngine {
     this.skin = opts.skin;
     this.flash = flashUniforms(opts.skin);
     this.rng = mulberry(opts.seed);
-    this.sky = skyAt(opts.skyMode ?? "day", 0);
+    this.sky = skyAt(battleLook, hourAt(battleLook, 0, opts.skyMode ?? "day"));
     this.scene.add(this.root);
     this.root.add(this.table);
     // The painted backdrop stands behind the slice.
-    const backdropGeometry = new THREE.PlaneGeometry(110, 60);
+    const backdropGeometry = new THREE.PlaneGeometry(1100, 140);
     backdropGeometry.rotateX(Math.PI / 2);
     const backdropMesh = new THREE.Mesh(backdropGeometry, this.backdrop);
-    backdropMesh.position.set(0, 9.5, 24);
+    backdropMesh.position.set(0, battleLook.pos.horizonY, 60);
     backdropMesh.renderOrder = -5;
     backdropMesh.frustumCulled = false;
     this.root.add(backdropMesh);
+    this.backdropMesh = backdropMesh;
+    this.root.add(this.lookGroup);
     this.resources.push(backdropGeometry, this.backdrop);
     this.scene.background = new THREE.Color(0, 0, 0);
     (this.scene.background as THREE.Color).setRGB(0.085, 0.07, 0.06, THREE.NoColorSpace);
@@ -266,6 +274,16 @@ export class BattleStageEngine {
     const groundMesh = new THREE.Mesh(groundGeometry, this.ground);
     groundMesh.position.z = 0.002;
     this.root.add(groundMesh);
+    // The far ground runs on to the horizon, hazed and drawn out of colour, like the old frame's field.
+    const farSpan = battleLook.pos.horizonY + STAGE_DEPTH / 2 + 4;
+    const farGeometry = new THREE.PlaneGeometry(1100, farSpan);
+    const farMesh = new THREE.Mesh(farGeometry, this.ground);
+    farMesh.position.set(0, -STAGE_DEPTH / 2 + farSpan / 2, 0.001);
+    farMesh.frustumCulled = false;
+    this.root.add(farMesh);
+    this.resources.push(farGeometry);
+    // The ground to the sides of the slice, in front of it, too: the table is the board's own edge, not a cliff.
+
     this.resources.push(groundGeometry, this.ground);
     void loadBiome("grass").then((texture) => {
       if (this.disposed || !texture) {
@@ -323,14 +341,6 @@ export class BattleStageEngine {
     this.lensScene.add(this.lensQuad);
     this.resources.push(this.lensQuad.geometry, this.lens);
 
-    if (opts.coastal) {
-      const seaGeometry = new THREE.PlaneGeometry(STAGE_WIDTH, STAGE_DEPTH * 0.1);
-      this.sea = seaMaterial();
-      const seaMesh = new THREE.Mesh(seaGeometry, this.sea);
-      seaMesh.position.set(0, -STAGE_DEPTH / 2 + STAGE_DEPTH * 0.05, 0.012);
-      this.root.add(seaMesh);
-      this.resources.push(seaGeometry, this.sea);
-    }
     this.buildLandmark();
     this.syncConfig(true);
   }
@@ -694,9 +704,9 @@ export class BattleStageEngine {
         fn: () => {
           const gun = pool[i % pool.length];
           const toward = gun.side === "attacker" ? 1 : -1;
-          const tx = toward * (1 + this.rng() * 5.5);
-          const td = 0.2 + this.rng() * 0.35;
-          const [wx, wy] = toWorld(tx, td);
+          const td = 0.2 + this.rng() * 0.5;
+          const wy = (td - 0.5) * STAGE_DEPTH;
+          const wx = toward * trenchHalfWidth(wy, battleLook.pos.trench) * (0.1 + this.rng() * 0.8);
           this.shoot(gun, { x: wx, y: wy, z: 0.1 }, true, true);
         },
       });
@@ -780,9 +790,6 @@ export class BattleStageEngine {
     this.updateTable();
     this.poseUnits(state);
     this.poseShips();
-    if (this.sea) {
-      this.sea.uniforms.uTime.value = this.time;
-    }
     this.runPending();
     this.runShells();
     this.runBursts();
@@ -890,13 +897,13 @@ export class BattleStageEngine {
 
   private buildTable(units: readonly FeedUnit[]): void {
     this.clearTable();
-    const lipD = this.opts.coastal ? 0.135 : 0.08;
+    const lipD = this.opts.coastal ? battleLook.pos.beach.to + 0.04 : 0.09;
     const lipY = toWorld(0, lipD)[1];
     const mist = v3(this.skin.grade.valleyMist);
     for (const side of ["attacker", "defender"] as const) {
       for (let col = 0; col < 4; col++) {
         const rank = side === "attacker" ? 4 - col : col + 1;
-        const x = columnX(side, col);
+        const x = columnX(side, col, 0.43);
         const bandGeometry = new THREE.PlaneGeometry(COLUMN_GAP * 0.92, STAGE_DEPTH * 0.58);
         const bandMat = bandMaterial("#AAA25D");
         const band = new THREE.Mesh(bandGeometry, bandMat);
@@ -954,24 +961,218 @@ export class BattleStageEngine {
 
   /** The campaign's sun and sky for this moment of the battle: the light on every surface, the backdrop, and the landmark's own light. */
   private updateSky(): void {
-    const s = (this.sky = skyAt(this.opts.skyMode ?? "day", this.time));
+    const s = (this.sky = skyAt(battleLook, hourAt(battleLook, this.time, this.opts.skyMode ?? "day")));
     this.flash.uLight.value.set(s.light[0], s.light[1], s.light[2]);
-    const u = this.backdrop.uniforms;
-    u.uZenith.value.set(...s.zenith);
-    u.uHorizon.value.set(...s.horizon);
-    u.uTree.value.set(...s.tree);
-    u.uCloud.value.set(...s.cloud);
-    u.uSunDir.value.set(...s.dir);
-    u.uSunColor.value.set(...s.color);
-    u.uNight.value = s.night;
-    u.uTime.value = this.time;
     const sh = this.landmarkShared;
     if (sh) {
-      sh.uSunDir.value.set(...s.dir).normalize();
-      sh.uSunColor.value.set(...s.color);
-      sh.uAmbient.value.set(...s.ambient);
+      sh.uSunDir.value.set(...s.lightDir).normalize();
+      sh.uSunColor.value.set(...s.lightColor);
+      sh.uAmbient.value.set(s.light[0] * 0.6, s.light[1] * 0.6, s.light[2] * 0.6);
       sh.uDirect.value = s.direct;
     }
+    this.updateLook();
+  }
+
+
+  // --- The framework: trench lines, far ground, beach and sea ------------------------------------------------------
+
+  private lookKey = "";
+  private readonly lookGroup = new THREE.Group();
+  private seaMat: THREE.ShaderMaterial | null = null;
+  private beachMat: THREE.ShaderMaterial | null = null;
+  private trenchMats: THREE.ShaderMaterial[] = [];
+
+  /** A trench line as a real sculpted ribbon of sandbags from the front lip toward the horizon, converging as the zones say. */
+  private trenchGeometry(side: "attacker" | "defender"): THREE.BufferGeometry {
+    const g = battleLook.pos.trench;
+    const rows = 90;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const tops: number[] = [];
+    const index: number[] = [];
+    for (let i = 0; i <= rows; i++) {
+      const t = i / rows;
+      // Rows are denser near the lip, where the eye is.
+      const y = g.yFront + (g.yBack - g.yFront) * t * t;
+      const x = trenchLineX(side, y, g);
+      const w = g.width * (1 - 0.55 * t);
+      const h = g.height * (1 - 0.45 * t);
+      const row: [number, number, number, number, number][] = [
+        [x - w, y, 0, 0, 0],
+        [x - w * 0.55, y, h, 0.33, 1],
+        [x + w * 0.55, y, h, 0.66, 1],
+        [x + w, y, 0, 1, 0],
+      ];
+      for (const [px, py, pz, u, top] of row) {
+        positions.push(px, py, pz);
+        uvs.push(u, y);
+        tops.push(top);
+      }
+      if (i > 0) {
+        const a = (i - 1) * 4;
+        const b = i * 4;
+        for (let k = 0; k < 3; k++) {
+          index.push(a + k, b + k, a + k + 1, a + k + 1, b + k, b + k + 1);
+        }
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setAttribute("aTop", new THREE.Float32BufferAttribute(tops, 1));
+    geometry.setIndex(index);
+    return geometry;
+  }
+
+  private clearLook(): void {
+    this.lookGroup.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+      }
+    });
+    this.lookGroup.clear();
+    this.trenchMats = [];
+    this.seaMat = null;
+    this.beachMat = null;
+  }
+
+  /** Builds the parts of the look that depend on positions, again whenever an inspector moves one. */
+  private buildLook(): void {
+    this.clearLook();
+    const pos = battleLook.pos;
+    for (const side of ["attacker", "defender"] as const) {
+      const material = trenchMaterial();
+      this.trenchMats.push(material);
+      const mesh = new THREE.Mesh(this.trenchGeometry(side), material);
+      mesh.position.z = 0.004;
+      mesh.renderOrder = 2;
+      mesh.frustumCulled = false;
+      this.lookGroup.add(mesh);
+    }
+    if (this.opts.coastal) {
+      const frontY = -STAGE_DEPTH / 2;
+      const seaFrom = frontY + pos.sea.from * STAGE_DEPTH;
+      const seaTo = frontY + pos.sea.to * STAGE_DEPTH;
+      const seaGeo = new THREE.PlaneGeometry(STAGE_WIDTH, seaTo - seaFrom, 72, 10);
+      this.seaMat = shoreSeaMaterial();
+      const sea = new THREE.Mesh(seaGeo, this.seaMat);
+      sea.position.set(0, (seaFrom + seaTo) / 2, 0.02);
+      sea.renderOrder = 3;
+      this.lookGroup.add(sea);
+      const beachFrom = frontY + pos.beach.from * STAGE_DEPTH;
+      const beachTo = frontY + pos.beach.to * STAGE_DEPTH;
+      const beachGeo = new THREE.PlaneGeometry(STAGE_WIDTH, beachTo - beachFrom, 1, 1);
+      this.beachMat = beachMaterial();
+      const beach = new THREE.Mesh(beachGeo, this.beachMat);
+      beach.position.set(0, (beachFrom + beachTo) / 2, 0.012);
+      beach.renderOrder = 2;
+      this.lookGroup.add(beach);
+    }
+    // The old frame's layout, in world terms, for the ground shader.
+    this.ground.uniforms.uTrench.value.set(pos.trench.halfFront, pos.trench.halfBack, pos.trench.yFront, pos.trench.yBack);
+  }
+
+  private updateLook(): void {
+    const key = JSON.stringify([battleLook.pos, this.opts.coastal]);
+    if (key !== this.lookKey) {
+      const first = this.lookKey === "";
+      this.lookKey = key;
+      this.buildLook();
+      if (!first) {
+        // The columns step out from the trench lines, so the roster stands again where they say.
+        this.rosterKey = "";
+        this.scatterKey = "";
+        this.tableKey = "";
+      }
+    }
+    const l = battleLook;
+    const s = this.sky;
+    const light = new THREE.Vector3(s.light[0], s.light[1], s.light[2]);
+    const mist = hexToRgb(l.horizon.mistColor);
+    // The mist takes the sky's horizon colour a little, so dusk fog is warm and night fog is dark.
+    const mistC = new THREE.Vector3(mist[0] * 0.6 + s.low[0] * 0.4, mist[1] * 0.6 + s.low[1] * 0.4, mist[2] * 0.6 + s.low[2] * 0.4).multiply(light);
+    this.ground.uniforms.uMistColor.value.copy(mistC);
+    this.ground.uniforms.uHaze.value.set(l.horizon.mist, l.horizon.desat);
+    const nml = hexToRgb(l.ground.noMansLand);
+    this.ground.uniforms.uNml.value.set(nml[0], nml[1], nml[2], l.ground.noMansDarken);
+    const bagL = hexToRgb(l.ground.bagLight);
+    const bagD = hexToRgb(l.ground.bagDark);
+    for (const m of this.trenchMats) {
+      m.uniforms.uBagLight.value.set(bagL[0], bagL[1], bagL[2]);
+      m.uniforms.uBagDark.value.set(bagD[0], bagD[1], bagD[2]);
+      m.uniforms.uMist.value.copy(mistC);
+      m.uniforms.uFar.value.set(l.pos.trench.yFront, l.pos.trench.yBack, l.horizon.mist, 0);
+      m.uniforms.uLight.value.copy(light);
+    }
+    if (this.seaMat) {
+      const u = this.seaMat.uniforms;
+      const c = hexToRgb(l.sea.coast);
+      const m = hexToRgb(l.sea.mid);
+      const d = hexToRgb(l.sea.deep);
+      u.uCoast.value.set(c[0], c[1], c[2]);
+      u.uMid.value.set(m[0], m[1], m[2]);
+      u.uDeep.value.set(d[0], d[1], d[2]);
+      const k = l.sea.lightShare;
+      u.uTint.value.set(1 - k + s.light[0] * k, 1 - k + s.light[1] * k, 1 - k + s.light[2] * k);
+      u.uGlint.value.set(s.lightColor[0], s.lightColor[1], s.lightColor[2]);
+      u.uTime.value = this.time;
+      u.uSwash.value = l.sea.swash;
+      u.uSwell.value.set(0.25 * l.sea.bob, 20, 1, 0);
+      u.uFrontAt.value = frontPosition(this.time, 20, 0);
+    }
+    if (this.beachMat) {
+      const u = this.beachMat.uniforms;
+      const sand = hexToRgb(l.sea.sand);
+      u.uSand.value.set(sand[0], sand[1], sand[2]);
+      const g = hexToRgb(this.skin.palettes[this.opts.terrain].low);
+      u.uLand.value.set(g[0] * s.light[0], g[1] * s.light[1], g[2] * s.light[2]);
+      u.uLight.value.copy(light);
+      u.uTime.value = this.time;
+      u.uSwash.value = l.sea.swash;
+    }
+    // The far backdrop.
+    const u = this.backdrop.uniforms;
+    u.uLow.value.set(...s.low);
+    u.uMid.value.set(...s.mid);
+    u.uHigh.value.set(...s.high);
+    const skyTop = 30;
+    const bandTop = l.horizon.height;
+    // The sun and moon stand on the painted sky: across by their lean, up by their height above the horizon.
+    const span = skyTop - bandTop * 0.9;
+    const sunUp = Math.max(-0.2, s.sunHeight) * l.pos.sun.up * 1.8;
+    u.uSunPos.value.set(l.pos.sun.x + s.sunDir[0] * 70, bandTop * 0.6 + sunUp * span, s.sunStrength);
+    u.uSunLook.value.set(l.sun.size * 3.2, l.sun.haloSize, 0, 0);
+    const halo = l.sun.halo.map(hexToRgb);
+    const strength = 0.45 + 0.55 * s.sunStrength;
+    u.uHalo0.value.set(halo[0][0] * strength, halo[0][1] * strength, halo[0][2] * strength);
+    u.uHalo1.value.set(halo[1][0] * strength, halo[1][1] * strength, halo[1][2] * strength);
+    u.uHalo2.value.set(halo[2][0] * strength, halo[2][1] * strength, halo[2][2] * strength);
+    const rim = hexToRgb(l.sun.haloRim);
+    u.uHaloRim.value.set(rim[0] * 0.5, rim[1] * 0.5, rim[2] * 0.5);
+    u.uSunColor.value.set(s.lightColor[0], s.lightColor[1], s.lightColor[2]).multiplyScalar(1.0);
+    const moonUp = Math.max(-0.2, -s.sunHeight) * l.pos.moon.up * 1.8;
+    u.uMoonPos.value.set(l.pos.moon.x + s.moonDir[0] * 40, bandTop * 0.6 + moonUp * span, s.moonStrength);
+    u.uMoonLook.value.set(l.moon.size * 3.2, l.moon.glowSize, 0, 0);
+    const mc = hexToRgb(l.moon.color);
+    const mg = hexToRgb(l.moon.glowColor);
+    u.uMoonColor.value.set(mc[0], mc[1], mc[2]);
+    u.uMoonGlow.value.set(mg[0], mg[1], mg[2]);
+    u.uStars.value.set(s.stars, l.stars.twinkle, l.stars.density, 0);
+    u.uCloud.value.set(l.clouds.share, l.clouds.speed, l.clouds.dirX, l.clouds.dirY);
+    const cc = hexToRgb(l.clouds.color);
+    u.uCloudColor.value.set(cc[0], cc[1], cc[2]);
+    u.uBand.value.set(bandTop, l.horizon.town, l.horizon.mist, l.horizon.desat);
+    const tree = hexToRgb(l.horizon.treeColor);
+    const town = hexToRgb(l.horizon.townColor);
+    u.uTree.value.set(tree[0], tree[1], tree[2]);
+    u.uTown.value.set(town[0], town[1], town[2]);
+    u.uMist.value.copy(mistC);
+    u.uLight.value.copy(light);
+    u.uSkyTop.value = skyTop;
+    u.uTime.value = this.time;
+    this.backdropMesh.position.y = l.pos.horizonY;
   }
 
   // --- The sea strip's ships ---------------------------------------------------------------------------------------
@@ -1107,7 +1308,7 @@ export class BattleStageEngine {
       u.uHot.value = Math.max(0, 1 - (this.time - view.hotT) / 0.14);
       view.mesh.visible = view.fade > 0.02;
       // The contact shadow disc: under the unit's feet, or on the ground below an aircraft, offset away from the sun.
-      const sun = this.sky.dir;
+      const sun = this.sky.lightDir;
       const shadowK = Math.min(1.3, 0.5 + this.sky.shadow * 1.7);
       const lean = Math.min(1.2, 0.25 / Math.max(0.3, sun[2]));
       if (lane === "air") {
@@ -1234,7 +1435,7 @@ export class BattleStageEngine {
     camera.position.set(pose.position[0], pose.position[1], pose.position[2] + thud);
     camera.fov = pose.fovDeg;
     camera.near = 0.5;
-    camera.far = 120;
+    camera.far = 700;
     camera.updateProjectionMatrix();
     camera.lookAt(pose.target[0], pose.target[1], pose.target[2] + thud * 0.5);
     camera.updateMatrixWorld();

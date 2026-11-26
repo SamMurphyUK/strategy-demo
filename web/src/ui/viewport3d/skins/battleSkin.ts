@@ -5,7 +5,7 @@
 //
 // It mirrors skins/boardSkin.ts: a registry, a preset of the settings the skin starts from, an `owns` list of the settings
 // only it reads, and the helpers that let the look panel dim a slider that means nothing under the active skin.
-import { DEFAULT_BATTLE_VISUALS, type BattleVisualConfig, type BattleVisualKey } from "./battleVisualConfig";
+import { DEFAULT_BATTLE_VISUALS, EUROPEAN_LOOK, type BattleLook, type BattleVisualConfig, type BattleVisualKey } from "./battleVisualConfig";
 
 export type BattleSkinId = "european";
 
@@ -61,6 +61,8 @@ export interface BattleSkin {
   preset: Readonly<BattleVisualConfig>;
   /** The settings only this skin reads. A slider for one under another skin means nothing, so the panel dims it. */
   owns: readonly BattleVisualKey[];
+  /** The colours, positions and scales this skin starts the live look from (battleVisualConfig.ts `battleLook`). Every field is data, so a skin swaps the object. */
+  look: Readonly<BattleLook>;
   rim: {
     /** The smoked walnut and slate of the diorama's rim. */
     color: string;
@@ -110,6 +112,7 @@ export const BATTLE_SKINS: Readonly<Record<BattleSkinId, BattleSkin>> = Object.f
     description: "A smoked-walnut and slate diorama slice of loam, grass and hedge, lit by a low northern sun.",
     preset: DEFAULT_BATTLE_VISUALS,
     owns: OWNED,
+    look: EUROPEAN_LOOK,
     rim: {
       color: "#1E1B18",
       slate: "#3A3D44",
@@ -134,8 +137,8 @@ export const BATTLE_SKINS: Readonly<Record<BattleSkinId, BattleSkin>> = Object.f
       scatterPull: 0.7,
     },
     camera: {
-      establishing: { pitchDeg: 35, fovDeg: 35, lookX: 0, lookZ: 0.42, zoom: 1 },
-      exchange: { pitchDeg: 35, fovDeg: 35, lookX: 0, lookZ: 0.38, zoom: 0.82 },
+      establishing: { pitchDeg: 12, fovDeg: 35, lookX: 0, lookZ: 0.42, zoom: 1 },
+      exchange: { pitchDeg: 12, fovDeg: 35, lookX: 0, lookZ: 0.38, zoom: 0.85 },
       overhead: { pitchDeg: 42, fovDeg: 35, lookX: 0, lookZ: 0.45, zoom: 1.08 },
     },
     scatter: {

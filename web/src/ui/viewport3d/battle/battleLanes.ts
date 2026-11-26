@@ -4,10 +4,11 @@
 //   frontline   infantry, mechanized, tanks     d about 0.30   full size
 //   rear        artillery, AA                   d about 0.60   scaled back (battleDepthScale), drawn out of colour, mist-tinted
 //   air         fighters, bombers               banking overhead, with a shadow on the ground
-import type { BattleVisualConfig } from "../skins/battleVisualConfig";
+import { battleLook, type BattleLook, type BattleVisualConfig } from "../skins/battleVisualConfig";
+import { rankColumnX } from "./battleZones";
 
 export const STAGE_WIDTH = 18;
-export const STAGE_DEPTH = 10;
+export const STAGE_DEPTH = 24;
 export const STAGE_HALF = STAGE_WIDTH / 2;
 
 export type Lane = "front" | "rear" | "air";
@@ -59,10 +60,8 @@ export function desaturate(rgb: readonly [number, number, number], amount: numbe
 // The attacker stands on the left with colIndex = 4 - rank (rank 4 outermost), the defender on the right mirrored with colIndex = rank - 1.
 // Columns are 105 px apart on a 1280 px board, which is 1.477 stage units; units of one rank stack as rows. Depth scale and desaturation
 // are applied on top by lane (see depthScale) and never change who stands where.
-const PX_PER_STAGE_UNIT = 1280 / STAGE_WIDTH;
-export const COLUMN_GAP = 105 / PX_PER_STAGE_UNIT;
-const ATTACKER_X0 = (102 - 640) / PX_PER_STAGE_UNIT;
-const DEFENDER_X0 = (862 - 640) / PX_PER_STAGE_UNIT;
+/** Spacing of the rank columns, from the live look: they step outward from the trench line (see battleZones.ts). */
+export const COLUMN_GAP = 1.45;
 const ROW_GAP = 0.1;
 const ROW_D0 = 0.17;
 const DEFAULT_RANK: Record<string, number> = { infantry: 1, mech_infantry: 1, aa: 1, aaa: 1, artillery: 2, tank: 3, armor: 3, fighter: 3, tactical_bomber: 3, strategic_bomber: 4 };
@@ -101,17 +100,26 @@ export function columnOf(side: Side, rank: number): number {
   return side === "attacker" ? 4 - r : r - 1;
 }
 
-/** x of a column's centre, before any row stagger. */
-export function columnX(side: Side, col: number): number {
-  return side === "attacker" ? ATTACKER_X0 + col * COLUMN_GAP : DEFENDER_X0 + col * COLUMN_GAP;
+/** The rank a column holds, the inverse of `columnOf`. */
+export function rankOfColumn(side: Side, col: number): number {
+  return side === "attacker" ? 4 - col : col + 1;
+}
+
+type Pos = BattleLook["pos"];
+
+/** x of a column's centre at depth fraction d, stepping outward from the trench line. */
+export function columnX(side: Side, col: number, d = 0.3, pos: Pos = battleLook.pos): number {
+  const y = (d - 0.5) * STAGE_DEPTH;
+  return rankColumnX(side, rankOfColumn(side, col), y, pos.trench, pos.columnGap, pos.columnOffset);
 }
 
 /** Position of a column and row on the stage. Odd rows stand a little further out, so the ranks do not form a grid. */
-export function rankSlot(side: Side, col: number, row: number): { x: number; d: number } {
+export function rankSlot(side: Side, col: number, row: number, pos: Pos = battleLook.pos): { x: number; d: number } {
   const out = row % 2 === 1 ? 0.2 : 0;
-  const x = side === "attacker" ? ATTACKER_X0 + col * COLUMN_GAP - out : DEFENDER_X0 + col * COLUMN_GAP + out;
   // A small stagger in depth between neighbouring columns, so the rows do not read as a grid.
-  return { x, d: Math.min(0.68, ROW_D0 + row * ROW_GAP + (col % 2) * 0.035) };
+  const d = Math.min(0.68, ROW_D0 + row * ROW_GAP + (col % 2) * 0.035);
+  const x = columnX(side, col, d, pos);
+  return { x: side === "attacker" ? x - out : x + out, d };
 }
 
 /** Where the airspace's Nth aircraft of a side starts, as a phase round its loop, and its altitude. */

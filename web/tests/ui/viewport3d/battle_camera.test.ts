@@ -5,10 +5,10 @@ import { BATTLE_SKINS } from "../../../src/ui/viewport3d/skins/battleSkin";
 const cam = BATTLE_SKINS.european.camera;
 
 describe("battle camera", () => {
-  it("looks down at 35 degrees through a 35 degree lens in the establishing shot", () => {
+  it("looks down at 12 degrees through a 35 degree lens in the establishing shot, so the horizon sits in the top sixth", () => {
     const pose = cameraPose(cam.establishing, 16 / 9);
     expect(pose.fovDeg).toBe(35);
-    expect(pitchOf(pose)).toBeCloseTo(35, 3);
+    expect(pitchOf(pose)).toBeCloseTo(12, 3);
     // It stands toward the front lip and above the table, looking into the scene.
     expect(pose.position[1]).toBeLessThan(pose.target[1]);
     expect(pose.position[2]).toBeGreaterThan(pose.target[2]);

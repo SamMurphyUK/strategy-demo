@@ -58,7 +58,7 @@ describe("battle skin registry", () => {
     expect(BATTLE_SKINS.european.rim.color).toBe("#1E1B18");
     expect(BATTLE_SKINS.european.grade.groundLumaCeiling).toBeLessThanOrEqual(0.92);
     expect(BATTLE_SKINS.european.grade.smokeLumaCeiling).toBeLessThanOrEqual(0.88);
-    expect(BATTLE_SKINS.european.camera.establishing.pitchDeg).toBe(35);
+    expect(BATTLE_SKINS.european.camera.establishing.pitchDeg).toBe(12);
     expect(BATTLE_SKINS.european.camera.establishing.fovDeg).toBe(35);
   });
 

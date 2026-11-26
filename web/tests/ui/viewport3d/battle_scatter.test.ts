@@ -60,10 +60,10 @@ describe("scatter placement", () => {
     for (const p of items) {
       if (p.zone === "cover") {
         expect(cover.has(p.set)).toBe(true);
-        expect(p.d).toBeLessThan(0.55);
+        expect(p.d).toBeLessThan(0.8);
       }
       if (p.zone === "midground") {
-        expect(p.d).toBeGreaterThan(0.65);
+        expect(p.d).toBeGreaterThan(0.75);
       }
     }
     for (const set of cover) {
@@ -79,7 +79,7 @@ describe("scatter placement", () => {
   it("keeps clear of keepouts, stays on the stage, and picks variants that exist", () => {
     const items = planScatter(skin, "urban", 1.5, 4, [{ x: 0, d: 0.85, r: 2.5 }]);
     for (const p of items) {
-      expect(Math.hypot(p.x, (p.d - 0.85) * 10)).toBeGreaterThanOrEqual(2.5);
+      expect(Math.hypot(p.x, (p.d - 0.85) * 24)).toBeGreaterThanOrEqual(2.5);
       expect(Math.abs(p.x)).toBeLessThan(9);
       expect(p.d).toBeGreaterThan(0);
       expect(p.d).toBeLessThan(1);

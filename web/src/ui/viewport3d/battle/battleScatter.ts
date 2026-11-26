@@ -4,7 +4,9 @@
 // urban or mountain. `planScatter` turns a skin's scatter mapping for that terrain into pieces on the stage, seeded by the
 // territory so the same battle always stands on the same ground. The stage never asks what a piece is for.
 import type { BattleSkin, BattleTerrain, ScatterRule, ScatterSet, ScatterZone } from "../skins/battleSkin";
-import { STAGE_HALF } from "./battleLanes";
+import { battleLook } from "../skins/battleVisualConfig";
+import { STAGE_DEPTH, STAGE_HALF } from "./battleLanes";
+import { trenchHalfWidth, type TrenchGeometry } from "./battleZones";
 
 export interface TerrainInput {
   regionId?: string;
@@ -122,27 +124,36 @@ export function hashString(text: string): number {
   return h >>> 0;
 }
 
-/** The rectangle of the stage a zone's pieces may stand in: |x| from `near` to `far` on either side, d from `from` to `to`. */
+/** The depth band (as fractions) a zone's pieces may stand in. */
 export function zoneBounds(zone: ScatterZone, set: ScatterSet): { near: number; far: number; from: number; to: number } {
   if (zone === "verge") {
     return { near: 0, far: STAGE_HALF - 0.6, from: 0.04, to: 0.11 };
   }
   if (zone === "midground") {
-    return { near: 0, far: STAGE_HALF - 0.6, from: 0.7, to: 0.94 };
+    return { near: 0, far: STAGE_HALF - 0.6, from: 0.78, to: 0.97 };
   }
-  // Cover: obstacles stand out in no-man's land, works stand behind the front rank.
+  // Cover: obstacles stand out in no man's land, works stand on and just behind the trench lines.
   if (set === "wire_obstacles" || set === "anti_tank_obstacles") {
-    return { near: 0.5, far: 2.1, from: 0.14, to: 0.5 };
+    return { near: 0.1, far: 0.85, from: 0.16, to: 0.78 };
   }
-  return { near: 2.4, far: 7.6, from: 0.4, to: 0.5 };
+  return { near: 0.3, far: 1.5, from: 0.16, to: 0.78 };
 }
 
-/** The Nth piece, drawn from `zone`'s rectangle. */
-function drawPoint(zone: ScatterZone, set: ScatterSet, rng: () => number): { x: number; d: number } {
+/** One piece's point, drawn from the zone: no man's land for wire and obstacles, the trench lines and their near side for works. */
+function drawPoint(zone: ScatterZone, set: ScatterSet, rng: () => number, trench: TrenchGeometry): { x: number; d: number } {
   const b = zoneBounds(zone, set);
+  const d = b.from + rng() * (b.to - b.from);
+  if (zone !== "cover") {
+    return { x: (rng() * 2 - 1) * b.far, d };
+  }
+  const half = trenchHalfWidth((d - 0.5) * STAGE_DEPTH, trench);
   const side = rng() < 0.5 ? -1 : 1;
-  const x = zone === "cover" ? side * (b.near + rng() * (b.far - b.near)) : (rng() * 2 - 1) * b.far;
-  return { x, d: b.from + rng() * (b.to - b.from) };
+  if (set === "wire_obstacles" || set === "anti_tank_obstacles") {
+    // In no man's land, as a share of the half gap.
+    return { x: side * half * (b.near + rng() * (b.far - b.near)), d };
+  }
+  // On the trench line, and just outside it.
+  return { x: side * (half + (rng() * 2 - 0.4) * 0.35 + b.near * rng()), d };
 }
 
 /** Whether a piece of the plan is allowed in the terrain. Masonry stands in towns and cities only. */
@@ -160,6 +171,7 @@ export function planScatter(
   density: number,
   seed: number,
   keepouts: readonly Keepout[] = [],
+  trench: TrenchGeometry = battleLook.pos.trench,
 ): ScatterPiece[] {
   const rng = seeded(seed ^ hashString(terrain));
   const k = density <= 1 ? Math.max(0, density) : 1 + (density - 1) * 0.5;
@@ -172,12 +184,12 @@ export function planScatter(
     const want = Math.round(rule.count * k);
     let made = 0;
     for (let tries = 0; made < want && tries < want * 40; tries++) {
-      const p = drawPoint(rule.zone, rule.set, rng);
+      const p = drawPoint(rule.zone, rule.set, rng, trench);
       const clear = rule.zone === "cover" ? 0.42 : 0.5;
-      if (keepouts.some((o) => Math.hypot(o.x - p.x, (o.d - p.d) * 10) < o.r)) {
+      if (keepouts.some((o) => Math.hypot(o.x - p.x, (o.d - p.d) * STAGE_DEPTH) < o.r)) {
         continue;
       }
-      if (placed.some((q) => Math.hypot(q.x - p.x, (q.d - p.d) * 10) < clear)) {
+      if (placed.some((q) => Math.hypot(q.x - p.x, (q.d - p.d) * STAGE_DEPTH) < clear)) {
         continue;
       }
       placed.push({

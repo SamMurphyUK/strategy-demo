@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import type { BattleSkin, BattleTerrain } from "../skins/battleSkin";
 import { hexToRgb } from "../skins/battleSkin";
+import { WATER_Y_GLSL } from "../skins/waterSwell";
 import { STAGE_DEPTH, STAGE_WIDTH } from "./battleLanes";
 
 const v3 = (hex: string) => {
@@ -90,6 +91,9 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
       uMistColor: { value: v3(skin.grade.valleyMist) },
       uMistAmt: { value: 0.3 },
       uStage: { value: new THREE.Vector2(STAGE_WIDTH, STAGE_DEPTH) },
+      uTrench: { value: new THREE.Vector4(3.2, 1.6, -12, 160) },
+      uNml: { value: new THREE.Vector4(0.4, 0.33, 0.33, 0.28) },
+      uHaze: { value: new THREE.Vector2(0.45, 0.35) },
       ...flash,
     },
     vertexShader: /* glsl */ `
@@ -113,6 +117,9 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
       uniform vec3 uMistColor;
       uniform float uMistAmt;
       uniform vec2 uStage;
+      uniform vec4 uTrench;
+      uniform vec4 uNml;
+      uniform vec2 uHaze;
       varying vec3 vWorld;
       void main() {
         vec2 uv = vWorld.xy * 0.16;
@@ -138,8 +145,16 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
         float rim = clamp(marks.g * 2.0 - 1.0, 0.0, 1.0);
         col = mix(col, uWorn * 0.5, clamp(marks.g, 0.0, 1.0) * 0.8);
         col = mix(col, min(col * 1.35 + 0.03, vec3(0.9)), rim * 0.4);
-        // Valley mist pooling toward the horizon.
-        col = mix(col, uMistColor, uMistAmt * smoothstep(0.3, 1.0, st.y));
+        // No man's land between the trench lines: darker, drawn toward its own tint.
+        float rec = clamp((vWorld.y - uTrench.z) / (uTrench.w - uTrench.z), 0.0, 1.0);
+        float halfGap = mix(uTrench.x, uTrench.y, rec);
+        float inNml = 1.0 - smoothstep(halfGap - 0.35, halfGap + 0.35, abs(vWorld.x));
+        col = mix(col, uNml.rgb, inNml * 0.45);
+        col *= 1.0 - uNml.a * inNml;
+        // Haze toward the horizon: the colour drawn out, then the mist laid over.
+        float haze = clamp(pow(rec, 0.7) * (0.15 + uHaze.x * 1.2), 0.0, 0.92);
+        col = mix(col, vec3(lumaOf(col)), haze * uHaze.y);
+        col = mix(col, uMistColor, haze);
         col *= uLight;
         col += flashAdd(vec3(vWorld.xy, 0.5));
         gl_FragColor = vec4(clampLuma(col, uCeil), 1.0);
@@ -608,6 +623,271 @@ export function linkMaterial(): THREE.ShaderMaterial {
           discard;
         }
         gl_FragColor = vec4(uColor, 0.9);
+      }
+    `,
+  });
+}
+
+// --- Horizon, sea and trenches (the old 2D battle's framework) ------------------------------------------------------
+
+/**
+ * The far backdrop: three sky stops (horizon, middle, top) from the hour, a small vector sun with a banded halo that is darkest at its rim,
+ * a crescent moon in a clear circular glow, twinkling stars, flat drifting cloud shapes, and a flat tree-line and town silhouette along the
+ * horizon, hazed and drawn out of colour, in palette tones. It stands upright at the horizon; the camera's low pitch puts it in the top sixth.
+ */
+export function horizonBackdropMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    depthWrite: false,
+    uniforms: {
+      uLow: { value: new THREE.Vector3() },
+      uMid: { value: new THREE.Vector3() },
+      uHigh: { value: new THREE.Vector3() },
+      uSunPos: { value: new THREE.Vector3(0, 0, 0) },
+      uSunLook: { value: new THREE.Vector4(3, 3.6, 0, 0) },
+      uHalo0: { value: new THREE.Vector3() },
+      uHalo1: { value: new THREE.Vector3() },
+      uHalo2: { value: new THREE.Vector3() },
+      uHaloRim: { value: new THREE.Vector3() },
+      uSunColor: { value: new THREE.Vector3(1, 1, 1) },
+      uMoonPos: { value: new THREE.Vector3() },
+      uMoonLook: { value: new THREE.Vector4(2.6, 3.2, 0, 0) },
+      uMoonColor: { value: new THREE.Vector3() },
+      uMoonGlow: { value: new THREE.Vector3() },
+      uStars: { value: new THREE.Vector4(0, 0.5, 0.55, 0) },
+      uCloud: { value: new THREE.Vector4(0.45, 0.012, 1, 0) },
+      uCloudColor: { value: new THREE.Vector3(1, 1, 1) },
+      uBand: { value: new THREE.Vector4(12, 0.3, 0.45, 0.35) },
+      uTree: { value: new THREE.Vector3() },
+      uTown: { value: new THREE.Vector3() },
+      uMist: { value: new THREE.Vector3() },
+      uLight: { value: new THREE.Vector3(1, 1, 1) },
+      uSkyTop: { value: 30 },
+      uTime: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      ${NOISE_GLSL}
+      uniform vec3 uLow; uniform vec3 uMid; uniform vec3 uHigh;
+      uniform vec3 uSunPos; uniform vec4 uSunLook;
+      uniform vec3 uHalo0; uniform vec3 uHalo1; uniform vec3 uHalo2; uniform vec3 uHaloRim; uniform vec3 uSunColor;
+      uniform vec3 uMoonPos; uniform vec4 uMoonLook; uniform vec3 uMoonColor; uniform vec3 uMoonGlow;
+      uniform vec4 uStars; uniform vec4 uCloud; uniform vec3 uCloudColor;
+      uniform vec4 uBand; uniform vec3 uTree; uniform vec3 uTown; uniform vec3 uMist;
+      uniform vec3 uLight; uniform float uSkyTop; uniform float uTime;
+      varying vec3 vWorld;
+      float disc(vec2 p, vec2 c, float r) { return 1.0 - smoothstep(r - 0.12, r + 0.12, distance(p, c)); }
+      void main() {
+        vec2 p = vec2(vWorld.x, vWorld.z);
+        float base = uBand.x * 0.55;
+        float h = clamp((p.y - base) / (uSkyTop - base), 0.0, 1.0);
+        // Three blended hues, darker and bluer toward the top.
+        vec3 c = mix(uLow, uMid, smoothstep(0.0, 0.55, h));
+        c = mix(c, uHigh, smoothstep(0.4, 1.0, h));
+        // Stars: cells with a hashed twinkle, in only while uStars.x (the night's fade) is up.
+        vec2 sc = floor(p * 0.9);
+        float sh = hash21(sc * 1.37 + 3.1);
+        float tw = 0.65 + 0.35 * sin(uTime * (1.2 + sh * 2.0) + sh * 40.0 * 6.28318) * uStars.y;
+        float starDot = 1.0 - smoothstep(0.05, 0.13, distance(fract(p * 0.9), vec2(0.5)));
+        float star = step(1.0 - uStars.z * 0.05, sh) * tw * uStars.x * smoothstep(0.1, 0.45, h) * starDot;
+        c += vec3(0.85, 0.88, 1.0) * star * 0.8;
+        // The sun: a small flat disc, and a halo in three bands, dark at its very rim, brightening inward with the light.
+        float sd = distance(p, uSunPos.xy);
+        float sr = uSunLook.x;
+        float hr = sr * uSunLook.y;
+        float inHalo = 1.0 - step(hr, sd);
+        float t = clamp((sd - sr) / max(hr - sr, 0.001), 0.0, 1.0);
+        vec3 halo = t < 0.34 ? uHalo2 : (t < 0.67 ? uHalo1 : uHalo0);
+        halo = mix(halo, uHaloRim, smoothstep(0.88, 1.0, t));
+        c = mix(c, c + halo * 0.55, inHalo * (1.0 - smoothstep(0.0, 1.0, t) * 0.55) * uSunPos.z);
+        c = mix(c, uSunColor, disc(p, uSunPos.xy, sr) * uSunPos.z);
+        // The moon: a soft crescent inside a clear circular glow.
+        float mr = uMoonLook.x;
+        float md = distance(p, uMoonPos.xy);
+        float glow = 1.0 - smoothstep(mr * 0.9, mr * uMoonLook.y, md);
+        c = mix(c, uMoonGlow, glow * 0.35 * uMoonPos.z);
+        float crescent = disc(p, uMoonPos.xy, mr) * (1.0 - disc(p, uMoonPos.xy + vec2(mr * 0.55, mr * 0.1), mr * 0.92));
+        c = mix(c, uMoonColor, crescent * uMoonPos.z);
+        // Flat vector clouds, drifting: pale blobs with a flat underside, a few to a cell.
+        vec2 q = p * 0.045 - vec2(uCloud.z, uCloud.w) * uCloud.y * uTime * 6.0;
+        vec2 cell = floor(q);
+        vec2 f = fract(q);
+        float seed = hash21(cell + 7.7);
+        float show = step(1.0 - uCloud.x, seed);
+        vec2 cc = vec2(0.5 + (hash21(cell + 1.3) - 0.5) * 0.4, 0.5);
+        float body = disc(f * vec2(1.0, 1.9), cc * vec2(1.0, 1.9), 0.32 + 0.1 * hash21(cell + 2.2));
+        float body2 = disc(f * vec2(1.0, 1.9), (cc + vec2(0.24, -0.04)) * vec2(1.0, 1.9), 0.24);
+        float body3 = disc(f * vec2(1.0, 1.9), (cc - vec2(0.22, 0.02)) * vec2(1.0, 1.9), 0.22);
+        float cloud = max(body, max(body2, body3)) * step(0.34, f.y) * show;
+        cloud *= smoothstep(0.12, 0.3, h);
+        c = mix(c, uCloudColor * uLight, clamp(cloud, 0.0, 1.0) * 0.85);
+        // The far band along the horizon: a tree line and a town, flat, hazed, drawn out of colour.
+        float x = vWorld.x;
+        float pines = abs(fract(x * 0.55) - 0.5) * 2.0;
+        float trees = uBand.x * (0.28 + 0.2 * vnoise(vec2(x * 0.17, 2.0))) * (0.62 + 0.38 * (1.0 - pines));
+        float bx = floor(x / 6.0);
+        float bh = hash21(vec2(bx, 9.0));
+        float building = (step(1.0 - uBand.y, bh) * uBand.x * (0.38 + 0.4 * hash21(vec2(bx, 3.0)))) * step(0.12, fract(x / 6.0)) * step(fract(x / 6.0), 0.9);
+        float spire = step(0.9, bh) * uBand.x * 0.78 * (1.0 - smoothstep(0.0, 0.07, abs(fract(x / 6.0) - 0.5)));
+        float top = max(trees, max(building, spire));
+        float inBand = 1.0 - step(top, p.y);
+        float isTown = step(trees + 0.01, max(building, spire));
+        vec3 band = mix(uTree, uTown, isTown);
+        // Haze: more over the foot of the band, and the colour drawn toward grey and then toward the mist.
+        float foot = 1.0 - smoothstep(0.0, uBand.x * 0.75, p.y);
+        float mistAmt = clamp(uBand.z * (0.5 + foot * 0.9), 0.0, 0.92);
+        band = mix(band, vec3(lumaOf(band)), uBand.w);
+        band = mix(band, uMist, mistAmt);
+        c = mix(c, band * uLight, inBand);
+        gl_FragColor = vec4(min(c, vec3(0.95)), 1.0);
+      }
+    `,
+  });
+}
+
+/** One trench line: a real sculpted parapet of sandbags, near unbroken, fading into the haze as it recedes. */
+export function trenchMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    uniforms: {
+      uBagLight: { value: new THREE.Vector3() },
+      uBagDark: { value: new THREE.Vector3() },
+      uMist: { value: new THREE.Vector3() },
+      uFar: { value: new THREE.Vector4(-12, 160, 0.45, 0) },
+      uLight: { value: new THREE.Vector3(1, 1, 1) },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      varying vec2 vUv;
+      varying float vTop;
+      attribute float aTop;
+      void main() {
+        vUv = uv;
+        vTop = aTop;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      ${NOISE_GLSL}
+      uniform vec3 uBagLight; uniform vec3 uBagDark; uniform vec3 uMist; uniform vec4 uFar; uniform vec3 uLight;
+      varying vec3 vWorld; varying vec2 vUv; varying float vTop;
+      void main() {
+        float rec = clamp((vWorld.y - uFar.x) / (uFar.y - uFar.x), 0.0, 1.0);
+        // Rows of bags along the line, each staggered, the colour wandering between the light and the dark tan.
+        float row = floor(vUv.x * 3.0 + vTop * 1.0);
+        float along = vWorld.y / 0.62 + row * 0.5;
+        vec2 id = vec2(floor(along), row);
+        float j = hash21(id + 4.1);
+        vec3 bag = mix(uBagDark, uBagLight, 0.35 + 0.5 * j);
+        float seam = smoothstep(0.0, 0.12, fract(along)) * smoothstep(1.0, 0.88, fract(along));
+        bag *= 0.78 + 0.22 * seam;
+        // The crest catches the light, the foot sits in shade.
+        bag *= 0.8 + 0.3 * vTop;
+        // Far away the individual bags are not told apart: the line fades to its own mean tone, then into the haze, but stays unbroken.
+        vec3 mean = mix(uBagDark, uBagLight, 0.5) * 0.9;
+        bag = mix(bag, mean, smoothstep(0.05, 0.5, rec));
+        bag = mix(bag, uMist, clamp(rec * rec * (0.25 + uFar.z * 1.1), 0.0, 0.9));
+        gl_FragColor = vec4(min(bag * uLight, vec3(0.92)), 1.0);
+      }
+    `,
+  });
+}
+
+/** The sea strip: three blended bands (coast, mid, deep), the campaign's swell lifting and dropping it, crests that catch the light, and a swash. */
+export function shoreSeaMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uSwell: { value: new THREE.Vector4(0.1, 20, 1, 0) },
+      uFrontAt: { value: 0 },
+      uCoast: { value: new THREE.Vector3() },
+      uMid: { value: new THREE.Vector3() },
+      uDeep: { value: new THREE.Vector3() },
+      uTint: { value: new THREE.Vector3(1, 1, 1) },
+      uGlint: { value: new THREE.Vector3(1, 1, 1) },
+      uSwash: { value: 0.6 },
+    },
+    vertexShader: /* glsl */ `
+      ${WATER_Y_GLSL}
+      uniform float uTime;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      varying float vH;
+      void main() {
+        vUv = uv;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vH = waterY(w.xy, uTime);
+        w.z += vH;
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      ${NOISE_GLSL}
+      uniform float uTime; uniform vec3 uCoast; uniform vec3 uMid; uniform vec3 uDeep; uniform vec3 uTint; uniform vec3 uGlint; uniform float uSwash;
+      varying vec2 vUv; varying vec3 vWorld; varying float vH;
+      void main() {
+        // 0 at the coast, 1 at the bottom edge.
+        float t = clamp(1.0 - vUv.y, 0.0, 1.0);
+        vec3 c = mix(mix(uCoast, uMid, smoothstep(0.1, 0.5, t)), uDeep, smoothstep(0.5, 0.95, t));
+        // Crests sliding left and right, catching the light.
+        float crest = sin(vWorld.x * 1.1 - uTime * 1.3 + t * 11.0 + vH * 14.0);
+        float row = smoothstep(0.86, 0.97, crest) * (0.35 + 0.65 * (1.0 - t * 0.5));
+        c = mix(c, uGlint, row * 0.55);
+        // The swash: the water breaks onto the beach in a foam line that comes and goes.
+        float sw = uSwash * (0.55 * (0.5 + 0.5 * sin(uTime * 0.9 - vWorld.x * 0.35)) + 0.45 * (0.5 + 0.5 * sin(uTime * 0.37 + vWorld.x * 0.11)));
+        float edge = 0.05 + 0.05 * sw;
+        float foam = smoothstep(edge + 0.05, edge, t) * (0.6 + 0.4 * vnoise(vec2(vWorld.x * 2.5, uTime * 0.7)));
+        c = mix(c, vec3(0.93, 0.92, 0.84), foam * 0.85);
+        gl_FragColor = vec4(min(c * uTint, vec3(0.92)), 1.0);
+      }
+    `,
+  });
+}
+
+/** The beach: a gentle sandy slope from the waterline up into the land, wet where the swash has just been. Never a cliff. */
+export function beachMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uSand: { value: new THREE.Vector3() },
+      uLand: { value: new THREE.Vector3() },
+      uLight: { value: new THREE.Vector3(1, 1, 1) },
+      uSwash: { value: 0.6 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      void main() {
+        vUv = uv;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      ${NOISE_GLSL}
+      uniform float uTime; uniform vec3 uSand; uniform vec3 uLand; uniform vec3 uLight; uniform float uSwash;
+      varying vec2 vUv; varying vec3 vWorld;
+      void main() {
+        float s = vUv.y;
+        float sw = uSwash * (0.55 * (0.5 + 0.5 * sin(uTime * 0.9 - vWorld.x * 0.35)) + 0.45 * (0.5 + 0.5 * sin(uTime * 0.37 + vWorld.x * 0.11)));
+        vec3 sand = uSand * (0.9 + 0.12 * vnoise(vWorld.xy * 3.0) + 0.1 * s);
+        float wet = 1.0 - smoothstep(sw * 0.7, sw * 0.7 + 0.18, s);
+        sand = mix(sand, sand * vec3(0.62, 0.58, 0.55), wet);
+        float foamLine = (1.0 - smoothstep(0.0, 0.05, abs(s - sw * 0.7))) * 0.6;
+        sand = mix(sand, vec3(0.93, 0.92, 0.84), foamLine);
+        // The top of the beach blends into the land.
+        sand = mix(sand, uLand, smoothstep(0.78, 1.0, s) * (0.6 + 0.4 * vnoise(vWorld.xy * 2.0)));
+        gl_FragColor = vec4(min(sand * uLight, vec3(0.92)), 1.0);
       }
     `,
   });

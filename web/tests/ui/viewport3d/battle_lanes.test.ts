@@ -9,7 +9,6 @@ import {
   groundShadow,
   columnOf,
   rankSlot,
-  COLUMN_GAP,
   laneOf,
   layoutLanes,
   toWorld,
@@ -93,16 +92,18 @@ describe("lane layout", () => {
     expect(by("attacker-t1").y).toBe(0);
   });
 
-  it("stands the four hit ranks in columns, the attacker rank 4 outermost and the defender mirrored", () => {
+  it("steps the rank columns outward from the trench line, rank I nearest, the attacker left and the defender mirrored", () => {
     expect([1, 2, 3, 4].map((r) => columnOf("attacker", r))).toEqual([3, 2, 1, 0]);
     expect([1, 2, 3, 4].map((r) => columnOf("defender", r))).toEqual([0, 1, 2, 3]);
-    const mk = (side: "attacker" | "defender", rank: number, uid: string) => ({ uid, type: "infantry", side, effectiveRank: rank });
+    const mk = (side: "attacker" | "defender", rank: number, uid: string) => ({ uid, type: "infantry", side, effectiveRank: rank, rowIndex: 0 });
     const s = layoutLanes([mk("attacker", 4, "a4"), mk("attacker", 1, "a1"), mk("defender", 1, "d1"), mk("defender", 4, "d4")]);
     const x = (u: string) => s.find((q) => q.uid === u)!.x;
     expect(x("a4")).toBeLessThan(x("a1"));
+    expect(x("a1")).toBeLessThan(0);
     expect(x("d1")).toBeLessThan(x("d4"));
-    expect(x("a1") - x("a4")).toBeCloseTo(3 * COLUMN_GAP, 6);
-    expect(x("a4") + x("d4")).toBeCloseTo(0, 1);
+    expect(x("d1")).toBeGreaterThan(0);
+    // The rank I columns stand outside the trench lines, so no man's land between them is empty of units.
+    expect(x("d1") - x("a1")).toBeGreaterThan(2 * 3);
   });
 
   it("stacks units of one rank as rows in their column, and keeps the rows apart", () => {
