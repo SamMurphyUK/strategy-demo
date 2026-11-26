@@ -31,3 +31,14 @@ describe("camera distance and its tiers", () => {
     expect(maxZoomK(100, 1)).toBeLessThanOrEqual(zoomForDistance(1.35) + 1e-9);
   });
 });
+
+import { cliffShadeFade } from "../../../src/ui/map/boardTune";
+describe("the cliff shade", () => {
+  it("is off at the chart's zoom and comes in slowly over the close zoom", () => {
+    expect(cliffShadeFade(2)).toBe(0);
+    expect(cliffShadeFade(3.4)).toBe(0);
+    expect(cliffShadeFade(5.7)).toBeGreaterThan(0.4);
+    expect(cliffShadeFade(5.7)).toBeLessThan(0.6);
+    expect(cliffShadeFade(8)).toBe(1);
+  });
+});

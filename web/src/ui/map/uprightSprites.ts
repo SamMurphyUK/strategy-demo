@@ -61,6 +61,8 @@ export interface UprightPaint {
   submergePx?: number;
   /** How high the live water stands at this ship, in CSS pixels (see waterSwell.ts): the crest that overwashes the hull. */
   waterRisePx?: number;
+  /** Ships are drawn at this share of their size. */
+  shipScale?: number;
   /** Vehicles and aircraft are drawn at this share of their size in the close-up. */
   vehicleScale?: number;
   /** An aircraft over open water has no base at all. */
@@ -822,7 +824,8 @@ function placedSquad(count: number, step: number): { x: number; y: number }[] {
 export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPaint): void {
   const radius = paint.tokenPx / 2;
   const { x, y } = paint;
-  const figureScale = uprightScale(paint.unitType) * (paint.spriteScale ?? 1) * (VEHICLE_SCALED.has(paint.unitType) ? (paint.vehicleScale ?? 1) : 1);
+  const figureScale =
+    uprightScale(paint.unitType) * (paint.spriteScale ?? 1) * (VEHICLE_SCALED.has(paint.unitType) ? (paint.vehicleScale ?? 1) : 1) * (SEA_UNITS.has(paint.unitType) ? (paint.shipScale ?? 1) : 1);
   // A ship is drawn once however many stand in the stack, where units draw a small squad. The count is a badge.
   const naval = SEA_UNITS.has(paint.unitType);
   const useQuick = hasQuickUnit(paint.factionId, paint.unitType);

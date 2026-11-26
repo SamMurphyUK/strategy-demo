@@ -49,6 +49,7 @@ import { frontDirection, frontPosition } from "../map/shipSway";
 import { pointInMultiPolygon } from "../map/regionClip";
 import { biomeAtMap, lonLatToMap, mapToLonLat } from "./geography";
 import { createMist } from "./mistField";
+import { cliffShadeFade } from "../map/boardTune";
 import { type IslandCell, islandScale, lowerShare, makeLowerAt } from "./islandLowering";
 import { getIslandRevision, getIslandScales, subscribeIslandScales } from "../map/islandOverrides";
 import { facilityGeometry } from "./facilityModels";
@@ -1531,7 +1532,9 @@ export function BoardScene(props: BoardSceneProps) {
         material.uniforms.uSwellTime.value = swellNow;
         material.uniforms.uFrontAt.value = kit.water.uniforms.uFrontAt.value;
         material.uniforms.uSurgeFoam.value = mapVisuals.cliffSurgeFoam;
-        material.uniforms.uCliffShade.value = mapVisuals.cliffShadowStrength;
+        // The cliff's own shade is a smooth gradient, which breaks the pixel look at the chart's zoom: it stays off there and comes in slowly,
+        // over a long stretch of the close zoom, so the cliffs darken a little at a time.
+        material.uniforms.uCliffShade.value = mapVisuals.cliffShadowStrength * cliffShadeFade(frame.view.k);
       }
     }
     // The waves and the shine keep a share of themselves with the camera all the way out.

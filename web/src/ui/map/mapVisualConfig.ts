@@ -202,6 +202,8 @@ export interface MapVisualConfig {
   /** How far a ship's shadow stretches across the water, as a share of what the sun would throw. 0 is none; low is a reflection. */
   /** How deep the shadows drawn on the monuments go. 1 is the plain shade. */
   landmarkShadowStrength: number;
+  /** The size of the ships against what they were: 0.4 is 60% smaller. */
+  shipSizeScale: number;
   /** The recess wash of the city landmarks: a deeper, hue-shifted wash pooled in the crevices and under the eaves. 0 is none. */
   landmarkWashStrength: number;
   /** The drybrush edge highlight on the landmark ridges, domes and spires. 0 is none. */
@@ -399,6 +401,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   microSpriteTiltDeg: 10,
   tiltShiftStrength: 1,
   landmarkShadowStrength: 1.7,
+  shipSizeScale: 0.4,
   landmarkWashStrength: 0.7,
   landmarkDrybrushStrength: 0.6,
   landmarkGroundAO: 0.7,
@@ -439,7 +442,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   squadSpread: 1,
   plinthSpecular: 0.3,
   vehicleDioramaScale: 0.75,
-  vehiclePlinthRadius: 0.72,
+  vehiclePlinthRadius: 0.92,
   landmarkRimStrength: 0.6,
   boardSheenStrength: 0.5,
   contactAoStrength: 0.5,
@@ -588,6 +591,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   microSpriteTiltDeg: [0, 20],
   tiltShiftStrength: [0, 2],
   landmarkShadowStrength: [1, 3],
+  shipSizeScale: [0.2, 1.2],
   landmarkWashStrength: [0, 1.5],
   landmarkDrybrushStrength: [0, 1.5],
   landmarkGroundAO: [0, 1.5],

@@ -785,6 +785,7 @@ export function BoardLookPanel() {
         <Num name="landmarkWashStrength" label="Monument wash" title="A deeper, hue-shifted wash pooled in the crevices, colonnades, arches and under the eaves of the city landmarks. 0 is none." />
         <Num name="landmarkDrybrushStrength" label="Monument drybrush" title="A crisp edge highlight on the ridges, domes and spires of the city landmarks, held under the bloom. 0 is none." />
         <Num name="landmarkGroundAO" label="Monument foot shade" title="The dark earth and stone contact shade across the foot of each landmark, so it sits rooted in the ground. 0 is none." />
+        <Num name="shipSizeScale" label="Ship size" title="The size of the ships against what they were. 0.4 is 60% smaller." />
         <Num name="landmarkShadowStrength" label="Monument shadow" title="How deep the shadows drawn on the monuments go. 1 is the plain shade." />
         <Num name="tiltShiftStrength" label="Tilt-shift" title="The soft blur of the top and bottom of the frame in the micro tier. 0 is none." />
         <Num name="microMinDistance" label="Nearest camera" title="The nearest the camera may come, in camera distance. The tiers are 14, 7.5 and 3.8; micro ends here." />

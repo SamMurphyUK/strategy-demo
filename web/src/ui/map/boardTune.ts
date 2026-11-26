@@ -234,6 +234,15 @@ function nearShare(distance: number, from: number, to: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** The cliffs' own shade is off at the chart's zoom, and comes in slowly over this stretch of the close zoom. */
+export const CLIFF_SHADE_FROM = 3.4;
+export const CLIFF_SHADE_TO = 8;
+
+export function cliffShadeFade(k: number): number {
+  const t = clamp01((k - CLIFF_SHADE_FROM) / (CLIFF_SHADE_TO - CLIFF_SHADE_FROM));
+  return t * t * (3 - 2 * t);
+}
+
 /** The zoom the facility badges begin to fade at (the sprites' arrival), and where they are gone. */
 export const FACILITY_FADE_FROM = 3.8;
 export const FACILITY_FADE_TO = 7.0;

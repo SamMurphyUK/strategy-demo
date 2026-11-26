@@ -1466,6 +1466,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
             spriteScale: game.unitScale,
             contactAo: mapVisuals.contactAoStrength,
             vehicleScale: mapVisuals.vehicleDioramaScale,
+            shipScale: mapVisuals.shipSizeScale,
             noBase,
             plinth3D:
               game.plinths3D && counter.domain !== "sea" && !noBase
