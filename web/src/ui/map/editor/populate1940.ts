@@ -575,7 +575,7 @@ export function populateWorldMap(source: Dict, isLand: ((x: number, y: number) =
   map = garrison(map, regions, LAND_TROOPS, false);
   map = garrison(map, regions, SEA_TROOPS, true);
   const pairs = autoNeighborPairs(
-    map.regions.map((r) => ({ id: r.id, polygon: r.polygon, extra: r.extra, is_sea: r.is_sea })),
+    map.regions.map((r) => ({ id: r.id, polygon: r.polygon, extra: r.extra, holes: r.holes, is_sea: r.is_sea })),
     isLand,
   );
   map = applyAutoLinks(map, pairs);

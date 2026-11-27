@@ -161,6 +161,14 @@ export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlayt
                     ))}
                   </select>
                 </label>
+                <button
+                  type="button"
+                  className="field-wide"
+                  title="Treat this region as an inland sea zone. The coastline opens so the bake and the game both keep the water."
+                  onClick={editor.turnSelectedToLake}
+                >
+                  Turn region to lake
+                </button>
               </>
             )}
             {selected.is_sea && (

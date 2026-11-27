@@ -7,6 +7,7 @@ function adjacencyOf(region: EditorRegion): AdjacencyRegion {
     id: region.id,
     polygon: region.polygon,
     extra: region.extra,
+    holes: region.holes,
     is_sea: region.is_sea,
   };
 }

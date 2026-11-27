@@ -8,6 +8,8 @@ export interface AdjacencyRegion {
   polygon: Vec2[];
   /** The other islands of a multi-island territory. The territory touches whatever any of them touches. */
   extra?: Vec2[][];
+  /** Rings cut out of `polygon`. A sea hole that matches another sea zone can still be open water. */
+  holes?: Vec2[][];
   is_sea: boolean;
 }
 
@@ -191,6 +193,59 @@ function distanceToRing(p: Vec2, ring: Vec2[]): number {
   return best;
 }
 
+/**
+ * A sea hole that traces another sea zone joins the two when the water just outside the hole is open.
+ * A hole sealed by land does not. The hole is not the parent's water ring, so the shared-edge test
+ * never sees it on its own.
+ */
+function holeJoins(
+  host: AdjacencyRegion,
+  other: AdjacencyRegion,
+  isLand: (x: number, y: number) => boolean,
+): boolean {
+  const holes = host.holes ?? [];
+  if (holes.length === 0) {
+    return false;
+  }
+  const parts = [other.polygon, ...(other.extra ?? [])];
+  for (const hole of holes) {
+    if (hole.length < 3) {
+      continue;
+    }
+    const bare = stripHairlines(hole);
+    const matches = parts.some(
+      (part) => part.length >= 3 && sameDomainAdjacent(bare, stripHairlines(part)),
+    );
+    if (!matches || !opensOntoWater(hole, isLand)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** True when a step just outside the ring is water. A sealed shore is land on that step. */
+function opensOntoWater(ring: Vec2[], isLand: (x: number, y: number) => boolean): boolean {
+  for (let i = 0; i < ring.length; i++) {
+    const c = ring[i];
+    const d = ring[(i + 1) % ring.length];
+    const len = Math.hypot(d.x - c.x, d.y - c.y);
+    if (len <= 1e-6) {
+      continue;
+    }
+    const mid = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+    const nx = -(d.y - c.y) / len;
+    const ny = (d.x - c.x) / len;
+    const left = { x: mid.x + nx, y: mid.y + ny };
+    const right = { x: mid.x - nx, y: mid.y - ny };
+    const outside = pointInPolygon(left, ring) ? right : left;
+    if (!isLand(outside.x, outside.y)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function waterAdjacent(a: Vec2[], b: Vec2[], isLand: (x: number, y: number) => boolean, eps = SHARED_VERTEX_EPS): boolean {
   if (!sameDomainAdjacent(stripHairlines(a), stripHairlines(b), eps)) {
     return false;
@@ -367,6 +422,9 @@ export function autoNeighborPairs(
             });
           }
         }
+      }
+      if (!linked && a.is_sea && b.is_sea && mask) {
+        linked = holeJoins(a, b, mask) || holeJoins(b, a, mask);
       }
       if (linked) {
         pairs.push(a.id < b.id ? [a.id, b.id] : [b.id, a.id]);

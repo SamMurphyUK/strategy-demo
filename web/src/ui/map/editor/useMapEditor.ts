@@ -33,6 +33,7 @@ import {
   vertexAt,
   viewBoxAround,
 } from "./landmass";
+import { turnRegionToLake } from "./lake";
 import { validateEditorMap } from "./validateMap";
 import {
   CANONICAL_BOARD_NAME,
@@ -219,6 +220,8 @@ export interface MapEditor {
   undoVertex(): void;
   select(id: string): void;
   patchSelected(patch: Partial<EditorRegion>): void;
+  /** The selected land region becomes an inland sea zone, and the coast opens so the bake keeps the water. */
+  turnSelectedToLake(): void;
   /** Writes one more unit slot, keeping the ones already on the map. One undo step. Does nothing at the cap. */
   addUnitSlot(): void;
   /** Drops the last unit slot, keeping the rest. One undo step. */
@@ -642,7 +645,13 @@ export function useMapEditor(
   const withAutoLinks = useCallback((current: EditorMap): { map: EditorMap; pairs: number; masked: boolean } => {
     const mask = live.current.land;
     const pairs = autoNeighborPairs(
-      current.regions.map((r) => ({ id: r.id, polygon: r.polygon, extra: r.extra, is_sea: r.is_sea })),
+      current.regions.map((r) => ({
+        id: r.id,
+        polygon: r.polygon,
+        extra: r.extra,
+        holes: r.holes,
+        is_sea: r.is_sea,
+      })),
       mask ? (x, y) => isLandAt(mask, { x, y }) : null,
     );
     return { map: applyAutoLinks(current, pairs), pairs: pairs.length, masked: mask !== null };
@@ -866,6 +875,40 @@ export function useMapEditor(
     },
     [commit],
   );
+
+  const turnSelectedToLake = useCallback(() => {
+    const id = live.current.selectedId;
+    const mask = live.current.land;
+    const turned = turnRegionToLake(docRef.current.map, id, mask?.polygons ?? null);
+    if (!turned.ok) {
+      setStatus(turned.error);
+      return;
+    }
+    let next = turned.map;
+    if (turned.land && mask) {
+      const svg = landmassToSvg(turned.land, mask.viewBox);
+      const meta = { ...next.meta, sculpted_land_svg: svg };
+      delete meta.no_landmass;
+      next = { ...next, meta };
+      try {
+        const master = parseLandSvg(svg);
+        onLandmaskRef.current?.(master);
+        live.current = { ...live.current, land: master };
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : "The lake could not be cut out of the coast.");
+        return;
+      }
+    }
+    const linked = withAutoLinks(next);
+    commit(linked.map);
+    setLayerState("sea");
+    const name = findRegion(linked.map, id)?.name ?? id;
+    setStatus(
+      turned.land
+        ? `${name} is an inland sea zone. The bake keeps this water.`
+        : `${name} is an inland sea zone.`,
+    );
+  }, [commit, withAutoLinks]);
 
   const addUnitSlot = useCallback(() => {
     const id = live.current.selectedId;
@@ -2418,6 +2461,7 @@ export function useMapEditor(
     undoVertex,
     select,
     patchSelected,
+    turnSelectedToLake,
     addUnitSlot,
     removeLastUnitSlot,
     seedUnitSlots,
