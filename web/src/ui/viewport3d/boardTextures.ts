@@ -36,7 +36,7 @@ export function coastMaskCanvas(land: MasterLand, bounds: Rect): HTMLCanvasEleme
     ctx.fillStyle = color;
     for (const dx of [-bounds.w, 0, bounds.w]) {
       ctx.setTransform(sx, 0, 0, sy, (dx - bounds.x) * sx, -bounds.y * sy);
-      ctx.fill(land.masterLandPath);
+      ctx.fill(land.masterLandPath, "evenodd");
     }
     ctx.restore();
   };

@@ -143,7 +143,7 @@ function fadeInland(plate: HTMLCanvasElement, box: StampBox, shore: ShoreStencil
   ctx.fillStyle = "#000";
   for (const copy of shore.copies) {
     ctx.setTransform(copy.sx * dpr, 0, 0, copy.sy * dpr, copy.e * dpr - box.left, copy.f * dpr - box.top);
-    ctx.fill(shore.path);
+    ctx.fill(shore.path, "evenodd");
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = "source-over";

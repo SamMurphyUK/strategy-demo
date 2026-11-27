@@ -16,7 +16,7 @@ import {
 import { WORLD_COORD_SPACE } from "../map_space";
 import type { RegionClipper } from "../regionClip";
 import { type Pair, sharedVertexCount } from "./adjacency";
-import { fillKey, parseLatticeCells, type LatticeCell } from "./seaLattice";
+import { fillKey, latticeSheetFrom, parseLatticeCells, type LatticeCell } from "./seaLattice";
 
 export type { Pair };
 export type LinkKind = "land" | "sea" | "coastal";
@@ -101,6 +101,8 @@ export interface EditorRegion {
   factory: FactoryLevel;
   capital: boolean;
   polygon: Vec2[];
+  /** Rings cut out of `polygon`: a lake, or each landmass inside a sea zone. Not other islands. */
+  holes?: Vec2[][];
   /**
    * The other islands of a multi-island territory (Japan, the Philippines): disjoint outlines that share this
    * region's id, IPC value and anchor. `polygon` is the largest one. They are not editable with the vertex tool.
@@ -1158,14 +1160,21 @@ export function pruneSmallIslands(
   return { map: next, removed };
 }
 
-/** Adds each outline as a new region of the layer, placed under the existing ones. */
-export function addBlocks(map: EditorMap, blocks: Vec2[][], sea: boolean, anchors: Vec2[]): { map: EditorMap; ids: string[] } {
+/** Adds each outline as a new region of the layer, placed under the existing ones. `holes` lines up with `blocks`. */
+export function addBlocks(
+  map: EditorMap,
+  blocks: Vec2[][],
+  sea: boolean,
+  anchors: Vec2[],
+  holes?: Vec2[][][],
+): { map: EditorMap; ids: string[] } {
   let next = map;
   const ids: string[] = [];
   const added: EditorRegion[] = [];
   blocks.forEach((polygon, i) => {
     const id = nextRegionId({ ...next, regions: [...next.regions, ...added] }, sea);
     const label = anchors[i] ?? labelPoint(polygon);
+    const cut = (holes?.[i] ?? []).filter((ring) => ring.length >= 3).map((ring) => ring.map((p) => ({ ...p })));
     ids.push(id);
     added.push({
       id,
@@ -1176,6 +1185,7 @@ export function addBlocks(map: EditorMap, blocks: Vec2[][], sea: boolean, anchor
       factory: "none",
       capital: false,
       polygon: polygon.map((p) => ({ ...p })),
+      ...(cut.length > 0 ? { holes: cut } : {}),
       cx: label.x,
       cy: label.y,
     });
@@ -1308,6 +1318,9 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
   const rawRegions: Dict[] = Array.isArray(mapJson.regions) ? mapJson.regions : [];
   const explicitNeighbors = rawRegions.some((r) => Array.isArray(r.neighbors));
   const geometry = buildMapGeometry(mapJson);
+  const latticeSheet = latticeSheetFrom(
+    mapJson.board !== null && typeof mapJson.board === "object" ? (mapJson.board as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }) : null,
+  );
   for (const raw of rawRegions) {
     const meta: Dict = raw.metadata ?? {};
     const id = String(meta.region_id ?? "");
@@ -1324,9 +1337,10 @@ export function editorFromMapJson(mapJson: Dict): EditorMap {
       factory: factoryLevelOf(meta),
       capital: Boolean(meta.victory ?? false),
       polygon: polygonOf(raw.polygon),
+      ...(shape.holes && shape.holes.length > 0 ? { holes: shape.holes.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
       ...(shape.extra && shape.extra.length > 0 ? { extra: shape.extra.map((ring) => ring.map((p) => ({ ...p }))) } : {}),
       ...(() => {
-        const lattice = parseLatticeCells(meta.lattice_cells);
+        const lattice = parseLatticeCells(meta.lattice_cells, latticeSheet);
         return lattice ? { lattice } : {};
       })(),
       cx: shape.anchor.x,
@@ -1383,7 +1397,13 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
     options.clipper
       ? {
           clipped_polygon: options.clipper
-            .clip({ id: region.id, type: region.is_sea ? "sea" : "land", points: region.polygon, extra: region.extra })
+            .clip({
+              id: region.id,
+              type: region.is_sea ? "sea" : "land",
+              points: region.polygon,
+              holes: region.holes,
+              extra: region.extra,
+            })
             .map((polygon) => polygon.map((ring) => ring.map(([x, y]) => [r(x), r(y)]))),
         }
       : {};
@@ -1424,6 +1444,9 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
         ...(region.is_sea && region.is_convoy_zone ? { is_convoy_zone: true } : {}),
       },
       polygon: region.polygon.map((p) => [r(p.x), r(p.y)]),
+      ...(region.holes && region.holes.length > 0
+        ? { holes: region.holes.map((ring) => ring.map((p) => [r(p.x), r(p.y)])) }
+        : {}),
       ...(region.extra && region.extra.length > 0
         ? { extra_polygons: region.extra.map((ring) => ring.map((p) => [r(p.x), r(p.y)])) }
         : {}),

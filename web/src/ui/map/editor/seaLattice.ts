@@ -1,14 +1,46 @@
-// An 8×8 lattice over the 800×504 world. A sea zone is a set of squares and diagonal wedges.
-// Dissolving them cancels every shared half-edge, so the saved cutter is an ordinary polygon the
-// land mask still clips with difference(cutter, land). The dateline stays two rings: x = 0 and
-// x = 800 are different vertices, so a Pacific zone does not draw a chord across the map.
+// An 8×8 lattice over the board. The default sheet is the 800×504 world. A loaded SVG uses its
+// viewBox, so a wider coast is not folded back onto itself at x = 800. A sea zone is a set of
+// squares and diagonal wedges. Dissolving them cancels every shared half-edge, so the saved cutter
+// is an ordinary polygon the land mask still clips with difference(cutter, land). The dateline
+// stays two rings: the left edge and the right edge of the sheet are different vertices.
 import { pointInPolygon, type Vec2 } from "../geometry";
 
 export const LATTICE = 8;
+/** Default sheet, used when a map has no board of its own. */
 export const MAP_W = 800;
 export const MAP_H = 504;
 export const LATTICE_COLS = MAP_W / LATTICE;
 export const LATTICE_ROWS = MAP_H / LATTICE;
+
+/** The rectangle the lattice wraps and paints. `x` and `y` are the sheet's origin. */
+export interface LatticeSheet {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const DEFAULT_LATTICE_SHEET: LatticeSheet = { x: 0, y: 0, w: MAP_W, h: MAP_H };
+
+/** A board rectangle, or the 800×504 sheet when the map has none. */
+export function latticeSheetFrom(bounds: { x?: unknown; y?: unknown; w?: unknown; h?: unknown } | null | undefined): LatticeSheet {
+  const w = Number(bounds?.w);
+  const h = Number(bounds?.h);
+  if (!(w > 0) || !(h > 0)) {
+    return DEFAULT_LATTICE_SHEET;
+  }
+  const x = Number(bounds?.x ?? 0);
+  const y = Number(bounds?.y ?? 0);
+  return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0, w, h };
+}
+
+export function latticeCols(sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): number {
+  return Math.max(1, Math.ceil((sheet.w - 1e-6) / LATTICE));
+}
+
+export function latticeRows(sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): number {
+  return Math.max(1, Math.ceil((sheet.h - 1e-6) / LATTICE));
+}
 
 export const WEDGES = ["N", "E", "S", "W"] as const;
 export type Wedge = (typeof WEDGES)[number];
@@ -26,7 +58,7 @@ export interface LatticeHit {
   col: number;
   row: number;
   part: LatticePart;
-  /** World x of the map copy under the pointer, a multiple of 800. Painting still stores col in 0..99. */
+  /** World x of the map copy under the pointer, a multiple of the sheet width. */
   originX: number;
 }
 
@@ -81,13 +113,15 @@ export function parseFill(raw: unknown): LatticeFill | null {
 }
 
 /** Drop cells that are out of the grid or empty. Later cells with the same col/row replace earlier ones. */
-export function normalizeCells(cells: readonly LatticeCell[]): LatticeCell[] {
+export function normalizeCells(cells: readonly LatticeCell[], sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeCell[] {
+  const cols = latticeCols(sheet);
+  const rows = latticeRows(sheet);
   const byKey = new Map<string, LatticeCell>();
   for (const cell of cells) {
     if (!Number.isInteger(cell.col) || !Number.isInteger(cell.row)) {
       continue;
     }
-    if (cell.col < 0 || cell.col >= LATTICE_COLS || cell.row < 0 || cell.row >= LATTICE_ROWS) {
+    if (cell.col < 0 || cell.col >= cols || cell.row < 0 || cell.row >= rows) {
       continue;
     }
     const fill = normalizeFill(cell.fill);
@@ -99,7 +133,7 @@ export function normalizeCells(cells: readonly LatticeCell[]): LatticeCell[] {
   return [...byKey.values()].sort((a, b) => a.row - b.row || a.col - b.col);
 }
 
-export function parseLatticeCells(raw: unknown): LatticeCell[] | undefined {
+export function parseLatticeCells(raw: unknown, sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeCell[] | undefined {
   if (!Array.isArray(raw)) {
     return undefined;
   }
@@ -117,16 +151,17 @@ export function parseLatticeCells(raw: unknown): LatticeCell[] | undefined {
     }
     cells.push({ col, row, fill });
   }
-  const normalized = normalizeCells(cells);
+  const normalized = normalizeCells(cells, sheet);
   return normalized.length > 0 ? normalized : undefined;
 }
 
-/** World x folded into [0, 800). The right edge of the map is the same seam as the left edge. */
-export function wrapMapX(x: number): number {
+/** World x folded into the sheet. The right edge is the same seam as the left edge. */
+export function wrapMapX(x: number, sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): number {
   if (!Number.isFinite(x)) {
-    return 0;
+    return sheet.x;
   }
-  return ((x % MAP_W) + MAP_W) % MAP_W;
+  const u = x - sheet.x;
+  return sheet.x + ((u % sheet.w) + sheet.w) % sheet.w;
 }
 
 function wedgeAt(lx: number, ly: number): Wedge {
@@ -148,24 +183,29 @@ function wedgeAt(lx: number, ly: number): Wedge {
   return "W";
 }
 
-/** The square or wedge under a world point. Y outside the map misses. X wraps the dateline. */
-export function latticeHit(x: number, y: number, triangle: boolean): LatticeHit | null {
-  if (!Number.isFinite(x) || !Number.isFinite(y) || y < 0 || y >= MAP_H) {
+/** The square or wedge under a world point. Y outside the sheet misses. X wraps the dateline. */
+export function latticeHit(x: number, y: number, triangle: boolean, sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeHit | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || y < sheet.y || y >= sheet.y + sheet.h) {
     return null;
   }
-  const wx = wrapMapX(x);
-  const col = Math.floor(wx / LATTICE);
-  const row = Math.floor(y / LATTICE);
-  if (col < 0 || col >= LATTICE_COLS || row < 0 || row >= LATTICE_ROWS) {
+  const wx = wrapMapX(x, sheet);
+  const col = Math.floor((wx - sheet.x) / LATTICE);
+  const row = Math.floor((y - sheet.y) / LATTICE);
+  if (col < 0 || col >= latticeCols(sheet) || row < 0 || row >= latticeRows(sheet)) {
     return null;
   }
-  const lx = wx - col * LATTICE;
-  const ly = y - row * LATTICE;
-  return { col, row, part: triangle ? wedgeAt(lx, ly) : "FULL", originX: Math.floor(x / MAP_W) * MAP_W };
+  const lx = wx - sheet.x - col * LATTICE;
+  const ly = y - sheet.y - row * LATTICE;
+  return {
+    col,
+    row,
+    part: triangle ? wedgeAt(lx, ly) : "FULL",
+    originX: sheet.x + Math.floor((x - sheet.x) / sheet.w) * sheet.w,
+  };
 }
 
 /** Samples a drag so a fast stroke still paints every cell it crosses. */
-export function hitsAlong(from: Vec2, to: Vec2, triangle: boolean): LatticeHit[] {
+export function hitsAlong(from: Vec2, to: Vec2, triangle: boolean, sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeHit[] {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const span = Math.hypot(dx, dy);
@@ -174,7 +214,7 @@ export function hitsAlong(from: Vec2, to: Vec2, triangle: boolean): LatticeHit[]
   let previous = "";
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const hit = latticeHit(from.x + dx * t, from.y + dy * t, triangle);
+    const hit = latticeHit(from.x + dx * t, from.y + dy * t, triangle, sheet);
     if (!hit) {
       continue;
     }
@@ -246,17 +286,17 @@ export function partTouches(rings: Vec2[][], col: number, row: number, part: Lat
 }
 
 /** Cells whose center sits inside `ring`, using the same even-odd rule as `pointInPolygon`. */
-function fillRingCenters(ring: Vec2[], cells: Map<string, LatticeFill>): void {
+function fillRingCenters(ring: Vec2[], cells: Map<string, LatticeFill>, sheet: LatticeSheet): void {
   let minY = Infinity;
   let maxY = -Infinity;
   for (const point of ring) {
     minY = Math.min(minY, point.y);
     maxY = Math.max(maxY, point.y);
   }
-  const row0 = Math.max(0, Math.floor(minY / LATTICE));
-  const row1 = Math.min(LATTICE_ROWS - 1, Math.floor((maxY - 1e-9) / LATTICE));
+  const row0 = Math.max(0, Math.floor((minY - sheet.y) / LATTICE));
+  const row1 = Math.min(latticeRows(sheet) - 1, Math.floor((maxY - sheet.y - 1e-9) / LATTICE));
   for (let row = row0; row <= row1; row++) {
-    const y = row * LATTICE + LATTICE / 2;
+    const y = sheet.y + row * LATTICE + LATTICE / 2;
     const xs: number[] = [];
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const a = ring[j];
@@ -269,13 +309,13 @@ function fillRingCenters(ring: Vec2[], cells: Map<string, LatticeFill>): void {
     }
     xs.sort((p, q) => p - q);
     for (let k = 0; k + 1 < xs.length; k += 2) {
-      let col = Math.floor(xs[k] / LATTICE);
-      const colEnd = Math.min(LATTICE_COLS - 1, Math.floor(xs[k + 1] / LATTICE));
+      let col = Math.floor((xs[k] - sheet.x) / LATTICE);
+      const colEnd = Math.min(latticeCols(sheet) - 1, Math.floor((xs[k + 1] - sheet.x) / LATTICE));
       for (; col <= colEnd; col++) {
         if (col < 0) {
           continue;
         }
-        const cx = col * LATTICE + LATTICE / 2;
+        const cx = sheet.x + col * LATTICE + LATTICE / 2;
         if (cx >= xs[k] && cx < xs[k + 1]) {
           cells.set(`${col},${row}`, "FULL");
         }
@@ -284,14 +324,21 @@ function fillRingCenters(ring: Vec2[], cells: Map<string, LatticeFill>): void {
   }
 }
 
-function visitSegment(x0: number, y0: number, x1: number, y1: number, visit: (col: number, row: number) => void): void {
+function visitSegment(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  sheet: LatticeSheet,
+  visit: (col: number, row: number) => void,
+): void {
   const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (LATTICE / 4)));
   let previous = "";
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const col = Math.floor((x0 + (x1 - x0) * t) / LATTICE);
-    const row = Math.floor((y0 + (y1 - y0) * t) / LATTICE);
-    if (col < 0 || row < 0 || col >= LATTICE_COLS || row >= LATTICE_ROWS) {
+    const col = Math.floor((x0 + (x1 - x0) * t - sheet.x) / LATTICE);
+    const row = Math.floor((y0 + (y1 - y0) * t - sheet.y) / LATTICE);
+    if (col < 0 || row < 0 || col >= latticeCols(sheet) || row >= latticeRows(sheet)) {
       continue;
     }
     const key = `${col},${row}`;
@@ -309,8 +356,9 @@ function visitSegment(x0: number, y0: number, x1: number, y1: number, visit: (co
  * A wedge on the outline counts when any part of it is inside, so a coast keeps its water. The land mask
  * still trims the coast when the map draws.
  */
-export function rasterizeRings(polygon: Vec2[], extra: Vec2[][] = []): LatticeCell[] {
-  const cached = rasterCache.get(polygon);
+export function rasterizeRings(polygon: Vec2[], extra: Vec2[][] = [], sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeCell[] {
+  const cacheable = sheet.w === MAP_W && sheet.h === MAP_H && sheet.x === 0 && sheet.y === 0;
+  const cached = cacheable ? rasterCache.get(polygon) : undefined;
   if (cached) {
     return cached;
   }
@@ -318,11 +366,11 @@ export function rasterizeRings(polygon: Vec2[], extra: Vec2[][] = []): LatticeCe
   const cells = new Map<string, LatticeFill>();
   const boundary = new Set<string>();
   for (const ring of rings) {
-    fillRingCenters(ring, cells);
+    fillRingCenters(ring, cells, sheet);
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i];
       const b = ring[(i + 1) % ring.length];
-      visitSegment(a.x, a.y, b.x, b.y, (col, row) => boundary.add(`${col},${row}`));
+      visitSegment(a.x, a.y, b.x, b.y, sheet, (col, row) => boundary.add(`${col},${row}`));
     }
   }
   for (const key of boundary) {
@@ -340,8 +388,11 @@ export function rasterizeRings(polygon: Vec2[], extra: Vec2[][] = []): LatticeCe
       const [col, row] = key.split(",").map(Number);
       return { col, row, fill };
     }),
+    sheet,
   );
-  rasterCache.set(polygon, result);
+  if (cacheable) {
+    rasterCache.set(polygon, result);
+  }
   return result;
 }
 
@@ -497,9 +548,9 @@ function vertexKey(x: number, y: number): string {
  * Cancel every internal half-edge and stitch what remains into rings.
  * The largest ring is `polygon`. Further pieces, including a second ring across the dateline, are `extra`.
  */
-export function dissolveLatticeCellsToRings(cells: readonly LatticeCell[]): LatticeRings {
+export function dissolveLatticeCellsToRings(cells: readonly LatticeCell[], sheet: LatticeSheet = DEFAULT_LATTICE_SHEET): LatticeRings {
   const counts = new Map<string, HalfEdge>();
-  for (const cell of normalizeCells(cells)) {
+  for (const cell of normalizeCells(cells, sheet)) {
     for (const part of partsOf(cell.fill)) {
       for (const edge of ringEdges(latticePartRing(cell.col, cell.row, part))) {
         const forward = edgeKey(edge);
@@ -598,7 +649,11 @@ export function dissolveLatticeCellsToRings(cells: readonly LatticeCell[]): Latt
   });
 
   const [polygon = [], ...extra] = rings;
-  return { polygon, extra };
+  if (sheet.x === 0 && sheet.y === 0) {
+    return { polygon, extra };
+  }
+  const shift = (ring: Vec2[]) => ring.map((p) => ({ x: p.x + sheet.x, y: p.y + sheet.y }));
+  return { polygon: shift(polygon), extra: extra.map(shift) };
 }
 
 /** Larger cross product first (the turn the square's own corners take), then the straighter continuation. */
@@ -637,22 +692,30 @@ export interface LatticeZone {
  * Paint or erase `hits` on `targetId`. A painted wedge is taken off every other zone first,
  * so two sea zones share the cut and do not overlap.
  */
-export function editLatticeZones(zones: readonly LatticeZone[], targetId: string, hits: readonly LatticeHit[], erase: boolean): LatticeZone[] {
+export function editLatticeZones(
+  zones: readonly LatticeZone[],
+  targetId: string,
+  hits: readonly LatticeHit[],
+  erase: boolean,
+  sheet: LatticeSheet = DEFAULT_LATTICE_SHEET,
+): LatticeZone[] {
+  const cols = latticeCols(sheet);
+  const rows = latticeRows(sheet);
   const maps = new Map<string, Map<string, LatticeCell>>();
   for (const zone of zones) {
     const cells = new Map<string, LatticeCell>();
-    for (const cell of normalizeCells(zone.cells)) {
+    for (const cell of normalizeCells(zone.cells, sheet)) {
       cells.set(`${cell.col},${cell.row}`, cell);
     }
     maps.set(zone.id, cells);
   }
   const target = maps.get(targetId);
   if (!target) {
-    return zones.map((zone) => ({ id: zone.id, cells: normalizeCells(zone.cells) }));
+    return zones.map((zone) => ({ id: zone.id, cells: normalizeCells(zone.cells, sheet) }));
   }
 
   for (const hit of hits) {
-    if (hit.col < 0 || hit.col >= LATTICE_COLS || hit.row < 0 || hit.row >= LATTICE_ROWS) {
+    if (hit.col < 0 || hit.col >= cols || hit.row < 0 || hit.row >= rows) {
       continue;
     }
     const key = `${hit.col},${hit.row}`;
@@ -690,7 +753,7 @@ export function editLatticeZones(zones: readonly LatticeZone[], targetId: string
 
   return zones.map((zone) => {
     const cells = maps.get(zone.id);
-    return { id: zone.id, cells: cells ? normalizeCells([...cells.values()]) : [] };
+    return { id: zone.id, cells: cells ? normalizeCells([...cells.values()], sheet) : [] };
   });
 }
 

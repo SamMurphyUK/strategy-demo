@@ -1381,9 +1381,11 @@ export function App() {
           }}
           onWorld={(svg) => {
             editor.openBlank(1810, 913, false);
-            if (editor.openCoastSvg(svg)) {
+            const problem = editor.openCoastSvg(svg);
+            if (problem === "") {
               setBoardGate(false);
             }
+            return problem;
           }}
           onDemo={() => {
             editor.resetToDemo();

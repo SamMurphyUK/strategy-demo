@@ -27,6 +27,8 @@ interface Box {
 export interface ClipInput {
   id: string;
   points: Vec2[];
+  /** Rings cut out of `points` (a lake, or the land inside a sea zone). Not other islands. */
+  holes?: Vec2[][];
   /** Further outlines of the same region (an archipelago's other islands). Disjoint from `points`. */
   extra?: Vec2[][];
   type: "land" | "sea";
@@ -50,26 +52,177 @@ function boxesOverlap(a: Box, b: Box): boolean {
   return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0;
 }
 
+/** SVG fill-rule. The default in the spec, and on the world sheet, is nonzero. */
+export type FillRule = "nonzero" | "evenodd";
+
+function signedRingArea(ring: Ring): number {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return a / 2;
+}
+
+function pointInRing(x: number, y: number, ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** A point strictly inside the ring, so containment is not decided on a vertex. */
+function interiorPoint(ring: Ring): [number, number] {
+  let x = 0;
+  let y = 0;
+  for (const p of ring) {
+    x += p[0];
+    y += p[1];
+  }
+  const c: [number, number] = [x / ring.length, y / ring.length];
+  if (pointInRing(c[0], c[1], ring)) {
+    return c;
+  }
+  const sign = signedRingArea(ring) >= 0 ? 1 : -1;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) {
+      continue;
+    }
+    // Left of the edge is inward for a CCW ring.
+    const px = (a[0] + b[0]) / 2 + (-dy / len) * 0.25 * sign;
+    const py = (a[1] + b[1]) / 2 + (dx / len) * 0.25 * sign;
+    if (pointInRing(px, py, ring)) {
+      return [px, py];
+    }
+  }
+  return c;
+}
+
+function orientRing(ring: Ring, want: 1 | -1): Ring {
+  const sign = signedRingArea(ring) >= 0 ? 1 : -1;
+  return sign === want ? ring : [...ring].reverse();
+}
+
+/** Even-odd: every other nested ring is a hole, which is what xor of the sub-paths produces. */
+function evenoddPolygons(rings: Ring[]): MultiPolygon {
+  if (rings.length === 1) {
+    return [[rings[0]]];
+  }
+  const [first, ...rest] = rings.map((r): Polygon => [r]);
+  return polygonClipping.xor(first, ...rest);
+}
+
 /**
- * The land SVG as one MultiPolygon. Each <path> is one landmass; its sub-paths are combined with
- * even-odd (xor), which is what nonzero fill gives for lakes drawn with opposite winding. Different
- * paths are separate landmasses and are kept side by side.
+ * Nonzero: a nested ring is a hole only when the winding inside it falls to zero.
+ * A same-winding ring stays filled. An opposite-winding ring is a hole. An island in that hole
+ * is its own polygon. Outers are CCW and holes are CW, so an evenodd fill of the result matches.
  */
-export function landFromPathData(data: string[]): MultiPolygon {
+function nonzeroPolygons(rings: Ring[]): MultiPolygon {
+  if (rings.length === 1) {
+    return [[rings[0]]];
+  }
+  interface Node {
+    ring: Ring;
+    sign: 1 | -1;
+    abs: number;
+    parent: number;
+    inside: number;
+  }
+  const nodes: Node[] = [];
+  for (const ring of rings) {
+    const area = signedRingArea(ring);
+    if (Math.abs(area) < 1e-8) {
+      continue;
+    }
+    nodes.push({ ring, sign: area >= 0 ? 1 : -1, abs: Math.abs(area), parent: -1, inside: 0 });
+  }
+  if (nodes.length === 0) {
+    return [];
+  }
+  if (nodes.length === 1) {
+    return [[nodes[0].ring]];
+  }
+  const sample = nodes.map((n) => interiorPoint(n.ring));
+  for (let i = 0; i < nodes.length; i++) {
+    let parent = -1;
+    let parentAbs = Infinity;
+    for (let j = 0; j < nodes.length; j++) {
+      if (i === j || nodes[j].abs <= nodes[i].abs) {
+        continue;
+      }
+      if (nodes[j].abs < parentAbs && pointInRing(sample[i][0], sample[i][1], nodes[j].ring)) {
+        parent = j;
+        parentAbs = nodes[j].abs;
+      }
+    }
+    nodes[i].parent = parent;
+  }
+  const order = nodes.map((_, i) => i).sort((a, b) => nodes[b].abs - nodes[a].abs);
+  for (const i of order) {
+    const outside = nodes[i].parent < 0 ? 0 : nodes[nodes[i].parent].inside;
+    nodes[i].inside = outside + nodes[i].sign;
+  }
+  const polygons: MultiPolygon = [];
+  const owned = new Map<number, Polygon>();
+  for (const i of order) {
+    const outside = nodes[i].parent < 0 ? 0 : nodes[nodes[i].parent].inside;
+    const inside = outside + nodes[i].sign;
+    if (outside === 0 && inside !== 0) {
+      const poly: Polygon = [orientRing(nodes[i].ring, 1)];
+      polygons.push(poly);
+      owned.set(i, poly);
+    } else if (outside !== 0 && inside === 0) {
+      let a = nodes[i].parent;
+      while (a >= 0 && !owned.has(a)) {
+        a = nodes[a].parent;
+      }
+      if (a >= 0) {
+        owned.get(a)!.push(orientRing(nodes[i].ring, -1));
+      }
+    }
+  }
+  return polygons;
+}
+
+/**
+ * The land SVG as one MultiPolygon. Each path is its own landmass. `evenodd` (the default, so the
+ * existing suites stay) xors sub-paths. `nonzero` follows the SVG rule: a same-winding nested ring
+ * stays filled, and only a winding that falls to zero becomes a hole. Different paths stay side by side.
+ */
+export function landFromPathData(data: string[], rule: FillRule = "evenodd"): MultiPolygon {
   const land: MultiPolygon = [];
   for (const d of data) {
-    const rings = parsePathRings(d);
+    const rings = parsePathRings(d).filter((r) => r.length >= 3);
     if (rings.length === 0) {
       continue;
     }
-    if (rings.length === 1) {
-      land.push([rings[0]]);
-    } else {
-      const [first, ...rest] = rings.map((r): Polygon => [r]);
-      land.push(...polygonClipping.xor(first, ...rest));
-    }
+    land.push(...(rule === "nonzero" ? nonzeroPolygons(rings) : evenoddPolygons(rings)));
   }
   return land;
+}
+
+/** The polygons as one SVG path. Fill and clip it with evenodd: holes are their own sub-paths. */
+export function multiPolygonPathData(mp: MultiPolygon): string {
+  const parts: string[] = [];
+  for (const poly of mp) {
+    for (const ring of poly) {
+      if (ring.length < 3) {
+        continue;
+      }
+      const cmds = ring.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(2)} ${p[1].toFixed(2)}`);
+      parts.push(`${cmds.join(" ")} Z`);
+    }
+  }
+  return parts.join(" ");
 }
 
 /** Even-odd containment across every ring of every polygon: the same answer as a canvas evenodd fill. */
@@ -110,7 +263,7 @@ export function multiPolygonArea(mp: MultiPolygon): number {
 
 const keyOfPoints = (points: Vec2[]) => points.map((p) => `${p.x},${p.y}`).join(" ");
 const keyOf = (region: ClipInput) =>
-  `${region.type}|${keyOfPoints(region.points)}${(region.extra ?? []).map((e) => `|${keyOfPoints(e)}`).join("")}`;
+  `${region.type}|${keyOfPoints(region.points)}|h${(region.holes ?? []).map((h) => keyOfPoints(h)).join("/")}|e${(region.extra ?? []).map((e) => keyOfPoints(e)).join("/")}`;
 
 export class RegionClipper {
   private readonly parts: { poly: Polygon; box: Box }[];
@@ -132,12 +285,14 @@ export class RegionClipper {
     if (ring.length < 3) {
       return [];
     }
-    const rings: Ring[] = [
-      ring,
-      ...(region.extra ?? []).filter((e) => e.length >= 3).map((e): Ring => e.map((p): Pair => [p.x, p.y])),
-    ];
-    const subject: MultiPolygon = rings.map((r): Polygon => [r]);
-    const boxes = rings.map(ringBox);
+    const holes: Ring[] = (region.holes ?? [])
+      .filter((h) => h.length >= 3)
+      .map((h): Ring => h.map((p): Pair => [p.x, p.y]));
+    const extra: Ring[] = (region.extra ?? [])
+      .filter((e) => e.length >= 3)
+      .map((e): Ring => e.map((p): Pair => [p.x, p.y]));
+    const subject: MultiPolygon = [[ring, ...holes], ...extra.map((r): Polygon => [r])];
+    const boxes = [ring, ...holes, ...extra].map(ringBox);
     const near = this.near({
       x0: Math.min(...boxes.map((b) => b.x0)),
       y0: Math.min(...boxes.map((b) => b.y0)),

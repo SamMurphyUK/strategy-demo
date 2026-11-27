@@ -6,6 +6,7 @@ import { isLandAt } from "../hitTest";
 import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
 import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring, uncoveredLand } from "../regionClip";
+import { flattenLandSvg } from "../landSvg";
 import { parseLandSvg, type MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
 import { blankEditorMap, boardFrame } from "./blankMap";
@@ -99,6 +100,7 @@ import {
   LOOP_MIN_PX,
   masterBlocks,
   mergeRegions,
+  outlineForCut,
   separateBlockedPieces,
   type PreparedStroke,
   prepareClicks,
@@ -112,8 +114,10 @@ import {
   hitsAlong,
   latticeAnchor,
   latticeHit,
+  latticeSheetFrom,
   partTouches,
   rasterizeRings,
+  type LatticeSheet,
   type LatticeCell,
   type LatticeHit,
   type LatticeRings,
@@ -304,8 +308,8 @@ export interface MapEditor {
   downloadLandmassSvg(): void;
   /** Leave Landmass. A new or changed coast is baked and becomes the blocks the knife slices. */
   enterCutting(): void;
-  /** Read a landmass SVG, install it as the coast, and open Cut. False when the file cannot be sliced. */
-  openCoastSvg(text: string): boolean;
+  /** Read a landmass SVG, install it as the coast, and open Cut. Empty when it opened; otherwise the reason. */
+  openCoastSvg(text: string): string;
 }
 
 function anchorForLattice(region: EditorRegion, rings: LatticeRings, land: MasterLand | null): Vec2 {
@@ -343,8 +347,12 @@ function addEmptySeaZone(map: EditorMap): { map: EditorMap; id: string } {
   return { map: { ...map, regions: [...map.regions, region] }, id };
 }
 
+function sheetOfMap(map: EditorMap): LatticeSheet {
+  return latticeSheetFrom(boardFrame(map));
+}
+
 /** A hand-drawn sea zone joins the lattice once a stroke reaches it, so the stroke can carve it. */
-function latticeCellsOf(region: EditorRegion, targetId: string, hits: LatticeHit[]): LatticeCell[] {
+function latticeCellsOf(region: EditorRegion, targetId: string, hits: LatticeHit[], sheet: LatticeSheet): LatticeCell[] {
   if (region.lattice && region.lattice.length > 0) {
     return region.lattice;
   }
@@ -353,7 +361,7 @@ function latticeCellsOf(region: EditorRegion, targetId: string, hits: LatticeHit
   }
   const rings = [region.polygon, ...(region.extra ?? [])].filter((ring) => ring.length >= 3);
   const reached = region.id === targetId || hits.some((hit) => partTouches(rings, hit.col, hit.row, hit.part));
-  return reached ? rasterizeRings(region.polygon, region.extra ?? []) : [];
+  return reached ? rasterizeRings(region.polygon, region.extra ?? [], sheet) : [];
 }
 
 /**
@@ -367,12 +375,13 @@ function paintSeaLatticeMap(
   erase: boolean,
   land: MasterLand | null,
   final: boolean,
+  sheet: LatticeSheet,
 ): EditorMap {
   // The preview paints only the target. Carving the zones around it waits for release.
   const zones = base.regions
     .filter((region) => region.is_sea && (final || region.id === targetId))
-    .map((region) => ({ id: region.id, cells: latticeCellsOf(region, targetId, hits) }));
-  const edited = editLatticeZones(zones, targetId, hits, erase);
+    .map((region) => ({ id: region.id, cells: latticeCellsOf(region, targetId, hits, sheet) }));
+  const edited = editLatticeZones(zones, targetId, hits, erase, sheet);
   let next = base;
   for (const zone of edited) {
     const region = findRegion(next, zone.id);
@@ -383,7 +392,7 @@ function paintSeaLatticeMap(
     if (JSON.stringify(before) === JSON.stringify(zone.cells)) {
       continue;
     }
-    const rings = dissolveLatticeCellsToRings(zone.cells);
+    const rings = dissolveLatticeCellsToRings(zone.cells, sheet);
     const anchor =
       rings.polygon.length < 3
         ? { x: region.cx, y: region.cy }
@@ -723,7 +732,7 @@ export function useMapEditor(
           : splitPolygonInto(ring, cut.line, { reach: KNIFE_REACH_PX * scale, ends: cut.ends });
       search: for (const candidate of order) {
         // A territory's main island first, then its other islands.
-        const rings = [candidate.polygon, ...(candidate.extra ?? [])];
+        const rings = [outlineForCut(candidate.polygon, candidate.holes), ...(candidate.extra ?? [])];
         for (let k = 0; k < rings.length; k++) {
           const result = attempt(rings[k]);
           if (result.ok) {
@@ -1536,8 +1545,8 @@ export function useMapEditor(
       onLandmaskRef.current?.(master);
       live.current = { ...live.current, land: master };
       const clipper = clipperFor(master.polygons);
-      const landFound = masterBlocks([], master.viewBox, "land", clipper);
-      const seaFound = masterBlocks([], master.viewBox, "sea", clipper);
+      const landFound = masterBlocks([], master.viewBox, "land", clipper, { bridge: false });
+      const seaFound = masterBlocks([], master.viewBox, "sea", clipper, { bridge: false });
       if (landFound.blocks.length === 0) {
         setStatus("That coast produced no land to slice.");
         return false;
@@ -1559,15 +1568,17 @@ export function useMapEditor(
         },
       };
       const landAnchors = landFound.blocks.map(
-        (polygon) => anchorFor(clipper.clip({ id: "landmass", type: "land", points: polygon })) ?? labelPoint(polygon),
+        (polygon, i) =>
+          anchorFor(clipper.clip({ id: "landmass", type: "land", points: polygon, holes: landFound.holes[i] })) ?? labelPoint(polygon),
       );
-      const addedLand = addBlocks(next, landFound.blocks, false, landAnchors);
+      const addedLand = addBlocks(next, landFound.blocks, false, landAnchors, landFound.holes);
       next = addedLand.map;
       const seaAnchors = seaFound.blocks.map(
-        (polygon) => anchorFor(clipper.clip({ id: "landmass", type: "sea", points: polygon })) ?? labelPoint(polygon),
+        (polygon, i) =>
+          anchorFor(clipper.clip({ id: "landmass", type: "sea", points: polygon, holes: seaFound.holes[i] })) ?? labelPoint(polygon),
       );
-      const addedSea = addBlocks(next, seaFound.blocks, true, seaAnchors);
-      next = withAutoLinks(addedSea.map).map;
+      const addedSea = addBlocks(next, seaFound.blocks, true, seaAnchors, seaFound.holes);
+      next = addedSea.map;
       commit(next);
       sculptSvgRef.current = svg;
       setSculptSvg(svg);
@@ -1586,7 +1597,7 @@ export function useMapEditor(
       );
       return true;
     },
-    [commit, withAutoLinks],
+    [commit],
   );
 
   const enterCutting = useCallback(() => {
@@ -1613,18 +1624,21 @@ export function useMapEditor(
   }, [currentSvg, installCoast]);
 
   const openCoastSvg = useCallback(
-    (text: string): boolean => {
+    (text: string): string => {
+      const lined = flattenLandSvg(text);
       let imported: DraftShape[];
       try {
-        parseLandSvg(text);
-        imported = shapesFromSvg(text).map((shape) => ({ ...shape, id: nextShapeId() }));
+        parseLandSvg(lined);
+        imported = shapesFromSvg(lined).map((shape) => ({ ...shape, id: nextShapeId() }));
       } catch (err) {
-        setStatus(err instanceof Error ? err.message : "That SVG could not be read.");
-        return false;
+        const message = err instanceof Error ? err.message : "That SVG could not be read.";
+        setStatus(message);
+        return message;
       }
       if (imported.length === 0) {
-        setStatus("That SVG has no closed paths.");
-        return false;
+        const message = "That SVG has no closed paths.";
+        setStatus(message);
+        return message;
       }
       sculptPast.current = [...sculptPast.current, shapesRef.current.map(copyShape)].slice(-40);
       sculptFuture.current = [];
@@ -1632,9 +1646,12 @@ export function useMapEditor(
       setSculptShapes(imported);
       setSculptSelectedId(imported[0].id);
       setSculptDraft([]);
-      sculptSvgRef.current = text;
-      setSculptSvg(text);
-      return installCoast(text);
+      sculptSvgRef.current = lined;
+      setSculptSvg(lined);
+      if (!installCoast(lined)) {
+        return "That SVG could not be sliced.";
+      }
+      return "";
     },
     [installCoast],
   );
@@ -1857,7 +1874,10 @@ export function useMapEditor(
         pruneIds: boxIds,
         slots: selectedSlots,
         uncovered: showUncovered ? uncovered : null,
-        lattice: tool === "lattice" && layer === "sea" ? { brush: latticeBrush, shift: latticeShift, hover: latticeHover } : null,
+        lattice:
+          tool === "lattice" && layer === "sea"
+            ? { brush: latticeBrush, shift: latticeShift, hover: latticeHover, sheet: sheetOfMap(docRef.current.map) }
+            : null,
         sculpt: sculpting
           ? { tool: sculptTool, shapes: sculptShapes, selectedId: sculptSelectedId, draft: sculptDraft }
           : null,
@@ -2082,7 +2102,7 @@ export function useMapEditor(
         const t = live.current.tool;
         if (t === "lattice") {
           const triangle = live.current.latticeBrush === "triangle" || live.current.latticeShift;
-          const hit = world && live.current.layer === "sea" ? latticeHit(world.x, world.y, triangle) : null;
+          const hit = world && live.current.layer === "sea" ? latticeHit(world.x, world.y, triangle, sheetOfMap(docRef.current.map)) : null;
           setLatticeHover((prev) => {
             if (!hit && !prev) {
               return prev;
@@ -2301,7 +2321,7 @@ export function useMapEditor(
           latticeStroke.current = stroke;
         }
         const triangle = brush === "triangle" || mods.shift || shiftDown;
-        const hover = latticeHit(world.x, world.y, triangle);
+        const hover = latticeHit(world.x, world.y, triangle, sheetOfMap(docRef.current.map));
         setLatticeHover((prev) => {
           if (!hover && !prev) {
             return prev;
@@ -2312,7 +2332,7 @@ export function useMapEditor(
           return hover;
         });
         const seen = new Set(stroke.hits.map((hit) => `${hit.col},${hit.row},${hit.part}`));
-        for (const hit of hitsAlong(stroke.last, world, triangle)) {
+        for (const hit of hitsAlong(stroke.last, world, triangle, sheetOfMap(docRef.current.map))) {
           const key = `${hit.col},${hit.row},${hit.part}`;
           if (seen.has(key)) {
             continue;
@@ -2329,7 +2349,7 @@ export function useMapEditor(
               if (latticeStroke.current !== active) {
                 return;
               }
-              const preview = paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, false);
+              const preview = paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, false, sheetOfMap(active.start));
               apply({ ...docRef.current, map: preview });
             });
           }
@@ -2341,7 +2361,9 @@ export function useMapEditor(
         }
         latticeStroke.current = null;
         const next =
-          active.hits.length > 0 ? paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, true) : active.start;
+          active.hits.length > 0
+            ? paintSeaLatticeMap(active.start, active.targetId, active.hits, active.erase, mask, true, sheetOfMap(active.start))
+            : active.start;
         const cur = docRef.current;
         if (next === active.start) {
           apply({ ...cur, map: active.base });

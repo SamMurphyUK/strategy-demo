@@ -194,7 +194,7 @@ export function lineCanvas(bounds: Rect, land: MasterLand | null, shapes: readon
   ctx.lineCap = "round";
   ctx.save();
   if (land) {
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
   }
   const all = segmentsPath(sharedEdges(shapes.map((item) => item.shape), seam, 2));
   const friendly = friendlyBorders(shapes, seam);
@@ -236,7 +236,7 @@ export function frontCanvas(bounds: Rect, land: MasterLand | null, frontlines: r
   ctx.lineCap = "round";
   ctx.save();
   if (land) {
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
   }
   const path = segmentsPath(frontlines.map((segment): Segment => [segment.x1, segment.y1, segment.x2, segment.y2]));
   ctx.lineWidth = FRONT_FLANK_WIDTH;

@@ -11,7 +11,7 @@
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { MILITARY } from "../theme/militaryPalette";
 import { isLandAt } from "./hitTest";
-import { LATTICE, LATTICE_COLS, LATTICE_ROWS, latticePartRing, MAP_H, MAP_W } from "./editor/seaLattice";
+import { DEFAULT_LATTICE_SHEET, LATTICE, latticeCols, latticePartRing, latticeRows, type LatticeSheet } from "./editor/seaLattice";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
 import {
@@ -315,7 +315,7 @@ function landRegionsOf(s: TerrainScene): RegionShape[] {
 /** The continent silhouette the cliff is extruded from. The master coast when it has loaded. */
 function fillLandSilhouette(ctx: CanvasRenderingContext2D, s: TerrainScene): void {
   if (s.land) {
-    ctx.fill(s.land.masterLandPath);
+    ctx.fill(s.land.masterLandPath, "evenodd");
     return;
   }
   for (const region of landRegionsOf(s)) {
@@ -423,7 +423,7 @@ function drawTiltedCliffs(ctx: CanvasRenderingContext2D, s: TerrainScene, bleed:
 
   ctx.save();
   if (s.land) {
-    ctx.clip(s.land.masterLandPath);
+    ctx.clip(s.land.masterLandPath, "evenodd");
   } else {
     const cover = new Path2D();
     for (const region of landRegions) {
@@ -747,7 +747,7 @@ export function shoreStencilFor(scene: TerrainScene): ShoreStencil | null {
 function fillLandWash(ctx: CanvasRenderingContext2D, s: TerrainScene, color: string): void {
   ctx.fillStyle = color;
   if (s.land) {
-    ctx.fill(s.land.masterLandPath);
+    ctx.fill(s.land.masterLandPath, "evenodd");
     return;
   }
   for (const region of s.regions) {
@@ -1023,7 +1023,7 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
     fillLandWash(ctx, s, LAND_WASH);
     ctx.save();
     if (land && !s.exact) {
-      ctx.clip(land.masterLandPath);
+      ctx.clip(land.masterLandPath, "evenodd");
     }
     for (const region of s.regions) {
       const path = s.paths.get(region.id);
@@ -2121,6 +2121,8 @@ export interface EditorOverlay {
     brush: "square" | "triangle";
     shift: boolean;
     hover: { col: number; row: number; part: "FULL" | "N" | "E" | "S" | "W"; originX: number } | null;
+    /** The board the grid wraps on. Absent means the 800×504 sheet. */
+    sheet?: LatticeSheet;
   } | null;
   /** Draft landmass shapes, drawn above the regions while that layer is open. */
   sculpt?: {
@@ -2185,6 +2187,9 @@ function drawSeaLattice(
   lattice: NonNullable<EditorOverlay["lattice"]>,
 ): void {
   const { view } = scene;
+  const sheet = lattice.sheet ?? DEFAULT_LATTICE_SHEET;
+  const cols = latticeCols(sheet);
+  const rows = latticeRows(sheet);
   const px = 1 / view.k;
   const x0 = view.x;
   const x1 = view.x + scene.width / view.k;
@@ -2196,21 +2201,21 @@ function drawSeaLattice(
   ctx.lineWidth = px;
   ctx.strokeStyle = "rgba(184, 148, 90, 0.45)";
   ctx.beginPath();
-  for (let col = 0; col <= LATTICE_COLS; col++) {
-    const x = col * LATTICE;
-    for (const shift of [-MAP_W, 0, MAP_W]) {
+  for (let col = 0; col <= cols; col++) {
+    const x = sheet.x + col * LATTICE;
+    for (const shift of [-sheet.w, 0, sheet.w]) {
       const gx = x + shift;
       if (gx < x0 - LATTICE || gx > x1 + LATTICE) {
         continue;
       }
-      ctx.moveTo(gx, Math.max(y0, 0));
-      ctx.lineTo(gx, Math.min(y1, MAP_H));
+      ctx.moveTo(gx, Math.max(y0, sheet.y));
+      ctx.lineTo(gx, Math.min(y1, sheet.y + sheet.h));
     }
   }
-  const rowTop = Math.max(0, Math.floor(y0 / LATTICE));
-  const rowBottom = Math.min(LATTICE_ROWS, Math.ceil(y1 / LATTICE));
+  const rowTop = Math.max(0, Math.floor((y0 - sheet.y) / LATTICE));
+  const rowBottom = Math.min(rows, Math.ceil((y1 - sheet.y) / LATTICE));
   for (let row = rowTop; row <= rowBottom; row++) {
-    const y = row * LATTICE;
+    const y = sheet.y + row * LATTICE;
     ctx.moveTo(x0, y);
     ctx.lineTo(x1, y);
   }
@@ -2219,14 +2224,14 @@ function drawSeaLattice(
   if (diagonals) {
     ctx.strokeStyle = "rgba(184, 148, 90, 0.28)";
     ctx.beginPath();
-    const colStart = Math.floor(x0 / LATTICE) - 1;
-    const colEnd = Math.ceil(x1 / LATTICE) + 1;
-    const rowStart = Math.max(0, Math.floor(y0 / LATTICE) - 1);
-    const rowEnd = Math.min(LATTICE_ROWS - 1, Math.ceil(y1 / LATTICE));
+    const colStart = Math.floor((x0 - sheet.x) / LATTICE) - 1;
+    const colEnd = Math.ceil((x1 - sheet.x) / LATTICE) + 1;
+    const rowStart = Math.max(0, Math.floor((y0 - sheet.y) / LATTICE) - 1);
+    const rowEnd = Math.min(rows - 1, Math.ceil((y1 - sheet.y) / LATTICE));
     for (let col = colStart; col <= colEnd; col++) {
       for (let row = rowStart; row <= rowEnd; row++) {
-        const gx = col * LATTICE;
-        const gy = row * LATTICE;
+        const gx = sheet.x + col * LATTICE;
+        const gy = sheet.y + row * LATTICE;
         ctx.moveTo(gx, gy);
         ctx.lineTo(gx + LATTICE, gy + LATTICE);
         ctx.moveTo(gx + LATTICE, gy);
@@ -2333,23 +2338,55 @@ function drawSculptLayer(
   setScreenTransform(ctx, scene.dpr);
 }
 
+/** The coast of a ring, leaving out a hole bridge (the same edge traced there and back). */
+function traceCoast(ctx: CanvasRenderingContext2D, ring: Vec2[]): void {
+  const n = ring.length;
+  if (n < 2) return;
+  const key = (a: Vec2, b: Vec2) => {
+    const pa = `${a.x.toFixed(3)},${a.y.toFixed(3)}`;
+    const pb = `${b.x.toFixed(3)},${b.y.toFixed(3)}`;
+    return pa < pb ? `${pa}|${pb}` : `${pb}|${pa}`;
+  };
+  const count = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    const k = key(ring[i], ring[(i + 1) % n]);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  let pen = false;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    if ((count.get(key(a, b)) ?? 0) >= 2) {
+      pen = false;
+      continue;
+    }
+    if (!pen) {
+      ctx.moveTo(a.x, a.y);
+      pen = true;
+    }
+    ctx.lineTo(b.x, b.y);
+  }
+}
+
 export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainScene, editor: EditorOverlay): void {
   const { view, dpr } = scene;
   const px = 1 / view.k;
   const active = (type: "land" | "sea") => type === editor.layer;
 
   // Full rough outlines (including the parts the land mask hides) so the slicing is visible.
+  // A hole bridge is the same edge traced there and back. It is not a coast, so it is not stroked.
   setWorldTransform(ctx, view, dpr);
   ctx.lineJoin = "round";
   ctx.lineWidth = px;
   ctx.setLineDash([2 * px, 3 * px]);
   ctx.strokeStyle = "rgba(75, 61, 68, 0.55)";
   for (const region of editor.regions) {
-    const path = editor.paths.get(region.id);
-    if (path) {
-      ctx.globalAlpha = active(region.type) ? 1 : 0.35;
-      ctx.stroke(path);
-    }
+    ctx.globalAlpha = active(region.type) ? 1 : 0.35;
+    ctx.beginPath();
+    traceCoast(ctx, region.points);
+    for (const ring of region.holes ?? []) traceCoast(ctx, ring);
+    for (const ring of region.extra ?? []) traceCoast(ctx, ring);
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
 
@@ -2389,7 +2426,7 @@ export function drawEditorOverlay(ctx: CanvasRenderingContext2D, scene: TerrainS
     }
   }
 
-  // Neighbor links, dotted, colour-coded.
+  // Neighbor links, dotted, colour-coded. Import leaves this empty. Calculate Neighbors fills it.
   ctx.lineCap = "round";
   ctx.lineWidth = 2 * px;
   ctx.setLineDash([0.1 * px, 5 * px]);

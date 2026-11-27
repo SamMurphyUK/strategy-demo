@@ -3,6 +3,26 @@ import { isDict } from "../../../engine/model/types";
 import type { MapVersion } from "./mapVersions";
 import { editorFromMapJson, type EditorMap } from "./editorModel";
 import { projectMapJson } from "../map_space";
+import demoMapUrl from "../../../../../demomap01.json?url";
+import global1940Url from "../../../../../demomap_global_1940.json?url";
+
+/** Land coasts in `web/public/assets`. Unit drawings are not maps. */
+const LAND_SVGS = [
+  { name: "world_global.svg", url: "assets/world_global.svg" },
+  { name: "ne_110m_land_FINAL_02.svg", url: "assets/ne_110m_land_FINAL_02.svg" },
+  { name: "ne_110m_land_FINAL.svg", url: "assets/ne_110m_land_FINAL.svg" },
+  { name: "ne_110m_land_adjsut.svg", url: "assets/ne_110m_land_adjsut.svg" },
+] as const;
+
+/** Scenario maps that ship with the game. `demo` is the map the editor already has loaded. */
+const GAME_SCENARIOS = [
+  { name: "demomap01.json", url: demoMapUrl, demo: true },
+  { name: "demomap_global_1940.json", url: global1940Url, demo: false },
+] as const;
+
+function assetUrl(path: string): string {
+  return `${import.meta.env.BASE_URL}${path}`;
+}
 
 export function EditorStart({
   versions,
@@ -15,7 +35,8 @@ export function EditorStart({
 }: {
   versions: MapVersion[];
   onBlank(width: number, height: number, referenceUrl: string | null, emptyOcean: boolean): void;
-  onWorld(svg: string): void;
+  /** Install an SVG coast. Empty when it opened; otherwise the reason. */
+  onWorld(svg: string): string;
   onDemo(): void;
   onVersion(id: string): void;
   onMap(map: EditorMap): void;
@@ -27,6 +48,7 @@ export function EditorStart({
   const [referenceName, setReferenceName] = useState("");
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [opening, setOpening] = useState("");
 
   const readReference = (file: File | undefined) => {
     if (!file) {
@@ -42,23 +64,74 @@ export function EditorStart({
     reader.readAsDataURL(file);
   };
 
-  const openWorld = () => {
+  const openSvgText = (name: string, text: string) => {
+    if (!text.includes("<path")) {
+      setOpening("");
+      setError(`${name} has no coast to slice.`);
+      return;
+    }
+    setOpening(name);
+    // Let the label paint before the coast is built. A large SVG holds the page for a moment.
+    requestAnimationFrame(() => {
+      const problem = onWorld(text);
+      setOpening("");
+      if (problem !== "") {
+        setError(problem);
+      }
+    });
+  };
+
+  const openSvgUrl = (name: string, url: string) => {
     setError("");
-    const url = `${import.meta.env.BASE_URL}assets/world_global.svg`;
+    setOpening(name);
     void fetch(url)
       .then(async (res) => {
         if (!res.ok) {
-          setError("The world map did not load.");
+          setOpening("");
+          setError(`${name} did not load.`);
           return;
         }
-        const text = await res.text();
-        if (!text.includes("<path")) {
-          setError("The world map did not load.");
-          return;
-        }
-        onWorld(text);
+        openSvgText(name, await res.text());
       })
-      .catch(() => setError("The world map did not load."));
+      .catch(() => {
+        setOpening("");
+        setError(`${name} did not load.`);
+      });
+  };
+
+  const readSvg = (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    setError("");
+    void file.text().then(
+      (text) => openSvgText(file.name, text),
+      () => setError(`${file.name} could not be read.`),
+    );
+  };
+
+  const openScenarioUrl = (name: string, url: string) => {
+    setError("");
+    setOpening(name);
+    void fetch(url)
+      .then(async (res) => {
+        if (!res.ok) {
+          setOpening("");
+          setError(`${name} did not load.`);
+          return;
+        }
+        const parsed: unknown = JSON.parse(await res.text());
+        setOpening("");
+        if (!isDict(parsed)) {
+          setError(`${name} is not a map.`);
+          return;
+        }
+        onMap(editorFromMapJson(projectMapJson(parsed)));
+      })
+      .catch(() => {
+        setOpening("");
+        setError(`${name} did not load.`);
+      });
   };
 
   const readMap = (file: File | undefined) => {
@@ -85,11 +158,8 @@ export function EditorStart({
     <div className="editor-start-scrim" role="dialog" aria-label="Start a map">
       <div className="editor-start">
         <h2>Map editor</h2>
-        <p className="muted">
-          Landmass draws the coast. Cut slices that coast into territories and sea zones. Open a saved landmass
-          SVG from Cut to slice it. The lattice clips each zone to the coast.
-        </p>
         {error !== "" && <p className="warn">{error}</p>}
+        {opening !== "" && <p className="muted">Opening {opening}…</p>}
         <section>
           <h3>Start blank map</h3>
           <div className="editor-start-size">
@@ -126,7 +196,7 @@ export function EditorStart({
             />
           </label>
           {referenceName !== "" && <p className="muted">Tracing sheet: {referenceName}</p>}
-          <label className="editor-start-check">
+          <label className="editor-start-check" title="A blank ocean. You draw the coast. Uncheck this to keep the world landmass.">
             <input
               type="checkbox"
               checked={emptyOcean}
@@ -135,11 +205,6 @@ export function EditorStart({
             />
             Empty ocean
           </label>
-          <p className="muted">
-            {emptyOcean
-              ? "No continents. Draw the coast, then switch to Cut."
-              : "The world landmass stays on the board."}
-          </p>
           <button
             type="button"
             className="primary"
@@ -151,33 +216,64 @@ export function EditorStart({
           </button>
         </section>
         <section>
-          <h3>World map</h3>
-          <p className="muted">Global coast. Suez and Panama are open. Opening it builds the land and sea blocks, which takes a moment.</p>
-          <button type="button" className="primary" onClick={openWorld}>
-            Slice world map
-          </button>
+          <h3>Load pre-existing map</h3>
+          <p className="muted">Choose any .svg to load your map and begin slicing it into regions.</p>
+          <ul className="editor-start-versions">
+            {LAND_SVGS.map((file) => (
+              <li key={file.name}>
+                <button type="button" disabled={opening !== ""} onClick={() => openSvgUrl(file.name, assetUrl(file.url))}>
+                  {file.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <label className="editor-start-file">
+            Upload SVG
+            <input
+              type="file"
+              accept=".svg,image/svg+xml"
+              aria-label="Upload SVG"
+              disabled={opening !== ""}
+              onChange={(event) => {
+                readSvg(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
         </section>
         <section>
-          <h3>Load existing map</h3>
-          <div className="editor-start-actions">
-            <button type="button" onClick={onDemo}>
-              Demo map
-            </button>
-            <label className="editor-start-file">
-              Import JSON
-              <input
-                type="file"
-                accept="application/json,.json"
-                aria-label="Import map JSON"
-                onChange={(event) => readMap(event.target.files?.[0])}
-              />
-            </label>
-          </div>
+          <h3>Load scenario</h3>
+          <ul className="editor-start-versions">
+            {GAME_SCENARIOS.map((file) => (
+              <li key={file.name}>
+                <button
+                  type="button"
+                  disabled={opening !== ""}
+                  onClick={() => (file.demo ? onDemo() : openScenarioUrl(file.name, file.url))}
+                >
+                  {file.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <label className="editor-start-file">
+            Upload JSON
+            <input
+              type="file"
+              accept="application/json,.json"
+              aria-label="Upload JSON"
+              disabled={opening !== ""}
+              onChange={(event) => {
+                readMap(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
           {versions.length > 0 && (
             <ul className="editor-start-versions">
               {versions.map((version) => (
                 <li key={version.id}>
-                  <button type="button" onClick={() => onVersion(version.id)}>
+                  <button type="button" disabled={opening !== ""} onClick={() => onVersion(version.id)}>
                     {version.name}
                   </button>
                 </li>

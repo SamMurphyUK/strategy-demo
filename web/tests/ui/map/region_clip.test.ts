@@ -4,7 +4,7 @@ import { loadJson } from "../../../src/engine/content/res";
 import { mapIntegrityProblems } from "./map_invariants";
 import { editorFromMapJson, editorToMapJson, formatMapJson } from "../../../src/ui/map/editor/editorModel";
 import { buildMapGeometry, type Vec2 } from "../../../src/ui/map/geometry";
-import { extractPathData, parsePathRings } from "../../../src/ui/map/landSvg";
+import { extractPathData, flattenLandSvg, parsePathRings } from "../../../src/ui/map/landSvg";
 import {
   clipperFor,
   landFromPathData,
@@ -40,6 +40,31 @@ describe("parsePathRings", () => {
   it("refuses curves, so a changed SVG fails loudly instead of drawing wrong", () => {
     expect(() => parsePathRings("M 0 0 C 1 1 2 2 3 3 Z")).toThrow();
   });
+
+  it("flattens an imported cubic into lines the coast reader accepts", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M 0 0 c 10 0 10 10 0 10 L 0 0 Z"/></svg>`;
+    const flat = flattenLandSvg(svg);
+    expect(flat).not.toMatch(/\sd="[^"]*\bc\b/);
+    const rings = parsePathRings(extractPathData(flat)[0]);
+    expect(rings[0][0]).toEqual([0, 0]);
+    expect(rings[0].some(([x, y]) => Math.abs(x) < 0.05 && Math.abs(y - 10) < 0.05)).toBe(true);
+  });
+
+  it("bakes a group translate and a path rotate into the coast coordinates", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><g transform="translate(5,-2)"><path d="M 0 0 L 3 0 L 0 4 Z"/></g><path transform="rotate(90)" d="M 1 0 L 2 0 L 2 1 L 1 1 Z"/></svg>`;
+    const flat = flattenLandSvg(svg);
+    expect(flat).not.toMatch(/transform\s*=/);
+    const [moved, turned] = extractPathData(flat).map((d) => parsePathRings(d)[0]);
+    expect(moved).toEqual([
+      [5, -2],
+      [8, -2],
+      [5, 2],
+    ]);
+    expect(turned[0][0]).toBeCloseTo(0, 5);
+    expect(turned[0][1]).toBeCloseTo(1, 5);
+    expect(turned[1][0]).toBeCloseTo(0, 5);
+    expect(turned[1][1]).toBeCloseTo(2, 5);
+  });
 });
 
 describe("landFromPathData", () => {
@@ -49,6 +74,23 @@ describe("landFromPathData", () => {
     expect(multiPolygonArea(land)).toBeCloseTo(100 * 100 - 20 * 20 + 100, 6);
     expect(pointInMultiPolygon({ x: 50, y: 50 }, land)).toBe(false);
     expect(pointInMultiPolygon({ x: 10, y: 10 }, land)).toBe(true);
+  });
+
+  it("keeps a same-winding nested ring filled under nonzero, and cuts an opposite-winding lake", () => {
+    const filled = landFromPathData(["M0 0 L100 0 L100 100 L0 100 Z M40 40 L60 40 L60 60 L40 60 Z"], "nonzero");
+    expect(pointInMultiPolygon({ x: 50, y: 50 }, filled)).toBe(true);
+    expect(multiPolygonArea(filled)).toBeCloseTo(10000, 4);
+    const lake = landFromPathData(["M0 0 L100 0 L100 100 L0 100 Z M40 40 L40 60 L60 60 L60 40 Z"], "nonzero");
+    expect(pointInMultiPolygon({ x: 50, y: 50 }, lake)).toBe(false);
+    expect(pointInMultiPolygon({ x: 10, y: 10 }, lake)).toBe(true);
+    expect(multiPolygonArea(lake)).toBeCloseTo(9600, 4);
+    const island = landFromPathData(
+      ["M0 0 L100 0 L100 100 L0 100 Z M20 20 L20 80 L80 80 L80 20 Z M40 40 L60 40 L60 60 L40 60 Z"],
+      "nonzero",
+    );
+    expect(pointInMultiPolygon({ x: 10, y: 10 }, island)).toBe(true);
+    expect(pointInMultiPolygon({ x: 30, y: 30 }, island)).toBe(false);
+    expect(pointInMultiPolygon({ x: 50, y: 50 }, island)).toBe(true);
   });
 
   it("parses the real land SVG into 122 landmasses", () => {

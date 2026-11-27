@@ -44,7 +44,7 @@ function buildLandMask(land: MasterLand): LandMask | null {
   }
   ctx.setTransform(columns / box.w, 0, 0, rows / box.h, (-box.x * columns) / box.w, (-box.y * rows) / box.h);
   ctx.fillStyle = "#000";
-  ctx.fill(land.masterLandPath);
+  ctx.fill(land.masterLandPath, "evenodd");
   const pixels = ctx.getImageData(0, 0, columns, rows).data;
   const cells = new Uint8Array(columns * rows);
   for (let i = 0; i < cells.length; i += 1) {

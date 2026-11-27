@@ -5,7 +5,7 @@
 // stay separate polygons. Ramer-Douglas-Peucker then drops points that do not move the coast.
 import polygonClipping from "polygon-clipping";
 import { pointInPolygon, type Rect, type Vec2 } from "../geometry";
-import { extractPathData } from "../landSvg";
+import { extractPathData, fillRuleOf } from "../landSvg";
 import {
   landFromPathData,
   multiPolygonArea,
@@ -414,7 +414,7 @@ export function shapesFromSvg(svgText: string): DraftShape[] {
   if (data.length === 0) {
     return [];
   }
-  return landFromPathData(data).flatMap((poly, i) => {
+  return landFromPathData(data, fillRuleOf(svgText)).flatMap((poly, i) => {
     const ring = openRing(poly[0].map(([x, y]) => ({ x, y })));
     if (ring.length < 3) {
       return [];

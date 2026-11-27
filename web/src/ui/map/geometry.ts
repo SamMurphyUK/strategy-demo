@@ -120,6 +120,8 @@ export interface RegionShape {
   /** `metadata.land_cover` in upper case (FOREST, MOUNTAIN, DESERT, SNOW, URBAN). Absent is open ground. */
   landCover?: string;
   points: Vec2[];
+  /** Rings cut out of `points` (`holes` on the region). Absent when the outline is solid. */
+  holes?: Vec2[][];
   /** The other islands of a multi-island territory (`extra_polygons`). Absent for an ordinary region. */
   extra?: Vec2[][];
   bounds: Rect;
@@ -182,6 +184,9 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
     }
     const ipc = Math.trunc(Number(meta.ipc ?? 0));
     const points = polygonPoints(regionDict.polygon ?? []);
+    const holes = (Array.isArray(regionDict.holes) ? regionDict.holes : [])
+      .map((ring: unknown) => polygonPoints(Array.isArray(ring) ? ring : []))
+      .filter((ring: Vec2[]) => ring.length >= 3);
     const extra = (Array.isArray(regionDict.extra_polygons) ? regionDict.extra_polygons : [])
       .map((ring: unknown) => polygonPoints(Array.isArray(ring) ? ring : []))
       .filter((ring: Vec2[]) => ring.length >= 3);
@@ -212,6 +217,7 @@ export function buildMapGeometry(mapJson: Dict): MapGeometry {
       capital: Boolean(meta.victory ?? false),
       ...(cover !== "" ? { landCover: cover } : {}),
       points,
+      ...(holes.length > 0 ? { holes } : {}),
       ...(extra.length > 0 ? { extra } : {}),
       bounds,
       centroid: polygonCentroid(points),

@@ -1121,8 +1121,8 @@ function edgesOf(ring: Vec2[]): [Vec2, Vec2][] {
 
 /**
  * Joins each hole to the outline with a hairline cut (two coincident edges), giving one ring that covers
- * exactly the same area as the outline with its holes. A region has a single ring, and a block that merely
- * ignored its holes would overlap whatever sits in them.
+ * exactly the same area as the outline with its holes. The knife wants one ring. Import does not: a fresh
+ * coast keeps the holes as rings, and this runs only when a cut asks for it.
  */
 function bridgeHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
   let ring = outer;
@@ -1153,19 +1153,50 @@ function bridgeHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
   return ring;
 }
 
+/** One ring for a knife cut. A region stores its holes; the cut joins them because the knife takes one ring. */
+export function outlineForCut(outer: Vec2[], holes?: Vec2[][]): Vec2[] {
+  const open = (holes ?? []).filter((h) => h.length >= 3);
+  return open.length > 0 ? bridgeHoles(outer, open) : outer;
+}
+
+interface CoastPieces {
+  rings: Vec2[][];
+  holes: Vec2[][][];
+}
+
+/** Outers and their holes, unbridged. A hole stays a ring. The outer's area decides whether the piece is kept. */
+function coastPieces(mp: MultiPolygon, minArea: number): CoastPieces {
+  const rings: Vec2[][] = [];
+  const holes: Vec2[][][] = [];
+  for (const poly of mp) {
+    const outer = fromRing(poly[0]);
+    const hs = poly
+      .slice(1)
+      .map(fromRing)
+      .filter((h) => h.length >= 3);
+    if (outer.length >= 3 && ringAreaOf(outer) >= minArea) {
+      rings.push(outer);
+      holes.push(hs);
+    }
+  }
+  return { rings, holes };
+}
+
 /**
  * What is left of the layer once every cutter already in it is taken out, as outlines ready to become
  * regions. Land is the real coastline (the unclaimed part of the land mask); sea is the canvas minus the
  * land. Each connected piece (a continent, an island, an ocean) is its own block, so a knife stroke on one
- * never reaches another, and its outline is the visible shape itself, not a canvas-sized box. A block that
- * wraps around other regions reaches them through hairline cuts, so it never overlaps them.
+ * never reaches another, and its outline is the visible shape itself, not a canvas-sized box.
+ * `bridge` (the default) joins holes into the ring for the older single-ring callers. Import passes
+ * `bridge: false` and keeps `holes` as rings.
  */
 export function masterBlocks(
   layerCutters: Vec2[][],
   canvas: Rect,
   type: "land" | "sea",
   clipper: RegionClipper,
-): { blocks: Vec2[][] } {
+  options?: { bridge?: boolean },
+): { blocks: Vec2[][]; holes: Vec2[][][] } {
   const base: Ring = [
     [canvas.x, canvas.y],
     [canvas.x + canvas.w, canvas.y],
@@ -1182,11 +1213,20 @@ export function masterBlocks(
       .filter((mp) => mp.length > 0);
     free = covered.length === 0 ? world : polygonClipping.difference(world, ...covered);
   } catch {
-    return { blocks: [] };
+    return { blocks: [], holes: [] };
   }
-  const blocks = piecesOf(free, type === "land" ? MIN_AREA : MIN_BLOCK_AREA);
+  const minArea = type === "land" ? MIN_AREA : MIN_BLOCK_AREA;
+  if (options?.bridge === false) {
+    const pieces = coastPieces(free, minArea);
+    const order = pieces.rings.map((_, i) => i).sort((a, b) => {
+      const net = (i: number) => ringAreaOf(pieces.rings[i]) - pieces.holes[i].reduce((sum, h) => sum + ringAreaOf(h), 0);
+      return net(b) - net(a);
+    });
+    return { blocks: order.map((i) => pieces.rings[i]), holes: order.map((i) => pieces.holes[i]) };
+  }
+  const blocks = piecesOf(free, minArea);
   blocks.sort((p, q) => ringAreaOf(q) - ringAreaOf(p));
-  return { blocks };
+  return { blocks, holes: blocks.map(() => []) };
 }
 
 // ---------------------------------------------------------------

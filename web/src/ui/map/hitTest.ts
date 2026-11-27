@@ -50,6 +50,9 @@ export function buildCutterPaths(regions: RegionShape[]): Map<string, Path2D> {
   return new Map(
     regions.map((r) => {
       const path = polygonPath2D(r.points);
+      for (const ring of r.holes ?? []) {
+        path.addPath(polygonPath2D(ring));
+      }
       for (const ring of r.extra ?? []) {
         path.addPath(polygonPath2D(ring));
       }
@@ -77,7 +80,7 @@ export function buildRegionPaths(regions: RegionShape[], clipped?: Map<string, M
 }
 
 export function isLandAt(land: MasterLand, p: Vec2): boolean {
-  return probeContext().isPointInPath(land.masterLandPath, p.x, p.y);
+  return probeContext().isPointInPath(land.masterLandPath, p.x, p.y, "evenodd");
 }
 
 /**

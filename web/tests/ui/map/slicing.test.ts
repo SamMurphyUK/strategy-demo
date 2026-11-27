@@ -271,6 +271,35 @@ describe("master blocks", () => {
     expect(shown).toBeCloseTo(160000 - 90000, 3);
   });
 
+  it("keeps a lake and the sea's land as holes when the import asks not to bridge", () => {
+    const withLake: MultiPolygon = [
+      [
+        [
+          [0, 0],
+          [100, 0],
+          [100, 100],
+          [0, 100],
+        ],
+        [
+          [40, 40],
+          [40, 60],
+          [60, 60],
+          [60, 40],
+        ],
+      ],
+    ];
+    const lakeClip = new RegionClipper(withLake);
+    const lake = masterBlocks([], { x: 0, y: 0, w: 100, h: 100 }, "land", lakeClip, { bridge: false });
+    expect(lake.holes[0]).toHaveLength(1);
+    expect(area(lake.blocks[0])).toBeCloseTo(10000, 3);
+    const clipper = new RegionClipper(land);
+    const sea = masterBlocks([], canvas, "sea", clipper, { bridge: false });
+    expect(sea.blocks[0]).toHaveLength(4);
+    expect(sea.holes[0].length).toBeGreaterThan(0);
+    const shown = multiPolygonArea(clipper.clip({ id: "s", type: "sea", points: sea.blocks[0], holes: sea.holes[0] }));
+    expect(shown).toBeCloseTo(160000 - 90000, 3);
+  });
+
   it("adds blocks under the existing regions, welded to them", () => {
     let map = editorFromMapJson({ regions: [] });
     map = addRegionFromPolygon(map, square(0, 0, 200), false).map;

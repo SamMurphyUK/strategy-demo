@@ -279,7 +279,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
     g.lineWidth = SHELF_GROW * 2;
     g.lineJoin = "round";
     if (land) {
-      g.fill(land.masterLandPath);
+      g.fill(land.masterLandPath, "evenodd");
       g.stroke(land.masterLandPath);
       return;
     }
@@ -304,7 +304,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   // Neutral land under everything, then a hatch on the decorative gaps the territories will cover.
   if (land) {
     ctx.fillStyle = tacticalLandTint("");
-    ctx.fill(land.masterLandPath);
+    ctx.fill(land.masterLandPath, "evenodd");
   }
   const hatch = segmentsPath(hatchSegments(bounds, NEUTRAL_HATCH.spacing));
   const strokeHatch = () => {
@@ -316,14 +316,14 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   };
   if (land) {
     ctx.save();
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
     strokeHatch();
     ctx.restore();
   }
   // Cliff faces are drawn with the live camera so their depth can follow the tilt.
   ctx.save();
   if (land && !input.exact) {
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
   }
   for (const region of landRegions) {
     const owner = input.owners[region.id] ?? "";
@@ -355,7 +355,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
 
   ctx.save();
   if (land) {
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
   } else {
     const union = new Path2D();
     for (const region of landRegions) {
@@ -393,7 +393,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   if (land && coast) {
     const bevel = coastBevel(sx, (COAST_INK.width / 2) * sx);
     ctx.save();
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
     ctx.lineWidth = bevel.band / sx;
     ctx.lineCap = "butt";
     ctx.lineJoin = "round";
@@ -413,7 +413,7 @@ export function bakeTerrain(input: BakeInput, scale: number): Baked {
   // Layer 3: borders two territories share, smudge then ink, kept off the water; then the coastline.
   ctx.save();
   if (land) {
-    ctx.clip(land.masterLandPath);
+    ctx.clip(land.masterLandPath, "evenodd");
   }
   const borders = segmentsPath(sharedEdges(landShapes, seam, land ? 2 : 1));
   for (const pass of borderPasses(getBoardTune())) {

@@ -1847,6 +1847,10 @@
   text-align: left;
 }
 
+.editor-start-versions + .editor-start-file {
+  margin-top: 8px;
+}
+
 .main-menu-seats,
 .editor-start-actions,
 .editor-start-size {
