@@ -10,7 +10,6 @@
 //
 // Layers 0-4 draw in world units; layer 5 draws in screen pixels so counters keep their size at any zoom.
 import { MILITARY } from "../theme/militaryPalette";
-import { isLandAt } from "./hitTest";
 import { DEFAULT_LATTICE_SHEET, LATTICE, latticeCols, latticePartRing, latticeRows, type LatticeSheet } from "./editor/seaLattice";
 import { drawMapToken } from "./mapToken";
 import { isActiveFaction } from "./tokenStyle";
@@ -39,7 +38,6 @@ import {
   facilitiesOf,
   facilityAnchorOf,
   type HighlightMode,
-  pointInPolygon,
   type Rect,
   type RegionShape,
   SELECTED_OUTLINE_WIDTH,
@@ -102,14 +100,7 @@ import type { ShoreStencil } from "./figureSheet";
 import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
 import { plinthFactor, unitBaseShare } from "../viewport3d/plinthPlacement";
 import { drawHoldCircles } from "./shipHold";
-import {
-  type MapLod,
-  TACTICAL_IN,
-  type TerrainStamp,
-  terrainStampFadeAlpha,
-  terrainStamps,
-  uprightDrawOrder,
-} from "./zoomLod";
+import { type MapLod, TACTICAL_IN, uprightDrawOrder } from "./zoomLod";
 
 export const TOKEN_PX = 32;
 const PAPER = MILITARY.cream;
@@ -148,17 +139,15 @@ export interface TerrainScene {
   frontlines?: readonly FrontlineSegment[];
   /** Craters and the current smoke frame, in world units. Drawn on every copy. */
   scars?: readonly ScarFrame[];
-  /** 0 strategic, 1 operational stamps, 2 upright sprites. Omitted means strategic. */
+  /** 0 strategic, 1 operational, 2 upright sprites. Omitted means strategic. */
   lod?: MapLod;
   /** 0 icon tokens, 1 upright sprites. A value between is the timed handoff. */
   unitFade?: number;
-  /** World points stamps must stay clear of, per land region. Hubs and unit slots. */
-  stampAvoid?: Readonly<Record<string, readonly Vec2[]>>;
   /** Skip cliff fills. The pan/zoom interacting paint blits a held picture instead. */
   skipCliffs?: boolean;
   /**
    * The ground is drawn by a board layer under this canvas (see boardLayer.ts). The canvas is
-   * cleared, and the base map, cliffs, and terrain stamps are left out.
+   * cleared, and the base map and cliffs are left out.
    */
   backdrop?: boolean;
   /** With a 3D board under the canvas: how far the water lies below the land, in world units. A sea zone's coast is outlined at the foot of the cliff. */
@@ -898,118 +887,6 @@ function drawBattleScars(ctx: CanvasRenderingContext2D, scars: readonly ScarFram
   ctx.restore();
 }
 
-const stampCache = new Map<string, { key: string; stamps: TerrainStamp[] }>();
-
-function inTerritory(region: RegionShape, p: Vec2): boolean {
-  if (pointInPolygon(p, region.points)) {
-    return true;
-  }
-  for (const ring of region.extra ?? []) {
-    if (pointInPolygon(p, ring)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function stampKey(region: RegionShape, avoid: readonly Vec2[], land: boolean): string {
-  let h = region.points.length;
-  for (const point of region.points) {
-    h = Math.imul(h, 31) + Math.round(point.x * 10) + Math.imul(Math.round(point.y * 10), 17);
-  }
-  for (const point of avoid) {
-    h = Math.imul(h, 31) + Math.round(point.x) + Math.imul(Math.round(point.y), 13);
-  }
-  return `${h}:${land ? 1 : 0}`;
-}
-
-function drawPine(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = MILITARY.charcoal;
-  ctx.fillRect(x + 3 * u, y - 5 * v, 2 * u, 5 * v);
-  ctx.fillStyle = MILITARY.spruce;
-  ctx.fillRect(x + 3 * u, y - 14 * v, 2 * u, 3 * v);
-  ctx.fillRect(x + 1 * u, y - 11 * v, 6 * u, 4 * v);
-  ctx.fillRect(x - 1 * u, y - 7 * v, 10 * u, 4 * v);
-  ctx.fillRect(x - 2 * u, y - 4 * v, 12 * u, 3 * v);
-}
-
-function drawPineCluster(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number, n: number): void {
-  const start = -((n - 1) * 5 * u) / 2;
-  for (let i = 0; i < n; i++) {
-    drawPine(ctx, x + start + i * 5 * u, y + (i % 2) * 2 * v, u, v);
-  }
-}
-
-function drawRidge(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = MILITARY.charcoal;
-  ctx.fillRect(x - 7 * u, y - 1 * v, 16 * u, 2 * v);
-  ctx.fillStyle = MILITARY.taupe;
-  ctx.fillRect(x - 6 * u, y - 3 * v, 5 * u, 2 * v);
-  ctx.fillRect(x - 1 * u, y - 5 * v, 4 * u, 2 * v);
-  ctx.fillRect(x + 3 * u, y - 3 * v, 5 * u, 2 * v);
-  ctx.fillStyle = MILITARY.brown;
-  ctx.fillRect(x - 1 * u, y - 6 * v, 2 * u, 2 * v);
-}
-
-function drawWaterDash(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, v: number): void {
-  ctx.fillStyle = MILITARY.spruce;
-  ctx.fillRect(x, y, 3 * u, v);
-  ctx.fillRect(x + 5 * u, y, 2 * u, v);
-  ctx.fillRect(x + 8 * u, y, 3 * u, v);
-}
-
-function drawPixelStamps(ctx: CanvasRenderingContext2D, s: TerrainScene, dx: number): void {
-  const alpha = terrainStampFadeAlpha(s.view.k);
-  if (alpha <= 0) {
-    return;
-  }
-  const copyView = { ...s.view, x: s.view.x - dx };
-  const { sx, sy } = projectionScales(s.view.k);
-  const u = 1 / sx;
-  const v = 1 / sy;
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  ctx.globalAlpha = alpha;
-  for (const region of s.regions) {
-    if (region.type !== "land" || region.points.length < 3) {
-      continue;
-    }
-    const origin = worldToScreen(copyView, { x: region.bounds.x, y: region.bounds.y });
-    const far = worldToScreen(copyView, { x: region.bounds.x + region.bounds.w, y: region.bounds.y + region.bounds.h });
-    if (far.x < -24 || origin.x > s.width + 24 || far.y < -24 || origin.y > s.height + 24) {
-      continue;
-    }
-    const avoid = s.stampAvoid?.[region.id] ?? [region.anchor, ...(region.unitSlots ?? [])];
-    const key = stampKey(region, avoid, s.land !== null);
-    const cached = stampCache.get(region.id);
-    const stamps =
-      cached && cached.key === key
-        ? cached.stamps
-        : terrainStamps(region.id, [region.points, ...(region.extra ?? [])], avoid, {
-            interior: (p) => inTerritory(region, p) && (s.land ? isLandAt(s.land, p) : true),
-            water: (p) => (s.land ? !isLandAt(s.land, p) : !inTerritory(region, p)),
-          });
-    if (!cached || cached.key !== key) {
-      stampCache.set(region.id, { key, stamps });
-    }
-    for (const stamp of stamps) {
-      const screen = worldToScreen(copyView, stamp);
-      if (screen.x < -24 || screen.y < -24 || screen.x > s.width + 24 || screen.y > s.height + 24) {
-        continue;
-      }
-      if (stamp.kind === "pine") {
-        const trees = 2 + (Math.abs(Math.round(stamp.x * 3 + stamp.y * 5)) % 2);
-        drawPineCluster(ctx, stamp.x, stamp.y, u, v, trees);
-      } else if (stamp.kind === "ridge") {
-        drawRidge(ctx, stamp.x, stamp.y, u, v);
-      } else {
-        drawWaterDash(ctx, stamp.x, stamp.y, u, v);
-      }
-    }
-  }
-  ctx.restore();
-}
-
 function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number, dx: number): void {
   const { land } = s;
 
@@ -1059,10 +936,6 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
         ctx.stroke(path);
       }
     }
-  }
-
-  if (!s.backdrop) {
-    drawPixelStamps(ctx, s, dx);
   }
 
   drawFrontlines(ctx, s.frontlines ?? []);

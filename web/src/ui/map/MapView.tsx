@@ -5,7 +5,7 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useStat
 import { DRAG_PITCH_OFFSET, dragPitchStep, soundManager } from "../../audio/sound_manager";
 import { factionPalette } from "../theme/factionPalette";
 import { getTokenArtVersion, subscribeTokenArt } from "../theme/tokens/tokenArt";
-import { facilityAnchorOf, type HighlightMode, type MapGeometry, type Rect, type StackEntry, stackKey, type Vec2 } from "./geometry";
+import { type HighlightMode, type MapGeometry, type Rect, type StackEntry, stackKey, type Vec2 } from "./geometry";
 import { pickHold, seatStack, type HoldMark, type HoldShip } from "./shipHold";
 import { effectiveUnitSlots, roughShape, TOKEN_WORLD } from "./unitSlots";
 import { buildCutterPaths, buildRegionPaths, pickCounter, pickFrontCounter, pickPlus, pickRegion } from "./hitTest";
@@ -987,14 +987,6 @@ export function MapView(props: MapViewProps) {
       frontlines: editor || board?.ownFront ? [] : (props.relief?.frontlines ?? []),
       lod: mapLod,
       unitFade,
-      stampAvoid:
-        mapLod >= 1
-          ? Object.fromEntries(
-              geometry.regions
-                .filter((region) => region.type === "land")
-                .map((region) => [region.id, [region.anchor, facilityAnchorOf(region), ...slotsFor(region)]]),
-            )
-          : undefined,
       backdrop: boardGround,
       cliffDrop: boardGround ? SEA_DROP * mapVisuals.terrainHeightScale : 0,
       scars: editor || boardGround
