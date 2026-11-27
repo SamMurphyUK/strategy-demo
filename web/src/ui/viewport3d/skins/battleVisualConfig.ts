@@ -187,7 +187,7 @@ export interface BattleLook {
     height: number;
     town: number;
   };
-  ground: { trench: string; bagLight: string; bagDark: string; noMansLand: string; noMansDarken: number; scorch: number };
+  ground: { trench: string; bagLight: string; bagDark: string; /** The tint of the sunken no man's land trough. */ troughTint: string; noMansDarken: number; scorch: number };
   sea: {
     coast: string;
     mid: string;
@@ -210,6 +210,10 @@ export interface BattleLook {
     /** The beach and the sea strip, along the front, in stage depth fractions. */
     beach: { from: number; to: number };
     sea: { from: number; to: number };
+    /** The camera: the lens (wide-angle by default), its height above the table, and what depth fraction it aims at. */
+    camera: { fov: number; height: number; aim: number };
+    /** The trench lips stand this high above the ground, and the no man's land trough between them is sunk this deep. */
+    relief: { lipHeight: number; troughDepth: number };
     /** The columns step outward from a trench line by this much a rank, and the first column's offset. */
     columnGap: number;
     columnOffset: number;
@@ -229,7 +233,7 @@ export const EUROPEAN_LOOK: Readonly<BattleLook> = Object.freeze<BattleLook>({
   stars: { density: 0.55, twinkle: 0.5 },
   clouds: { share: 0.45, speed: 0.012, dirX: 1, dirY: 0, color: "#F2EBDD" },
   horizon: { mist: 0.45, desat: 0.35, mistColor: "#B9C2B4", treeColor: "#4F6B5C", townColor: "#6D6B74", height: 9, town: 0.3 },
-  ground: { trench: "#846D59", bagLight: "#CCA87B", bagDark: "#846D59", noMansLand: "#645355", noMansDarken: 0.14, scorch: 1 },
+  ground: { trench: "#846D59", bagLight: "#CCA87B", bagDark: "#846D59", troughTint: "#645355", noMansDarken: 0.14, scorch: 1 },
   sea: { coast: "#7DAA9E", mid: "#4F7BA0", deep: "#33567E", sand: "#CCA87B", swash: 0.6, bob: 0.5, lightShare: 0.35 },
   pos: {
     trench: { halfFront: 3.2, halfBack: 1.6, yFront: -9, yBack: 160, height: 0.13, width: 0.24 },
@@ -238,6 +242,8 @@ export const EUROPEAN_LOOK: Readonly<BattleLook> = Object.freeze<BattleLook>({
     moon: { x: 18, up: 0.3 },
     beach: { from: 0.075, to: 0.15 },
     sea: { from: 0, to: 0.085 },
+    camera: { fov: 50, height: 6, aim: 0.42 },
+    relief: { lipHeight: 0.16, troughDepth: 0.22 },
     columnGap: 1.45,
     columnOffset: 0.9,
   },

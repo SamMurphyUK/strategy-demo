@@ -137,8 +137,8 @@ export const BATTLE_SKINS: Readonly<Record<BattleSkinId, BattleSkin>> = Object.f
       scatterPull: 0.7,
     },
     camera: {
-      establishing: { pitchDeg: 12, fovDeg: 35, lookX: 0, lookZ: 0.42, zoom: 1 },
-      exchange: { pitchDeg: 12, fovDeg: 35, lookX: 0, lookZ: 0.38, zoom: 0.85 },
+      establishing: { pitchDeg: 17, fovDeg: 50, lookX: 0, lookZ: 0.42, zoom: 1 },
+      exchange: { pitchDeg: 17, fovDeg: 50, lookX: 0, lookZ: 0.38, zoom: 0.88 },
       overhead: { pitchDeg: 42, fovDeg: 35, lookX: 0, lookZ: 0.45, zoom: 1.08 },
     },
     scatter: {

@@ -8,9 +8,9 @@ import { landmarkUniforms, propMaterial, sharedUniforms } from "../boardMaterial
 import { loadLandmark } from "../landmarkModels";
 import { battleLook, battleVisuals, getBattleVisualRev } from "../skins/battleVisualConfig";
 import { hexToRgb, type BattleSkin, type BattleTerrain } from "../skins/battleSkin";
-import { blendPresets, cameraPose } from "./battleCamera";
+import { blendPresets, lookPose } from "./battleCamera";
 import { hourAt, skyAt, type SkyMode, type SkyState } from "./battleSky";
-import { trenchLineX, trenchHalfWidth } from "./battleZones";
+import { reliefHeight, trenchLineX, trenchHalfWidth } from "./battleZones";
 import { swellAt } from "./battleSea";
 import { frontPosition } from "../../map/shipSway";
 import { diffSnapshots, pickTarget, snapshotOf, type FeedUnit, type StageEvent, type StageSnapshot } from "./battleFeed";
@@ -209,6 +209,7 @@ export class BattleStageEngine {
   private sky: SkyState;
   private readonly backdrop = horizonBackdropMaterial();
   private backdropMesh!: THREE.Mesh;
+  private slabMesh!: THREE.Mesh;
   private tableKey = "";
   private readonly table = new THREE.Group();
   private bands: { material: THREE.ShaderMaterial; side: "attacker" | "defender"; rank: number }[] = [];
@@ -256,7 +257,8 @@ export class BattleStageEngine {
     const slab = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: true, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, steps: 1 });
     slab.translate(0, 0, -(thickness + bevel));
     const rim = rimMaterial(opts.skin);
-    this.root.add(new THREE.Mesh(slab, rim));
+    this.slabMesh = new THREE.Mesh(slab, rim);
+    this.root.add(this.slabMesh);
     this.resources.push(slab, rim);
 
     this.marksCanvas.width = MARKS_W;
@@ -270,17 +272,22 @@ export class BattleStageEngine {
     this.paintMarks();
     this.ground = groundMaterial(opts.skin, opts.terrain, this.flash);
     this.ground.uniforms.uMarks.value = this.marksTexture;
-    const groundGeometry = new THREE.PlaneGeometry(STAGE_WIDTH, STAGE_DEPTH);
+    // The ground is one fine strip across the whole field, so the trench lips and the trough can be cut into it.
+    const stripSpan = battleLook.pos.horizonY + STAGE_DEPTH / 2 + 4;
+    const groundGeometry = new THREE.PlaneGeometry(28, stripSpan, 280, 200);
     const groundMesh = new THREE.Mesh(groundGeometry, this.ground);
-    groundMesh.position.z = 0.002;
+    groundMesh.position.set(0, -STAGE_DEPTH / 2 + stripSpan / 2, 0.002);
+    groundMesh.frustumCulled = false;
     this.root.add(groundMesh);
     // The far ground runs on to the horizon, hazed and drawn out of colour, like the old frame's field.
     const farSpan = battleLook.pos.horizonY + STAGE_DEPTH / 2 + 4;
-    const farGeometry = new THREE.PlaneGeometry(1100, farSpan);
-    const farMesh = new THREE.Mesh(farGeometry, this.ground);
-    farMesh.position.set(0, -STAGE_DEPTH / 2 + farSpan / 2, 0.001);
-    farMesh.frustumCulled = false;
-    this.root.add(farMesh);
+    const farGeometry = new THREE.PlaneGeometry(536, farSpan);
+    for (const side of [-1, 1]) {
+      const farMesh = new THREE.Mesh(farGeometry, this.ground);
+      farMesh.position.set(side * (14 + 268), -STAGE_DEPTH / 2 + farSpan / 2, 0.002);
+      farMesh.frustumCulled = false;
+      this.root.add(farMesh);
+    }
     this.resources.push(farGeometry);
     // The ground to the sides of the slice, in front of it, too: the table is the board's own edge, not a cliff.
 
@@ -499,7 +506,7 @@ export class BattleStageEngine {
         const mesh = new THREE.Mesh(geometry, material);
         mesh.scale.x = piece.flip ? -1 : 1;
         const [x, y] = toWorld(piece.x, piece.d);
-        mesh.position.set(x, y, 0);
+        mesh.position.set(x, y, reliefHeight(x, y, battleLook.pos.trench, battleLook.pos.relief.lipHeight, battleLook.pos.relief.troughDepth));
         mesh.renderOrder = 4;
         this.root.add(mesh);
         this.scatterMeshes.push(mesh);
@@ -1046,7 +1053,7 @@ export class BattleStageEngine {
       const material = trenchMaterial();
       this.trenchMats.push(material);
       const mesh = new THREE.Mesh(this.trenchGeometry(side), material);
-      mesh.position.z = 0.004;
+      mesh.position.z = 0.004 + pos.relief.lipHeight * 0.5;
       mesh.renderOrder = 2;
       mesh.frustumCulled = false;
       this.lookGroup.add(mesh);
@@ -1095,7 +1102,14 @@ export class BattleStageEngine {
     const mistC = new THREE.Vector3(mist[0] * 0.6 + s.low[0] * 0.4, mist[1] * 0.6 + s.low[1] * 0.4, mist[2] * 0.6 + s.low[2] * 0.4).multiply(light);
     this.ground.uniforms.uMistColor.value.copy(mistC);
     this.ground.uniforms.uHaze.value.set(l.horizon.mist, l.horizon.desat);
-    const nml = hexToRgb(l.ground.noMansLand);
+    this.ground.uniforms.uRelief.value.set(l.pos.relief.lipHeight, l.pos.relief.troughDepth);
+    this.ground.uniforms.uLightDir.value.set(...s.lightDir);
+    this.ground.uniforms.uShadowAmt.value = s.shadow;
+    // Everything stands on the raised field; the slab stays where it is, so the trough can sink to the slab's top.
+    const lift = l.pos.relief.troughDepth + 0.02;
+    this.root.position.z = lift;
+    this.slabMesh.position.z = -lift;
+    const nml = hexToRgb(l.ground.troughTint);
     this.ground.uniforms.uNml.value.set(nml[0], nml[1], nml[2], l.ground.noMansDarken);
     const bagL = hexToRgb(l.ground.bagLight);
     const bagD = hexToRgb(l.ground.bagDark);
@@ -1429,7 +1443,7 @@ export class BattleStageEngine {
     this.activity = Math.max(0, this.activity - 0.012);
     const presets = this.skin.camera;
     const preset = blendPresets(presets.establishing, presets.exchange, this.activity);
-    const pose = cameraPose(preset, aspect);
+    const pose = lookPose(preset, aspect, battleLook.pos.camera, presets.establishing.lookZ);
     const thud = cameraThud(this.real - this.thudT, this.thudAmp);
     camera.up.set(0, 0, 1);
     camera.position.set(pose.position[0], pose.position[1], pose.position[2] + thud);

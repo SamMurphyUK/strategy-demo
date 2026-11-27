@@ -69,3 +69,20 @@ export function hazeAt(y: number, g: TrenchGeometry, mist: number): number {
 export function depthScaleAt(y: number, g: TrenchGeometry, back: number): number {
   return 1 + (back - 1) * Math.sqrt(recession(y, g));
 }
+
+/**
+ * The ground's height at a point: the trench lips stand a little proud of the field, and no man's land between them is sunk into a trough.
+ * It fades out toward the front lip, where the trench starts. The ground shader runs the same sum.
+ */
+export function reliefHeight(x: number, y: number, g: TrenchGeometry, lipHeight: number, troughDepth: number): number {
+  const half = trenchHalfWidth(y, g);
+  const d = Math.abs(x) - half;
+  const smooth = (a: number, b: number, v: number) => {
+    const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+  const start = smooth(g.yFront, g.yFront + 3, y);
+  const trough = -troughDepth * (1 - smooth(-0.35, -0.05, d));
+  const lip = lipHeight * Math.exp(-(d * d) / 0.12);
+  return (trough + lip) * start;
+}

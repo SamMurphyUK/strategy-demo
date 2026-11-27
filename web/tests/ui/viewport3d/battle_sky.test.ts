@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { hourAt, skyAt, skyModeFor, stageWeights, starFade, sunHeightAt } from "../../../src/ui/viewport3d/battle/battleSky";
 import { beachHeight, seaBandAt, seaLit, swashReach } from "../../../src/ui/viewport3d/battle/battleSea";
-import { convergenceY, hazeAt, recession, rankColumnX, trenchHalfWidth, trenchLineX, zoneAt } from "../../../src/ui/viewport3d/battle/battleZones";
+import { convergenceY, hazeAt, recession, rankColumnX, reliefHeight, trenchHalfWidth, trenchLineX, zoneAt } from "../../../src/ui/viewport3d/battle/battleZones";
 import { EUROPEAN_LOOK, battleLook, battleLookJson, lookLeaves, resetBattleLook, setBattleLook } from "../../../src/ui/viewport3d/skins/battleVisualConfig";
 import { BATTLE_SKINS, hexToRgb } from "../../../src/ui/viewport3d/skins/battleSkin";
 import { BOARD_SKINS } from "../../../src/ui/viewport3d/skins/boardSkin";
@@ -126,6 +126,30 @@ describe("zones and the two trench lines", () => {
   });
 });
 
+describe("trench relief", () => {
+  const g = look.pos.trench;
+  const { lipHeight, troughDepth } = look.pos.relief;
+
+  it("raises each trench lip above the field and sinks no man's land into a trough", () => {
+    const y = 0;
+    const half = trenchHalfWidth(y, g);
+    expect(reliefHeight(half, y, g, lipHeight, troughDepth)).toBeGreaterThan(lipHeight * 0.5);
+    expect(reliefHeight(0, y, g, lipHeight, troughDepth)).toBeCloseTo(-troughDepth, 2);
+    expect(reliefHeight(half + 3, y, g, lipHeight, troughDepth)).toBeCloseTo(0, 2);
+    // Each side has the same lip, and the trough lies between them.
+    expect(reliefHeight(-half, y, g, lipHeight, troughDepth)).toBeCloseTo(reliefHeight(half, y, g, lipHeight, troughDepth), 6);
+    expect(reliefHeight(0, y, g, lipHeight, troughDepth)).toBeLessThan(reliefHeight(half, y, g, lipHeight, troughDepth));
+  });
+
+  it("follows the lines as they converge, and is flat at the front lip where the trench starts", () => {
+    const far = 80;
+    const halfFar = trenchHalfWidth(far, g);
+    expect(reliefHeight(halfFar, far, g, lipHeight, troughDepth)).toBeGreaterThan(lipHeight * 0.5);
+    expect(reliefHeight(0, g.yFront, g, lipHeight, troughDepth)).toBeCloseTo(0, 6);
+    expect(reliefHeight(0, 0, g, 0, 0)).toBe(0);
+  });
+});
+
 describe("sea and beach", () => {
   const sea = look.sea;
 
@@ -176,6 +200,9 @@ describe("the look config", () => {
     expect(leaves.some((l) => l.path === "sea.swash")).toBe(true);
     expect(leaves.some((l) => l.path === "pos.trench.halfFront")).toBe(true);
     expect(leaves.some((l) => l.path === "sky.dawn.low")).toBe(true);
+    for (const path of ["pos.camera.fov", "pos.camera.height", "pos.camera.aim", "pos.relief.lipHeight", "pos.relief.troughDepth", "ground.troughTint"]) {
+      expect(leaves.some((l) => l.path === path)).toBe(true);
+    }
   });
 
   it("sets a field by path, ignores a wrong kind, resets, and copies as JSON in its own shape", () => {

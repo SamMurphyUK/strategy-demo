@@ -304,8 +304,8 @@ export interface MapEditor {
   downloadLandmassSvg(): void;
   /** Leave Landmass. A new or changed coast is baked and becomes the blocks the knife slices. */
   enterCutting(): void;
-  /** Read a landmass SVG, install it as the coast, and open Cut. */
-  openCoastSvg(text: string): void;
+  /** Read a landmass SVG, install it as the coast, and open Cut. False when the file cannot be sliced. */
+  openCoastSvg(text: string): boolean;
 }
 
 function anchorForLattice(region: EditorRegion, rings: LatticeRings, land: MasterLand | null): Vec2 {
@@ -1613,18 +1613,18 @@ export function useMapEditor(
   }, [currentSvg, installCoast]);
 
   const openCoastSvg = useCallback(
-    (text: string) => {
+    (text: string): boolean => {
       let imported: DraftShape[];
       try {
         parseLandSvg(text);
         imported = shapesFromSvg(text).map((shape) => ({ ...shape, id: nextShapeId() }));
       } catch (err) {
         setStatus(err instanceof Error ? err.message : "That SVG could not be read.");
-        return;
+        return false;
       }
       if (imported.length === 0) {
         setStatus("That SVG has no closed paths.");
-        return;
+        return false;
       }
       sculptPast.current = [...sculptPast.current, shapesRef.current.map(copyShape)].slice(-40);
       sculptFuture.current = [];
@@ -1634,7 +1634,7 @@ export function useMapEditor(
       setSculptDraft([]);
       sculptSvgRef.current = text;
       setSculptSvg(text);
-      installCoast(text);
+      return installCoast(text);
     },
     [installCoast],
   );

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="768" height="384" viewBox="0 0 768 384" xmlns="http://www.w3.org/2000/svg">
+  <!-- Single-colour silhouette. Heavy tank, side view, facing right. Ground contact at y=376. -->
+  <g fill="#000" transform="translate(-37.5 -208.1) scale(1.03)">
+    <!-- tracks: long run with gaps between the wheels showing through -->
+    <path fill-rule="evenodd" d="M95 480 Q88 510 120 530 L160 548 Q190 566 230 566 H590 Q640 560 660 528 Q676 500 668 482 L650 466 H110 Z
+      M196 560 L206 546 L216 560 Z M262 560 L272 546 L282 560 Z M330 560 L340 546 L350 560 Z M398 560 L408 546 L418 560 Z M466 560 L476 546 L486 560 Z M534 560 L544 546 L554 560 Z"/>
+    <!-- hull -->
+    <path d="M98 466 L96 418 Q98 392 118 380 L150 372 Q168 370 190 372 L250 380 V365 H470 V382 Q500 376 528 380 L574 384 Q590 392 596 404 L612 400 L590 424 L664 440 L668 482 L650 500 H110 L96 482 Z"/>
+    <!-- road wheels, round under the skirt -->
+    <g><circle cx="190" cy="524" r="30"/><circle cx="256" cy="526" r="30"/><circle cx="324" cy="526" r="30"/><circle cx="392" cy="526" r="30"/><circle cx="460" cy="526" r="30"/><circle cx="528" cy="526" r="30"/><circle cx="596" cy="522" r="30"/></g>
+    <!-- rear stowage plate and tool -->
+    <path d="M56 366 L92 362 L98 464 L64 470 Z"/>
+    <path d="M64 470 L78 458 L82 462 L68 476 Z"/>
+    <!-- turret with cupola, stowage box at the rear, mantlet -->
+    <path d="M213 306 H250 L258 298 H290 L296 284 L304 278 H352 L358 300 L365 300 H395 Q412 300 418 304 L440 308 L470 314 L482 324 L498 328 V352 L490 362 H470 V382 H250 V365 H213 Z"/>
+    <path d="M418 296 L428 298 L434 308 L418 306 Z"/>
+    <!-- hull top fittings: MG, periscope, hatch -->
+    <path d="M545 384 L553 372 Q562 370 566 376 L568 384 Z"/>
+    <path d="M580 392 L598 392 L602 404 L582 404 Z"/>
+    <!-- gun, with a slotted muzzle brake -->
+    <path d="M495 328 H565 L572 331 H735 V350 H572 L565 352 H495 Z"/>
+    <path fill-rule="evenodd" d="M733 326 H760 Q770 332 770 340 Q770 350 760 354 H733 Z M742 335 H764 V346 H742 Z"/>
+  </g>
+</svg>

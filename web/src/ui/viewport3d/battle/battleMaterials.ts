@@ -47,6 +47,21 @@ vec3 flashAdd(vec3 p) {
 }
 `;
 
+/** The ground's relief, as a shader chunk: lips proud of the field, no man's land sunk between them. Mirrors `reliefHeight` in battleZones.ts. */
+const RELIEF_GLSL = /* glsl */ `
+uniform vec4 uTrench;
+uniform vec2 uRelief;
+float reliefAt(vec2 p) {
+  float rec = clamp((p.y - uTrench.z) / (uTrench.w - uTrench.z), 0.0, 1.0);
+  float halfGap = mix(uTrench.x, uTrench.y, rec);
+  float d = abs(p.x) - halfGap;
+  float start = smoothstep(uTrench.z, uTrench.z + 3.0, p.y);
+  float trough = -uRelief.y * (1.0 - smoothstep(-0.35, -0.05, d));
+  float lip = uRelief.x * exp(-(d * d) / 0.12);
+  return (trough + lip) * start;
+}
+`;
+
 const NOISE_GLSL = /* glsl */ `
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -94,12 +109,17 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
       uTrench: { value: new THREE.Vector4(3.2, 1.6, -12, 160) },
       uNml: { value: new THREE.Vector4(0.4, 0.33, 0.33, 0.28) },
       uHaze: { value: new THREE.Vector2(0.45, 0.35) },
+      uRelief: { value: new THREE.Vector2(0.16, 0.22) },
+      uLightDir: { value: new THREE.Vector3(0, 0.3, 0.9) },
+      uShadowAmt: { value: 0.3 },
       ...flash,
     },
     vertexShader: /* glsl */ `
+      ${RELIEF_GLSL}
       varying vec3 vWorld;
       void main() {
         vec4 w = modelMatrix * vec4(position, 1.0);
+        w.z += reliefAt(w.xy);
         vWorld = w.xyz;
         gl_Position = projectionMatrix * viewMatrix * w;
       }
@@ -107,6 +127,9 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
     fragmentShader: /* glsl */ `
       ${NOISE_GLSL}
       ${FLASH_GLSL}
+      ${RELIEF_GLSL}
+      uniform vec3 uLightDir;
+      uniform float uShadowAmt;
       uniform vec3 uLow;
       uniform vec3 uHigh;
       uniform vec3 uWorn;
@@ -117,7 +140,6 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
       uniform vec3 uMistColor;
       uniform float uMistAmt;
       uniform vec2 uStage;
-      uniform vec4 uTrench;
       uniform vec4 uNml;
       uniform vec2 uHaze;
       varying vec3 vWorld;
@@ -155,6 +177,24 @@ export function groundMaterial(skin: BattleSkin, terrain: BattleTerrain, flash: 
         float haze = clamp(pow(rec, 0.7) * (0.15 + uHaze.x * 1.2), 0.0, 0.92);
         col = mix(col, vec3(lumaOf(col)), haze * uHaze.y);
         col = mix(col, uMistColor, haze);
+        // The relief: the lips catch the directional light, and each throws a crisp shadow into the trough on the side away from the sun.
+        vec2 rp = vWorld.xy;
+        float e = 0.05;
+        vec3 rn = normalize(vec3(-(reliefAt(rp + vec2(e, 0.0)) - reliefAt(rp - vec2(e, 0.0))) / (2.0 * e), -(reliefAt(rp + vec2(0.0, e)) - reliefAt(rp - vec2(0.0, e))) / (2.0 * e), 1.0));
+        vec3 L = normalize(uLightDir);
+        float slope = clamp(dot(rn, L), 0.0, 1.0) - clamp(L.z, 0.0, 1.0);
+        col *= 1.0 + slope * 0.9;
+        float h0 = reliefAt(rp);
+        vec2 dxy = L.xy / max(length(L.xy), 0.001);
+        float rise = L.z / max(length(L.xy), 0.05);
+        float lit = 1.0;
+        for (int i = 1; i <= 10; i++) {
+          float s = float(i) * 0.07;
+          if (reliefAt(rp + dxy * s) > h0 + s * rise + 0.004) {
+            lit = 0.0;
+          }
+        }
+        col *= mix(1.0 - uShadowAmt * 1.6, 1.0, lit);
         col *= uLight;
         col += flashAdd(vec3(vWorld.xy, 0.5));
         gl_FragColor = vec4(clampLuma(col, uCeil), 1.0);

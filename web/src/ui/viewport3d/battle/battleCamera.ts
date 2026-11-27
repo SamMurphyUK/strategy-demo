@@ -59,3 +59,29 @@ export function blendPresets(a: CameraPreset, b: CameraPreset, t: number): Camer
     zoom: mix(a.zoom, b.zoom),
   };
 }
+
+/** The lens, the camera's height and its aim, from the look (the X inspector's values). */
+export interface CameraLook {
+  fov: number;
+  height: number;
+  aim: number;
+}
+
+/**
+ * The pose for a preset with the look's lens, height and aim laid over it. The camera stands back far enough to fit the stage for that lens,
+ * at the given height, and looks at the aimed depth; the pitch follows. A wide lens (about 50 degrees) gives a long, low shot.
+ */
+export function lookPose(preset: CameraPreset, aspect: number, cam: CameraLook, baseAim = 0.42): CameraPose {
+  const p: CameraPreset = { ...preset, fovDeg: cam.fov, lookZ: cam.aim + (preset.lookZ - baseAim) };
+  const base = cameraPose(p, aspect);
+  const pitch = (preset.pitchDeg * Math.PI) / 180;
+  const back = Math.cos(pitch) * base.distance;
+  const position: [number, number, number] = [base.target[0], base.target[1] - back, cam.height];
+  return { position, target: base.target, fovDeg: cam.fov, distance: base.distance };
+}
+
+/** Where the horizon falls in the frame, as a fraction from the top: 0 at the top edge, 1 at the bottom. Off the top it is negative. */
+export function horizonFraction(pose: CameraPose): number {
+  const pitch = pitchOf(pose);
+  return (pose.fovDeg / 2 - pitch) / pose.fovDeg;
+}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="320" height="320" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+  <!-- Single-colour silhouette. Rifleman advancing, facing right. Feet at y=292. -->
+  <g fill="#000" transform="translate(-12.5 -40) scale(0.5)">
+    <!-- helmet and face in profile -->
+    <path d="M426 246 L440 226 Q450 216 470 218 Q495 222 502 242 L504 262 L494 268 L488 280 L482 292 L470 302 L462 296 L466 280 L468 270 L458 268 L448 262 L438 262 Z"/>
+    <!-- back, torso and pouch -->
+    <path d="M432 268 L400 268 Q372 272 346 304 Q328 330 334 350 L344 362 L322 366 L306 392 L316 424 L360 480 L404 490 L440 470 L436 400 L470 350 L466 300 Z"/>
+    <path d="M304 396 L330 390 L338 416 L312 426 Z"/>
+    <!-- rear leg, stretched back, boot flat -->
+    <path d="M316 410 L306 520 L262 568 L252 578 L256 592 L236 626 L232 646 L242 660 L266 664 L278 658 L272 636 L266 620 L284 596 Q298 590 306 572 L342 540 L372 470 L340 420 Z"/>
+    <!-- front leg, planted, boot toeing forward -->
+    <path d="M364 478 L408 524 L412 540 L406 572 L404 592 L416 598 L412 622 L402 640 L404 654 L440 658 L468 658 L470 646 Q452 626 432 620 L436 596 L450 592 L454 566 L462 520 L446 490 L436 440 L400 470 Z"/>
+    <!-- arms and rifle -->
+    <path d="M440 380 L470 350 L520 366 Q546 358 566 366 L600 380 L640 392 L654 404 L640 410 L590 398 L548 394 L540 398 L514 408 Q498 414 482 412 L462 410 L440 400 Z"/>
+    <path d="M520 366 L604 378 L604 392 L548 392 L520 404 Z"/>
+    <path d="M484 404 L508 400 L508 438 L492 442 Z"/>
+    <path d="M506 352 L522 348 L520 366 L506 366 Z"/>
+    <path d="M626 380 L632 368 L642 370 L642 394 Z"/>
+    <!-- sling -->
+    <path d="M432 446 Q470 464 520 442 Q560 422 576 392" fill="none" stroke="#000" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>

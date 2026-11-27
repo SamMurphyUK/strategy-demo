@@ -1379,6 +1379,12 @@ export function App() {
             editor.setReference(referenceUrl);
             setBoardGate(false);
           }}
+          onWorld={(svg) => {
+            editor.openBlank(1810, 913, false);
+            if (editor.openCoastSvg(svg)) {
+              setBoardGate(false);
+            }
+          }}
           onDemo={() => {
             editor.resetToDemo();
             setBoardGate(false);

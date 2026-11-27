@@ -7,6 +7,7 @@ import { projectMapJson } from "../map_space";
 export function EditorStart({
   versions,
   onBlank,
+  onWorld,
   onDemo,
   onVersion,
   onMap,
@@ -14,6 +15,7 @@ export function EditorStart({
 }: {
   versions: MapVersion[];
   onBlank(width: number, height: number, referenceUrl: string | null, emptyOcean: boolean): void;
+  onWorld(svg: string): void;
   onDemo(): void;
   onVersion(id: string): void;
   onMap(map: EditorMap): void;
@@ -38,6 +40,25 @@ export function EditorStart({
       setReferenceUrl(typeof reader.result === "string" ? reader.result : null);
     };
     reader.readAsDataURL(file);
+  };
+
+  const openWorld = () => {
+    setError("");
+    const url = `${import.meta.env.BASE_URL}assets/world_global.svg`;
+    void fetch(url)
+      .then(async (res) => {
+        if (!res.ok) {
+          setError("The world map did not load.");
+          return;
+        }
+        const text = await res.text();
+        if (!text.includes("<path")) {
+          setError("The world map did not load.");
+          return;
+        }
+        onWorld(text);
+      })
+      .catch(() => setError("The world map did not load."));
   };
 
   const readMap = (file: File | undefined) => {
@@ -127,6 +148,13 @@ export function EditorStart({
             }
           >
             Start blank map
+          </button>
+        </section>
+        <section>
+          <h3>World map</h3>
+          <p className="muted">Global coast. Suez and Panama are open. Opening it builds the land and sea blocks, which takes a moment.</p>
+          <button type="button" className="primary" onClick={openWorld}>
+            Slice world map
           </button>
         </section>
         <section>
