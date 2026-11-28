@@ -257,12 +257,12 @@ describe("the table", () => {
     expect(VISUAL_KEYS).toEqual(Object.keys(DEFAULT_VISUALS));
   });
 
-  it("ships the ranges, the grain, the rivers, the roads, the moving sun, the shadows, and the bases on", () => {
+  it("ships the ranges, the grain, the moving sun, the shadows, and the bases on, and the rivers and roads off so the borders read", () => {
     expect(DEFAULT_VISUALS.enableShogunMountains).toBe(true);
     expect(DEFAULT_VISUALS.enableScatteredRocks).toBe(false);
     expect(DEFAULT_VISUALS.enablePbrSurface).toBe(true);
-    expect(DEFAULT_VISUALS.enableRivers).toBe(true);
-    expect(DEFAULT_VISUALS.enableRoads).toBe(true);
+    expect(DEFAULT_VISUALS.enableRivers).toBe(false);
+    expect(DEFAULT_VISUALS.enableRoads).toBe(false);
     expect(DEFAULT_VISUALS.enableSunTransit).toBe(true);
     expect(DEFAULT_VISUALS.enableShadows).toBe(true);
     expect(DEFAULT_VISUALS.enableBasePlinths).toBe(true);
@@ -334,16 +334,17 @@ describe("the table", () => {
       tiling: 30,
       saturation: 0.7,
     });
-    expect(riverLook({ ...DEFAULT_VISUALS, riverWidth: 1, riverDepthShade: 0.3, riverBankHighlight: 0.8 })).toEqual({ halfWidth: 0.5, depth: 0.3, bank: 0.8 });
-    expect(roadLook({ ...DEFAULT_VISUALS, roadWidth: 0.4, roadOpacity: 0.6, roadWarmth: 0.2 }, 1)).toEqual({ halfWidth: 0.2, opacity: 0.6, warmth: 0.2 });
+    expect(riverLook({ ...DEFAULT_VISUALS, enableRivers: true, riverWidth: 1, riverDepthShade: 0.3, riverBankHighlight: 0.8 })).toEqual({ halfWidth: 0.5, depth: 0.3, bank: 0.8 });
+    expect(roadLook({ ...DEFAULT_VISUALS, enableRoads: true, roadWidth: 0.4, roadOpacity: 0.6, roadWarmth: 0.2 }, 1)).toEqual({ halfWidth: 0.2, opacity: 0.6, warmth: 0.2 });
   });
 
   it("fades the roads out toward the fitted board, with no step", () => {
-    expect(roadLook(DEFAULT_VISUALS, 0)).toBeNull();
-    expect(roadLook({ ...DEFAULT_VISUALS, roadOpacity: 0 }, 1)).toBeNull();
+    const ROADS_ON = { ...DEFAULT_VISUALS, enableRoads: true };
+    expect(roadLook(ROADS_ON, 0)).toBeNull();
+    expect(roadLook({ ...ROADS_ON, roadOpacity: 0 }, 1)).toBeNull();
     let previous = 0;
     for (let i = 1; i <= 40; i++) {
-      const opacity = roadLook(DEFAULT_VISUALS, i / 40)?.opacity ?? 0;
+      const opacity = roadLook(ROADS_ON, i / 40)?.opacity ?? 0;
       expect(opacity).toBeGreaterThanOrEqual(previous);
       expect(opacity - previous).toBeLessThan(0.2);
       previous = opacity;
