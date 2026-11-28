@@ -92,7 +92,7 @@ import {
   zoomAt,
   terrainHoldPlacement,
 } from "./viewMath";
-import { detailedSpriteScale, lodForZoom, type MapLod, SPRITE_FADE_MS, TACTICAL_IN, UPRIGHT_HIT_PX } from "./zoomLod";
+import { detailedSpriteScale, lodForZoom, type MapLod, SPRITE_FADE_MS, SPRITE_REFERENCE_ZOOM, UPRIGHT_HIT_PX } from "./zoomLod";
 
 export interface CombatMarker {
   regionId: string;
@@ -863,7 +863,7 @@ export function MapView(props: MapViewProps) {
     // The sheet stamps one shared picture for each kind. Off, every figure is its own SVG node.
     const sheet = getDrawFlags().sheet;
     // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
-    const lean = unitLean(Math.min(scene?.view.k ?? live.current.view.k, TACTICAL_IN), getBoardTune()) * microSpriteLean(scene?.view.k ?? live.current.view.k);
+    const lean = unitLean(Math.min(scene?.view.k ?? live.current.view.k, SPRITE_REFERENCE_ZOOM), getBoardTune()) * microSpriteLean(scene?.view.k ?? live.current.view.k);
     if (stage && cssW > 0 && cssH > 0) {
       stage.setShoreVeil(scene && !sheet ? shoreVeilFor(scene) : null);
       stage.sync(
