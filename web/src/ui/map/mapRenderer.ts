@@ -79,6 +79,7 @@ import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
 import { emblemAlpha, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { beginSpriteBoxes, commitSpriteBoxes } from "./spriteHits";
 import { facilityTarget } from "./facilityTargets";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
@@ -1433,6 +1434,7 @@ function paintSmokePlume(ctx: CanvasRenderingContext2D, scene: TerrainScene, dx:
  * so a unit closer to the camera covers one standing behind it.
  */
 function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, game: GameOverlay): void {
+  beginSpriteBoxes();
   const tokenPx = TOKEN_PX * game.unitScale;
   const facing = facingByStack(scene, game);
   // On the 3D board a figure stands on a turned base. The 2D map keeps the flat baseplate.
@@ -1593,6 +1595,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
   for (const item of uprightDrawOrder(2, items)) {
     item.paint();
   }
+  commitSpriteBoxes();
 }
 
 /** One eight-way bearing per region and faction. The campaign map wraps, so the short way around wins. */

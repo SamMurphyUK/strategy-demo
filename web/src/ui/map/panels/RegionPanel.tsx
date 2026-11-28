@@ -57,7 +57,7 @@ export function RegionPanel({ game, regionId, selection, focusNonce, onSelectSta
   ];
   const tags = [
     region.type === "sea" ? "Sea zone" : "Land",
-    region.ipc_value > 0 ? `${region.ipc_value} IO` : "",
+    region.ipc_value > 0 ? `${region.ipc_value} GDP` : "",
     region.has_factory ? "Factory" : "",
     region.is_capital ? "Capital" : "",
   ].filter(Boolean);

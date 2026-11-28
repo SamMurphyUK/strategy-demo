@@ -71,7 +71,7 @@ export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, play
         {state.turn_order.map((f) => (
           <span key={f} className={f === faction ? "ipc-active" : ""} style={factionStyle(f)}>
             <RoundelBadge faction={f} size="sm" label="" />
-            {factionName(f)} <b className="mono">{state.getFactionIpc(f)}</b> IO
+            {factionName(f)} <b className="mono">{state.getFactionIpc(f)}</b> GDP
           </span>
         ))}
       </div>

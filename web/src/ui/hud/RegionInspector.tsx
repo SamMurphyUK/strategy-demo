@@ -1,5 +1,8 @@
 import { Copy } from "lucide-react";
+import { GdpCoin } from "../../components/ui/GdpCoin";
 import { RoundelBadge } from "../../components/ui/RoundelBadge";
+import { RegionEmblems } from "./RegionEmblems";
+import { regionEmblems } from "./emblemData";
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { fuelRemaining } from "../../engine/air/air_fuel";
 import { factionPalette } from "../theme/factionPalette";
@@ -10,7 +13,7 @@ import { factionName, unitName } from "../map/session/event_text";
 import type { GameSessionHandle } from "../map/session/use_game_session";
 import { cargoStacks } from "../map/shipHold";
 import { isActiveFaction } from "../map/tokenStyle";
-import { sortMedallions, territoryStatus } from "./medallionOrder";
+import { sortMedallions } from "./medallionOrder";
 
 interface MoveDragApi {
   start(spec: {
@@ -120,8 +123,7 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
   const occupied = entries.length > 0;
   // A territory the current player has a battle to fight in is contested.
   const contested = phase === "combat" && region != null && game.session.getPendingBattles(faction).some((battle) => battle.region_id === shown);
-  const status = region ? territoryStatus(state, faction, region.owner_faction_id, entries) : "FRIENDLY";
-  const cover = region?.land_cover ? region.land_cover.toLowerCase() : region?.type === "sea" ? "sea" : "open";
+  const emblems = region ? regionEmblems(state, region) : [];
   const squad = entries
     .filter((entry) => isActiveFaction(entry.faction_id, faction) && movableCount(shown, entry) > 0 && (phase === "combat_move" || phase === "noncombat_move"))
     .map((entry) => ({ entry, count: movableCount(shown, entry) }));
@@ -203,21 +205,16 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                 Select all
               </button>
             )}
-            <RoundelBadge faction={region.owner_faction_id} size="lg" capital={region.is_capital} contested={contested} label={factionName(region.owner_faction_id)} className="hud-roundel-owner" />
-            <div className="hud-emblem" style={{ borderColor: factionPalette(region.owner_faction_id).ring }}>
-              <b>{region.type === "sea" ? (region.name.match(/\d+/)?.[0] ?? region.name) : region.name}</b>
-              <span>{status}</span>
-              <span>
-                {region.ipc_value} IO · {cover}
-                {region.has_factory ? (region.major_factory ? " · Major complex" : " · Minor complex") : ""}
-              </span>
-              <span>{factionName(region.owner_faction_id)}</span>
-              {(region.is_capital || region.has_factory) && (
-                <span className="ui-badges">
-                  {region.is_capital && <span className="ui-pixel">Capital</span>}
-                  {region.has_factory && <span className="ui-pixel">Factory</span>}
-                </span>
-              )}
+            <div className="hud-head">
+              <div className="hud-flag">
+                <RoundelBadge faction={region.owner_faction_id} size="lg" contested={contested} label={factionName(region.owner_faction_id)} className="hud-roundel-owner" />
+                <RegionEmblems emblems={emblems} />
+              </div>
+              <div className="hud-title">
+                <b>{region.type === "sea" ? (region.name.match(/\d+/)?.[0] ?? region.name) : region.name}</b>
+                <span className="hud-owner">{factionName(region.owner_faction_id)}</span>
+              </div>
+              {region.type === "land" && region.ipc_value > 0 ? <GdpCoin value={region.ipc_value} size="md" className="hud-gdp" /> : null}
             </div>
             {occupied && (
               <div className="hud-medallions">

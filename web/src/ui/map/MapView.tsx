@@ -47,7 +47,8 @@ import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./
 import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
 import { borderPasses, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
-import { badgeAt, getRoundelHits, roundelAt } from "./hoverTip";
+import { badgeAt, getLandmarkHits, getRoundelHits, landmarkAt, roundelAt } from "./hoverTip";
+import { getSpriteBoxes, spriteAt } from "./spriteHits";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
@@ -205,6 +206,8 @@ export interface MapViewProps {
   unitTitle?(entry: StackEntry): string;
   /** What to call a territory under the pointer: its name and its owner. Without it a roundel has no tooltip. */
   regionTip?(regionId: string): string;
+  /** What to say of a landmark under the pointer: its city, that it is a Victory City, and who holds it. */
+  landmarkTip?(region: string, label: string): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
   movement?: { phase: string; orders: readonly OperationalOrder[]; regionIds: readonly string[] } | null;
   /** Sword badges that stay up through the combat phase, one per battle that is not finished. */
@@ -1356,8 +1359,19 @@ export function MapView(props: MapViewProps) {
 
   const pickUnit = (ls: RegionLayout[], sp: Vec2) => {
     const { tokenHitPx: hit, uprightReach: reach } = live.current;
-    // The upright picture is wider and taller than the token, and a squad stands out to either side.
-    return reach > 0 ? pickFrontCounter(ls, sp, Math.max(hit, 48), Math.max(reach, 52)) : pickCounter(ls, sp, hit);
+    if (reach > 0) {
+      // Standing figures answer for themselves only: the pointer is tested against each figure's own picture, front-most first.
+      // The wide base under a stack answers for nothing, so a crowded stack never takes a neighbour's tooltip or click.
+      const boxes = getSpriteBoxes();
+      if (boxes.length > 0) {
+        const figure = spriteAt(sp, boxes);
+        const layout = figure ? ls.find((item) => item.region.id === figure.regionId && item.copyDx === figure.copyDx) : undefined;
+        const counter = layout?.counters.find((item) => item.slot.key === figure?.stackKey);
+        return layout && counter ? { layout, counter } : null;
+      }
+      return pickFrontCounter(ls, sp, Math.max(hit, 48), Math.max(reach, 52));
+    }
+    return pickCounter(ls, sp, hit);
   };
 
   /** Transport circles, front to back. The token size matches the hit radius the overlay was drawn with. */
@@ -1879,6 +1893,9 @@ export function MapView(props: MapViewProps) {
         const onBadge = facilitySplit(v.k, mapVisuals.facilitySplitFrom, mapVisuals.facilityFadeEnd).alpha > 0.3 ? badgeAt(ls, sp) : null;
         if (onBadge?.layout.badge) {
           tip = { x: onBadge.layout.badge.x, y: onBadge.layout.badge.y - onBadge.layout.badge.hh - 10, label: onBadge.label };
+        } else if (p.landmarkTip && live.current.unitFade > 0.001 && landmarkAt(getLandmarkHits(), v, sp, (at) => p.board?.terrainLift?.(at) ?? 0)) {
+          const mark = landmarkAt(getLandmarkHits(), v, sp, (at) => p.board?.terrainLift?.(at) ?? 0)!;
+          tip = { x: mark.sx, y: mark.topY - 12, label: p.landmarkTip(mark.region, mark.label) };
         } else if (p.regionTip && live.current.unitFade > 0.001 && mapVisuals.enableRegionRoundels) {
           const disc = roundelAt(getRoundelHits(), v, tokenPx, mapVisuals.roundelRadiusShare, sp, (at) => p.board?.terrainLift?.(at) ?? 0);
           if (disc) {

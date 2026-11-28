@@ -108,7 +108,7 @@ export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlayt
               </select>
             </label>
             <label>
-              IO value
+              GDP value
               <CommitInput
                 type="number"
                 value={selected.ipc_value}
@@ -349,7 +349,7 @@ export function EditorPanel({ editor, onPlaytest }: { editor: MapEditor; onPlayt
               <button
                 type="button"
                 className="field-wide"
-                title="Remove this region from play (Delete or Backspace). The land stays on the map as plain terrain with no id, IPC or selection box. The Promote tool brings it back."
+                title="Remove this region from play (Delete or Backspace). The land stays on the map as plain terrain with no id, GDP or selection box. The Promote tool brings it back."
                 onClick={editor.makeDecorative}
               >
                 Mark as Decorative (Unplayable)

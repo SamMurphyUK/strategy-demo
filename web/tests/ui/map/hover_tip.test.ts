@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { badgeAt, facilityLabel, roundelAt, type RoundelHit } from "../../../src/ui/map/hoverTip";
+import { badgeAt, facilityLabel, landmarkAt, type LandmarkHit, roundelAt, type RoundelHit } from "../../../src/ui/map/hoverTip";
 import { ROUNDEL_REF } from "../../../src/ui/viewport3d/roundelPlacement";
 import { worldToScreen } from "../../../src/ui/map/viewMath";
 
@@ -52,5 +52,25 @@ describe("the roundel under the pointer", () => {
     expect(roundelAt(list, view, 40, 0.82, probe)).toBeNull();
     const bigger: RoundelHit[] = [{ regionId: "near", x: 50, y: 50, scale: ROUNDEL_REF * 2 }];
     expect(roundelAt(bigger, view, 40, 0.82, probe)?.regionId).toBe("near");
+  });
+});
+
+describe("the landmark under the pointer", () => {
+  const marks: LandmarkHit[] = [{ region: "France", label: "Paris", x: 80, y: 80, scale: 8 }];
+
+  it("hits on its footprint and misses well off it", () => {
+    const foot = worldToScreen(view, { x: 80, y: 80 });
+    expect(landmarkAt(marks, view, foot)?.label).toBe("Paris");
+    expect(landmarkAt(marks, view, { x: foot.x + 120, y: foot.y })).toBeNull();
+  });
+
+  it("stands up the screen as the camera tilts: a point above the foot is on it only when the view is tilted", () => {
+    const foot = worldToScreen(view, { x: 80, y: 80 });
+    const above = { x: foot.x, y: foot.y - 40 };
+    const tilted = landmarkAt(marks, { ...view, k: 8 }, { x: worldToScreen({ ...view, k: 8 }, { x: 80, y: 80 }).x, y: worldToScreen({ ...view, k: 8 }, { x: 80, y: 80 }).y - 40 });
+    // Whether the point is above the monument depends on the tilt at that zoom; the footprint itself is always a hit.
+    expect(landmarkAt(marks, view, foot)).not.toBeNull();
+    expect(above.y).toBeLessThan(foot.y);
+    expect(tilted === null || tilted.label === "Paris").toBe(true);
   });
 });

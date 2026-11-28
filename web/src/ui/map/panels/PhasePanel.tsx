@@ -88,7 +88,7 @@ export function PhasePanel({
 
       {phase === "collect_income" && (
         <p>
-          Income this turn: <strong>{session.economy.calculateIncome(faction)} IO</strong> from owned land.
+          Income this turn: <strong>{session.economy.calculateIncome(faction)} GDP</strong> from owned land.
         </p>
       )}
 
@@ -276,7 +276,7 @@ function PurchaseBody({
   return (
     <>
       <p className={slotsLeft === 1 ? "shop-readout is-tight" : "shop-readout"}>
-        Treasury <b className="mono">{ipc}</b> IO
+        Treasury <b className="mono">{ipc}</b> GDP
         <span>
           Build slots <b className="mono">{queued}/{cap.maxUnits}</b>
         </span>
@@ -322,8 +322,8 @@ function PurchaseBody({
                   </span>
                   <span className="unit-stats mono">
                     {repairId !== "" || isFactoryKind(id)
-                      ? `${costs[id]} IO`
-                      : `${costs[id]} IO · ${ut.attack}/${ut.defense}/${ut.movement}`}
+                      ? `${costs[id]} GDP`
+                      : `${costs[id]} GDP · ${ut.attack}/${ut.defense}/${ut.movement}`}
                   </span>
                   <span className="unit-max mono">max {max}</span>
                 </div>
@@ -349,7 +349,7 @@ function PurchaseBody({
         <p className="muted">Nothing in this list.</p>
       )}
       <p className={total > ipc ? "warn" : "budget"}>
-        Total <b className="mono">{total}</b> IO of <b className="mono">{ipc}</b> available
+        Total <b className="mono">{total}</b> GDP of <b className="mono">{ipc}</b> available
       </p>
       <div className="row">
         <button type="button" onClick={confirm} disabled={!commandsEnabled || total === 0 || total > ipc}>

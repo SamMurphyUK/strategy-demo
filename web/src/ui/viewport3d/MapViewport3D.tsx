@@ -26,7 +26,7 @@ import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regio
 import { battleScarDescriptors, craterCountFor } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { clearFacilityTargets, setFacilityTarget } from "../map/facilityTargets";
-import { setRoundelHits } from "../map/hoverTip";
+import { setLandmarkHits, setRoundelHits } from "../map/hoverTip";
 import { placeRoundels } from "./roundelPlacement";
 import { wrapWorldX } from "../map/viewMath";
 import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
@@ -310,6 +310,11 @@ export default function MapViewport3D(props: MapViewProps) {
   const everyLandmark = useMemo(() => [...landmarks, ...facilityMarks], [landmarks, facilityMarks]);
   // A flat roundel of the owner's faction under every land territory that has an IPC value.
   const roundels = useMemo(() => placeRoundels(geometry.regions, (id) => props.owners[id], placements), [geometry, props.owners, placements]);
+  // The same for the city landmarks, which are the Victory Cities.
+  useEffect(() => {
+    setLandmarkHits(landmarks.map((mark) => ({ region: mark.spec.region, label: mark.spec.label, x: mark.instance.x, y: mark.instance.y, scale: mark.instance.scale })));
+    return () => setLandmarkHits([]);
+  }, [landmarks]);
   // The 2D layer reads the pointer, so it is told where the roundels are to say what one is.
   useEffect(() => {
     setRoundelHits(roundels.map((item) => ({ regionId: item.regionId, x: item.instance.x, y: item.instance.y, scale: item.instance.scale })));

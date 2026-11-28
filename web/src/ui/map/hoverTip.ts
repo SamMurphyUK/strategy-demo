@@ -20,6 +20,28 @@ export interface RoundelHit {
 
 let hits: readonly RoundelHit[] = [];
 
+export interface LandmarkHit {
+  /** The territory it stands in, by the map's name for it. */
+  region: string;
+  /** The city's name. */
+  label: string;
+  /** Where it stands, in map coordinates. */
+  x: number;
+  y: number;
+  /** Its width on the board, in world units. */
+  scale: number;
+}
+
+let marks: readonly LandmarkHit[] = [];
+
+export function setLandmarkHits(next: readonly LandmarkHit[]): void {
+  marks = next;
+}
+
+export function getLandmarkHits(): readonly LandmarkHit[] {
+  return marks;
+}
+
 export function setRoundelHits(next: readonly RoundelHit[]): void {
   hits = next;
 }
@@ -93,6 +115,47 @@ export function roundelAt(
     if (gap <= 1 && gap < bestGap) {
       best = { regionId: item.regionId, sx: centre.x, sy: centre.y, ry };
       bestGap = gap;
+    }
+  }
+  return best;
+}
+
+export interface LandmarkUnderPointer {
+  region: string;
+  label: string;
+  /** The top of the monument on the screen, for placing the tip above it. */
+  sx: number;
+  topY: number;
+}
+
+/**
+ * The landmark under a screen point, if any: its footprint, which lies flat as an ellipse, and the monument standing on it. The
+ * monument rises as the camera tilts toward the horizon and lies down as it looks from above, so its height is the same
+ * foreshortening a cliff has (see seaLevelShift in mapRenderer.ts). The nearest to the camera wins.
+ */
+export function landmarkAt(
+  list: readonly LandmarkHit[],
+  view: View,
+  point: Vec2,
+  liftAt?: (world: Vec2) => number,
+): LandmarkUnderPointer | null {
+  const { sx, sy } = projectionScales(view.k);
+  const ratio = sx > 0 ? Math.max(0.15, Math.min(1, sy / sx)) : 1;
+  const stand = Math.sqrt(Math.max(0, 1 - ratio * ratio));
+  let best: LandmarkUnderPointer | null = null;
+  let bestFeet = -Infinity;
+  for (const item of list) {
+    const flat = worldToScreen(view, { x: item.x, y: item.y });
+    const cx = flat.x;
+    const cy = flat.y - (liftAt?.({ x: item.x, y: item.y }) ?? 0);
+    const rx = item.scale * 0.5 * view.k;
+    const ry = rx * ratio;
+    const height = item.scale * view.k * stand * 0.95;
+    const onFoot = ((point.x - cx) / rx) ** 2 + ((point.y - cy) / ry) ** 2 <= 1;
+    const onMonument = Math.abs(point.x - cx) <= rx * 0.55 && point.y <= cy && point.y >= cy - height;
+    if ((onFoot || onMonument) && cy > bestFeet) {
+      best = { region: item.region, label: item.label, sx: cx, topY: cy - Math.max(height, ry) };
+      bestFeet = cy;
     }
   }
   return best;

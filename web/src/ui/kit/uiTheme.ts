@@ -29,7 +29,7 @@ export const FONT_ROLES = [
   { id: "inspector", label: "Inspector info", var: "--font-inspector" },
   { id: "inspectorTitle", label: "Inspector title", var: "--font-inspector-title" },
   { id: "purchase", label: "Purchase readouts", var: "--font-purchase" },
-  { id: "phases", label: "Phases / IPC", var: "--font-phases" },
+  { id: "phases", label: "Phases / GDP", var: "--font-phases" },
   { id: "buttons", label: "Buttons", var: "--font-buttons" },
   { id: "headings", label: "Headings", var: "--font-headings" },
 ] as const;

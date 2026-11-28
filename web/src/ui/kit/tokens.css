@@ -74,6 +74,7 @@
   & h2,
   & .faction-chip,
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name {
     font-size: 16px;
     line-height: 1.25;
@@ -120,6 +121,7 @@
   & h2,
   & .faction-chip,
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name {
     font-size: 24px;
     line-height: 1.1;
@@ -141,6 +143,7 @@
   & .hud-pips,
   & .hud-count,
   & .hud-emblem span,
+  & .hud-owner,
   & .shop-readout,
   & .shop-readout span,
   & .shop-readout b,
@@ -169,11 +172,13 @@
   & .hud-pips,
   & .hud-count,
   & .hud-emblem span,
+  & .hud-owner,
   & .hud-select-all {
     font-family: var(--font-inspector, inherit);
   }
 
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name {
     font-family: var(--font-inspector-title, inherit);
   }
@@ -224,6 +229,7 @@
   & h2,
   & .faction-chip,
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name {
     font-size: 16px;
     font-weight: 700;
@@ -260,6 +266,7 @@
   & h2,
   & .faction-chip,
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name {
     font-size: 24px;
     line-height: 1.1;
@@ -293,6 +300,7 @@
 
   & .faction-chip,
   & .hud-emblem b,
+  & .hud-title b,
   & .hud-mini-name,
   & .main-menu-title h1,
   & .campaign-modal h2,
@@ -666,4 +674,89 @@
 .campaign .hud-roundel-owner {
   align-self: center;
   margin-left: 8px;
+}
+
+/* ---------- region inspector header: flag and emblems, name, GDP coin ---------- */
+
+.campaign .hud-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 14px;
+  margin-left: 8px;
+}
+
+.campaign .hud-flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.campaign .hud-emblems {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.campaign .hud-emblem-chip {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  color: var(--gold-text);
+  background: color-mix(in srgb, var(--frame) 75%, transparent);
+  border: 1px solid var(--brass);
+  border-radius: 50%;
+  cursor: default;
+  outline-offset: 2px;
+}
+
+.campaign .hud-emblem-chip.is-capital {
+  color: #d2a53a;
+  border-color: #a88a5e;
+}
+
+.campaign .hud-emblem-chip.is-major {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.campaign .hud-emblem-chip.is-impaired {
+  color: var(--stamp);
+  border-color: var(--stamp);
+}
+
+.campaign .hud-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 96px;
+  max-width: 220px;
+}
+
+.campaign .hud-title b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.campaign .hud-owner {
+  color: var(--parchment);
+}
+
+.campaign .hud-gdp {
+  align-self: center;
+}
+
+.campaign .hud-emblem-tip {
+  position: fixed;
+  z-index: 100;
+  max-width: 260px;
+  padding: 6px 8px;
+  color: var(--gold-text);
+  background: var(--frame);
+  border: 1px solid var(--brass);
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;
 }

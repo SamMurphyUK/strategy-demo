@@ -1,0 +1,34 @@
+/* A GDP coin: a flat enamel disc with a brass rim, in the same language as the faction roundels. */
+
+.gdp-coin {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+  color: #f3ecdf;
+  background: #2a2023;
+  box-shadow:
+    inset 0 0 0 2px #a88a5e,
+    inset 0 0 0 3px #2a2023;
+  line-height: 1;
+  user-select: none;
+}
+
+.gdp-coin .gdp-coin-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
+.gdp-coin.gdp-sm {
+  font-size: 11px;
+}
+
+.gdp-coin.gdp-md {
+  font-size: 14px;
+}
+
+.gdp-coin.gdp-lg {
+  font-size: 18px;
+}

@@ -33,6 +33,7 @@ import { SELECTED_COLOR } from "./mapStyle";
 import { anchorSpan, wrapWorldX } from "./viewMath";
 import { squadOffsets } from "./zoomLod";
 import { shouldFadeAtShore, spriteScreenBox } from "./seaOverlap";
+import { recordSpriteBox } from "./spriteHits";
 
 const CHARCOAL = MILITARY.charcoal;
 const STEEL = MILITARY.steel;
@@ -939,6 +940,17 @@ export function drawUprightStack(ctx: CanvasRenderingContext2D, paint: UprightPa
         ? (frameBase + infantryIdlePhase(`${paint.vectorKey ?? paint.factionId}:${i}`, poseCount)) % poseCount
         : frameBase;
       const href = clip && poseCount > 0 ? quickFrameUrl(clip, poseName, frameIndex) : null;
+      // Where this figure is on the screen, for picking: its own picture, never the base it stands on.
+      if (paint.vectorKey) {
+        const feetX = x + off.x + move.dx;
+        const feetY = y + off.y + sink + move.dy - move.dz - sway.bob;
+        recordSpriteBox(
+          paint.vectorKey,
+          clip && poseCount > 0
+            ? spriteScreenBox(feetX, feetY, clip.width, clip.height, clip.feet.x, clip.feet.y, pixelScale, pose.face)
+            : { left: feetX - figureW / 2, top: feetY - UPRIGHT_FIGURE_PX * figureScale, width: figureW, height: UPRIGHT_FIGURE_PX * figureScale },
+        );
+      }
       if (asVector && clip && href) {
         const figure = quickSvgFigure({
           id: `${paint.vectorKey ?? `${paint.factionId}:${paint.unitType}:${Math.round(x)}:${Math.round(y)}`}:${i}`,

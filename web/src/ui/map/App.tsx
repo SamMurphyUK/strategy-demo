@@ -1206,6 +1206,11 @@ export function App() {
           onDropBombard={(regionId, entry, destination, count, targetId, onto) =>
             commitMove(regionId, entry, destination, count, onto, targetId)
           }
+          landmarkTip={(region, label) => {
+            // The landmark names its territory as the map does, by id or by name.
+            const held = state.regions[region] ?? Object.values(state.regions).find((item) => item.name === region);
+            return `${label} \u00b7 Victory City \u00b7 Controlled by ${factionName(held?.owner_faction_id)}`;
+          }}
           regionTip={(regionId) => {
             const region = state.regions[regionId];
             return `${region?.name || regionId} \u00b7 ${factionName(region?.owner_faction_id)}`;
