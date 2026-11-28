@@ -95,7 +95,7 @@ import { LINE_SHEET_SCALE } from "./shogun/shogunSheets";
 import { PIGMENT, rgbOf, SHOGUN, landMaterial, shogunUniforms } from "./shogun/shogunMaterials";
 import { type FrameEffects, PostStack } from "./postStack";
 import { loadLandmarks } from "./landmarkModels";
-import { landmarkBaseShare, landmarkReveal } from "./placements";
+import { landmarkBaseShare } from "./placements";
 import { MAX_PLINTHS, plinthBuffers, plinthRadius, writePlinths } from "./plinthPlacement";
 import { plinthGeometry } from "./plinthMeshes";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
@@ -107,6 +107,9 @@ import { type BoardLook, shadowLight, shadowReach, sunFor } from "./sun";
 import { fitSunShadow } from "./sunShadow";
 import { shadowDirection, MAX_UNIT_SHADOWS, writeShipPositions, writeUnitClearings, writeUnitShadows } from "./unitShadows";
 import { boardAnimates, boardDetail } from "./zoomDetail";
+
+/** The height, in model units, that a landmark's build time is quoted for. Taller ones take longer, shorter ones less. */
+const LANDMARK_BUILD_HEIGHT = 1.5;
 
 /** What MapView last painted, and how to ask the board for a frame. Mutable; never React state. */
 export interface BoardStore {
@@ -992,6 +995,8 @@ export function BoardScene(props: BoardSceneProps) {
     () => [...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? []), ...hazeSites(bounds, (x, y) => { const place = mapToLonLat({ x, y }); return hazeOf(place.lon, place.lat); }, (x, y) => pointInMultiPolygon({ x, y }, land))],
     [patches, bounds, land, props.mistExtra],
   );
+  // When the landmarks' build began, in seconds, or -1 while they are not standing (see the frame loop).
+  const landmarkBuild = useRef({ start: -1 }).current;
   // How far each base has faded, by stack, and the last frame's time.
   const baseFade = useRef({ values: new Map<string, number>(), last: 0 }).current;
   // The photographed biome sets load once, in the background. Until they are in, the shader keeps its soft stand-in.
@@ -1647,9 +1652,26 @@ export function BoardScene(props: BoardSceneProps) {
 
     kit.prop.uniforms.uGrow.value = detail.props;
     kit.propShadow.uniforms.uGrow.value = detail.props;
-    // The landmarks are revealed by the zoom itself: the base over the first part of the window, the monument over the rest.
-    const reveal = landmarkReveal(frame.view.k, mapVisuals.landmarkRevealFrom, mapVisuals.landmarkRevealTo);
+    // The landmarks are built by the clock: crossing the zoom starts the build, and zooming on does not change it. Coming back out
+    // past a little under that zoom clears them, so the next approach builds them again.
+    const nowSeconds = performance.now() / 1000;
+    if (frame.view.k >= mapVisuals.landmarkRevealFrom) {
+      if (landmarkBuild.start < 0) {
+        landmarkBuild.start = nowSeconds;
+      }
+    } else if (frame.view.k < mapVisuals.landmarkRevealFrom - 0.2) {
+      landmarkBuild.start = -1;
+    }
+    const reveal = landmarkBuild.start >= 0 ? 1 : 0;
     kit.landmarkLook.uLandmarkReveal.value = reveal;
+    // A level takes the build time shared over the levels of a model about LANDMARK_BUILD_HEIGHT tall.
+    const cube = Math.max(0.01, mapVisuals.landmarkBuildCube);
+    kit.landmarkLook.uLandmarkBuild.value.set(
+      reveal > 0 ? nowSeconds - landmarkBuild.start : 0,
+      cube,
+      Math.max(0.001, (mapVisuals.landmarkBuildSeconds * cube) / LANDMARK_BUILD_HEIGHT),
+      1,
+    );
     kit.landmarkLook.uLandmarkBand.value = mapVisuals.landmarkRevealBand;
     // The surfaces catch the sun harder the sliders say, and the board's tooth and sheen come in over the close zoom.
     kit.landmarkLook.uLandmarkSpec.value = mapVisuals.landmarkRimStrength;

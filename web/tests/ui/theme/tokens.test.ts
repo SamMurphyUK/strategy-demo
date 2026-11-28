@@ -45,8 +45,8 @@ describe("faction palette", () => {
 });
 
 describe("token spec", () => {
-  it("uses the allied infantry art only for allied factions", () => {
-    expect(resolveTokenSpec("infantry", "allies").artName).toBe("allies_inf_ii");
+  it("gives infantry the same art for every faction side", () => {
+    expect(resolveTokenSpec("infantry", "allies").artName).toBe("axis_inf_ii");
     expect(resolveTokenSpec("infantry", "axis").artName).toBe("axis_inf_ii");
     expect(resolveTokenSpec("infantry", "neutral").artName).toBe("axis_inf_ii");
   });
@@ -56,8 +56,12 @@ describe("token spec", () => {
     expect(resolveTokenSpec("transport", "axis").artName).toBe("axis_trans");
   });
 
-  it("makes unit types without art letter-only, and unknown types too", () => {
-    expect(resolveTokenSpec("fighter", "allies")).toEqual({ letter: "F", artName: null });
+  it("draws the silhouette-sheet icons for air, carrier and battleship, and falls back to axis art for the allies", () => {
+    expect(resolveTokenSpec("fighter", "allies")).toEqual({ letter: "F", artName: "axis_fighter" });
+    expect(resolveTokenSpec("carrier", "axis")).toEqual({ letter: "V", artName: "axis_carrier" });
+  });
+
+  it("makes unknown types letter-only", () => {
     expect(resolveTokenSpec("zeppelin", "axis")).toEqual({ letter: "Z", artName: null });
   });
 

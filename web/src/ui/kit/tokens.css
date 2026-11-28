@@ -1,0 +1,464 @@
+/*
+ * UI kit: the font pack, the type roles, and the HUD behaviours (fold, slide, trim).
+ * Colour variants are applied inline by uiTheme.ts (fading-16 chrome). data-ui-type picks
+ * Silkscreen for everything (default) or the font pack. Weights bundled: 400/500/600/700.
+ */
+/* ---------- @font-face (files in public/fonts/ui) ---------- */
+
+@font-face { font-family: "Jost"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/Jost-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Jost"; font-weight: 500; font-style: normal; font-display: swap; src: url("/fonts/ui/Jost-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Jost"; font-weight: 600; font-style: normal; font-display: swap; src: url("/fonts/ui/Jost-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Jost"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/Jost-Bold.ttf") format("truetype"); }
+
+@font-face { font-family: "Barlow Condensed"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/BarlowCondensed-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url("/fonts/ui/BarlowCondensed-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url("/fonts/ui/BarlowCondensed-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/BarlowCondensed-Bold.ttf") format("truetype"); }
+
+@font-face { font-family: "Archivo Narrow"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/ArchivoNarrow-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Archivo Narrow"; font-weight: 500; font-style: normal; font-display: swap; src: url("/fonts/ui/ArchivoNarrow-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Archivo Narrow"; font-weight: 600; font-style: normal; font-display: swap; src: url("/fonts/ui/ArchivoNarrow-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "Archivo Narrow"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/ArchivoNarrow-Bold.ttf") format("truetype"); }
+
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/IBMPlexMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-style: normal; font-display: swap; src: url("/fonts/ui/IBMPlexMono-Medium.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 600; font-style: normal; font-display: swap; src: url("/fonts/ui/IBMPlexMono-SemiBold.ttf") format("truetype"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/IBMPlexMono-Bold.ttf") format("truetype"); }
+
+@font-face { font-family: "Silkscreen"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/Silkscreen-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Silkscreen"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/Silkscreen-Bold.ttf") format("truetype"); }
+
+
+@font-face { font-family: "VT323"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/VT323-Regular.ttf") format("truetype"); }
+
+/* ---------- font roles ---------- */
+
+:root {
+  --ui-font-title: "Jost", "Futura", "Century Gothic", sans-serif;
+  --ui-font-label: "Barlow Condensed", "Archivo Narrow", "Arial Narrow", sans-serif;
+  --ui-font-row: "Archivo Narrow", "Barlow Condensed", "Arial Narrow", sans-serif;
+  --ui-font-num: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  --ui-font-pixel: "Silkscreen", "Courier New", monospace;
+  --ui-font-thin: "VT323", "Courier New", monospace;
+}
+
+/* ---------- type: Silkscreen everywhere, regular and bold only ---------- */
+
+.campaign[data-ui-type="pixel"] {
+  --serif: var(--ui-font-pixel);
+  --mono: var(--ui-font-pixel);
+  font-family: var(--ui-font-pixel);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+
+  /* One size on the 12px grid; titles on 16px, the menu title on 24px. */
+  & *:not(canvas) {
+    font-family: var(--ui-font-pixel);
+    font-size: 12px;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+
+  & h2,
+  & .faction-chip,
+  & .hud-emblem b,
+  & .hud-mini-name {
+    font-size: 16px;
+    line-height: 1.25;
+  }
+
+  & .main-menu-title h1 {
+    font-size: 24px;
+    line-height: 1.2;
+  }
+
+  & button,
+  & .phase-tracker li,
+  & .ipc span,
+  & .hud-unit-label {
+    letter-spacing: 0.02em;
+  }
+}
+
+/* ---------- type: thin pixel (VT323), for small windows. One weight, so no bold. ---------- */
+
+.campaign[data-ui-type="thin"] {
+  --serif: var(--ui-font-thin);
+  --mono: var(--ui-font-thin);
+  font-family: var(--ui-font-thin);
+  font-size: 16px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  font-synthesis: none;
+
+  & *:not(canvas) {
+    font-family: var(--ui-font-thin);
+    font-size: 16px;
+    line-height: 1.2;
+    font-weight: 400;
+    font-synthesis: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  & h2,
+  & .faction-chip,
+  & .hud-emblem b,
+  & .hud-mini-name {
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  & .main-menu-title h1 {
+    font-size: 32px;
+    line-height: 1.05;
+  }
+}
+
+/* ---------- type: the font pack ---------- */
+
+.campaign[data-ui-type="pack"] {
+  font-family: var(--ui-font-row);
+  letter-spacing: 0.02em;
+
+  & .mono,
+  & .ipc b,
+  & .turn-count b,
+  & .hud-pips,
+  & .hud-count,
+  & .unit-stats,
+  & .unit-max,
+  & .stack-count,
+  & .shop-readout {
+    font-family: var(--ui-font-num);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+
+  & .faction-chip,
+  & .hud-emblem b,
+  & .hud-mini-name,
+  & .main-menu-title h1,
+  & .campaign-modal h2,
+  & .panel h2 {
+    font-family: var(--ui-font-title);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  & .turn-bar,
+  & .phase-tracker li,
+  & .ipc span,
+  & .shop-tabs button,
+  & .main-menu-kicker,
+  & button {
+    font-family: var(--ui-font-label);
+    letter-spacing: 0.08em;
+  }
+
+  & .unit-card,
+  & .unit-name,
+  & .hud-unit-label,
+  & .event-log {
+    font-family: var(--ui-font-row);
+    letter-spacing: 0.02em;
+  }
+}
+
+/* ---------- square corners ---------- */
+
+.campaign .faction-chip,
+.campaign .faction-chip::before,
+.campaign .faction-chip::after {
+  border-radius: 0;
+}
+
+/* ---------- panels slide in and out ---------- */
+
+.hud-drawer {
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 240ms ease;
+}
+
+.hud-inspector {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease;
+}
+
+.hud-inspector.is-open {
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 240ms ease;
+}
+
+.hud-phase-chip {
+  animation: hud-rise 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes hud-rise {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes hud-slide-left {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* ---------- events: the corner trim is the window's edge, and it folds ---------- */
+
+.hud-log {
+  width: 280px;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  animation: hud-slide-left 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hud-log .event-log {
+  min-height: 0;
+  padding: 10px 12px 10px;
+  border: 0;
+  background: color-mix(in srgb, var(--frame) 82%, transparent);
+}
+
+.campaign .hud-log .event-log::before {
+  inset: 0;
+}
+
+.hud-log .event-log h2 {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding-bottom: 6px;
+  transition: margin 240ms ease, padding 240ms ease;
+}
+
+.hud-log .event-log.is-collapsed h2 {
+  padding-bottom: 0;
+  border-bottom-color: transparent;
+}
+
+.event-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 8px;
+  transition: grid-template-rows 280ms cubic-bezier(0.22, 1, 0.36, 1), margin 280ms ease;
+}
+
+.event-log.is-collapsed .event-fold {
+  grid-template-rows: 0fr;
+  margin-top: 0;
+}
+
+.event-fold-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hud-log .event-log ol {
+  max-height: 112px;
+}
+
+.hud-log .event-log p {
+  margin: 0;
+}
+
+/* The fold and mini-window toggle: two stacked squares. */
+.campaign button.hud-fold {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  padding: 0;
+  color: var(--gold-text);
+  background: transparent;
+  border: 0;
+}
+
+.campaign button.hud-fold:hover:not(:disabled) {
+  color: var(--gold);
+  background: transparent;
+}
+
+/* ---------- region inspector: the full tray folds to a name plate ---------- */
+
+.hud-inspector-slot {
+  transition:
+    width 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hud-inspector-slot.is-mini {
+  width: min(320px, calc(100% - 192px));
+  height: 44px;
+}
+
+.hud-inspector .hud-fold {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 1;
+}
+
+.hud-inspector-slot.is-mini .hud-fold {
+  top: 11px;
+}
+
+.hud-mini {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 36px 0 14px;
+  animation: hud-swap 180ms ease-out;
+}
+
+.hud-mini-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.hud-inspector-body .ui-badges {
+  justify-content: center;
+}
+
+/* ---------- Silkscreen micro badges: 12px or 16px only ---------- */
+
+.ui-pixel {
+  display: inline-block;
+  padding: 2px 4px 1px;
+  font-family: var(--ui-font-pixel);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 12px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--frame, #14171c);
+  background: var(--gold, #b89b5e);
+  border-radius: 0;
+}
+
+.ui-pixel.is-lg {
+  font-size: 16px;
+  line-height: 16px;
+  padding: 3px 5px 2px;
+}
+
+.ui-pixel.is-outline {
+  color: var(--gold, #b89b5e);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--gold, #b89b5e);
+}
+
+.ui-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* ---------- /ui-lab overlay (fixed neutral chrome, so it reads on any variant) ---------- */
+
+.ui-lab {
+  position: fixed;
+  z-index: 200;
+  right: 12px;
+  bottom: 12px;
+  width: 300px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 10px 12px 12px;
+  font: 12px/1.5 var(--ui-font-pixel);
+  color: #ddcf99;
+  background: rgba(35, 29, 33, 0.94);
+  border: 1px solid #846d59;
+
+  & header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #846d59;
+  }
+
+  & h2 {
+    margin: 0;
+    font: 700 16px/1 var(--ui-font-pixel);
+    text-transform: uppercase;
+  }
+
+  & .ui-lab-keys,
+  & .ui-lab-role {
+    margin: 6px 0 4px;
+    font: 400 12px/1.2 var(--ui-font-pixel);
+    color: #a99c8d;
+    text-transform: uppercase;
+  }
+
+  & .ui-lab-themes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+  }
+
+  & .ui-lab-types {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+  }
+
+  & button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    font: 700 12px/1.2 var(--ui-font-pixel);
+    text-transform: uppercase;
+    color: #ddcf99;
+    background: #4b3d44;
+    border: 1px solid #846d59;
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  & button i {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border: 1px solid #ddcf99;
+  }
+
+  & button[aria-pressed="true"] {
+    color: #231d21;
+    background: #ddcf99;
+  }
+
+  & .ui-lab-row {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(132, 109, 89, 0.5);
+  }
+
+  & .ui-lab-pixel {
+    font: 400 12px/1.5 var(--ui-font-pixel);
+  }
+
+  & .ui-lab-pixel.is-bold {
+    font-weight: 700;
+  }
+}

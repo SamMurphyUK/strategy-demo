@@ -1,3 +1,4 @@
+import { Copy } from "lucide-react";
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { fuelRemaining } from "../../engine/air/air_fuel";
 import { factionPalette } from "../theme/factionPalette";
@@ -31,7 +32,6 @@ interface Props {
   moveDrag: RefObject<MoveDragApi | null>;
   squadOn: boolean;
   onToggleSquad(entries: { entry: StackEntry; count: number }[] | null): void;
-  onClose(): void;
 }
 
 const DRAG_PX = 6;
@@ -97,8 +97,9 @@ function cargoOfShip(game: GameSessionHandle, entry: StackEntry): StackEntry[] {
   }));
 }
 
-export function RegionInspector({ game, regionId, selectedKey, movableCount, moveDrag, squadOn, onToggleSquad, onClose }: Props) {
+export function RegionInspector({ game, regionId, selectedKey, movableCount, moveDrag, squadOn, onToggleSquad }: Props) {
   const state = game.session.state;
+  const [folded, setFolded] = useState(false);
   const faction = state.current_faction_id;
   const phase = state.current_phase;
   const [shown, setShown] = useState(regionId);
@@ -165,17 +166,27 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
   };
 
   return (
-    <div className={`hud-inspector-slot${occupied ? " is-full" : " is-pill"}`}>
+    <div className={`hud-inspector-slot${folded && open ? " is-mini is-full" : occupied ? " is-full" : " is-pill"}`}>
       <section
         className={`hud-inspector${open ? " is-open" : ""}${dragging ? " is-passing" : ""}`}
         aria-label="Region inspector"
         aria-hidden={!open}
       >
         {region && (
-          <div key={shown} className="hud-inspector-body">
-            <button type="button" className="hud-close" aria-label="Close region" onClick={onClose}>
-              ×
+          <div key={folded ? `${shown}-mini` : shown} className={folded ? "hud-mini" : "hud-inspector-body"}>
+            <button
+              type="button"
+              className="hud-fold"
+              aria-label={folded ? "Expand region" : "Shrink region to its name"}
+              aria-expanded={!folded}
+              onClick={() => setFolded((value) => !value)}
+            >
+              <Copy size={14} strokeWidth={2} aria-hidden="true" />
             </button>
+            {folded ? (
+              <b className="hud-mini-name">{region.type === "sea" ? (region.name.match(/\d+/)?.[0] ?? region.name) : region.name}</b>
+            ) : (
+              <>
             {squadTotal > 0 && (
               <button
                 type="button"
@@ -197,6 +208,12 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                 {region.has_factory ? (region.major_factory ? " · Major complex" : " · Minor complex") : ""}
               </span>
               <span>{factionName(region.owner_faction_id)}</span>
+              {(region.is_capital || region.has_factory) && (
+                <span className="ui-badges">
+                  {region.is_capital && <span className="ui-pixel">Capital</span>}
+                  {region.has_factory && <span className="ui-pixel">Factory</span>}
+                </span>
+              )}
             </div>
             {occupied && (
               <div className="hud-medallions">
@@ -253,6 +270,8 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                   );
                 })}
               </div>
+            )}
+              </>
             )}
           </div>
         )}

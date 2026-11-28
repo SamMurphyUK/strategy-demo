@@ -2285,20 +2285,6 @@ export function MapView(props: MapViewProps) {
       <canvas ref={chromeRef} className="map-figure-chrome" style={{ width: paintW, height: paintH }} />
       <canvas ref={arrowRef} className="map-arrows" style={{ width: paintW, height: paintH }} />
       </div>
-      <div className="map-controls">
-        <button
-          type="button"
-          onClick={() => {
-            stopWheelZoom();
-            userMoved.current = false;
-            const fitted = fitView(bounds, size.w, size.h);
-            setView(fitted);
-            commitTunerCenter(fitted);
-          }}
-        >
-          Fit map
-        </button>
-      </div>
       {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={tunerCenter} />}
       {props.children}
       {mapLod === 2 && hoverChip && (

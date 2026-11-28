@@ -806,10 +806,15 @@ export function BoardLookPanel() {
         <h3>Landmarks</h3>
         <Num name="landmarkRimStrength" label="Landmark shine" title="How hard the sun catches a landmark: a crisp specular on its domes and spires, and a cool shade. 0 is flat." />
         <Num name="boardSheenStrength" label="Board sheen" title="A fine tooth and a low satin sheen on the board, faded in as the camera comes in close. 0 is smooth." />
-        <p className="muted">The city landmarks stand at a fixed size on the board and rise out of it as the camera comes in: the base fades in first, then the monument builds from the ground up.</p>
-        <Num name="landmarkRevealFrom" label="Reveal from" title="The zoom where the city landmarks begin to appear. Their bases fade in first." />
-        <Num name="landmarkRevealTo" label="Reveal to" title="The zoom where every landmark is whole and solid. Keep it under the closest zoom." />
-        <Num name="landmarkRevealBand" label="Reveal band" title="Height of the soft band at the top of a rising landmark, as a share of its height." />
+        <p className="muted">Landmarks are built brick by brick when the camera crosses a zoom: a ring of small cubes at the base, then up a level, round again. Zooming further does not change it; coming back out resets it.</p>
+        <Num name="landmarkRevealFrom" label="Build at zoom" title="The zoom where the landmarks appear and start building. They keep building by the clock, not by more zoom." />
+        <Num name="landmarkBuildSeconds" label="Build time" title="Seconds to build a landmark from its base to its top." />
+        <Num name="landmarkBuildCube" label="Cube size" title="The size of one build cube, as a share of the model's width. Smaller is finer bricks and a longer build." />
+        <h3>Facility badges</h3>
+        <p className="muted">The factory, harbor and airbase badge splits into its three triangles as you zoom in. Each drifts toward its model on the board and fades before the closest zoom.</p>
+        <Num name="facilitySplitFrom" label="Split from" title="The zoom where the badge starts to split apart." />
+        <Num name="facilityFadeEnd" label="Gone by" title="The zoom where the split badges have faded away. Keep it a little under the closest zoom." />
+        <Num name="facilitySplitSpread" label="Spread" title="How far apart the triangles drift, in badge widths. 0 leaves them together." />
 
         <h3>Mountains</h3>
         <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />

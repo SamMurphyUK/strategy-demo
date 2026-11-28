@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "../battle/battle.css";
 import "./styles.css";
+import "../kit/tokens.css";
 
 // The battle board's usePlayground would otherwise fetch Google's SDK script; the preview flag
 // makes it use the bundled fake.

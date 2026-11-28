@@ -1086,6 +1086,8 @@ varying float vNormY;
 // 0 for a monument or a base standing; up to 1 as a base is faded out (a per-instance dither, see plinthPlacement.ts).
 attribute float aGone;
 varying float vGone;
+// The point in the model's own space, for the cube-by-cube build (see LANDMARK_REVEAL).
+varying vec3 vLm;
 // Where the surface is and which way it faces, in the board's space, for the specular.
 varying vec3 vN;
 varying vec3 vWorld;
@@ -1109,6 +1111,7 @@ vec3 propPoint() {
   #ifdef LANDMARK
   vNormY = aNormY;
   vGone = aGone;
+  vLm = position;
   vMat = aMat;
   vCurve = aCurve;
   #else
@@ -1130,8 +1133,11 @@ const LANDMARK_REVEAL = /* glsl */ `
 #ifdef LANDMARK
 varying float vNormY;
 varying float vGone;
+varying vec3 vLm;
 uniform float uLandmarkReveal;
 uniform float uLandmarkBand;
+// The build: x seconds since it began, y the cube's size in model units, z seconds a level takes, w 1 when it is on.
+uniform vec4 uLandmarkBuild;
 const float LM_PLINTH = 0.1;
 uniform float uLandmarkBaseShare;
 // The base takes the first stretch of the window (a fixed bit of zoom), the monument the rest.
@@ -1143,6 +1149,23 @@ float lmAlpha(float y) {
   float rise = clamp((uLandmarkReveal - uLandmarkBaseShare) / (1.0 - uLandmarkBaseShare), 0.0, 1.0);
   float top = rise * (1.0 + uLandmarkBand);
   return 1.0 - smoothstep(top - uLandmarkBand, top, y);
+}
+// How long ago, in levels, the cube this point is in was laid. Below 0 it is not laid yet. Cubes go round the
+// base in order of their angle, then the next level up goes round the same way.
+float lmBuildAge() {
+  vec3 cell = floor(vLm / uLandmarkBuild.y);
+  float level = max(cell.z, 0.0);
+  float turn = atan(cell.y + 0.5, cell.x + 0.5) / 6.2831853 + 0.5;
+  float key = fract(turn + fract(sin(dot(cell.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.02);
+  return uLandmarkBuild.x / uLandmarkBuild.z - (level + key);
+}
+// Whether this point is drawn: the build's cubes when it is on, otherwise the height reveal. The plinths take the second.
+float lmShown() {
+  float a = lmAlpha(vNormY);
+  if (uLandmarkBuild.w > 0.5) {
+    a = lmBuildAge() >= 0.0 ? 1.0 : 0.0;
+  }
+  return a * (1.0 - vGone);
 }
 float lmBayer2(vec2 a) {
   a = mod(floor(a), 2.0);
@@ -1161,6 +1184,8 @@ export interface LandmarkUniforms {
   uLandmarkBand: { value: number };
   /** The share of the reveal the base takes before the monument rises. */
   uLandmarkBaseShare: { value: number };
+  /** The cube-by-cube build: x seconds since it began, y the cube's size in model units, z seconds a level takes, w 1 when it is on. */
+  uLandmarkBuild: { value: THREE.Vector4 };
   /** How hard the sun catches the surface: a specular rim and a warm key against a cool shade. */
   uLandmarkSpec: { value: number };
   /** How deep the shadows drawn on a monument go. 1 is the plain shade. */
@@ -1170,7 +1195,7 @@ export interface LandmarkUniforms {
 }
 
 export function landmarkUniforms(): LandmarkUniforms {
-  return { uLandmarkReveal: { value: 0 }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 }, uLandmarkShadow: { value: 1 }, uLandmarkFinish: { value: new THREE.Vector3(0, 0, 0) } };
+  return { uLandmarkReveal: { value: 0 }, uLandmarkBuild: { value: new THREE.Vector4(0, 0.06, 0.2, 0) }, uLandmarkBand: { value: 0.08 }, uLandmarkBaseShare: { value: 0.3 }, uLandmarkSpec: { value: 0.6 }, uLandmarkShadow: { value: 1 }, uLandmarkFinish: { value: new THREE.Vector3(0, 0, 0) } };
 }
 
 /** Trees, peaks, and buildings. With `landmark` it is a city landmark, at a fixed size and revealed from the ground up. */
@@ -1314,11 +1339,18 @@ export function propMaterial(shared: SharedUniforms, landmark?: LandmarkUniforms
         }
         c = min(c, vec3(0.95));
         float shown = lmAlpha(vNormY) * (1.0 - vGone);
+        float fresh = 0.0;
+        if (uLandmarkBuild.w > 0.5) {
+          // Cubes are laid whole: in or out, with a warm flash on the ones just laid.
+          float age = lmBuildAge();
+          shown = (age >= 0.0 ? 1.0 : 0.0) * (1.0 - vGone);
+          fresh = age >= 0.0 ? 1.0 - smoothstep(0.0, 0.9, age) : 0.0;
+        }
         if (shown < lmBayer(gl_FragCoord.xy)) {
           discard;
         }
         // A warm edge where the monument is still rising, and held under 1.0 so it never reaches the bloom.
-        float edge = shown < 0.999 ? shown * (1.0 - shown) * 4.0 : 0.0;
+        float edge = uLandmarkBuild.w > 0.5 ? fresh * 0.7 : (shown < 0.999 ? shown * (1.0 - shown) * 4.0 : 0.0);
         c = mix(c, min(c + vec3(0.16, 0.1, 0.03), vec3(0.95)), edge);
         #endif
         gl_FragColor = vec4(c, 1.0);
@@ -1396,7 +1428,7 @@ export function propShadowMaterial(shared: SharedUniforms, landmark?: LandmarkUn
             discard;
           }
           #ifdef LANDMARK
-          if (lmAlpha(vNormY) * (1.0 - vGone) < 0.5) {
+          if (lmShown() < 0.5) {
             discard;
           }
           #endif
@@ -1462,7 +1494,7 @@ export function propCasterMaterial(
         ${LANDMARK_REVEAL}
         void main() {
           #ifdef LANDMARK
-          if (lmAlpha(vNormY) * (1.0 - vGone) < 0.5) {
+          if (lmShown() < 0.5) {
             discard;
           }
           #endif

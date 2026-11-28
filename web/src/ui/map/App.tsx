@@ -60,6 +60,8 @@ import { type PlayChoice } from "./session/play_map";
 import { launchForScenario, legacyLaunch, type CampaignLaunchConfig } from "../../engine/types/ruleset";
 import { NewCampaignModal, draftLaunch, type CampaignDraft } from "./menu/NewCampaignModal";
 import { useCampaignSession } from "./session/use_campaign_session";
+import { UiLab } from "../kit/UiLab";
+import { uiThemeChrome, useUiLab, useUiTheme, useUiThemeHotkeys, useUiType } from "../kit/uiTheme";
 
 export type Selection =
   | {
@@ -156,6 +158,10 @@ export function App() {
   const { game, room, online, isMyTurn, battleFeed } = useCampaignSession();
   const { session, version } = game;
   const state = session.state;
+  const uiTheme = useUiTheme();
+  const uiType = useUiType();
+  const uiLabOpen = useUiLab();
+  useUiThemeHotkeys();
   const faction = state.current_faction_id;
   const phase = state.current_phase;
   const facingBag = useRef<{ session: typeof session; hold: FacingHold } | null>(null);
@@ -1088,7 +1094,9 @@ export function App() {
     <div
       className={menuOpen ? "campaign menu-open" : "campaign"}
       data-look={look}
-      style={look === "dusk" ? duskChrome() : factionChrome(faction)}
+      data-ui-theme={uiTheme}
+      data-ui-type={uiType}
+      style={uiThemeChrome(uiTheme) ?? (look === "dusk" ? duskChrome() : factionChrome(faction))}
       inert={covered ? true : undefined}
       onClickCapture={(event) => {
         const target = event.target;
@@ -1297,11 +1305,6 @@ export function App() {
                   setSelection(null);
                   setSquad({ regionId: selectedRegionId, entries });
                 }}
-                onClose={() => {
-                  setSquad(null);
-                  setSelection(null);
-                  setSelectedRegionId("");
-                }}
               />
               <PhaseChip
                 game={game}
@@ -1433,6 +1436,7 @@ export function App() {
       />
     )}
     <Soundboard />
+    {uiLabOpen && <UiLab />}
     {spriteEditor && <UnitBakeReviewPanel />}
     {import.meta.env.DEV && new URLSearchParams(window.location.search).get("anim") === "1" && <MotionTestLevel />}
     {fieldTest && <NativeBattlePreview />}

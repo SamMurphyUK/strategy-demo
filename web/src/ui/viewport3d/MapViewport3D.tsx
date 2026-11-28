@@ -25,12 +25,14 @@ import { MapView, type MapViewProps } from "../map/MapView";
 import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regionClip";
 import { battleScarDescriptors, craterCountFor } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
+import { clearFacilityTargets, setFacilityTarget } from "../map/facilityTargets";
 import { wrapWorldX } from "../map/viewMath";
 import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
 import { PlacementButton, PlacementEditor } from "./PlacementEditor";
 import savedPlacements from "./placements.json";
 import {
   applyPlacements,
+  facilityKindOf,
   parsePlacements,
   PLACEMENTS_STORAGE_KEY,
   type Placements,
@@ -304,6 +306,23 @@ export default function MapViewport3D(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [land, geometry, clipped, placements, builtKey]);
   const everyLandmark = useMemo(() => [...landmarks, ...facilityMarks], [landmarks, facilityMarks]);
+  // The badge painter points each of a territory's facility badges at the model that replaces it as the camera comes in.
+  useEffect(() => {
+    clearFacilityTargets();
+    for (const mark of facilityMarks) {
+      const kind = facilityKindOf(mark.id);
+      if (kind) {
+        setFacilityTarget(mark.spec.region, kind === "harbor" ? "harbour" : "airbase", { x: mark.instance.x, y: mark.instance.y });
+      }
+    }
+    // The factory's model stands at the territory's facility anchor.
+    for (const region of geometry.regions) {
+      if (region.type === "land" && facilitiesOf(region).factory !== "none") {
+        setFacilityTarget(region.id, "factory", facilityAnchorOf(region));
+      }
+    }
+    return clearFacilityTargets;
+  }, [facilityMarks, geometry]);
 
   // The table under the pieces: the three sculpted ranges, the rivers, and the roads between the
   // capitals and the factories. Set dressing only, laid out once for a map.

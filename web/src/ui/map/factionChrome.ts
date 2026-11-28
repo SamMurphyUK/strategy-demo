@@ -11,7 +11,7 @@ function channels(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function mix(from: string, toward: string, t: number): string {
+export function mix(from: string, toward: string, t: number): string {
   const [ar, ag, ab] = channels(from);
   const [br, bg, bb] = channels(toward);
   const byte = (a: number, b: number) => Math.round(a + (b - a) * t).toString(16).padStart(2, "0");
@@ -20,7 +20,11 @@ function mix(from: string, toward: string, t: number): string {
 
 /** CSS variables for `.campaign`. `--brass` is the map colour itself; the wells are that hue, darkened. */
 export function factionChrome(factionId: string): CSSProperties {
-  const land = factionPalette(factionId).primary;
+  return landChrome(factionPalette(factionId).primary);
+}
+
+/** The same chrome cut from any colour, such as one of the fading-16 strip. */
+export function landChrome(land: string): CSSProperties {
   return {
     "--land": land,
     "--frame": mix(land, INK, 0.84),

@@ -26,6 +26,7 @@ import {
   BADGE_INACTIVE_STROKE,
   BADGE_INK,
   type BadgeShape,
+  type BadgeSlot,
   badgeExtent,
   badgeShapes,
   chimneyCount,
@@ -77,7 +78,8 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { facilityBadgeAlpha, microSpriteLean, unitLean } from "./boardTune";
+import { facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { facilityTarget } from "./facilityTargets";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { waterY } from "../viewport3d/skins/waterSwell";
@@ -1063,26 +1065,68 @@ export interface GameOverlay {
 /** Facility icons stay at this opacity. Forty percent more opaque than the old 0.66, and nothing else changes it. */
 export const FACILITY_ICON_ALPHA = Math.min(1, 0.66 * 1.4);
 
-/** The Tri-Wedge: airbase ▼, factory ▲ and harbour ▼ as one trapezoid. See facilityBadge.ts for the geometry. */
-export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBadge, f: Facilities, dpr = 1): void {
+/** How far the badge's triangles have come apart, and where each one's model stands on the screen. */
+export interface BadgeSplit {
+  /** 0 whole, 1 fully apart. */
+  amount: number;
+  /** How far a triangle drifts at 1, in badge widths. */
+  spread: number;
+  /** Each slot's model, in screen px. A slot with none drifts to its own side and points nowhere. */
+  targets: Partial<Record<BadgeSlot, Vec2>>;
+}
+
+/** Without a model to point at, a triangle drifts out to its own side: airbase left, factory up, harbour right. */
+const SPLIT_FALLBACK: Record<BadgeSlot, Vec2> = {
+  airbase: { x: -0.85, y: -0.5 },
+  factory: { x: 0, y: -1 },
+  harbour: { x: 0.85, y: -0.5 },
+};
+
+/** The Tri-Wedge: airbase, factory and harbour as one trapezoid. See facilityBadge.ts for the geometry. With a split the three drift apart toward their models. */
+export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBadge, f: Facilities, dpr = 1, split?: BadgeSplit): void {
   const s = badge.side;
   const shapes = badgeShapes(f);
   const previousAlpha = ctx.globalAlpha;
   ctx.globalAlpha = FACILITY_ICON_ALPHA;
+  const amount = split ? split.amount : 0;
+  // Where each triangle has drifted to, and the model it points at.
+  const drift = new Map<BadgeSlot, { dx: number; dy: number; aim: Vec2 | null }>();
+  for (const shape of shapes) {
+    const centre = shape.points.reduce((sum, p) => ({ x: sum.x + p.x / 3, y: sum.y + p.y / 3 }), { x: 0, y: 0 });
+    const from = { x: badge.x + centre.x * s, y: badge.y + centre.y * s };
+    const target = split?.targets[shape.slot] ?? null;
+    let dir = SPLIT_FALLBACK[shape.slot];
+    let reach = Infinity;
+    if (target) {
+      const vx = target.x - from.x;
+      const vy = target.y - from.y;
+      const length = Math.hypot(vx, vy);
+      if (length > 1) {
+        dir = { x: vx / length, y: vy / length };
+        reach = length * 0.7;
+      }
+    }
+    const travel = split ? Math.min(amount * split.spread * s, reach) : 0;
+    drift.set(shape.slot, { dx: dir.x * travel, dy: dir.y * travel, aim: target });
+  }
+  const shift = (shape: BadgeShape) => drift.get(shape.slot) ?? { dx: 0, dy: 0, aim: null };
   const trace = (shape: BadgeShape) => {
+    const { dx, dy } = shift(shape);
     ctx.beginPath();
-    shape.points.forEach((p, i) => (i === 0 ? ctx.moveTo(badge.x + p.x * s, badge.y + p.y * s) : ctx.lineTo(badge.x + p.x * s, badge.y + p.y * s)));
+    shape.points.forEach((p, i) => (i === 0 ? ctx.moveTo(badge.x + dx + p.x * s, badge.y + dy + p.y * s) : ctx.lineTo(badge.x + dx + p.x * s, badge.y + dy + p.y * s)));
     ctx.closePath();
   };
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
   // Slots without a facility: only a faint outline, so the trapezoid still reads as one piece.
-  for (const shape of shapes.filter((x) => !x.active)) {
-    trace(shape);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = BADGE_INACTIVE_STROKE;
-    ctx.stroke();
+  if (amount < 0.05) {
+    for (const shape of shapes.filter((x) => !x.active)) {
+      trace(shape);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = BADGE_INACTIVE_STROKE;
+      ctx.stroke();
+    }
   }
   // Fills, with one soft shadow under the whole badge.
   ctx.shadowColor = "rgba(75, 61, 68, 0.45)";
@@ -1104,7 +1148,8 @@ export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBa
   }
   for (const shape of shapes.filter((x) => x.active)) {
     const { centre, size } = silhouetteBox(shape);
-    const at = { x: badge.x + centre.x * s, y: badge.y + centre.y * s };
+    const { dx, dy } = shift(shape);
+    const at = { x: badge.x + dx + centre.x * s, y: badge.y + dy + centre.y * s };
     const u = size * s;
     ctx.fillStyle = BADGE_INK;
     ctx.strokeStyle = BADGE_INK;
@@ -1134,6 +1179,44 @@ export function drawFacilityBadge(ctx: CanvasRenderingContext2D, badge: PlacedBa
       ctx.moveTo(at.x + 0.66 * u * Math.cos(Math.PI * 0.12), at.y + 0.14 * u + 0.66 * u * Math.sin(Math.PI * 0.12));
       ctx.arc(at.x, at.y + 0.14 * u, 0.66 * u, Math.PI * 0.12, Math.PI * 0.88);
       ctx.stroke();
+    }
+  }
+  // A thin pointer from each drifting triangle toward its model, ending in a small arrowhead short of it.
+  if (split && amount > 0.08) {
+    ctx.lineWidth = 1;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = BADGE_INK;
+    ctx.fillStyle = BADGE_INK;
+    ctx.globalAlpha = FACILITY_ICON_ALPHA * Math.min(1, (amount - 0.08) / 0.4);
+    for (const shape of shapes.filter((x) => x.active)) {
+      const { dx, dy, aim } = shift(shape);
+      if (!aim) {
+        continue;
+      }
+      const centre = shape.points.reduce((sum, p) => ({ x: sum.x + p.x / 3, y: sum.y + p.y / 3 }), { x: 0, y: 0 });
+      const from = { x: badge.x + dx + centre.x * s, y: badge.y + dy + centre.y * s };
+      const vx = aim.x - from.x;
+      const vy = aim.y - from.y;
+      const length = Math.hypot(vx, vy);
+      if (length < s * 0.9) {
+        continue;
+      }
+      const ux = vx / length;
+      const uy = vy / length;
+      const start = { x: from.x + ux * s * 0.62, y: from.y + uy * s * 0.62 };
+      const pull = Math.min(s * 0.3, length * 0.2);
+      const end = { x: aim.x - ux * pull, y: aim.y - uy * pull };
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      const head = Math.max(3, s * 0.16);
+      ctx.beginPath();
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - ux * head - uy * head * 0.55, end.y - uy * head + ux * head * 0.55);
+      ctx.lineTo(end.x - ux * head + uy * head * 0.55, end.y - uy * head - ux * head * 0.55);
+      ctx.closePath();
+      ctx.fill();
     }
   }
   ctx.globalAlpha = previousAlpha;
@@ -1289,14 +1372,24 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
           paint: () => {
             // The factory, harbor and airfield badges fade slowly away as the camera comes in, and are gone at the closest zoom: the models
             // stand there instead.
-            const shown = facilityBadgeAlpha(scene.view.k);
+            const { split, alpha: shown } = facilitySplit(scene.view.k, mapVisuals.facilitySplitFrom, mapVisuals.facilityFadeEnd);
             if (shown < 0.02) {
               return;
+            }
+            // As the camera comes in the badge comes apart, each triangle drifting toward its own model on the board.
+            const targets: Partial<Record<BadgeSlot, Vec2>> = {};
+            if (split > 0.01) {
+              for (const slot of ["airbase", "factory", "harbour"] as const) {
+                const at = facilityTarget(layout.region.id, slot);
+                if (at) {
+                  targets[slot] = worldToScreen(copyView, at);
+                }
+              }
             }
             setScreenTransform(ctx, scene.dpr);
             ctx.save();
             ctx.globalAlpha *= shown;
-            drawFacilityBadge(ctx, badge, facilitiesOf(layout.region), scene.dpr);
+            drawFacilityBadge(ctx, badge, facilitiesOf(layout.region), scene.dpr, { amount: split, spread: mapVisuals.facilitySplitSpread, targets });
             ctx.restore();
           },
         });

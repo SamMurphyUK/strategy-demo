@@ -1,6 +1,7 @@
 // Which art and which serif letter each unit type gets. Pure.
 //
-// Art lives in public/assets/units/. Only infantry has distinct allied art; every other unit has one
+// Art lives in public/assets/units/. The axis_* tokens are built from the silhouette sheet by scripts/buildIconTokens.mjs;
+// the previous ones are in backups/unit-tokens-pre-icon-sheet/. Only infantry has distinct allied art; every other unit has one
 // axis_* drawing that is recoloured per faction. Units with no art yet are letter-only tokens.
 
 import type { FactionSide } from "../factionPalette";
@@ -13,20 +14,20 @@ export interface UnitTokenSpec {
 }
 
 export const UNIT_TOKEN_SPEC: Record<string, UnitTokenSpec> = {
-  infantry: { letter: "I", art: { axis: "axis_inf_ii", allies: "allies_inf_ii" } },
-  mech_infantry: { letter: "M", art: { axis: "axis_inf_ii", allies: "allies_inf_ii" } },
+  infantry: { letter: "I", art: { axis: "axis_inf_ii" } },
+  mech_infantry: { letter: "M", art: { axis: "axis_mech" } },
   artillery: { letter: "A", art: { axis: "axis_art" } },
   tank: { letter: "K", art: { axis: "axis_tank" } },
   aaa: { letter: "G", art: { axis: "axis_aa" } },
-  fighter: { letter: "F" },
-  tactical_bomber: { letter: "L" },
-  strategic_bomber: { letter: "H" },
+  fighter: { letter: "F", art: { axis: "axis_fighter" } },
+  tactical_bomber: { letter: "L", art: { axis: "axis_tactical_bomber" } },
+  strategic_bomber: { letter: "H", art: { axis: "axis_strategic_bomber" } },
   submarine: { letter: "S", art: { axis: "axis_sub" } },
   destroyer: { letter: "D", art: { axis: "axis_des" } },
   cruiser: { letter: "C", art: { axis: "axis_cruiser" } },
   transport: { letter: "T", art: { axis: "axis_trans" } },
-  battleship: { letter: "B" },
-  carrier: { letter: "V" },
+  battleship: { letter: "B", art: { axis: "axis_battleship" } },
+  carrier: { letter: "V", art: { axis: "axis_carrier" } },
 };
 
 export interface ResolvedTokenSpec {

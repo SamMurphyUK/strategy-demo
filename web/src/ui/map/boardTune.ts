@@ -253,6 +253,17 @@ export function facilityBadgeAlpha(k: number): number {
   return 1 - t * t * (3 - 2 * t);
 }
 
+/**
+ * The facility badge's split at a zoom. `split` runs 0 to 1 from `from` to `end` and is how far its triangles have drifted
+ * apart; `alpha` holds at 1 through the first of it, then fades to nothing at `end`, a little before the closest zoom.
+ */
+export function facilitySplit(k: number, from: number, end: number): { split: number; alpha: number } {
+  const t = clamp01((k - from) / Math.max(0.05, end - from));
+  const split = t * t * (3 - 2 * t);
+  const fade = clamp01((t - 0.3) / 0.7);
+  return { split, alpha: 1 - fade * fade * (3 - 2 * fade) };
+}
+
 /** uMicroAlpha at a zoom: 0 outside the micro tier, 1 close in. */
 export function microAlpha(k: number): number {
   return nearShare(cameraDistance(k), MICRO_ALPHA_FROM, MICRO_ALPHA_TO);

@@ -87,7 +87,7 @@ export function MainMenu({
     <aside className="main-menu" aria-label="Main menu">
       <header className="main-menu-title">
         <p className="main-menu-kicker">Tactical dossier</p>
-        <h1>Strategy Demo</h1>
+        <h1>Battle Plans: Global War</h1>
         <span className="main-menu-badge">v{MENU_VERSION}</span>
       </header>
       {page === "home" && (

@@ -260,11 +260,22 @@ export interface MapVisualConfig {
   /** How far a ship's hull sits below the water, in world units. 0 floats on the surface. */
   navalSubmergeDepth: number;
   /** How far a ship heaves up and down all the time. 0 holds it still. Pitch and roll between waves are all but level whatever this is. */
-  /** The zoom where the city landmarks begin to appear, and where they are whole. The base fades in over the first part, the monument rises over the rest. */
+  /** The zoom where the city landmarks appear. Crossing it starts their build: it runs by the clock, not by further zoom. */
   landmarkRevealFrom: number;
+  /** Retired with the zoom-driven rise; kept so saved looks still load. */
   landmarkRevealTo: number;
-  /** Height of the soft band at the top of a rising landmark, as a share of its height. */
+  /** Retired with the zoom-driven rise; kept so saved looks still load. */
   landmarkRevealBand: number;
+  /** How long a landmark takes to build, brick by brick, in seconds. */
+  landmarkBuildSeconds: number;
+  /** The size of one build cube, as a share of the model's width. Smaller is finer bricks and more of them. */
+  landmarkBuildCube: number;
+  /** The zoom where the factory, harbor and airbase badges start to split apart and point at their models. */
+  facilitySplitFrom: number;
+  /** The zoom where the split badges are gone. Keep it a little under the closest zoom. */
+  facilityFadeEnd: number;
+  /** How far apart the badge's three triangles drift, in badge widths. */
+  facilitySplitSpread: number;
   /** The bases under land stacks are real models on the board, not flat drawings. Ships keep their ring. */
   enable3DBases: boolean;
   /** Height of a base against its radius. */
@@ -434,6 +445,11 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   landmarkRevealFrom: 4.4,
   landmarkRevealTo: 7,
   landmarkRevealBand: 0.08,
+  landmarkBuildSeconds: 3.75,
+  landmarkBuildCube: 0.06,
+  facilitySplitFrom: 2.6,
+  facilityFadeEnd: 6.4,
+  facilitySplitSpread: 2.4,
   enable3DBases: true,
   plinthHeight: 0.22,
   plinthBevel: 0.11,
@@ -624,6 +640,11 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   landmarkRevealFrom: [1, 8],
   landmarkRevealTo: [1.5, 9],
   landmarkRevealBand: [0.01, 0.4],
+  landmarkBuildSeconds: [0.5, 30],
+  landmarkBuildCube: [0.02, 0.25],
+  facilitySplitFrom: [1, 8],
+  facilityFadeEnd: [2, 9],
+  facilitySplitSpread: [0, 6],
   plinthHeight: [0.05, 0.6],
   plinthBevel: [0, 0.3],
   squadRadius2: [1, 2],
