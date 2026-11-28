@@ -31,6 +31,11 @@ export interface MapVisualConfig {
   /** The border line's brightness against the faction's colour (under 1 is darker, so it reads on the tint), and a multiplier on its opacity. */
   factionBorderBrightness: number;
   factionBorderOpacity: number;
+  /** How much of its strength a border keeps at the closest zoom, where the tint has faded out: 0.5 is half. Borders never fade to nothing. */
+  factionBorderFloor: number;
+  /** How close the zoom is (0 fitted board, 1 closest) where borders start to ease toward that floor, and where they reach it. */
+  factionBorderFadeFrom: number;
+  factionBorderFadeTo: number;
   /** How much stronger one faction's tint is than the rest at the mid zoom: 1.6 is 60% stronger. */
   factionBoostUSSR: number;
   factionBoostGER: number;
@@ -363,6 +368,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionTintSaturation: 1,
   factionBorderBrightness: 0.5,
   factionBorderOpacity: 1,
+  factionBorderFloor: 0.5,
+  factionBorderFadeFrom: 0.55,
+  factionBorderFadeTo: 0.9,
   factionBoostUSSR: 1.05,
   factionBoostGER: 1.6,
   factionBoostJAP: 1.15,
@@ -606,6 +614,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionTintSaturation: [0, 2],
   factionBorderBrightness: [0, 2],
   factionBorderOpacity: [0, 2],
+  factionBorderFloor: [0, 1],
+  factionBorderFadeFrom: [0, 1],
+  factionBorderFadeTo: [0, 1],
   factionBoostUSSR: [0.3, 3],
   factionBoostGER: [0.3, 3],
   factionBoostJAP: [0.3, 3],
@@ -832,6 +843,15 @@ export function factionWash(closeness: number, config: Readonly<MapVisualConfig>
 export function factionTint(closeness: number, config: Readonly<MapVisualConfig>): number {
   const span = Math.max(1e-3, config.factionTintFadeTo - config.factionTintFadeFrom);
   return config.factionTintMax * (1 - smooth((closeness - config.factionTintFadeFrom) / span));
+}
+
+/**
+ * How much of its strength a border keeps at a zoom: all of it through the mid zoom and the start of the diorama, easing to the floor
+ * deep in. A border never fades to nothing, so territories stay readable at the closest zoom.
+ */
+export function factionBorderShare(closeness: number, config: Readonly<MapVisualConfig>): number {
+  const span = Math.max(1e-3, config.factionBorderFadeTo - config.factionBorderFadeFrom);
+  return config.factionBorderFloor + (1 - config.factionBorderFloor) * (1 - smooth((closeness - config.factionBorderFadeFrom) / span));
 }
 
 /** Ink opacity of the dashed and the solid friendly line for a style. */

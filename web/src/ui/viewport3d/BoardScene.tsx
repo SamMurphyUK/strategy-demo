@@ -25,6 +25,7 @@ import {
   BLOOM_THRESHOLD,
   bloomLook,
   castShadowLook,
+  factionBorderShare,
   factionTint,
   factionWash,
   friendlyBorderInk,
@@ -1470,7 +1471,9 @@ export function BoardScene(props: BoardSceneProps) {
       // The faction tint: none at the diorama, up to its most at the mid zoom. Borders fade with it, as a share of their full strength.
       const tint = factionTint(raw.closeness, mapVisuals);
       const tintShare = mapVisuals.factionTintMax > 0 ? Math.min(1, tint / mapVisuals.factionTintMax) : 0;
-      chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, tint, tintShare);
+      // Borders do not fade with the tint: they keep at least `factionBorderFloor` of their strength all the way in.
+      const borderShare = factionBorderShare(raw.closeness, mapVisuals);
+      chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, tint, borderShare);
       // A combat selection dims the board and pushes every tint and border to full, easing in and out.
       const wantOverride = live.current.tintOverride === true ? 1 : 0;
       tintOverride.value += (wantOverride - tintOverride.value) * (1 - Math.exp(-Math.min(0.1, Math.max(0.001, (now - tintOverride.last) / 1000)) * 9));

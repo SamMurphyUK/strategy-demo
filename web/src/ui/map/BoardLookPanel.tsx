@@ -821,6 +821,9 @@ export function BoardLookPanel() {
         <Num name="factionTintBrightness" label="Tint brightness" title="The tint's brightness at the mid zoom. 1 is the faction's own colour." />
         <Num name="factionTintSaturation" label="Tint saturation" title="The tint's saturation at the mid zoom. 0 is grey, 1 is the faction's own colour." />
         <Num name="factionBorderBrightness" label="Border brightness" title="The border line against the faction's colour. Under 1 is darker, so it reads on the tint." />
+        <Num name="factionBorderFloor" label="Border at diorama" title="How much of its strength a border keeps at the closest zoom, where the tint has gone. 0.5 is half; 1 keeps it fully." />
+        <Num name="factionBorderFadeFrom" label="Border fade from" title="How close the zoom is, 0 to 1, where borders start to ease toward that floor." />
+        <Num name="factionBorderFadeTo" label="Border at floor by" title="How close the zoom is where borders reach the floor." />
         <Num name="factionBorderOpacity" label="Border opacity" title="A multiplier on the border's opacity. 1 is as set below." />
         <Num name="factionBoostUSSR" label="Boost, USSR" title="How much stronger the Soviet tint is than the rest at the mid zoom. 1.05 is 5% stronger." />
         <Num name="factionBoostGER" label="Boost, Germany" title="How much stronger the German tint is. 1.6 is 60% stronger." />

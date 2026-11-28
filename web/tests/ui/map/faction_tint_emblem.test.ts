@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VISUALS, factionTint } from "../../../src/ui/map/mapVisualConfig";
+import { DEFAULT_VISUALS, factionBorderShare, factionTint } from "../../../src/ui/map/mapVisualConfig";
 import { COIN_SHARE, emblemLayout, starPoints, STAR_SHARE } from "../../../src/ui/map/regionEmblem";
 
 describe("the faction tint across the zoom tiers", () => {
@@ -35,6 +35,23 @@ describe("the faction tint across the zoom tiers", () => {
   it("draws the border darker than the faction's colour, so it reads on the tint", () => {
     expect(DEFAULT_VISUALS.factionBorderBrightness).toBeLessThan(1);
     expect(DEFAULT_VISUALS.factionBorderOpacity).toBe(1);
+  });
+
+  it("keeps borders whole past the tint's end, and fainter but never gone at the closest zoom", () => {
+    expect(DEFAULT_VISUALS.factionBorderFloor).toBe(0.5);
+    // Whole at the mid zoom and where the diorama begins (the tint is gone by 0.42).
+    expect(factionBorderShare(0, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
+    expect(factionBorderShare(DEFAULT_VISUALS.factionTintFadeTo + 0.05, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
+    // Easing to the floor deep in, and holding it.
+    expect(factionBorderShare(DEFAULT_VISUALS.factionBorderFadeTo, DEFAULT_VISUALS)).toBeCloseTo(0.5, 6);
+    expect(factionBorderShare(1, DEFAULT_VISUALS)).toBeCloseTo(0.5, 6);
+    let last = Infinity;
+    for (let c = 0; c <= 1.0001; c += 0.05) {
+      const now = factionBorderShare(c, DEFAULT_VISUALS);
+      expect(now).toBeLessThanOrEqual(last + 1e-9);
+      expect(now).toBeGreaterThan(0.45);
+      last = now;
+    }
   });
 
   it("ships the border strengths: 35% inside one faction, 70% between two", () => {
