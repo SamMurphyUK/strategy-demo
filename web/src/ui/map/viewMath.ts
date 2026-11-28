@@ -24,9 +24,10 @@ export const MAX_BAKE_MAGNIFICATION = 2;
 /** Tightest zoom the wheel and the battle approach may use. The bake, not the old 24× factor, is what binds. */
 export function maxZoomK(fitK: number, dpr = 1): number {
   const relative = (fitK > 0 ? fitK : 1) * MAX_ZOOM_FACTOR;
-  const sharp = (MAX_BAKE_SCALE * MAX_BAKE_MAGNIFICATION) / Math.max(dpr, 1);
-  // The camera never goes nearer than the micro floor, so it cannot clip into a mountain or a tall landmark.
-  return Math.min(relative, sharp, zoomForDistance(mapVisuals.microMinDistance));
+  // The level tier may magnify the bake further than the sharp limit: up close the pixel chart is only the ground under the diorama.
+  const sharp = (MAX_BAKE_SCALE * MAX_BAKE_MAGNIFICATION * mapVisuals.levelMagnify) / Math.max(dpr, 1);
+  // The camera never goes nearer than the level floor, so it cannot clip into a mountain or a tall landmark.
+  return Math.min(relative, sharp, zoomForDistance(mapVisuals.levelMinDistance));
 }
 /** How far a unit's on-screen size may drift from its size on the fitted map. */
 export const TOKEN_ZOOM_LIMIT = 0.1;

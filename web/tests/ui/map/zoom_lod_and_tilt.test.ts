@@ -81,20 +81,20 @@ describe("semantic zoom lod", () => {
 });
 
 describe("the detailed sprites' scale curve", () => {
-  it("is the base at the 6.245 reveal, whatever the lock", () => {
+  it("is the base at the reference zoom, whatever the lock", () => {
     for (const lock of [0, 0.5, 1]) {
-      expect(detailedSpriteScale(6.245, 0.85, lock)).toBeCloseTo(0.85, 9);
+      expect(detailedSpriteScale(3.8, 0.85, lock)).toBeCloseTo(0.85, 9);
     }
   });
 
   it("holds one size on screen at lock 0, and grows with the board at lock 1", () => {
     expect(detailedSpriteScale(12.5, 0.85, 0)).toBeCloseTo(0.85, 9);
-    expect(detailedSpriteScale(12.49, 0.85, 1) / detailedSpriteScale(6.245, 0.85, 1)).toBeCloseTo(2, 9);
+    expect(detailedSpriteScale(7.6, 0.85, 1) / detailedSpriteScale(3.8, 0.85, 1)).toBeCloseTo(2, 9);
   });
 
   it("never shrinks as the camera comes in", () => {
     let last = 0;
-    for (let k = 6.245; k <= 12.5; k += 0.1) {
+    for (let k = 3.8; k <= 12.5; k += 0.1) {
       const scale = detailedSpriteScale(k, 0.85, 1);
       expect(scale).toBeGreaterThanOrEqual(last);
       last = scale;

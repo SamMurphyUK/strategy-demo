@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cameraDistance, cameraTier, DISTANCE_K, microAlpha, microSpriteLean, zoomForDistance } from "../../../src/ui/map/boardTune";
 import { maxZoomK } from "../../../src/ui/map/viewMath";
+import { DEFAULT_VISUALS } from "../../../src/ui/map/mapVisualConfig";
 import { dioramaFade } from "../../../src/ui/viewport3d/skins/dioramaPbr";
 
 describe("camera distance and its tiers", () => {
@@ -29,7 +30,7 @@ describe("camera distance and its tiers", () => {
   it("leans the figures back only in the micro tier, and never nearer than the floor", () => {
     expect(microSpriteLean(zoomForDistance(5))).toBe(1);
     expect(microSpriteLean(zoomForDistance(2))).toBeLessThan(1);
-    expect(maxZoomK(100, 1)).toBeLessThanOrEqual(zoomForDistance(1.35) + 1e-9);
+    expect(maxZoomK(100, 1)).toBeLessThanOrEqual(zoomForDistance(DEFAULT_VISUALS.levelMinDistance) + 1e-9);
   });
 });
 
