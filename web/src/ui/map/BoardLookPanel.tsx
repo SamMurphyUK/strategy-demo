@@ -815,15 +815,20 @@ export function BoardLookPanel() {
         <Num name="facilitySplitFrom" label="Split from" title="The zoom where the badge starts to split apart." />
         <Num name="facilityFadeEnd" label="Gone by" title="The zoom where the split badges have faded away. Keep it a little under the closest zoom." />
         <Num name="facilitySplitSpread" label="Spread" title="How far apart the triangles drift, in badge widths. 0 leaves them together." />
+        <h3>Faction tint</h3>
+        <p className="muted">The faction colour over the diorama's ground: none at the diorama, up to its most at the mid zoom, a little stronger along the edge of each faction's land. Picking a unit in a combat phase pushes it to full.</p>
+        <Num name="factionTintMax" label="Most tint" title="The faction tint at the mid zoom. 0.45 is 45%." />
+        <Num name="factionTintFadeFrom" label="Fade from" title="How close the zoom is, 0 to 1, where the tint starts to fade." />
+        <Num name="factionTintFadeTo" label="Gone by" title="How close the zoom is where the tint is gone: the diorama's." />
+        <Num name="factionEdgeBoost" label="Edge boost" title="How much stronger the tint is along the outer edge of a faction's land. 0 is even." />
+        <Num name="factionBorderInner" label="Border, same" title="The tint of a border between two territories of one faction." />
+        <Num name="factionBorderFrontier" label="Border, frontier" title="The tint of a border where two factions' land meet. A coast does not count." />
         <h3>Region roundels</h3>
         <p className="muted">A flat faction roundel under every land territory with a GDP value, in its owner's colours. Move or resize one in the placement editor (X).</p>
         <Flag name="enableRegionRoundels" label="Region roundels" title="Show the owner's roundel under each territory that has a GDP value" />
         <Num name="roundelRadiusShare" label="Size" title="How much of an infantry base's width the roundel takes. Under 1 is smaller than the base." off={!mapVisuals.enableRegionRoundels} />
         <Num name="roundelHeight" label="Thickness" title="The roundel's thickness against its radius. Small is a flat enamel plate." off={!mapVisuals.enableRegionRoundels} />
-        <h3>Territory emblems</h3>
-        <p className="muted">The GDP numerals and capital marks fade out as you zoom in, to leave the board and its pieces clear.</p>
-        <Num name="emblemFadeFrom" label="Fade from" title="The zoom where the numerals and capital marks start to fade." />
-        <Num name="emblemFadeTo" label="Gone by" title="The zoom where they are gone. Set it equal to Fade from for a quick cut." />
+
 
         <h3>Mountains</h3>
         <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />

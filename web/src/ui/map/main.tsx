@@ -3,10 +3,12 @@ import { App } from "./App";
 import "../battle/battle.css";
 import "./styles.css";
 import "../kit/tokens.css";
+import { preloadRoundelImages } from "./roundelImages";
 import { preloadTokenIcons } from "./tokenIcons";
 
 // The unit icons load now, so the map's first paint already has them.
 preloadTokenIcons();
+preloadRoundelImages();
 
 // The battle board's usePlayground would otherwise fetch Google's SDK script; the preview flag
 // makes it use the bundled fake.

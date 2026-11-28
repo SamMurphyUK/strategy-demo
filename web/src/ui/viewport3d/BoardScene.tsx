@@ -25,6 +25,7 @@ import {
   BLOOM_THRESHOLD,
   bloomLook,
   castShadowLook,
+  factionTint,
   factionWash,
   friendlyBorderInk,
   frontlineInk,
@@ -176,6 +177,8 @@ export interface BoardSceneProps {
   landmarks?: readonly BoardLandmark[];
   /** The flat faction roundels under the territories that have an IPC value (see roundelPlacement.ts). */
   roundels?: readonly PlacedRoundel[];
+  /** A unit is picked in a combat phase and the board dims: every faction tint and border goes to full. */
+  tintOverride?: boolean;
 }
 
 /** The sheets of the pixel chart that are made for a map, before the board draws. */
@@ -242,8 +245,6 @@ const SHEEN_PATH = 0.65;
 const ROCK_KINDS: ReadonlySet<PropKind> = new Set<PropKind>(["peak", "rock"]);
 /** The camera's steepest tip, in radians: the sea shows the most sky from here. */
 const FULL_TILT = 0.55;
-/** Share of the Shogun faction wash the pixel chart lays over its ground. The chart's own colours stay in charge. */
-const PIXIE_WASH = 0.45;
 /** The cliff's four colours, in the order they are swapped for the chart's. */
 const CLIFF_INKS = ["uRockHigh", "uRockLow", "uRockWet", "uRockLip"] as const;
 const PIXIE_CLIFF = [PIXIE_INK.cliffHigh, PIXIE_INK.cliffLow, PIXIE_INK.cliffWet, PIXIE_INK.cliffLip].map(rgbOf);
@@ -1032,6 +1033,8 @@ export function BoardScene(props: BoardSceneProps) {
     () => [...jungleSites(bounds, (x, y) => biomeAtMap({ x, y }) === "jungle" && pointInMultiPolygon({ x, y }, land)), ...(props.mistExtra ?? []), ...hazeSites(bounds, (x, y) => { const place = mapToLonLat({ x, y }); return hazeOf(place.lon, place.lat); }, (x, y) => pointInMultiPolygon({ x, y }, land))],
     [patches, bounds, land, props.mistExtra],
   );
+  // How far the combat tint override has eased in, 0 to 1, and the last frame's time.
+  const tintOverride = useRef({ value: 0, last: 0 }).current;
   // When the landmarks' build began, in seconds, or -1 while they are not standing (see the frame loop).
   const landmarkBuild = useRef({ start: -1 }).current;
   // How far each base has faded, by stack, and the last frame's time.
@@ -1464,7 +1467,18 @@ export function BoardScene(props: BoardSceneProps) {
       chartNow.uPixFoam.value.set(chart.foamBleed, chart.rings, 0, 0);
       chartNow.uPixSoft.value.set(chart.soft, chart.brush, chart.softDither, chart.softSat);
       chartNow.uPixSoft2.value.set(chart.softBand, 0, 0, 0);
-      chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, factionWash(raw.closeness, mapVisuals) * PIXIE_WASH, 1);
+      // The faction tint: none at the diorama, up to its most at the mid zoom. Borders fade with it, as a share of their full strength.
+      const tint = factionTint(raw.closeness, mapVisuals);
+      const tintShare = mapVisuals.factionTintMax > 0 ? Math.min(1, tint / mapVisuals.factionTintMax) : 0;
+      chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, tint, tintShare);
+      // A combat selection dims the board and pushes every tint and border to full, easing in and out.
+      const wantOverride = live.current.tintOverride === true ? 1 : 0;
+      tintOverride.value += (wantOverride - tintOverride.value) * (1 - Math.exp(-Math.min(0.1, Math.max(0.001, (now - tintOverride.last) / 1000)) * 9));
+      tintOverride.last = now;
+      if (Math.abs(wantOverride - tintOverride.value) < 0.004) {
+        tintOverride.value = wantOverride;
+      }
+      chartNow.uPixTint.value.set(mapVisuals.factionEdgeBoost, mapVisuals.factionBorderInner, mapVisuals.factionBorderFrontier, tintOverride.value);
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
       chartNow.uPixShipN.value = writeShipPositions(chartNow.uPixShips.value, frame);
     } else if (chartSheet.current) {

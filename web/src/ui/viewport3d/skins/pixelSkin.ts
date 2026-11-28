@@ -25,6 +25,8 @@ export interface PixieUniforms {
   uPixSea: { value: THREE.Vector4 };
   /** Rivers, roads, the faction wash, and the border ink: each a strength from 0 to 1. */
   uPixLines: { value: THREE.Vector4 };
+  /** The faction tint's rules: edge boost, inner border, frontier border, and the combat override (1 pushes tints and borders to full). */
+  uPixTint: { value: THREE.Vector4 };
   /** Relief and ground cover (see buildPixieSheet). */
   uPixSheet: { value: THREE.Texture | null };
   /** The share of each climate zone at a point (see climateZoneCanvas). */
@@ -63,6 +65,7 @@ export function pixieUniforms(): PixieUniforms {
     uPixShade: { value: new THREE.Vector4(1.4, 3, 1, 0.9) },
     uPixSea: { value: new THREE.Vector4(4, PIXIE_SHELF_WIDTH, PIXIE_COAST_REACH, 1) },
     uPixLines: { value: new THREE.Vector4(1, 0, 0.2, 1) },
+    uPixTint: { value: new THREE.Vector4(0.6, 0.35, 0.7, 0) },
     uPixSheet: { value: null },
     uPixZone: { value: null },
     uPixIds: { value: null },
@@ -147,6 +150,7 @@ export const PIXEL_LAND_DECLS = /* glsl */ `
       uniform vec4 uPixShade;
       uniform vec4 uPixSea;
       uniform vec4 uPixLines;
+      uniform vec4 uPixTint;
       uniform vec4 uPixSoft;
       uniform vec4 uPixSoft2;
       // Height of the ground at a map point, in world units: the ranges of the relief sheet, cut
@@ -255,7 +259,23 @@ LandSkinOut skinLand() {
         vec3 ids = textureLod(uPixIds, uv, 0.0).rgb;
         vec3 faction = textureLod(uPixFaction, uv, 0.0).rgb;
         float owned = step(0.001, ids.r + ids.g) * step(ids.b, 0.5);
-        c = mix(c, faction, uPixLines.z * owned);
+        // The tint is stronger along the outer edge of a faction's contiguous land: a ring of taps round the texel counts how much of
+        // its surroundings is the sea, nobody's land, or another faction's, and that share adds to the wash. Deep inside it adds nothing.
+        float edge = 0.0;
+        if (owned > 0.5 && uPixTint.x > 0.001 && uPixLines.z > 0.001) {
+          float reach = e * 6.0;
+          for (int ei = 0; ei < 8; ei++) {
+            float ang = float(ei) * 0.785398;
+            vec2 tap = m + vec2(cos(ang), sin(ang)) * reach;
+            vec3 nid = textureLod(uPixIds, sheetUv(tap), 0.0).rgb;
+            float nown = step(0.001, nid.r + nid.g) * step(nid.b, 0.5);
+            vec3 nfac = textureLod(uPixFaction, sheetUv(tap), 0.0).rgb;
+            edge += (1.0 - nown * (1.0 - step(0.04, distance(nfac, faction)))) * 0.125;
+          }
+        }
+        // A combat selection pushes the whole tint to full, so ownership and the frontlines read plainly.
+        float wash = mix(min(uPixLines.z * (1.0 + uPixTint.x * edge), 1.0), 1.0, uPixTint.w);
+        c = mix(c, faction, wash * owned);
 
         // Snow: on the summits that carry it, and scattered over the cold north.
         // The cold ground is patched by a broad drift, so the snow line is no line of latitude. An ice sheet is whole.
@@ -298,9 +318,15 @@ LandSkinOut skinLand() {
           bool onEast = any(greaterThan(abs(east.rg - ids.rg), vec2(0.002)));
           bool onSouth = any(greaterThan(abs(south.rg - ids.rg), vec2(0.002)));
           if (onEast || onSouth) {
-            vec3 theirs = textureLod(uPixFaction, sheetUv(onEast ? eastAt : southAt), 0.0).rgb;
-            float frontier = step(0.04, distance(theirs, faction));
-            c = mix(c, PIX_INK, uPixLines.w * mix(0.4, 0.82, frontier));
+            vec2 across = onEast ? eastAt : southAt;
+            vec3 theirs = textureLod(uPixFaction, sheetUv(across), 0.0).rgb;
+            vec3 nextIds = onEast ? east : south;
+            // A frontier is where two factions' land meet. A coast does not count: the other side must be land somebody holds.
+            float theirLand = pixLand(across) * step(0.001, nextIds.r + nextIds.g) * step(nextIds.b, 0.5);
+            float frontier = step(0.04, distance(theirs, faction)) * theirLand;
+            // A border is drawn in the faction's own colour: lightly inside one faction, heavily against another. It fades with the tint.
+            float lineTint = mix(uPixTint.y, uPixTint.z, frontier) * uPixLines.w;
+            c = mix(c, faction, mix(lineTint, 1.0, uPixTint.w));
           }
           // A road and a river are each one texel wide: the texels whose middle is within half a texel of the line.
           vec4 lines = textureLod(uGround, uv, 0.0);

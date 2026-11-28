@@ -1211,6 +1211,7 @@ export function App() {
             const held = state.regions[region] ?? Object.values(state.regions).find((item) => item.name === region);
             return `${label} \u00b7 Victory City \u00b7 Controlled by ${factionName(held?.owner_faction_id)}`;
           }}
+          tintOverride={!editing && (phase === "combat_move" || phase === "combat") && highlight.kind === "move"}
           regionTip={(regionId) => {
             const region = state.regions[regionId];
             return `${region?.name || regionId} \u00b7 ${factionName(region?.owner_faction_id)}`;

@@ -525,6 +525,7 @@ export default function MapViewport3D(props: MapViewProps) {
           plan={placedPlan ?? plan}
           landmarks={everyLandmark}
           roundels={roundels}
+          tintOverride={props.tintOverride}
           islands={islands}
           mistExtra={monsoon}
           scars={scars}

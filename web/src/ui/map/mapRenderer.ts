@@ -78,7 +78,11 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { emblemAlpha, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { emblemLayout, starPoints } from "./regionEmblem";
+import { roundelImage } from "./roundelImages";
+import { roundelFor } from "../../components/ui/RoundelBadge";
+import { factionPalette } from "../theme/factionPalette";
 import { beginSpriteBoxes, commitSpriteBoxes } from "./spriteHits";
 import { facilityTarget } from "./facilityTargets";
 import { getBoardTune } from "./boardTuneStore";
@@ -1321,22 +1325,6 @@ function drawPlusBadge(ctx: CanvasRenderingContext2D, x: number, y: number, toke
   ctx.stroke();
 }
 
-/** The capital's mark: a small geometric diamond in the same ink as the numeral. */
-function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number): void {
-  ctx.beginPath();
-  ctx.moveTo(x, y - outer);
-  ctx.lineTo(x + outer * 0.72, y);
-  ctx.lineTo(x, y + outer);
-  ctx.lineTo(x - outer * 0.72, y);
-  ctx.closePath();
-  ctx.fillStyle = MILITARY.charcoal;
-  ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = "miter";
-  ctx.strokeStyle = MILITARY.cream;
-  ctx.stroke();
-}
-
 /**
  * One region's unit tokens, back to front, with the rings that mark a selected or unmoved stack. A hovered
  * token is drawn last so a card tucked under the fan comes to the front. A capped fan grows a [+] on the lead.
@@ -1654,27 +1642,53 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
     if (region.type !== "land" || region.ipc <= 0) {
       return;
     }
-    // The numeral and the capital's diamond fade out as the camera comes in: close up the board carries enough already.
-    const fade = emblemAlpha(scene.view.k, mapVisuals.emblemFadeFrom, mapVisuals.emblemFadeTo);
+    // The pixel tier's mark: the owner's roundel, a GDP coin tucked under it, and a red star on a Victory City. It is gone at the
+    // diorama, where the 3D roundel and the landmark stand instead.
+    const fade = 1 - Math.min(1, Math.max(0, scene.unitFade ?? (lod >= 2 ? 1 : 0)));
     if (fade < 0.02) {
       return;
     }
+    const tokenPx = TOKEN_PX * s;
+    const d = Math.max(16, tokenPx * 0.85);
+    const { sx, sy } = projectionScales(scene.view.k);
+    const tokens = layout.counters.map((counter) => ({ x: counter.x, y: counter.y, r: tokenPx * 0.55 }));
+    const marks = emblemLayout({ x: anchor.x, y: layout.shieldY }, d, sx > 0 ? sy / sx : 1, tokens, region.capital === true);
     ctx.save();
     ctx.globalAlpha *= fade;
-    const shieldY = layout.shieldY;
-    const label = String(region.ipc);
-    const size = Math.max(9, 13 * s);
-    ctx.font = `700 ${size}px ${MONO}`;
+    // The coin first, so the roundel lies over it.
+    const { coin, roundel } = marks;
+    ctx.beginPath();
+    ctx.arc(coin.x, coin.y, coin.d / 2, 0, Math.PI * 2);
+    ctx.fillStyle = "#2a2023";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, coin.d * 0.09);
+    ctx.strokeStyle = "#a88a5e";
+    ctx.stroke();
+    ctx.font = `700 ${Math.max(8, coin.d * 0.62)}px "Pixel Futura", ${MONO}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 1.5 * Math.max(1, s);
-    ctx.strokeStyle = MILITARY.cream;
-    ctx.strokeText(label, anchor.x, shieldY);
-    ctx.fillStyle = MILITARY.charcoal;
-    ctx.fillText(label, anchor.x, shieldY);
-    if (region.capital) {
-      drawDiamond(ctx, anchor.x, shieldY - size * 0.95, Math.max(3, 4 * s));
+    ctx.fillStyle = "#f3ecdf";
+    ctx.fillText(String(region.ipc), coin.x, coin.y + coin.d * 0.04);
+    const image = roundelImage(roundelFor(game.owners[region.id]));
+    if (image) {
+      ctx.drawImage(image, roundel.x - roundel.d / 2, roundel.y - roundel.d / 2, roundel.d, roundel.d);
+    } else {
+      ctx.beginPath();
+      ctx.arc(roundel.x, roundel.y, roundel.d / 2, 0, Math.PI * 2);
+      ctx.fillStyle = factionPalette(game.owners[region.id] ?? "").primary;
+      ctx.fill();
+    }
+    if (marks.star) {
+      const points = starPoints(marks.star.x, marks.star.y, marks.star.d / 2);
+      ctx.beginPath();
+      points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = "#c8322b";
+      ctx.fill();
+      ctx.lineWidth = 1.25;
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "#f3ecdf";
+      ctx.stroke();
     }
     ctx.restore();
   };

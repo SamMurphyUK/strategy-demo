@@ -206,6 +206,8 @@ export interface MapViewProps {
   unitTitle?(entry: StackEntry): string;
   /** What to call a territory under the pointer: its name and its owner. Without it a roundel has no tooltip. */
   regionTip?(regionId: string): string;
+  /** A unit is picked in a combat phase and the board dims: the 3D ground pushes every faction tint and border to full. */
+  tintOverride?: boolean;
   /** What to say of a landmark under the pointer: its city, that it is a Victory City, and who holds it. */
   landmarkTip?(region: string, label: string): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */

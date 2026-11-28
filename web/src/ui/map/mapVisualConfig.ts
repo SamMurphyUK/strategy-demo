@@ -18,6 +18,16 @@ export type OutlineMode = "units-only" | "watercolor-only" | "both" | "off";
 export type SunCycle = "animated" | "static-noon" | "static-golden" | "off";
 
 export interface MapVisualConfig {
+  /** The faction tint on the Diorama's pixel ground: its most, at the mid zoom. It fades to none as the diorama comes in. */
+  factionTintMax: number;
+  /** How close the zoom is (0 fitted board, 1 closest) where the tint starts to fade, and where it is gone: the diorama's. */
+  factionTintFadeFrom: number;
+  factionTintFadeTo: number;
+  /** How much stronger the tint is along the outer edge of a faction's land than deep inside it. 0.6 is 60% stronger. */
+  factionEdgeBoost: number;
+  /** The faction tint of a border between two territories of one faction, and of one between two factions' land. */
+  factionBorderInner: number;
+  factionBorderFrontier: number;
   /** Share of the faction colour over the natural ground at the closest zoom. */
   factionWashClose: number;
   /** The same share at the fitted board. */
@@ -331,6 +341,12 @@ export type VisualKey = keyof MapVisualConfig;
 
 /** The Shogun look: natural ground, a light faction wash close in, ink borders, a watercolour selection. */
 export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
+  factionTintMax: 0.45,
+  factionTintFadeFrom: 0.2,
+  factionTintFadeTo: 0.42,
+  factionEdgeBoost: 0.6,
+  factionBorderInner: 0.35,
+  factionBorderFrontier: 0.7,
   factionWashClose: 0.15,
   factionWashFar: 0.5,
   terrainGrainStrength: 0.6,
@@ -559,6 +575,12 @@ export type VisualPresetName = keyof typeof VISUAL_PRESETS;
 
 /** Slider ends. The sun stays inside the part of the day that casts shadows. */
 export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> = Object.freeze({
+  factionTintMax: [0, 1],
+  factionTintFadeFrom: [0, 1],
+  factionTintFadeTo: [0, 1],
+  factionEdgeBoost: [0, 2],
+  factionBorderInner: [0, 1],
+  factionBorderFrontier: [0, 1],
   factionWashClose: [0, 1],
   factionWashFar: [0, 1],
   terrainGrainStrength: [0, 2],
@@ -771,6 +793,15 @@ function smooth(value: number): number {
 export function factionWash(closeness: number, config: Readonly<MapVisualConfig>): number {
   const near = smooth(closeness);
   return config.factionWashFar + (config.factionWashClose - config.factionWashFar) * near;
+}
+
+/**
+ * The faction tint on the Diorama's pixel ground at a zoom: the most from the fitted board to the start of the fade, then easing to
+ * none by the diorama's own zoom, where the ground is bare terrain. `closeness` is 0 at the fitted board and 1 at the closest zoom.
+ */
+export function factionTint(closeness: number, config: Readonly<MapVisualConfig>): number {
+  const span = Math.max(1e-3, config.factionTintFadeTo - config.factionTintFadeFrom);
+  return config.factionTintMax * (1 - smooth((closeness - config.factionTintFadeFrom) / span));
 }
 
 /** Ink opacity of the dashed and the solid friendly line for a style. */
