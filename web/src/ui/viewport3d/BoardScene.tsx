@@ -18,7 +18,7 @@ import type { BoardFrame, FigureCards } from "../map/boardLayer";
 import { stackOfFigure } from "../map/figureCards";
 import type { Rect, Vec2 } from "../map/geometry";
 import type { MultiPolygon } from "../map/regionClip";
-import { gradeSaturation, gradeWarm, tunedBoard } from "../map/boardTune";
+import { FACTION_KEYS, gradeSaturation, gradeWarm, landColor, tunedBoard } from "../map/boardTune";
 import { getBoardTune } from "../map/boardTuneStore";
 import {
   aoLook,
@@ -1479,6 +1479,19 @@ export function BoardScene(props: BoardSceneProps) {
         tintOverride.value = wantOverride;
       }
       chartNow.uPixTint.value.set(mapVisuals.factionEdgeBoost, mapVisuals.factionBorderInner, mapVisuals.factionBorderFrontier, tintOverride.value);
+      chartNow.uPixTone.value.set(mapVisuals.factionTintBrightness, mapVisuals.factionTintSaturation, mapVisuals.factionBorderBrightness, mapVisuals.factionBorderOpacity);
+      // Each faction's land colour, to tell its ground in the shader, and how much stronger its tint is at this zoom.
+      const boosts: Partial<Record<string, number>> = {
+        USSR: mapVisuals.factionBoostUSSR,
+        GER: mapVisuals.factionBoostGER,
+        JAP: mapVisuals.factionBoostJAP,
+        US: mapVisuals.factionBoostUS,
+        UK: mapVisuals.factionBoostUK,
+      };
+      FACTION_KEYS.forEach((key, i) => {
+        const [r, g, b] = rgbOf(landColor(key, tune));
+        chartNow.uPixFactions.value[i].set(r, g, b, boosts[key] ?? 1);
+      });
       chartNow.uPixUnitN.value = writeUnitClearings(chartNow.uPixUnits.value, frame);
       chartNow.uPixShipN.value = writeShipPositions(chartNow.uPixShips.value, frame);
     } else if (chartSheet.current) {

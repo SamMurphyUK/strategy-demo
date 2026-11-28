@@ -25,6 +25,18 @@ export interface MapVisualConfig {
   factionTintFadeTo: number;
   /** How much stronger the tint is along the outer edge of a faction's land than deep inside it. 0.6 is 60% stronger. */
   factionEdgeBoost: number;
+  /** The tint's brightness and saturation at the mid zoom, as multipliers: 1 is the faction's own colour. */
+  factionTintBrightness: number;
+  factionTintSaturation: number;
+  /** The border line's brightness against the faction's colour (under 1 is darker, so it reads on the tint), and a multiplier on its opacity. */
+  factionBorderBrightness: number;
+  factionBorderOpacity: number;
+  /** How much stronger one faction's tint is than the rest at the mid zoom: 1.6 is 60% stronger. */
+  factionBoostUSSR: number;
+  factionBoostGER: number;
+  factionBoostJAP: number;
+  factionBoostUS: number;
+  factionBoostUK: number;
   /** The faction tint of a border between two territories of one faction, and of one between two factions' land. */
   factionBorderInner: number;
   factionBorderFrontier: number;
@@ -347,6 +359,15 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionEdgeBoost: 0.6,
   factionBorderInner: 0.35,
   factionBorderFrontier: 0.7,
+  factionTintBrightness: 1,
+  factionTintSaturation: 1,
+  factionBorderBrightness: 0.5,
+  factionBorderOpacity: 1,
+  factionBoostUSSR: 1.05,
+  factionBoostGER: 1.6,
+  factionBoostJAP: 1.15,
+  factionBoostUS: 1.7,
+  factionBoostUK: 1.5,
   factionWashClose: 0.15,
   factionWashFar: 0.5,
   terrainGrainStrength: 0.6,
@@ -581,6 +602,15 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionEdgeBoost: [0, 2],
   factionBorderInner: [0, 1],
   factionBorderFrontier: [0, 1],
+  factionTintBrightness: [0.3, 2],
+  factionTintSaturation: [0, 2],
+  factionBorderBrightness: [0, 2],
+  factionBorderOpacity: [0, 2],
+  factionBoostUSSR: [0.3, 3],
+  factionBoostGER: [0.3, 3],
+  factionBoostJAP: [0.3, 3],
+  factionBoostUS: [0.3, 3],
+  factionBoostUK: [0.3, 3],
   factionWashClose: [0, 1],
   factionWashFar: [0, 1],
   terrainGrainStrength: [0, 2],

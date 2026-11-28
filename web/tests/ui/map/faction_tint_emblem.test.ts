@@ -24,6 +24,19 @@ describe("the faction tint across the zoom tiers", () => {
     }
   });
 
+  it("ships the per-faction boosts at the mid zoom: USSR +5%, Germany +60%, Japan +15%, USA +70%, Britain +50%", () => {
+    expect(DEFAULT_VISUALS.factionBoostUSSR).toBeCloseTo(1.05, 6);
+    expect(DEFAULT_VISUALS.factionBoostGER).toBeCloseTo(1.6, 6);
+    expect(DEFAULT_VISUALS.factionBoostJAP).toBeCloseTo(1.15, 6);
+    expect(DEFAULT_VISUALS.factionBoostUS).toBeCloseTo(1.7, 6);
+    expect(DEFAULT_VISUALS.factionBoostUK).toBeCloseTo(1.5, 6);
+  });
+
+  it("draws the border darker than the faction's colour, so it reads on the tint", () => {
+    expect(DEFAULT_VISUALS.factionBorderBrightness).toBeLessThan(1);
+    expect(DEFAULT_VISUALS.factionBorderOpacity).toBe(1);
+  });
+
   it("ships the border strengths: 35% inside one faction, 70% between two", () => {
     expect(DEFAULT_VISUALS.factionBorderInner).toBe(0.35);
     expect(DEFAULT_VISUALS.factionBorderFrontier).toBe(0.7);

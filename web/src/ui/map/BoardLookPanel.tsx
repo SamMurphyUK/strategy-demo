@@ -817,7 +817,16 @@ export function BoardLookPanel() {
         <Num name="facilitySplitSpread" label="Spread" title="How far apart the triangles drift, in badge widths. 0 leaves them together." />
         <h3>Faction tint</h3>
         <p className="muted">The faction colour over the diorama's ground: none at the diorama, up to its most at the mid zoom, a little stronger along the edge of each faction's land. Picking a unit in a combat phase pushes it to full.</p>
-        <Num name="factionTintMax" label="Most tint" title="The faction tint at the mid zoom. 0.45 is 45%." />
+        <Num name="factionTintMax" label="Tint opacity" title="The faction tint at the mid zoom. 0.45 is 45%." />
+        <Num name="factionTintBrightness" label="Tint brightness" title="The tint's brightness at the mid zoom. 1 is the faction's own colour." />
+        <Num name="factionTintSaturation" label="Tint saturation" title="The tint's saturation at the mid zoom. 0 is grey, 1 is the faction's own colour." />
+        <Num name="factionBorderBrightness" label="Border brightness" title="The border line against the faction's colour. Under 1 is darker, so it reads on the tint." />
+        <Num name="factionBorderOpacity" label="Border opacity" title="A multiplier on the border's opacity. 1 is as set below." />
+        <Num name="factionBoostUSSR" label="Boost, USSR" title="How much stronger the Soviet tint is than the rest at the mid zoom. 1.05 is 5% stronger." />
+        <Num name="factionBoostGER" label="Boost, Germany" title="How much stronger the German tint is. 1.6 is 60% stronger." />
+        <Num name="factionBoostJAP" label="Boost, Japan" title="How much stronger the Japanese tint is. 1.15 is 15% stronger." />
+        <Num name="factionBoostUS" label="Boost, USA" title="How much stronger the American tint is. 1.7 is 70% stronger." />
+        <Num name="factionBoostUK" label="Boost, Britain" title="How much stronger the British tint is. 1.5 is 50% stronger." />
         <Num name="factionTintFadeFrom" label="Fade from" title="How close the zoom is, 0 to 1, where the tint starts to fade." />
         <Num name="factionTintFadeTo" label="Gone by" title="How close the zoom is where the tint is gone: the diorama's." />
         <Num name="factionEdgeBoost" label="Edge boost" title="How much stronger the tint is along the outer edge of a faction's land. 0 is even." />

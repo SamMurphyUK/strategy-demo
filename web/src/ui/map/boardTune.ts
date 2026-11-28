@@ -113,7 +113,7 @@ export const PREVIOUS_BORDERS: readonly BorderPass[] = [
   { color: "#2B2620", width: 1.2 },
 ];
 
-const FACTION_KEYS: readonly FactionKey[] = ["US", "UK", "GER", "JAP", "USSR", "ITA", "CHI", "ANZ", "FRA", "NEUTRAL"];
+export const FACTION_KEYS: readonly FactionKey[] = ["US", "UK", "GER", "JAP", "USSR", "ITA", "CHI", "ANZ", "FRA", "NEUTRAL"];
 
 function knob(on = true, amount = 1): Knob {
   return { on, amount };
