@@ -1,7 +1,8 @@
 // Fetches the master land SVG and turns every <path> into one Path2D stencil and one MultiPolygon.
+import type { Dict } from "../../engine/model/types";
 import type { Rect } from "./geometry";
 import { parseViewBox } from "./landSvg";
-import { landFromPathData, multiPolygonPathData, type FillRule, type MultiPolygon } from "./regionClip";
+import { landFromPathData, multiPolygonPathData, polygonsFromSvg, type FillRule, type MultiPolygon } from "./regionClip";
 
 export const LAND_SVG_URL = `${import.meta.env.BASE_URL}assets/ne_110m_land_FINAL_02.svg`;
 
@@ -60,6 +61,38 @@ function fillRuleOfElement(el: Element): FillRule {
     node = node.parentElement;
   }
   return "nonzero";
+}
+
+/**
+ * The coast stored on a map, in that SVG's own viewBox. Transforms and fill rules are baked the same
+ * way the editor imports a coast, so a board that is not the 800×504 campaign sheet stays that sheet.
+ * Returns null when the map uses the shared campaign coastline.
+ */
+export function coastFromMap(map: Dict | null | undefined): { viewBox: Rect; polygons: MultiPolygon; pathData: string } | null {
+  const svg = map && typeof map.sculpted_land_svg === "string" ? map.sculpted_land_svg : "";
+  if (!svg.includes("<path")) {
+    return null;
+  }
+  try {
+    const { viewBox, polygons } = polygonsFromSvg(svg);
+    if (polygons.length === 0 || !(viewBox.w > 0) || !(viewBox.h > 0)) {
+      return null;
+    }
+    return { viewBox, polygons, pathData: multiPolygonPathData(polygons) };
+  } catch {
+    return null;
+  }
+}
+
+/** A stencil the board can clip and draw. Call this in the browser; the path data itself is DOM-free. */
+export function masterLandFromCoast(coast: { viewBox: Rect; polygons: MultiPolygon; pathData: string }): MasterLand {
+  return {
+    masterLandPath: new Path2D(coast.pathData),
+    pathData: coast.pathData,
+    polygons: coast.polygons,
+    viewBox: coast.viewBox,
+    pathCount: coast.polygons.length,
+  };
 }
 
 export async function loadMasterLand(url: string = LAND_SVG_URL): Promise<MasterLand> {

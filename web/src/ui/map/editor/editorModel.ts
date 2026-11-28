@@ -1413,7 +1413,10 @@ export function editorToMapJson(map: EditorMap, options: ExportOptions = { round
     version: map.meta.version ?? 2,
     base_map: "",
     coord_space: WORLD_COORD_SPACE,
-    land_mask: LAND_SVG_REF,
+    land_mask:
+      typeof map.meta.sculpted_land_svg === "string" && map.meta.sculpted_land_svg.includes("<path")
+        ? "sculpted"
+        : LAND_SVG_REF,
     neighbor_overrides: {
       add: map.overrides.add.map((p) => [...p]),
       remove: map.overrides.remove.map((p) => [...p]),

@@ -106,8 +106,8 @@ export interface EditorBinding {
   swipeable(): boolean;
   /** A freehand stroke starts (the pointer moved far enough from where it went down). */
   strokeBegin(): void;
-  /** The world points of the stroke so far; `pxToWorld` is world units per screen pixel. `done` on release. */
-  onStroke(points: Vec2[], pxToWorld: number, done: boolean): void;
+  /** The world points of the stroke so far; `pxToWorld` is world units per screen pixel. `done` on release. `straight` is Shift, which keeps a knife cut ruled. */
+  onStroke(points: Vec2[], pxToWorld: number, done: boolean, straight?: boolean): void;
   /** Paint or erase one sample of a sea-lattice stroke. `done` commits the undo step. False when nothing can be painted, so the press can pan instead. */
   onLattice?(world: Vec2, mods: { erase: boolean; shift: boolean; done: boolean; underId?: string }): boolean;
 }
@@ -251,6 +251,8 @@ const DRAG_THRESHOLD_PX = 5;
 /** The knife turns a drag into a freehand stroke after this much travel, then samples every STROKE_STEP_PX. */
 const STROKE_START_PX = 6;
 const STROKE_STEP_PX = 3;
+/** Knife samples are this far apart in world units, so the grain does not depend on zoom. */
+const KNIFE_SAMPLE_WORLD = 4;
 export const SNAP_PX = 8;
 const HANDLE_PX = 10;
 const WORLD_FALLBACK: Rect = { x: 0, y: 0, w: 800, h: 504 };
@@ -646,9 +648,19 @@ export function MapView(props: MapViewProps) {
   }, []);
 
   // Fit until the user takes over, including once the land mask arrives and changes the bounds.
+  // A different board rectangle is a different map, so the previous pan does not carry over.
   // The title screen starts from the fitted board, then the drift below takes it.
+  const fittedBoard = useRef("");
   useEffect(() => {
-    if (size.w > 0 && (props.menuBackdrop || !userMoved.current)) {
+    if (size.w <= 0) {
+      return;
+    }
+    const key = `${bounds.x},${bounds.y},${bounds.w},${bounds.h}`;
+    if (fittedBoard.current !== key) {
+      fittedBoard.current = key;
+      userMoved.current = false;
+    }
+    if (props.menuBackdrop || !userMoved.current) {
       setView(fitView(bounds, size.w, size.h));
     }
   }, [props.menuBackdrop, size.w, size.h, bounds.x, bounds.y, bounds.w, bounds.h]);
@@ -1756,7 +1768,12 @@ export function MapView(props: MapViewProps) {
         d.points = [d.from];
         p.editor?.strokeBegin();
       }
-      if (Math.hypot(e.clientX - d.lastX, e.clientY - d.lastY) >= STROKE_STEP_PX) {
+      const last = d.points[d.points.length - 1];
+      const knife = p.editor?.overlay.tool === "knife";
+      const stepped = knife
+        ? !last || Math.hypot(world.x - last.x, world.y - last.y) >= KNIFE_SAMPLE_WORLD
+        : Math.hypot(e.clientX - d.lastX, e.clientY - d.lastY) >= STROKE_STEP_PX;
+      if (stepped) {
         d.lastX = e.clientX;
         d.lastY = e.clientY;
         d.points.push(world);
@@ -1876,7 +1893,7 @@ export function MapView(props: MapViewProps) {
       if (!last || Math.hypot(end.x - last.x, end.y - last.y) * v.k >= 1) {
         d.points.push(end);
       }
-      p.editor?.onStroke(d.points, 1 / v.k, true);
+      p.editor?.onStroke(d.points, 1 / v.k, true, e.shiftKey);
       return;
     }
     if (d.kind === "swipe") {

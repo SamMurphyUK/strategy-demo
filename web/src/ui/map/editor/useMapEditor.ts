@@ -7,7 +7,7 @@ import { type EditorBinding, SNAP_PX } from "../MapView";
 import type { EditorLinkKind, EditorToolName } from "../mapRenderer";
 import { clipperFor, type MultiPolygon, multiPolygonArea, type Ring, uncoveredLand } from "../regionClip";
 import { flattenLandSvg } from "../landSvg";
-import { parseLandSvg, type MasterLand } from "../svgLandLoader";
+import { coastFromMap, masterLandFromCoast, parseLandSvg, type MasterLand } from "../svgLandLoader";
 import { autoNeighborPairs } from "./adjacency";
 import { blankEditorMap, boardFrame } from "./blankMap";
 import {
@@ -128,8 +128,8 @@ export type EditorTool = EditorToolName;
 export type EditorLayer = "land" | "sea";
 export type StrokeTolerance = "fine" | "medium" | "smooth";
 
-/** RDP tolerance for a freehand stroke, in screen pixels. */
-export const STROKE_TOLERANCE_PX: Record<StrokeTolerance, number> = { fine: 1.5, medium: 3, smooth: 5 };
+/** RDP tolerance for a freehand stroke, in world units. Low enough that a hand's jitter survives. */
+export const STROKE_TOLERANCE_PX: Record<StrokeTolerance, number> = { fine: 0.8, medium: 1.2, smooth: 1.5 };
 /** The first and last stretch of a stroke that sets the direction its ends are extended in, in pixels. */
 const TANGENT_SPAN_PX = 18;
 /** The button roughens only borders at least this long (world units); short ones are already detail. */
@@ -252,6 +252,9 @@ export interface MapEditor {
   setStrokeTolerance(t: StrokeTolerance): void;
   strokeSmooth: boolean;
   setStrokeSmooth(on: boolean): void;
+  /** How far a knife border wanders. 1 is the full thickness; 0.4 is the thinnest. */
+  borderWeight: number;
+  setBorderWeight(weight: number): void;
   /** Square paints an 8×8 cell. Triangle paints one diagonal wedge. Shift holds triangle for one stroke. */
   latticeBrush: "square" | "triangle";
   setLatticeBrush(brush: "square" | "triangle"): void;
@@ -451,6 +454,7 @@ export function useMapEditor(
   versionsRef.current = versions;
   const [strokeTolerance, setStrokeTolerance] = useState<StrokeTolerance>("medium");
   const [strokeSmooth, setStrokeSmooth] = useState(true);
+  const [borderWeight, setBorderWeightState] = useState(1);
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [latticeBrush, setLatticeBrush] = useState<"square" | "triangle">("square");
   const [latticeShift, setLatticeShift] = useState(false);
@@ -463,7 +467,7 @@ export function useMapEditor(
   const [sculptTolerance, setSculptToleranceState] = useState(2);
   const [blobRadius, setBlobRadiusState] = useState(12);
   const [sculptSvg, setSculptSvg] = useState("");
-  const stroke = useRef({ active: false, ignore: false, raw: [] as Vec2[], scale: 1 });
+  const stroke = useRef({ active: false, ignore: false, raw: [] as Vec2[], scale: 1, straight: false });
   /** World units per screen pixel at the current zoom, so the 25px and 20px knife limits mean pixels. */
   const pxScale = useRef(1);
   const onLandmaskRef = useRef(onLandmask);
@@ -478,11 +482,11 @@ export function useMapEditor(
   const sculptSvgRef = useRef(sculptSvg);
   sculptSvgRef.current = sculptSvg;
   const live = useRef({
-    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift,
+    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, borderWeight, latticeBrush, latticeShift,
     sculpting, sculptTool, sculptShapes, sculptSelectedId, sculptDraft, sculptTolerance, blobRadius,
   });
   live.current = {
-    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, latticeBrush, latticeShift,
+    tool, layer, drawSea, draft, selectedId, secondId, mergeIds, linkFirstId, land, strokeTolerance, strokeSmooth, borderWeight, latticeBrush, latticeShift,
     sculpting, sculptTool, sculptShapes, sculptSelectedId, sculptDraft, sculptTolerance, blobRadius,
   };
   /** `base` is what Undo restores. `start` is what the stroke paints onto: `base` plus a zone it created. */
@@ -819,16 +823,19 @@ export function useMapEditor(
 
   /** Simplifies the freehand stroke being traced and cuts with it. */
   const runStroke = useCallback(() => {
-    const { raw, scale } = stroke.current;
+    const { raw, scale, straight } = stroke.current;
     stroke.current.active = false;
     stroke.current.raw = [];
-    const { strokeTolerance: tol, strokeSmooth: smooth } = live.current;
+    const { strokeTolerance: tol, strokeSmooth: smooth, borderWeight: weight } = live.current;
     const prepared = prepareStroke(raw, {
-      tolerance: STROKE_TOLERANCE_PX[tol] * scale,
+      tolerance: STROKE_TOLERANCE_PX[tol],
       smooth,
       tangentSpan: TANGENT_SPAN_PX * scale,
       closeDist: LOOP_CLOSE_PX * scale,
       minLoop: LOOP_MIN_PX * scale,
+      border: true,
+      straight,
+      weight,
     });
     if (!prepared) {
       cancelDraft();
@@ -1342,14 +1349,10 @@ export function useMapEditor(
     if (!set) {
       return;
     }
-    const svg = map.meta.sculpted_land_svg;
-    if (typeof svg === "string" && svg.includes("<path")) {
-      try {
-        set(parseLandSvg(svg));
-        return;
-      } catch {
-        // A broken bake falls through to the board's coast flag.
-      }
+    const coast = coastFromMap(map.meta);
+    if (coast) {
+      set(masterLandFromCoast(coast));
+      return;
     }
     set(map.meta.no_landmass === true ? "none" : "file");
   }
@@ -1443,7 +1446,7 @@ export function useMapEditor(
       );
       return;
     }
-    // The named snapshot can still name the previous land file. The app draws FINAL_02.
+    // The named snapshot of the campaign board still names the shared land file. A map with its own coast carries that SVG instead.
     const map = {
       ...board.map,
       coord_space: typeof board.map.coord_space === "string" && board.map.coord_space !== "" ? board.map.coord_space : "svg",
@@ -2184,9 +2187,9 @@ export function useMapEditor(
         return (t === "knife" && pts.length === 0) || (t === "prune" && current === "land");
       },
       strokeBegin() {
-        stroke.current = { active: true, ignore: false, raw: [], scale: 1 };
+        stroke.current = { active: true, ignore: false, raw: [], scale: 1, straight: false };
       },
-      onStroke(points, pxToWorld, done) {
+      onStroke(points, pxToWorld, done, straight = false) {
         if (live.current.sculpting) {
           const mode = live.current.sculptTool;
           if (mode !== "pen" && mode !== "blob") {
@@ -2236,6 +2239,7 @@ export function useMapEditor(
         }
         stroke.current.raw = points;
         stroke.current.scale = pxToWorld;
+        stroke.current.straight = straight;
         pxScale.current = pxToWorld;
         if (!done) {
           setDraft(strokePreview(points));
@@ -2483,6 +2487,10 @@ export function useMapEditor(
     setStrokeTolerance,
     strokeSmooth,
     setStrokeSmooth,
+    borderWeight,
+    setBorderWeight(weight: number) {
+      setBorderWeightState(Math.min(1, Math.max(0.4, weight)));
+    },
     latticeBrush,
     setLatticeBrush,
     latticeShift,

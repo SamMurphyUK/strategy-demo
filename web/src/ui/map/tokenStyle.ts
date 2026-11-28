@@ -15,6 +15,10 @@ export const TOKEN_DISC: Record<FactionKey, string> = {
   UK: "#C59B61",
   US: "#586949",
   JAP: "#8C4A27",
+  ITA: "#2C4A42",
+  CHI: "#6A6230",
+  ANZ: "#4A3A2C",
+  FRA: "#2A3040",
   NEUTRAL: "#6E675C",
 };
 

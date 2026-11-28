@@ -6,7 +6,7 @@
 // axis_*.png set). UK, JAP and USSR follow the same recipe: a lighter ring, a near-white interior
 // tinted toward the faction, and a dark ink.
 
-export type FactionKey = "US" | "UK" | "JAP" | "GER" | "USSR" | "NEUTRAL";
+export type FactionKey = "US" | "UK" | "JAP" | "GER" | "USSR" | "ITA" | "CHI" | "ANZ" | "FRA" | "NEUTRAL";
 export type FactionSide = "allies" | "axis" | "neutral";
 
 export interface FactionPalette {
@@ -69,6 +69,42 @@ export const FACTION_PALETTE: Record<FactionKey, FactionPalette> = {
     fill: "#FBF4F1",
     ink: "#2A1415",
   },
+  ITA: {
+    key: "ITA",
+    name: "Italy",
+    side: "axis",
+    primary: "#5B7D73", // spruce
+    ring: "#7A9A90",
+    fill: "#F4F8F6",
+    ink: "#1A2A26",
+  },
+  CHI: {
+    key: "CHI",
+    name: "China",
+    side: "allies",
+    primary: "#AAA25D", // brass
+    ring: "#C4BC78",
+    fill: "#FBF8EC",
+    ink: "#2A2810",
+  },
+  ANZ: {
+    key: "ANZ",
+    name: "ANZAC",
+    side: "allies",
+    primary: "#846D59", // brown
+    ring: "#A89078",
+    fill: "#F8F4EE",
+    ink: "#2A2018",
+  },
+  FRA: {
+    key: "FRA",
+    name: "France",
+    side: "allies",
+    primary: "#4E5463", // steel
+    ring: "#7A8498",
+    fill: "#F4F6F8",
+    ink: "#1A1C22",
+  },
   NEUTRAL: {
     key: "NEUTRAL",
     name: "Neutral",
@@ -105,6 +141,16 @@ const ALIASES: Record<string, FactionKey> = {
   ussr: "USSR",
   russia: "USSR",
   soviet: "USSR",
+  soviet_union: "USSR",
+  united_kingdom: "UK",
+  united_states: "US",
+  italy: "ITA",
+  ita: "ITA",
+  china: "CHI",
+  chi: "CHI",
+  anzac: "ANZ",
+  free_france: "FRA",
+  france: "FRA",
 };
 
 export function resolveFaction(factionId: string | null | undefined): FactionKey {

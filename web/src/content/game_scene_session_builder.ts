@@ -95,12 +95,15 @@ export function buildMapData(mapJson: Dict): Dict {
       major_factory: meta.factory_size === "major" || (meta.factory === true && meta.factory_size !== "minor"),
       ...(cover !== "" ? { land_cover: cover } : {}),
       ...(type === "sea" && meta.is_convoy_zone === true ? { is_convoy_zone: true } : {}),
+      ...(meta.has_airbase === true ? { airbase: true } : {}),
+      ...(meta.has_harbour === true ? { harbor: true } : {}),
     });
   }
   return {
     schema_version: "0.5",
     regions,
     adjacency: buildAdjacencyFromPolygons(mapJson),
+    ...(Array.isArray(mapJson.canals) ? { canals: mapJson.canals } : {}),
   };
 }
 

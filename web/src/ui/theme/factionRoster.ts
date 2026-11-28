@@ -267,10 +267,11 @@ export const ROSTER_CUES: Record<RosterKey, RosterCues> = {
   },
 };
 
-/** The five powers keep their own roster. Everyone else, neutral or minor, fields the fallback set. */
+/** The five powers keep their own roster. Italy, China, ANZAC, France, and neutrals field the fallback set. */
 export function rosterKey(factionId: string | null | undefined): RosterKey {
   const key = resolveFaction(factionId);
-  return key === "NEUTRAL" ? "MINOR" : key;
+  if (key === "US" || key === "UK" || key === "GER" || key === "JAP" || key === "USSR") return key;
+  return "MINOR";
 }
 
 /** The roster slot for a rules unit id, or null for pieces with no historical counterpart (AA guns, mech infantry). */

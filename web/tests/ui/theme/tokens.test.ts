@@ -37,6 +37,13 @@ describe("faction palette", () => {
     expect(resolveFaction("uk")).toBe("UK");
     expect(resolveFaction("japan")).toBe("JAP");
     expect(resolveFaction("soviet")).toBe("USSR");
+    expect(resolveFaction("soviet_union")).toBe("USSR");
+    expect(resolveFaction("united_kingdom")).toBe("UK");
+    expect(resolveFaction("united_states")).toBe("US");
+    expect(resolveFaction("italy")).toBe("ITA");
+    expect(resolveFaction("china")).toBe("CHI");
+    expect(resolveFaction("anzac")).toBe("ANZ");
+    expect(resolveFaction("free_france")).toBe("FRA");
     expect(resolveFaction("")).toBe("NEUTRAL");
     expect(resolveFaction(undefined)).toBe("NEUTRAL");
     expect(resolveFaction("mars")).toBe("NEUTRAL");

@@ -1,6 +1,8 @@
-// World space for the map is the land SVG's viewBox (800 x 504). demomap01.json was authored over
-// art/loose/png/texture/test.jpg (3000 x 2139, centred on the origin), so its coordinates are projected into world
-// space when the UI loads it. The engine keeps reading the file untouched; it only needs adjacency.
+// The shared campaign coastline is the land file's viewBox (800 x 504). demomap01.json was authored over
+// art/loose/png/texture/test.jpg (3000 x 2139, centred on the origin), so those coordinates are projected into
+// that viewBox when the UI loads them. A map that brings its own coast (`sculpted_land_svg`, or `coord_space`
+// already "svg") is already in its own viewBox and must not be scaled onto the 800 x 504 sheet. The engine
+// keeps reading the file untouched; it only needs adjacency.
 import type { Dict } from "../../engine/model/types";
 
 /** Marker written by the editor's export: coordinates are already in land-SVG world space. */
@@ -23,7 +25,9 @@ export function worldToLegacy(x: number, y: number): [number, number] {
 /** A copy of the map JSON with polygons and unit anchors in world space. Already-world maps pass through. */
 export function projectMapJson(mapJson: Dict): Dict {
   const out: Dict = { ...mapJson };
-  if (mapJson.coord_space === WORLD_COORD_SPACE) {
+  // A stored coast means the polygons were cut in that SVG's viewBox, even if the marker was left off.
+  if (mapJson.coord_space === WORLD_COORD_SPACE || typeof mapJson.sculpted_land_svg === "string") {
+    out.coord_space = WORLD_COORD_SPACE;
     return out;
   }
   const regions: Dict[] = Array.isArray(mapJson.regions) ? mapJson.regions : [];
