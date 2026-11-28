@@ -466,7 +466,7 @@ vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         float seam = step(0.5, ids.b) * max(max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, west.b) * step(0.002, distance(west.rg, ids.rg))),
           max(step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)), step(0.5, north.b) * step(0.002, distance(north.rg, ids.rg))));
         // The sea zones' seams hold one strength at every zoom, dark enough to read on every band.
-        c = mix(c, PIX_SEAM * 0.6, seam * 0.9);
+        c = mix(c, PIX_SEAM * 0.6, seam * 0.9 * step(0.001, uPixLine.x));
         // In the tropics the shallows by the coast are a translucent turquoise-teal lagoon before the sea drops to deep navy.
         float lagoon = (1.0 - smoothstep(0.0, uPixSea.y * 0.5, away)) * smoothstep(uTropic.x - 5.0, uTropic.x + 5.0, m.y) * (1.0 - smoothstep(uTropic.y - 5.0, uTropic.y + 5.0, m.y));
         c = mix(c, vec3(0.17, 0.66, 0.63) * (0.9 + 0.1 * fbm(foot * 0.3)), lagoon * uTropic.z);

@@ -1472,7 +1472,7 @@ export function BoardScene(props: BoardSceneProps) {
       const tint = factionTint(raw.closeness, mapVisuals);
       const tintShare = mapVisuals.factionTintMax > 0 ? Math.min(1, tint / mapVisuals.factionTintMax) : 0;
       // Borders do not fade with the tint: they keep at least `factionBorderFloor` of their strength all the way in.
-      const borderShare = factionBorderShare(raw.closeness, mapVisuals);
+      const borderShare = mapVisuals.vectorBorders ? 0 : factionBorderShare(raw.closeness, mapVisuals);
       chartNow.uPixLines.value.set(rivers ? 1 : 0, roads ? roads.opacity : 0, tint, borderShare);
       // A combat selection dims the board and pushes every tint and border to full, easing in and out.
       const wantOverride = live.current.tintOverride === true ? 1 : 0;
@@ -1482,7 +1482,7 @@ export function BoardScene(props: BoardSceneProps) {
         tintOverride.value = wantOverride;
       }
       chartNow.uPixTint.value.set(mapVisuals.factionEdgeBoost, mapVisuals.factionBorderInner, mapVisuals.factionBorderFrontier, tintOverride.value);
-      chartNow.uPixLine.value.set(mapVisuals.factionBorderWidth, mapVisuals.factionBorderKeyline, mapVisuals.factionRegionShift, frame.view.k);
+      chartNow.uPixLine.value.set(mapVisuals.vectorBorders ? 0 : mapVisuals.factionBorderWidth, mapVisuals.factionBorderKeyline, mapVisuals.factionRegionShift, frame.view.k);
       chartNow.uPixTone.value.set(mapVisuals.factionTintBrightness, mapVisuals.factionTintSaturation, mapVisuals.factionBorderBrightness, mapVisuals.factionBorderOpacity);
       // Each faction's land colour, to tell its ground in the shader, and how much stronger its tint is at this zoom.
       const boosts: Partial<Record<string, number>> = {

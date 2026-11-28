@@ -821,6 +821,9 @@ export function BoardLookPanel() {
         <Num name="factionTintBrightness" label="Tint brightness" title="The tint's brightness at the mid zoom. 1 is the faction's own colour." />
         <Num name="factionTintSaturation" label="Tint saturation" title="The tint's saturation at the mid zoom. 0 is grey, 1 is the faction's own colour." />
         <Num name="factionBorderBrightness" label="Border brightness" title="The border line against the faction's colour. Under 1 is darker, so it reads on the tint." />
+        <Flag name="vectorBorders" label="Vector borders" title="Every border drawn as a crisp vector line over the pixel ground, at every zoom." />
+        <Num name="vectorBorderWidth" label="Vector land width" title="The land border line, in screen px." off={!mapVisuals.vectorBorders} />
+        <Num name="vectorSeaWidth" label="Vector sea width" title="The sea seam line, in screen px." off={!mapVisuals.vectorBorders} />
         <Num name="factionBorderWidth" label="Border width" title="The border line's width on the screen, in px, at every zoom." />
         <Num name="factionBorderKeyline" label="Border keyline" title="The pale line either side of the border's dark core. 0 is none." />
         <Flag name="showZoomReadout" label="Show zoom" title="A readout of the exact zoom in the corner of the map." />

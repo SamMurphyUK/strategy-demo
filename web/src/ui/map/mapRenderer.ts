@@ -78,7 +78,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { facilitySplit, landColor, microSpriteLean, unitLean } from "./boardTune";
 import { emblemLayout, starPoints } from "./regionEmblem";
 import { roundelImage } from "./roundelImages";
 import { roundelFor } from "../../components/ui/RoundelBadge";
@@ -86,6 +86,7 @@ import { factionPalette } from "../theme/factionPalette";
 import { beginSpriteBoxes, commitSpriteBoxes } from "./spriteHits";
 import { facilityTarget } from "./facilityTargets";
 import { getBoardTune } from "./boardTuneStore";
+import { PIXIE_INK } from "../viewport3d/pixieSheet";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
 import { waterY } from "../viewport3d/skins/waterSwell";
 import { cliffDepthScale, projectionScales, type View, screenToWorld, worldToScreen } from "./viewMath";
@@ -161,6 +162,11 @@ export interface TerrainScene {
   cliffDrop?: number;
   /** How far the land at a world point stands up the screen, in CSS pixels. A land outline is shifted by it. */
   terrainLift?(world: Vec2): number;
+  /**
+   * Draw every territory and sea zone's outline as a vector line, in screen pixels: a land border in a darker take of its owner's colour,
+   * a sea seam in the water's ink. The pixel ground leaves its own border lines off while this is set.
+   */
+  vectorBorders?: { width: number; seaWidth: number; brightness: number };
 }
 
 export interface PlacedCounter {
@@ -896,6 +902,55 @@ function drawBattleScars(ctx: CanvasRenderingContext2D, scars: readonly ScarFram
   ctx.restore();
 }
 
+/** A hex colour scaled toward black by `factor` (1 leaves it as it is). */
+function darkened(hex: string, factor: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) {
+    return hex;
+  }
+  const n = parseInt(m[1], 16);
+  const scale = (v: number) => Math.max(0, Math.min(255, Math.round(v * factor)));
+  return `rgb(${scale((n >> 16) & 255)}, ${scale((n >> 8) & 255)}, ${scale(n & 255)})`;
+}
+
+/**
+ * Every border as a crisp vector line. A land territory is stroked inside its own outline (clipped to it, at double width), so two
+ * neighbours each keep their half in their own darker colour, and its coast is stroked the same. A sea zone is stroked in the water's
+ * ink at the water's level, and cut back where it runs behind the land (see strokeOutline).
+ */
+function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number): void {
+  const vb = s.vectorBorders;
+  if (!vb) {
+    return;
+  }
+  const tune = getBoardTune();
+  const sea = darkened(PIXIE_INK.seam, 0.55);
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const region of s.regions) {
+    const path = s.paths.get(region.id);
+    if (!path) {
+      continue;
+    }
+    withLandLift(ctx, s, region.id, () => {
+      if (region.type === "land") {
+        ctx.save();
+        ctx.clip(path, "evenodd");
+        ctx.strokeStyle = darkened(landColor(s.owners[region.id] ?? "", tune), vb.brightness);
+        ctx.lineWidth = vb.width * 2 * px;
+        ctx.stroke(path);
+        ctx.restore();
+      } else {
+        ctx.strokeStyle = sea;
+        ctx.lineWidth = vb.seaWidth * px;
+        strokeOutline(ctx, s, region.id, path);
+      }
+    });
+  }
+  ctx.restore();
+}
+
 function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number, dx: number): void {
   const { land } = s;
 
@@ -926,6 +981,10 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
       }
     }
     ctx.restore();
+  }
+
+  if (s.vectorBorders) {
+    drawVectorBorders(ctx, s, px);
   }
 
   // Hover, then selection. A gold tint inside the true shape, then its outline, which follows the inland

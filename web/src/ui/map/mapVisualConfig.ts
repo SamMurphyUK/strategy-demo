@@ -41,6 +41,11 @@ export interface MapVisualConfig {
   factionRegionShift: number;
   /** How much larger the round unit tokens draw at the strategic and pixel zoom than their base size. They may overlap the borders. */
   tokenSizeBoost: number;
+  /** Every border drawn as a crisp vector line over the pixel ground, at every zoom. Off, the ground draws its own. */
+  vectorBorders: boolean;
+  /** The vector land border's width and the sea seam's, in screen px. */
+  vectorBorderWidth: number;
+  vectorSeaWidth: number;
   /** The zoom (view scale) where the token boost starts to ease away, and where it is gone and tokens are their base size again. */
   tokenBoostFadeFrom: number;
   tokenBoostFadeTo: number;
@@ -386,6 +391,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionBorderKeyline: 0.5,
   factionRegionShift: 0.05,
   tokenSizeBoost: 1.5,
+  vectorBorders: true,
+  vectorBorderWidth: 2,
+  vectorSeaWidth: 1.5,
   tokenBoostFadeFrom: 1.3,
   tokenBoostFadeTo: 2,
   showZoomReadout: true,
@@ -639,6 +647,8 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionBorderKeyline: [0, 1],
   factionRegionShift: [0, 0.2],
   tokenSizeBoost: [1, 3],
+  vectorBorderWidth: [0.5, 6],
+  vectorSeaWidth: [0.5, 6],
   tokenBoostFadeFrom: [0.2, 8],
   tokenBoostFadeTo: [0.2, 8],
   factionBorderFadeFrom: [0, 1],
