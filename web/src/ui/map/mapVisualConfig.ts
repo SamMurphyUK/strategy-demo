@@ -276,6 +276,12 @@ export interface MapVisualConfig {
   facilityFadeEnd: number;
   /** How far apart the badge's three triangles drift, in badge widths. */
   facilitySplitSpread: number;
+  /** A flat faction roundel under every land territory that has an IPC value, in its owner's colours. */
+  enableRegionRoundels: boolean;
+  /** How much of an infantry base's width a region roundel takes. */
+  roundelRadiusShare: number;
+  /** The roundel's thickness against its radius. */
+  roundelHeight: number;
   /** The zoom where the territory numerals and capital marks start to fade, and where they are gone. */
   emblemFadeFrom: number;
   emblemFadeTo: number;
@@ -453,6 +459,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   facilitySplitFrom: 2.6,
   facilityFadeEnd: 6.4,
   facilitySplitSpread: 2.4,
+  enableRegionRoundels: true,
+  roundelRadiusShare: 0.82,
+  roundelHeight: 0.05,
   emblemFadeFrom: 3.4,
   emblemFadeTo: 6,
   enable3DBases: true,
@@ -650,6 +659,8 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   facilitySplitFrom: [1, 8],
   facilityFadeEnd: [2, 9],
   facilitySplitSpread: [0, 6],
+  roundelRadiusShare: [0.3, 1.2],
+  roundelHeight: [0.01, 0.3],
   emblemFadeFrom: [1, 9],
   emblemFadeTo: [1.5, 10],
   plinthHeight: [0.05, 0.6],

@@ -20,12 +20,12 @@ const SIDES = 32;
 /** How far the wall runs below the footing, against the base's height. */
 const SKIRT = 1.2;
 
-function rgbOf(hex: string): [number, number, number] {
+export function rgbOf(hex: string): [number, number, number] {
   return [Number.parseInt(hex.slice(1, 3), 16) / 255, Number.parseInt(hex.slice(3, 5), 16) / 255, Number.parseInt(hex.slice(5, 7), 16) / 255];
 }
 
 /** Paints a geometry one colour and one part, with flat faces and no height of its own to reveal. */
-function part(source: THREE.BufferGeometry, color: readonly [number, number, number], mode: number): THREE.BufferGeometry {
+export function part(source: THREE.BufferGeometry, color: readonly [number, number, number], mode: number): THREE.BufferGeometry {
   const geometry = source.index ? source.toNonIndexed() : source;
   geometry.deleteAttribute("uv");
   geometry.deleteAttribute("normal");
@@ -45,7 +45,7 @@ function part(source: THREE.BufferGeometry, color: readonly [number, number, num
 }
 
 /** A flat disc or ring lying at height `z`, facing up. */
-function ring(inner: number, outer: number, z: number): THREE.BufferGeometry {
+export function ring(inner: number, outer: number, z: number): THREE.BufferGeometry {
   const geometry = inner > 0 ? new THREE.RingGeometry(inner, outer, SIDES, 1) : new THREE.CircleGeometry(outer, SIDES);
   geometry.translate(0, 0, z);
   return geometry;

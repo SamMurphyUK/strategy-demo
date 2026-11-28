@@ -46,7 +46,8 @@ import { unitLabel } from "./unitStacks";
 import { beginCampaignFigures, takeCampaignFigures, type FacingStacks } from "./uprightSprites";
 import { INFANTRY_IDLE_TICK_SECONDS, QUICK_TICK_SECONDS } from "../../art/quickUnitDraw";
 import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleStage";
-import { borderPasses, microSpriteLean, unitLean } from "./boardTune";
+import { borderPasses, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { badgeAt, getRoundelHits, roundelAt } from "./hoverTip";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
@@ -202,6 +203,8 @@ export interface MapViewProps {
   ): void;
   /** Display name for a stack in the split popover. Falls back to the type id. */
   unitTitle?(entry: StackEntry): string;
+  /** What to call a territory under the pointer: its name and its owner. Without it a roundel has no tooltip. */
+  regionTip?(regionId: string): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
   movement?: { phase: string; orders: readonly OperationalOrder[]; regionIds: readonly string[] } | null;
   /** Sword badges that stay up through the combat phase, one per battle that is not finished. */
@@ -373,6 +376,8 @@ export function MapView(props: MapViewProps) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [hoverStack, setHoverStack] = useState<{ regionId: string; key: string; copyDx: number } | null>(null);
+  // The tooltip under the pointer: a unit, a facility badge, or a region roundel.
+  const [hoverTip, setHoverTip] = useState<{ x: number; y: number; label: string } | null>(null);
   const refreshArrowsRef = useRef<() => void>(() => {});
   const hoverRef = useRef("");
   const transformOpenRef = useRef(false);
@@ -596,8 +601,9 @@ export function MapView(props: MapViewProps) {
   }, [mapLod, editor]);
 
   // Handlers read the latest values through this ref, so listeners are attached once.
-  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach });
-  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach };
+  const tokenPxNow = TOKEN_PX * unitScale;
+  const live = useRef({ view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach, tokenPxNow, unitFade });
+  live.current = { view, size, layouts, paths, props, fitK, bounds, exact, only, wrap, tokenHitPx, plusHitPx, uprightReach, tokenPxNow, unitFade };
   const commitTunerCenter = (nextView?: View) => {
     const { view: current, size: canvas } = live.current;
     const used = nextView ?? current;
@@ -1862,6 +1868,28 @@ export function MapView(props: MapViewProps) {
     setHoverStack((prev) =>
       prev?.regionId === nextHover?.regionId && prev?.key === nextHover?.key && prev?.copyDx === nextHover?.copyDx ? prev : nextHover,
     );
+    // What the pointer is over, in words: a unit first, then a facility badge, then a region roundel.
+    let tip: { x: number; y: number; label: string } | null = null;
+    const tokenPx = live.current.tokenPxNow;
+    if (!p.editor) {
+      if (picked) {
+        const entry = picked.counter.slot.entry;
+        tip = { x: picked.counter.x, y: picked.counter.y - tokenPx / 2 - 10, label: p.unitTitle?.(entry) ?? unitLabel(entry.unit_type_id) };
+      } else {
+        const onBadge = facilitySplit(v.k, mapVisuals.facilitySplitFrom, mapVisuals.facilityFadeEnd).alpha > 0.3 ? badgeAt(ls, sp) : null;
+        if (onBadge?.layout.badge) {
+          tip = { x: onBadge.layout.badge.x, y: onBadge.layout.badge.y - onBadge.layout.badge.hh - 10, label: onBadge.label };
+        } else if (p.regionTip && live.current.unitFade > 0.001 && mapVisuals.enableRegionRoundels) {
+          const disc = roundelAt(getRoundelHits(), v, tokenPx, mapVisuals.roundelRadiusShare, sp, (at) => p.board?.terrainLift?.(at) ?? 0);
+          if (disc) {
+            tip = { x: disc.sx, y: disc.sy - disc.ry - 10, label: p.regionTip(disc.regionId) };
+          }
+        }
+      }
+    }
+    setHoverTip((prev) =>
+      prev?.label === tip?.label && Math.abs((prev?.x ?? 0) - (tip?.x ?? 0)) < 1 && Math.abs((prev?.y ?? 0) - (tip?.y ?? 0)) < 1 ? prev : tip,
+    );
     const sculptAim = p.editor?.overlay.sculpt?.tool;
     const aiming =
       p.editor?.overlay.tool === "knife" ||
@@ -2131,6 +2159,7 @@ export function MapView(props: MapViewProps) {
     hoverRef.current = "";
     refreshArrows();
     setHoverStack(null);
+    setHoverTip(null);
     live.current.props.onRegionHover("");
     live.current.props.editor?.onHover(null, 0);
   };
@@ -2249,25 +2278,7 @@ export function MapView(props: MapViewProps) {
   }
   transformOpenRef.current = transformOpen;
 
-  let hoverChip: { x: number; y: number; label: string } | null = null;
-  if (mapLod === 2 && hoverStack) {
-    for (const layout of layouts) {
-      if (layout.region.id !== hoverStack.regionId || layout.copyDx !== hoverStack.copyDx) {
-        continue;
-      }
-      const counter = layout.counters.find((item) => item.slot.key === hoverStack.key);
-      if (!counter) {
-        continue;
-      }
-      const entry = counter.slot.entry;
-      hoverChip = {
-        x: counter.x,
-        y: counter.y - 46,
-        label: props.unitTitle?.(entry) ?? unitLabel(entry.unit_type_id),
-      };
-      break;
-    }
-  }
+  const hoverChip = hoverTip;
 
   return (
     <div className="map-wrap" ref={wrapRef}>
@@ -2305,7 +2316,7 @@ export function MapView(props: MapViewProps) {
       </div>
       {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={tunerCenter} />}
       {props.children}
-      {mapLod === 2 && hoverChip && (
+      {hoverChip && (
         <div className="unit-hover-label" style={{ left: hoverChip.x, top: hoverChip.y }}>
           {hoverChip.label}
         </div>

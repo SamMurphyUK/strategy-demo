@@ -24,6 +24,7 @@ import {
   turn,
 } from "./placements";
 import { PROP_KINDS, type PropPlan } from "./propPlan";
+import type { PlacedRoundel } from "./roundelPlacement";
 
 export interface PlacementEditorProps {
   /** The latest painted frame, for the view the picks and the marker are read against. */
@@ -32,6 +33,8 @@ export interface PlacementEditorProps {
   surface(): HTMLElement | null;
   plan: PropPlan;
   landmarks: readonly PlacedLandmark[];
+  /** The flat faction roundels under the territories with an IPC value. They are moved, resized, turned and locked like a landmark. */
+  roundels?: readonly PlacedRoundel[];
   placements: Placements;
   onChange(next: Placements): void;
   /** Throws away the draft and returns to the saved file. */
@@ -54,6 +57,9 @@ function labelOf(key: string): string {
   const [kind, id] = key.split(":");
   if (kind === "landmark") {
     return LANDMARKS.find((spec) => spec.id === id)?.label ?? id;
+  }
+  if (kind === "roundel") {
+    return `Roundel, ${id}`;
   }
   return `${kind} ${Number(id) + 1}`;
 }
@@ -193,6 +199,9 @@ export function PlacementEditor(props: PlacementEditorProps) {
       for (const mark of live.current.landmarks) {
         consider({ key: mark.key, label: mark.spec.label, x: mark.instance.x, y: mark.instance.y, r: mark.instance.scale * 0.6 });
       }
+      for (const disc of live.current.roundels ?? []) {
+        consider({ key: disc.key, label: disc.label, x: disc.instance.x, y: disc.instance.y, r: disc.instance.scale * 0.6 });
+      }
       if (best) {
         setSelected((best as Pickable).key);
       }
@@ -276,8 +285,11 @@ export function PlacementEditor(props: PlacementEditorProps) {
     }
     let at: { x: number; y: number; r: number } | null = null;
     const mark = landmarks.find((item) => item.key === selected);
+    const disc = props.roundels?.find((item) => item.key === selected);
     if (mark) {
       at = { x: mark.instance.x, y: mark.instance.y, r: mark.instance.scale * 0.6 };
+    } else if (disc) {
+      at = { x: disc.instance.x, y: disc.instance.y, r: disc.instance.scale * 0.6 };
     } else {
       const [kind, index] = selected.split(":");
       const prop = plan.props[kind as keyof PropPlan["props"]]?.[Number(index)];
@@ -292,7 +304,7 @@ export function PlacementEditor(props: PlacementEditorProps) {
     const edge = worldToScreen(frame.view, { x: at.x + at.r, y: at.y });
     const radius = Math.max(10, Math.abs(edge.x - centre.x));
     return { x: rect.left + centre.x, y: rect.top + centre.y, r: radius };
-  }, [selected, frame, rect, landmarks, plan]);
+  }, [selected, frame, rect, landmarks, props.roundels, plan]);
 
   const value = edit ?? { dx: 0, dy: 0, dz: 0, mult: 1, dturn: 0, locked: false };
   const row = (label: string, shown: string, minus: () => void, plus: () => void, titles: [string, string]) => (
@@ -359,6 +371,20 @@ export function PlacementEditor(props: PlacementEditorProps) {
             </option>
           ))}
         </select>
+        {(props.roundels?.length ?? 0) > 0 ? (
+          <select
+            value={selected?.startsWith("roundel:") ? selected : ""}
+            onChange={(e) => setSelected(e.target.value || null)}
+            style={{ width: "100%", marginBottom: 6 }}
+          >
+            <option value="">Pick a region roundel</option>
+            {(props.roundels ?? []).map((disc) => (
+              <option key={disc.key} value={disc.key}>
+                {disc.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <div style={{ marginBottom: 6 }}>{selected ? `${labelOf(selected)}${locked ? "  (locked)" : ""}` : "Nothing picked"}</div>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <span style={{ width: 44 }}>Step</span>

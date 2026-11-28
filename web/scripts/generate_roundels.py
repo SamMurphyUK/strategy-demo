@@ -128,7 +128,7 @@ def jap():
     for i in range(16):
         centre = math.radians(i * 22.5 - 90)
         half = math.radians(5.4)
-        far = 150
+        far = 118
         near = 44
         points = [
             (C + near * math.cos(centre - half * 0.6), C + near * math.sin(centre - half * 0.6)),

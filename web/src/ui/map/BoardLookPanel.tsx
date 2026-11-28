@@ -815,6 +815,11 @@ export function BoardLookPanel() {
         <Num name="facilitySplitFrom" label="Split from" title="The zoom where the badge starts to split apart." />
         <Num name="facilityFadeEnd" label="Gone by" title="The zoom where the split badges have faded away. Keep it a little under the closest zoom." />
         <Num name="facilitySplitSpread" label="Spread" title="How far apart the triangles drift, in badge widths. 0 leaves them together." />
+        <h3>Region roundels</h3>
+        <p className="muted">A flat faction roundel under every land territory with an IPC value, in its owner's colours. Move or resize one in the placement editor (X).</p>
+        <Flag name="enableRegionRoundels" label="Region roundels" title="Show the owner's roundel under each territory that has an IPC value" />
+        <Num name="roundelRadiusShare" label="Size" title="How much of an infantry base's width the roundel takes. Under 1 is smaller than the base." off={!mapVisuals.enableRegionRoundels} />
+        <Num name="roundelHeight" label="Thickness" title="The roundel's thickness against its radius. Small is a flat enamel plate." off={!mapVisuals.enableRegionRoundels} />
         <h3>Territory emblems</h3>
         <p className="muted">The IPC numerals and capital marks fade out as you zoom in, to leave the board and its pieces clear.</p>
         <Num name="emblemFadeFrom" label="Fade from" title="The zoom where the numerals and capital marks start to fade." />

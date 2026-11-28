@@ -98,6 +98,9 @@ import { loadLandmarks } from "./landmarkModels";
 import { landmarkBaseShare } from "./placements";
 import { MAX_PLINTHS, plinthBuffers, plinthRadius, writePlinths } from "./plinthPlacement";
 import { plinthGeometry } from "./plinthMeshes";
+import { roundelGeometry } from "./roundelMeshes";
+import { type PlacedRoundel, type RoundelBuffer, roundelBuffer, writeRoundels } from "./roundelPlacement";
+import { ROUNDEL_IDS, type RoundelId, roundelUrl } from "../../components/ui/RoundelBadge";
 import { DEFAULT_SKIN, skinDefine } from "./skins/boardSkin";
 import { GROUND_SHARE, propBuffers, propGeometry } from "./propMeshes";
 import { PROP_KINDS, type PropInstance, type PropKind, type PropPlan, type SmokeStack, theaterOf } from "./propPlan";
@@ -171,6 +174,8 @@ export interface BoardSceneProps {
   pixie?: BoardPixie | null;
   /** The landmarks standing on the board, each at its place (see placements.ts). */
   landmarks?: readonly BoardLandmark[];
+  /** The flat faction roundels under the territories that have an IPC value (see roundelPlacement.ts). */
+  roundels?: readonly PlacedRoundel[];
 }
 
 /** The sheets of the pixel chart that are made for a map, before the board draws. */
@@ -773,6 +778,36 @@ export function BoardScene(props: BoardSceneProps) {
       live = false;
     };
   }, []);
+  // The roundel discs are built once from their SVGs, then drawn as one instanced mesh for each art.
+  const [roundelGeometries, setRoundelGeometries] = useState<Partial<Record<RoundelId, THREE.BufferGeometry>> | null>(null);
+  const wantRoundels = (props.roundels?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!wantRoundels || roundelGeometries) {
+      return undefined;
+    }
+    let alive = true;
+    Promise.all(
+      ROUNDEL_IDS.map(async (id) => {
+        const text = await (await fetch(roundelUrl(id))).text();
+        return [id, roundelGeometry(text)] as const;
+      }),
+    )
+      .then((entries) => {
+        if (alive) {
+          setRoundelGeometries(Object.fromEntries(entries));
+        } else {
+          for (const [, geometry] of entries) {
+            geometry.dispose();
+          }
+        }
+      })
+      .catch(() => {
+        // Without the art the board simply has no roundels.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [wantRoundels, roundelGeometries]);
   const post = useDisposable(
     () => new PostStack(),
     (old) => old.dispose(),
@@ -1114,6 +1149,43 @@ export function BoardScene(props: BoardSceneProps) {
       old.caster.dispose();
     },
     [kit, plinthBevel],
+  );
+  // One instanced mesh for each roundel art, sharing the plinth's material. They draw before the bases, so a base always stands over one.
+  const roundelCapacity = Math.max(8, (props.roundels?.length ?? 0) + 8);
+  const roundelSet = useDisposable(
+    () => {
+      const meshes = new Map<RoundelId, THREE.InstancedMesh>();
+      const buffers = new Map<RoundelId, RoundelBuffer>();
+      for (const id of ROUNDEL_IDS) {
+        const geometry = roundelGeometries?.[id];
+        if (!geometry) {
+          continue;
+        }
+        const buffer = roundelBuffer(roundelCapacity);
+        const art = geometry.clone();
+        art.setAttribute("aFlag", new THREE.InstancedBufferAttribute(new Float32Array(roundelCapacity * 3), 3));
+        art.setAttribute("aRise", new THREE.InstancedBufferAttribute(buffer.rises, 2));
+        art.setAttribute("aGone", new THREE.InstancedBufferAttribute(new Float32Array(roundelCapacity), 1));
+        const mesh = new THREE.InstancedMesh(art, kit.plinth, roundelCapacity);
+        mesh.instanceMatrix = new THREE.InstancedBufferAttribute(buffer.matrices, 16);
+        // The prop shader reads a tint for the parts that take one; a roundel has none, but the attribute must exist.
+        mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundelCapacity * 3), 3);
+        mesh.count = 0;
+        mesh.frustumCulled = false;
+        mesh.renderOrder = 0;
+        mesh.visible = false;
+        meshes.set(id, mesh);
+        buffers.set(id, buffer);
+      }
+      return { meshes, buffers };
+    },
+    (old) => {
+      for (const mesh of old.meshes.values()) {
+        mesh.geometry.dispose();
+        mesh.dispose();
+      }
+    },
+    [roundelGeometries, kit, roundelCapacity],
   );
   const unitShadows = useDisposable(
     () => {
@@ -1777,6 +1849,28 @@ export function BoardScene(props: BoardSceneProps) {
       kit.plinthLook.uLandmarkReveal.value = Math.min(1, frame.unitFade);
     }
 
+    // The region roundels: flat, thin, in the owner's colours, under every base and figure. They come in with the bases.
+    const roundelsOn = basesOn && mapVisuals.enableRegionRoundels && roundelSet.meshes.size > 0;
+    if (roundelsOn) {
+      writeRoundels(
+        roundelSet.buffers,
+        live.current.roundels ?? [],
+        frame,
+        { heightRatio: mapVisuals.roundelHeight, share: mapVisuals.roundelRadiusShare },
+        (x, y) => (patches.length > 0 ? sampleReliefFields(patches, x, y) : NO_RELIEF),
+        (x, y) => lowerAt(x, y),
+      );
+    }
+    for (const [id, mesh] of roundelSet.meshes) {
+      const buffer = roundelSet.buffers.get(id);
+      mesh.visible = roundelsOn && (buffer?.count ?? 0) > 0;
+      mesh.count = roundelsOn ? (buffer?.count ?? 0) : 0;
+      if (roundelsOn) {
+        mesh.instanceMatrix.needsUpdate = true;
+        (mesh.geometry.getAttribute("aRise") as THREE.InstancedBufferAttribute).needsUpdate = true;
+      }
+    }
+
     // A shadow under every counter. Fixed and faint from altitude, cast by the sun close in. Where
     // the figures cast their own, what is left under a stack is the dark beneath its base.
     unitShadows.count = writeUnitShadows(unitShadows.instanceMatrix.array as Float32Array, frame, sun, UNIT_SHADOW_LIFT, cards > 0);
@@ -1931,6 +2025,9 @@ export function BoardScene(props: BoardSceneProps) {
       <mesh ref={sea} geometry={plane} material={kit.water} frustumCulled={false} renderOrder={-2} />
       <group ref={once}>
         <primitive object={unitShadows} />
+        {[...roundelSet.meshes.values()].map((mesh) => (
+          <primitive key={mesh.uuid} object={mesh} />
+        ))}
         <primitive object={plinths.prop} />
         <primitive object={plinths.caster} />
         <primitive object={rig.cards} />

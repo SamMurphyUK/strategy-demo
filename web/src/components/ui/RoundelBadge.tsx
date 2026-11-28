@@ -17,6 +17,10 @@ const BY_FACTION: Record<FactionKey, RoundelId> = {
   USSR: "ussr",
   GER: "ger",
   JAP: "jap",
+  ITA: "ita",
+  CHI: "chn",
+  ANZ: "anz",
+  FRA: "fra",
   NEUTRAL: "neutral_true",
 };
 

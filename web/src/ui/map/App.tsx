@@ -1206,6 +1206,10 @@ export function App() {
           onDropBombard={(regionId, entry, destination, count, targetId, onto) =>
             commitMove(regionId, entry, destination, count, onto, targetId)
           }
+          regionTip={(regionId) => {
+            const region = state.regions[regionId];
+            return `${region?.name || regionId} \u00b7 ${factionName(region?.owner_faction_id)}`;
+          }}
           unitTitle={(entry) => {
             const name = unitName(entry.unit_type_id, session.state.unit_types);
             const historic = rosterName(entry.unit_type_id, entry.faction_id);

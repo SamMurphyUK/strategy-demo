@@ -936,10 +936,7 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
         ctx.fill(path, "evenodd");
         ctx.lineWidth = width * px;
         ctx.strokeStyle = color;
-        // A hovered sea zone is outlined at the foot of the cliff; a selected one keeps the old rule, from the top of the cliff.
-        if (id === s.selectedRegionId || !strokeSeaAtCliffFoot(ctx, s, id)) {
-          ctx.stroke(path);
-        }
+        strokeOutline(ctx, s, id, path);
       });
     }
   }
@@ -949,14 +946,27 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
 }
 
 /**
- * A sea zone's outline, drawn where the water meets the cliff and not along the top of it. The coast stretches of the outline are
- * moved down the screen by the cliff's height; the borders with other sea zones are on the water already and stay. Returns false
- * when it does not apply (a land territory, a flat map, or no true shape yet), so the caller strokes the path as before.
+ * Puts a region's outline and wash at its own height on the board, then puts the transform back. A land territory is moved up the
+ * screen by the height the board gives it. A sea zone is moved down by the cliff's height, onto the water: the whole of it, at the
+ * foot of the cliff along the coast and in open water between sea zones alike.
  */
-/** Moves a land outline up the screen by the height the board gives that region, then puts the transform back. */
 function withLandLift(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string, draw: () => void): void {
   const lift = s.terrainLift;
   const region = s.regions.find((item) => item.id === regionId);
+  if (region?.type === "sea") {
+    // A sea zone lies on the water, which is a cliff's height below the land: its outline and its wash drop by that much, the
+    // coast at the foot of the cliff and the open water between sea zones alike.
+    const lower = seaLevelShift(s);
+    if (lower === 0) {
+      draw();
+      return;
+    }
+    ctx.save();
+    ctx.translate(0, lower);
+    draw();
+    ctx.restore();
+    return;
+  }
   if (!lift || region?.type !== "land") {
     draw();
     return;
@@ -973,54 +983,97 @@ function withLandLift(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: 
   ctx.restore();
 }
 
-function strokeSeaAtCliffFoot(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string): boolean {
+/** How far down the world's y a sea zone's outline and wash sit from the land plane: the cliff's face on the screen. 0 on a flat map. */
+function seaLevelShift(s: TerrainScene): number {
   const drop = s.cliffDrop ?? 0;
-  const shape = s.shapes?.get(regionId);
-  const land = s.land;
-  const region = s.regions.find((item) => item.id === regionId);
-  if (!(drop > 0) || !shape || !land || region?.type !== "sea") {
-    return false;
+  if (!(drop > 0)) {
+    return 0;
   }
   const { sx, sy } = projectionScales(s.view.k);
   const ratio = sx > 0 ? Math.min(1, sy / sx) : 1;
   // The cliff's face on the screen, in pixels, and that in world y.
   const facePx = drop * Math.sqrt(Math.max(0, 1 - ratio * ratio)) * s.view.k;
-  const shiftY = sy > 0 ? facePx / sy : 0;
-  const probe = 0.7;
-  for (const polygon of shape) {
-    for (const ring of polygon) {
-      const n = ring.length;
-      if (n < 2) {
-        continue;
-      }
-      // A segment is coast when land lies close to it on either side.
-      const coast: boolean[] = [];
-      for (let i = 0; i < n; i++) {
-        const a = ring[i];
-        const b = ring[(i + 1) % n];
-        const mx = (a[0] + b[0]) / 2;
-        const my = (a[1] + b[1]) / 2;
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-        const nx = -(b[1] - a[1]) / len;
-        const ny = (b[0] - a[0]) / len;
-        coast.push(landMaskAt(land, { x: mx + nx * probe, y: my + ny * probe }) || landMaskAt(land, { x: mx - nx * probe, y: my - ny * probe }));
-      }
-      ctx.beginPath();
-      let open = false;
-      for (let i = 0; i < n; i++) {
-        const a = ring[i];
-        const b = ring[(i + 1) % n];
-        const dy = coast[i] ? shiftY : 0;
-        if (!open || (i > 0 && coast[i] !== coast[i - 1])) {
-          ctx.moveTo(a[0], a[1] + dy);
-        }
-        ctx.lineTo(b[0], b[1] + dy);
-        open = true;
-      }
-      ctx.stroke();
-    }
+  return sy > 0 ? facePx / sy : 0;
+}
+
+/** What is left of a sea zone's outline where it passes behind the land. */
+const OCCLUDED_OUTLINE_ALPHA = 0.1;
+let outlineScratch: HTMLCanvasElement | null = null;
+let occluderScratch: HTMLCanvasElement | null = null;
+
+function scratchLike(source: HTMLCanvasElement, current: HTMLCanvasElement | null): HTMLCanvasElement | null {
+  if (typeof document === "undefined") {
+    return null;
   }
-  return true;
+  const canvas = current ?? document.createElement("canvas");
+  if (canvas.width !== source.width || canvas.height !== source.height) {
+    canvas.width = source.width;
+    canvas.height = source.height;
+  }
+  return canvas;
+}
+
+/**
+ * Strokes a region's outline with the current stroke settings. A sea zone's outline lies on the water, so where it runs behind
+ * the land (the raised top of it, and the cliff face down to the water) it is cut to a tenth of its strength: the coast stays
+ * crisp and no ghost of a sea border cuts through a continent. The coast itself, at the foot of the cliff, is left whole.
+ * Land outlines, a flat map and a scene with no land yet stroke the path plainly.
+ */
+function strokeOutline(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string, path: Path2D): void {
+  const region = s.regions.find((item) => item.id === regionId);
+  const land = s.land;
+  const lower = seaLevelShift(s);
+  const canvas = ctx.canvas as HTMLCanvasElement | undefined;
+  if (region?.type !== "sea" || !land || !(lower > 0) || !canvas || typeof canvas.width !== "number") {
+    ctx.stroke(path);
+    return;
+  }
+  outlineScratch = scratchLike(canvas, outlineScratch);
+  occluderScratch = scratchLike(canvas, occluderScratch);
+  const outline = outlineScratch?.getContext("2d");
+  const mask = occluderScratch?.getContext("2d");
+  if (!outlineScratch || !occluderScratch || !outline || !mask) {
+    ctx.stroke(path);
+    return;
+  }
+  const transform = ctx.getTransform();
+  // The outline at full strength, in the same space as the caller's.
+  outline.setTransform(1, 0, 0, 1, 0, 0);
+  outline.globalCompositeOperation = "source-over";
+  outline.globalAlpha = 1;
+  outline.clearRect(0, 0, outlineScratch.width, outlineScratch.height);
+  outline.setTransform(transform);
+  outline.lineWidth = ctx.lineWidth;
+  outline.strokeStyle = ctx.strokeStyle;
+  outline.lineJoin = ctx.lineJoin;
+  outline.lineCap = ctx.lineCap;
+  outline.stroke(path);
+  // The land's silhouette from the top of it down to the foot of its cliff, swept in steps. It stops a stroke's width short of the
+  // foot, so the coast line itself is not eaten.
+  mask.setTransform(1, 0, 0, 1, 0, 0);
+  mask.globalAlpha = 1;
+  mask.clearRect(0, 0, occluderScratch.width, occluderScratch.height);
+  mask.setTransform(transform);
+  mask.fillStyle = "#000";
+  const stop = Math.max(0, lower - ctx.lineWidth * 0.75);
+  const steps = 8;
+  for (let i = 0; i <= steps; i++) {
+    mask.save();
+    mask.translate(0, -lower + (stop * i) / steps);
+    mask.fill(land.masterLandPath, "evenodd");
+    mask.restore();
+  }
+  // Cut the outline down where the silhouette covers it.
+  outline.setTransform(1, 0, 0, 1, 0, 0);
+  outline.globalCompositeOperation = "destination-out";
+  outline.globalAlpha = 1 - OCCLUDED_OUTLINE_ALPHA;
+  outline.drawImage(occluderScratch, 0, 0);
+  outline.globalCompositeOperation = "source-over";
+  outline.globalAlpha = 1;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(outlineScratch, 0, 0);
+  ctx.restore();
 }
 
 /** Hover wash on the arrow layer, so a pointer move does not repaint the coast. */
@@ -1042,9 +1095,7 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
       ctx.fill(path, "evenodd");
       ctx.lineWidth = 2 * px;
       ctx.strokeStyle = HOVER_COLOR;
-      if (!strokeSeaAtCliffFoot(ctx, scene, regionId)) {
-        ctx.stroke(path);
-      }
+      strokeOutline(ctx, scene, regionId, path);
     });
   }
   ctx.restore();

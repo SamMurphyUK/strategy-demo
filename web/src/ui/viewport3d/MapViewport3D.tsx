@@ -26,6 +26,8 @@ import { clipperFor, type MultiPolygon, pointInMultiPolygon } from "../map/regio
 import { battleScarDescriptors, craterCountFor } from "../map/terrainRelief";
 import { effectiveUnitSlots, roughShape } from "../map/unitSlots";
 import { clearFacilityTargets, setFacilityTarget } from "../map/facilityTargets";
+import { setRoundelHits } from "../map/hoverTip";
+import { placeRoundels } from "./roundelPlacement";
 import { wrapWorldX } from "../map/viewMath";
 import { type BattleScar, type BoardPixie, BoardScene, type BoardStore, type BoardTable } from "./BoardScene";
 import { PlacementButton, PlacementEditor } from "./PlacementEditor";
@@ -306,6 +308,13 @@ export default function MapViewport3D(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [land, geometry, clipped, placements, builtKey]);
   const everyLandmark = useMemo(() => [...landmarks, ...facilityMarks], [landmarks, facilityMarks]);
+  // A flat roundel of the owner's faction under every land territory that has an IPC value.
+  const roundels = useMemo(() => placeRoundels(geometry.regions, (id) => props.owners[id], placements), [geometry, props.owners, placements]);
+  // The 2D layer reads the pointer, so it is told where the roundels are to say what one is.
+  useEffect(() => {
+    setRoundelHits(roundels.map((item) => ({ regionId: item.regionId, x: item.instance.x, y: item.instance.y, scale: item.instance.scale })));
+    return () => setRoundelHits([]);
+  }, [roundels]);
   // The badge painter points each of a territory's facility badges at the model that replaces it as the camera comes in.
   useEffect(() => {
     clearFacilityTargets();
@@ -510,6 +519,7 @@ export default function MapViewport3D(props: MapViewProps) {
           mask={mask}
           plan={placedPlan ?? plan}
           landmarks={everyLandmark}
+          roundels={roundels}
           islands={islands}
           mistExtra={monsoon}
           scars={scars}
@@ -543,6 +553,7 @@ export default function MapViewport3D(props: MapViewProps) {
           surface={() => document.querySelector<HTMLElement>("canvas.map-canvas")}
           plan={placedPlan ?? plan}
           landmarks={landmarks}
+          roundels={roundels}
           placements={placements}
           onChange={changePlacements}
           onRevert={() => {
