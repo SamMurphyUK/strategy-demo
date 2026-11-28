@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VISUALS, factionBorderShare, factionTint } from "../../../src/ui/map/mapVisualConfig";
+import { DEFAULT_VISUALS, factionBorderShare, factionTint, tokenBoostAt } from "../../../src/ui/map/mapVisualConfig";
 import { COIN_SHARE, emblemLayout, starPoints, STAR_SHARE } from "../../../src/ui/map/regionEmblem";
 
 describe("the faction tint across the zoom tiers", () => {
@@ -102,5 +102,16 @@ describe("the pixel tier's emblem", () => {
     expect(points).toHaveLength(10);
     expect(points[0].x).toBeCloseTo(10, 6);
     expect(points[0].y).toBeCloseTo(5, 6);
+  });
+});
+
+describe("the token boost", () => {
+  it("is whole far out, a little at the mid zoom, and gone up close", () => {
+    expect(tokenBoostAt(1, DEFAULT_VISUALS)).toBeCloseTo(DEFAULT_VISUALS.tokenSizeBoost, 6);
+    const mid = tokenBoostAt(1.67, DEFAULT_VISUALS);
+    expect(mid).toBeGreaterThan(1.05);
+    expect(mid).toBeLessThan(DEFAULT_VISUALS.tokenSizeBoost);
+    expect(tokenBoostAt(DEFAULT_VISUALS.tokenBoostFadeTo, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
+    expect(tokenBoostAt(4, DEFAULT_VISUALS)).toBe(1);
   });
 });

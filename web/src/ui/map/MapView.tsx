@@ -53,7 +53,7 @@ import { ActionBubble, PatrolMark, TargetMarker, type BubbleOption } from "./ops
 import type { OpIcon } from "./ops/specialOps";
 import { classifyUnit } from "../../engine/types/ruleset";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
-import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
+import { getVisualRev, mapVisuals, subscribeVisuals, tokenBoostAt, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
 import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
 import { CoastTuner } from "./CoastTuner";
@@ -528,7 +528,7 @@ export function MapView(props: MapViewProps) {
   const only = editor ? editor.overlay.layer : null;
   // Tokens are a fixed size in the world, so they scale with the map and hold their formation at every zoom;
   // only the extremes are clamped (see worldTokenPx).
-  const tokenScale = (worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX) * (editor ? 1 : mapVisuals.tokenSizeBoost);
+  const tokenScale = (worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX) * (editor ? 1 : tokenBoostAt(view.k, mapVisuals));
   const mapLod: MapLod = editor ? 0 : lodForZoom(view.k, lodHold.current);
   // The detailed sprites have a curve of their own: see detailedSpriteScale. The round tokens keep theirs.
   const unitScale =
@@ -2359,6 +2359,11 @@ export function MapView(props: MapViewProps) {
             : undefined
         }
       >
+      {!editor && mapVisuals.showZoomReadout && (
+        <div className="zoom-readout" style={{ position: "absolute", left: 12, bottom: 44, zIndex: 30, padding: "2px 6px", font: "12px monospace", background: "rgba(0,0,0,0.65)", color: "#fff", pointerEvents: "none" }}>
+          zoom {view.k.toFixed(3)} · fit {(view.k / fitK).toFixed(2)}x · LoD {mapLod}
+        </div>
+      )}
       {!editor && props.board?.node}
       {transformOpen && <UnitTransformInspector target={transformTarget} onClose={() => setInspectorOpen(false)} />}
       <canvas

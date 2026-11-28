@@ -41,6 +41,11 @@ export interface MapVisualConfig {
   factionRegionShift: number;
   /** How much larger the round unit tokens draw at the strategic and pixel zoom than their base size. They may overlap the borders. */
   tokenSizeBoost: number;
+  /** The zoom (view scale) where the token boost starts to ease away, and where it is gone and tokens are their base size again. */
+  tokenBoostFadeFrom: number;
+  tokenBoostFadeTo: number;
+  /** A small readout of the exact zoom, in the corner of the map. */
+  showZoomReadout: boolean;
   /** How close the zoom is (0 fitted board, 1 closest) where borders start to ease toward that floor, and where they reach it. */
   factionBorderFadeFrom: number;
   factionBorderFadeTo: number;
@@ -381,6 +386,9 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionBorderKeyline: 0.5,
   factionRegionShift: 0.05,
   tokenSizeBoost: 1.5,
+  tokenBoostFadeFrom: 1.3,
+  tokenBoostFadeTo: 2,
+  showZoomReadout: true,
   factionBorderFadeFrom: 0.55,
   factionBorderFadeTo: 0.9,
   factionBoostUSSR: 1.05,
@@ -631,6 +639,8 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionBorderKeyline: [0, 1],
   factionRegionShift: [0, 0.2],
   tokenSizeBoost: [1, 3],
+  tokenBoostFadeFrom: [0.2, 8],
+  tokenBoostFadeTo: [0.2, 8],
   factionBorderFadeFrom: [0, 1],
   factionBorderFadeTo: [0, 1],
   factionBoostUSSR: [0.3, 3],
@@ -868,6 +878,15 @@ export function factionTint(closeness: number, config: Readonly<MapVisualConfig>
 export function factionBorderShare(closeness: number, config: Readonly<MapVisualConfig>): number {
   const span = Math.max(1e-3, config.factionBorderFadeTo - config.factionBorderFadeFrom);
   return config.factionBorderFloor + (1 - config.factionBorderFloor) * (1 - smooth((closeness - config.factionBorderFadeFrom) / span));
+}
+
+/**
+ * How much larger the round tokens draw at a zoom: the full boost while far out, easing to none (the base size) between the two fade
+ * zooms, so the closer views keep the size they had.
+ */
+export function tokenBoostAt(zoom: number, config: Readonly<MapVisualConfig>): number {
+  const span = Math.max(1e-3, config.tokenBoostFadeTo - config.tokenBoostFadeFrom);
+  return 1 + (config.tokenSizeBoost - 1) * (1 - smooth((zoom - config.tokenBoostFadeFrom) / span));
 }
 
 /** Ink opacity of the dashed and the solid friendly line for a style. */
