@@ -345,7 +345,8 @@ LandSkinOut skinLand() {
           // A border is where land of another territory lies within half the line's width of the texel. The width is in screen
           // px, so the line is as wide at every zoom (never thinner than one texel). A dark core carries a pale keyline either side
           // of it, so the line reads on dark and light ground alike. It is heavier between two factions than inside one.
-          float hw = max(uPixLine.x * 0.5 / max(uPixLine.w, 1e-3), 0.5 * e);
+          // Up close the line is a whole texel wide, so it stays a hard pixel-art step; the probes then reach the next texel.
+          float hw = max(uPixLine.x * 0.5 / max(uPixLine.w, 1e-3), e);
           vec2 c0 = pixAcross(m + vec2(hw, 0.0), ids, faction);
           vec2 c1 = pixAcross(m - vec2(hw, 0.0), ids, faction);
           vec2 c2 = pixAcross(m + vec2(0.0, hw), ids, faction);
@@ -446,7 +447,8 @@ vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         vec3 east = textureLod(uPixIds, sheetUv(m + vec2(t.e, 0.0)), 0.0).rgb;
         vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, t.e)), 0.0).rgb;
         float seam = step(0.5, ids.b) * max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)));
-        c = mix(c, PIX_SEAM, seam * 0.55);
+        // The sea zones' seams hold one strength at every zoom, dark enough to read on every band.
+        c = mix(c, PIX_SEAM * 0.6, seam * 0.9);
         // In the tropics the shallows by the coast are a translucent turquoise-teal lagoon before the sea drops to deep navy.
         float lagoon = (1.0 - smoothstep(0.0, uPixSea.y * 0.5, away)) * smoothstep(uTropic.x - 5.0, uTropic.x + 5.0, m.y) * (1.0 - smoothstep(uTropic.y - 5.0, uTropic.y + 5.0, m.y));
         c = mix(c, vec3(0.17, 0.66, 0.63) * (0.9 + 0.1 * fbm(foot * 0.3)), lagoon * uTropic.z);

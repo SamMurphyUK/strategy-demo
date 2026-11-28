@@ -823,6 +823,7 @@ export function BoardLookPanel() {
         <Num name="factionBorderBrightness" label="Border brightness" title="The border line against the faction's colour. Under 1 is darker, so it reads on the tint." />
         <Num name="factionBorderWidth" label="Border width" title="The border line's width on the screen, in px, at every zoom." />
         <Num name="factionBorderKeyline" label="Border keyline" title="The pale line either side of the border's dark core. 0 is none." />
+        <Num name="tokenSizeBoost" label="Token size" title="How much larger the round unit tokens draw at the strategic and pixel zoom. 1 is the base size." />
         <Num name="factionRegionShift" label="Region shift" title="How much lighter or darker each territory sits than its neighbours, so they part without a line. 0.05 is up to 5%." />
         <Num name="factionBorderFloor" label="Border at diorama" title="How much of its strength a border keeps at the closest zoom, where the tint has gone. 0.5 is half; 1 keeps it fully." />
         <Num name="factionBorderFadeFrom" label="Border fade from" title="How close the zoom is, 0 to 1, where borders start to ease toward that floor." />

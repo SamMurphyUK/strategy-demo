@@ -528,7 +528,7 @@ export function MapView(props: MapViewProps) {
   const only = editor ? editor.overlay.layer : null;
   // Tokens are a fixed size in the world, so they scale with the map and hold their formation at every zoom;
   // only the extremes are clamped (see worldTokenPx).
-  const tokenScale = worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX;
+  const tokenScale = (worldTokenPx(view.k, TOKEN_WORLD) / TOKEN_PX) * (editor ? 1 : mapVisuals.tokenSizeBoost);
   const mapLod: MapLod = editor ? 0 : lodForZoom(view.k, lodHold.current);
   // The detailed sprites have a curve of their own: see detailedSpriteScale. The round tokens keep theirs.
   const unitScale =

@@ -39,6 +39,8 @@ export interface MapVisualConfig {
   factionBorderKeyline: number;
   /** How much lighter or darker a territory sits than its neighbours: 0.05 is up to 5% either way. */
   factionRegionShift: number;
+  /** How much larger the round unit tokens draw at the strategic and pixel zoom than their base size. They may overlap the borders. */
+  tokenSizeBoost: number;
   /** How close the zoom is (0 fitted board, 1 closest) where borders start to ease toward that floor, and where they reach it. */
   factionBorderFadeFrom: number;
   factionBorderFadeTo: number;
@@ -374,10 +376,11 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionTintSaturation: 1,
   factionBorderBrightness: 0.5,
   factionBorderOpacity: 1,
-  factionBorderFloor: 0.75,
+  factionBorderFloor: 1,
   factionBorderWidth: 2,
   factionBorderKeyline: 0.5,
   factionRegionShift: 0.05,
+  tokenSizeBoost: 1.5,
   factionBorderFadeFrom: 0.55,
   factionBorderFadeTo: 0.9,
   factionBoostUSSR: 1.05,
@@ -627,6 +630,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionBorderWidth: [0.5, 6],
   factionBorderKeyline: [0, 1],
   factionRegionShift: [0, 0.2],
+  tokenSizeBoost: [1, 3],
   factionBorderFadeFrom: [0, 1],
   factionBorderFadeTo: [0, 1],
   factionBoostUSSR: [0.3, 3],
