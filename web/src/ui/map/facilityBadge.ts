@@ -172,3 +172,24 @@ export function factoryParts(size: Facilities["factory"]): { hall: Vec2[]; chimn
     chimneys: xs.map((x) => ({ x, y0: 0.1, y1: -0.8, w: 0.26 })),
   };
 }
+
+/** The line under the pointer. A landmark is the region's name. A works names itself and its owner. */
+export function placeCaption(place: {
+  name: string;
+  owner: string;
+  capital: boolean;
+  factory: "none" | "minor" | "major";
+  airbase: boolean;
+  harbour: boolean;
+}): { landmark: string; works: string } {
+  const name = place.name.trim();
+  const landmark = place.capital && name !== "" ? `${name} (Victory City)` : "";
+  const bits: string[] = [];
+  if (place.factory === "major") bits.push("Major factory");
+  else if (place.factory === "minor") bits.push("Factory");
+  if (place.airbase) bits.push("Airbase");
+  if (place.harbour) bits.push("Harbour");
+  const owner = place.owner.trim();
+  const works = bits.length === 0 ? "" : owner === "" ? bits.join(", ") : `${bits.join(", ")} · ${owner}`;
+  return { landmark, works };
+}

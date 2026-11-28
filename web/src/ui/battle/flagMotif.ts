@@ -1,5 +1,6 @@
 // Faction cloth for the waving flag. Colours are the battle board palette, so the
 // intro and the outro are cut from the same cloth.
+import { resolveFaction } from "../theme/factionPalette";
 
 export type FlagEmblem = "star" | "stars" | "cross" | "disc";
 
@@ -25,20 +26,16 @@ const MOTIFS: Record<string, FlagMotif> = {
   UK: { stripes: [NAVAL, SAND, CRIMSON], canton: NAVAL, emblem: "cross" },
   GER: { stripes: [CHARCOAL, SAND, CRIMSON], canton: CHARCOAL, emblem: "cross" },
   JAP: { stripes: [CRIMSON, TERRACOTTA], canton: CRIMSON, emblem: "disc" },
+  ITA: { stripes: ["#5B7D73", SAND], canton: "#5B7D73", emblem: "cross" },
+  CHI: { stripes: ["#AAA25D", CRIMSON], canton: "#AAA25D", emblem: "star" },
+  ANZ: { stripes: ["#846D59", SAND], canton: "#846D59", emblem: "stars" },
+  FRA: { stripes: [NAVAL, SAND, CRIMSON], canton: NAVAL, emblem: "cross" },
   NEUTRAL: { stripes: [MUD, KHAKI], canton: EARTH, emblem: "stars" },
 };
 
 /** `ger` and `axis` are Germany. An unknown id flies the neutral cloth. */
 export function flagMotifForFaction(factionId: string): FlagMotif {
-  const id = String(factionId ?? "").trim().toLowerCase();
-  if (id === "ussr" || id === "russia" || id === "soviet") return MOTIFS.USSR;
-  if (id === "usa" || id === "us" || id === "america" || id === "american" || id === "allies" || id === "allied") {
-    return MOTIFS.US;
-  }
-  if (id === "uk" || id === "gb" || id === "britain" || id === "british") return MOTIFS.UK;
-  if (id === "ger" || id === "germany" || id === "german" || id === "axis") return MOTIFS.GER;
-  if (id === "jap" || id === "japan" || id === "japanese") return MOTIFS.JAP;
-  return MOTIFS.NEUTRAL;
+  return MOTIFS[resolveFaction(factionId)] ?? MOTIFS.NEUTRAL;
 }
 
 /** The number on the battle outro: IPC of pieces destroyed in that battle. */

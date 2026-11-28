@@ -154,6 +154,8 @@ export interface TerrainScene {
   backdrop?: boolean;
   /** With a 3D board under the canvas: how far the water lies below the land, in world units. A sea zone's coast is outlined at the foot of the cliff. */
   cliffDrop?: number;
+  /** How far the land at a world point stands up the screen, in CSS pixels. A land outline is shifted by it. */
+  terrainLift?(world: Vec2): number;
 }
 
 export interface PlacedCounter {
@@ -929,14 +931,16 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
   ] as const) {
     const path = id === "" ? undefined : s.paths.get(id);
     if (path) {
-      ctx.fillStyle = tint;
-      ctx.fill(path, "evenodd");
-      ctx.lineWidth = width * px;
-      ctx.strokeStyle = color;
-      // A hovered sea zone is outlined at the foot of the cliff; a selected one keeps the old rule, from the top of the cliff.
-      if (id === s.selectedRegionId || !strokeSeaAtCliffFoot(ctx, s, id)) {
-        ctx.stroke(path);
-      }
+      withLandLift(ctx, s, id, () => {
+        ctx.fillStyle = tint;
+        ctx.fill(path, "evenodd");
+        ctx.lineWidth = width * px;
+        ctx.strokeStyle = color;
+        // A hovered sea zone is outlined at the foot of the cliff; a selected one keeps the old rule, from the top of the cliff.
+        if (id === s.selectedRegionId || !strokeSeaAtCliffFoot(ctx, s, id)) {
+          ctx.stroke(path);
+        }
+      });
     }
   }
 
@@ -949,6 +953,26 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
  * moved down the screen by the cliff's height; the borders with other sea zones are on the water already and stay. Returns false
  * when it does not apply (a land territory, a flat map, or no true shape yet), so the caller strokes the path as before.
  */
+/** Moves a land outline up the screen by the height the board gives that region, then puts the transform back. */
+function withLandLift(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string, draw: () => void): void {
+  const lift = s.terrainLift;
+  const region = s.regions.find((item) => item.id === regionId);
+  if (!lift || region?.type !== "land") {
+    draw();
+    return;
+  }
+  const { sy } = projectionScales(s.view.k);
+  const shift = sy > 0 ? lift(region.anchor) / sy : 0;
+  if (shift === 0) {
+    draw();
+    return;
+  }
+  ctx.save();
+  ctx.translate(0, -shift);
+  draw();
+  ctx.restore();
+}
+
 function strokeSeaAtCliffFoot(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string): boolean {
   const drop = s.cliffDrop ?? 0;
   const shape = s.shapes?.get(regionId);
@@ -1013,13 +1037,15 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
   for (const dx of scene.copies) {
     setWorldTransform(ctx, scene.view, scene.dpr);
     ctx.translate(dx, 0);
-    ctx.fillStyle = HOVER_TINT;
-    ctx.fill(path, "evenodd");
-    ctx.lineWidth = 2 * px;
-    ctx.strokeStyle = HOVER_COLOR;
-    if (!strokeSeaAtCliffFoot(ctx, scene, regionId)) {
-      ctx.stroke(path);
-    }
+    withLandLift(ctx, scene, regionId, () => {
+      ctx.fillStyle = HOVER_TINT;
+      ctx.fill(path, "evenodd");
+      ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = HOVER_COLOR;
+      if (!strokeSeaAtCliffFoot(ctx, scene, regionId)) {
+        ctx.stroke(path);
+      }
+    });
   }
   ctx.restore();
 }
@@ -1031,7 +1057,7 @@ export function drawHoverMark(ctx: CanvasRenderingContext2D, scene: TerrainScene
 export interface GameOverlay {
   layouts: RegionLayout[];
   /** How far the ground under a world point stands up the screen, in CSS pixels. Absent is flat. */
-  groundLift?(world: Vec2, stack?: { naval: boolean; count: number }): number;
+  groundLift?(world: Vec2, stack?: { naval: boolean; count: number; unitType?: string }): number;
   /** The board draws the bases under land stacks in three dimensions, so the canvas draws none for them. */
   plinths3D?: boolean;
   owners: Record<string, string>;
@@ -1408,7 +1434,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
         paint: () => {
           setScreenTransform(ctx, scene.dpr);
           // A figure on a range stands on its slope: it is lifted by how far the ground there stands up the screen.
-          const lift = game.groundLift?.(world, { naval: counter.domain === "sea", count: entry.count }) ?? 0;
+          const lift = game.groundLift?.(world, { naval: counter.domain === "sea", count: entry.count, unitType: entry.unit_type_id }) ?? 0;
           if (lift !== 0) {
             ctx.translate(0, -lift);
           }

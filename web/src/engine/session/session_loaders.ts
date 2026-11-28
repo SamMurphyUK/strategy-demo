@@ -2,7 +2,7 @@
 import { Faction } from "../model/faction";
 import type { GameState } from "../model/game_state";
 import { Region } from "../model/region";
-import type { Dict } from "../model/types";
+import { type Dict, isDict } from "../model/types";
 import { Unit } from "../model/unit";
 
 export function loadUnits(state: GameState, data: Dict): void {
@@ -52,6 +52,18 @@ export function loadMap(state: GameState, data: Dict): void {
     }
     if (!state.adjacency[t].includes(f)) {
       state.adjacency[t].push(f);
+    }
+  }
+  state.canals = [];
+  if (Array.isArray(data.canals)) {
+    for (const raw of data.canals) {
+      if (!isDict(raw) || !Array.isArray(raw.seas) || raw.seas.length < 2 || !Array.isArray(raw.control)) {
+        continue;
+      }
+      state.canals.push({
+        seas: [String(raw.seas[0]), String(raw.seas[1])],
+        control: raw.control.map((id) => String(id)),
+      });
     }
   }
 }

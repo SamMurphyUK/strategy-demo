@@ -23,7 +23,7 @@ const SCULPT_HINTS: Record<SculptTool, string> = {
 const HINTS: Record<EditorTool, string> = {
   select: "Click a region to edit it. Drag the amber diamond to move its unit anchor.",
   vertex: "Drag a square to reshape. A shared border moves every region on it. Click a + to add a vertex. Shift-click a shared border to roughen it.",
-  knife: "Drag a border from coast to coast and release to cut (an end stopping within 25px of the edge still reaches it). Draw a closed loop to carve out an inland country. Or click points, then press Enter or double-click. Alt-drag pans.",
+  knife: "Drag a border from coast to coast and release to cut (an end stopping within 25px of the edge still reaches it). The cut keeps a hand-drawn edge. Hold Shift for a straight line. Draw a closed loop to carve out an inland country. Or click points, then press Enter or double-click. Alt-drag pans.",
   merge: "Click a region, then Shift-click any number of others of the same type, then press Merge Regions. Islands across water become one territory.",
   draw: "Click to place vertices. Click the first vertex, double-click or press Enter to finish.",
   link: "Click region A, then region B, to add or remove a neighbor link.",
@@ -168,20 +168,32 @@ export function EditorToolbar({ editor }: { editor: MapEditor }) {
         )}
         {editor.tool === "knife" && (
           <>
-            <label className="editor-toolbar-note" title="How far a freehand stroke is simplified. Smoother means fewer vertices.">
+            <label className="editor-toolbar-note" title="How far a freehand stroke is simplified, in world units. Lower keeps the hand's jitter. Hold Shift while dragging for a straight border.">
               Trace{" "}
               <select
                 value={editor.strokeTolerance}
                 onChange={(e) => editor.setStrokeTolerance(e.target.value as StrokeTolerance)}
               >
-                <option value="fine">Fine (1.5px)</option>
-                <option value="medium">Medium (3px)</option>
-                <option value="smooth">Smooth (5px)</option>
+                <option value="fine">Fine (0.8)</option>
+                <option value="medium">Medium (1.2)</option>
+                <option value="smooth">Smooth (1.5)</option>
               </select>
             </label>
             <label className="editor-toolbar-note" title="One Chaikin corner-cutting pass before simplifying, so curves read as hand drawn.">
               <input type="checkbox" checked={editor.strokeSmooth} onChange={(e) => editor.setStrokeSmooth(e.target.checked)} /> Round
               curves
+            </label>
+            <label className="editor-toolbar-note" title="How far the border wanders off the drag. 100% is the thickest. 40% stays closer to the line you drew.">
+              Thickness {Math.round(editor.borderWeight * 100)}%
+              <input
+                type="range"
+                min={40}
+                max={100}
+                step={5}
+                value={Math.round(editor.borderWeight * 100)}
+                aria-label="Border thickness"
+                onChange={(e) => editor.setBorderWeight(Number(e.target.value) / 100)}
+              />
             </label>
           </>
         )}

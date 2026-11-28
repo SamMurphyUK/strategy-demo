@@ -515,6 +515,114 @@ export interface StrokeOptions {
   closeDist: number;
   /** A self-crossing loop smaller than this is a tremor and is untangled, not carved (world units). */
   minLoop: number;
+  /**
+   * After simplifying, subdivide long segments and push the new points sideways with seeded noise.
+   * Both halves of the cut receive that same chain, so the seam has no gap.
+   */
+  border?: boolean;
+  /** Hold Shift: skip the noise and keep the simplified stroke, for a ruled colonial line. */
+  straight?: boolean;
+  /** Share of the full wander, from 0.4 to 1. The full wander is the thickest border. */
+  weight?: number;
+}
+
+/**
+ * Vertices along a waved border. Closer than this, at full thickness, the wander is taller than the
+ * gap and the line folds back on itself, which the knife refuses.
+ */
+const BORDER_STEP = 3;
+/** How far the broad octave and the micro octave may push a point, in world units. */
+const BORDER_BROAD = 2.6;
+const BORDER_MICRO = 0.55;
+/** Displacement fades to nothing this far from either end, so the stroke still meets the coast. */
+const BORDER_END_FADE = 14;
+
+function hashUnit(n: number): number {
+  let x = Math.imul(n ^ (n >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Smooth 1D value noise in 0..1. `t` is arc length in the noise's own units. */
+function valueNoise(t: number, seed: number): number {
+  const i = Math.floor(t);
+  const f = t - i;
+  const u = f * f * (3 - 2 * f);
+  const a = hashUnit(Math.imul(i, 0x9e3779b1) ^ seed);
+  const b = hashUnit(Math.imul(i + 1, 0x9e3779b1) ^ seed);
+  return a + (b - a) * u;
+}
+
+/** Two octaves: a slow river-bend and a short coastline wiggle, centered on zero. */
+function borderWave(arc: number, seed: number): number {
+  const broad = valueNoise(arc / 56, seed) * 2 - 1;
+  const micro = valueNoise(arc / 10, seed ^ 0x51ed15ed) * 2 - 1;
+  return broad * BORDER_BROAD + micro * BORDER_MICRO;
+}
+
+function borderSeed(points: Vec2[]): number {
+  const a = points[0];
+  const b = points[points.length - 1];
+  let h = points.length | 0;
+  h = Math.imul(h ^ Math.round(a.x * 16), 0x9e3779b1);
+  h = Math.imul(h ^ Math.round(a.y * 16), 0x85ebca6b);
+  h = Math.imul(h ^ Math.round(b.x * 16), 0xc2b2ae35);
+  h = Math.imul(h ^ Math.round(b.y * 16), 0x27d4eb2f);
+  return h | 0;
+}
+
+/**
+ * Subdivide any segment longer than {@link BORDER_STEP} and shift the new vertices perpendicular to it.
+ * The original vertices, including both ends, stay where they are.
+ */
+export function displaceBorder(points: Vec2[], seed = borderSeed(points), weight = 1): Vec2[] {
+  if (points.length < 2) {
+    return points.map((p) => ({ ...p }));
+  }
+  const scale = Math.min(1, Math.max(0.4, weight));
+  const total = pathLength(points);
+  const out: Vec2[] = [];
+  let walked = 0;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const len = dist(a, b);
+    if (i === 0) {
+      out.push({ ...a });
+    }
+    if (len <= BORDER_STEP || len < 1e-6) {
+      out.push({ ...b });
+      walked += len;
+      continue;
+    }
+    const steps = Math.ceil(len / BORDER_STEP);
+    const nx = -(b.y - a.y) / len;
+    const ny = (b.x - a.x) / len;
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      if (s === steps) {
+        out.push({ ...b });
+        continue;
+      }
+      const along = walked + len * t;
+      const edge = Math.min(along, total - along);
+      const fade = Math.min(1, edge / BORDER_END_FADE);
+      const amp = borderWave(along, seed) * fade * scale;
+      out.push({
+        x: a.x + (b.x - a.x) * t + nx * amp,
+        y: a.y + (b.y - a.y) * t + ny * amp,
+      });
+    }
+    walked += len;
+  }
+  return dedupe(out, 1e-6);
+}
+
+function withBorder(line: Vec2[], options: StrokeOptions): Vec2[] {
+  if (!options.border || options.straight) {
+    return line;
+  }
+  return removeLoops(displaceBorder(line, borderSeed(line), options.weight ?? 1));
 }
 
 /** A knife stroke ready to cut: an open line, or (when `loop` is set) a closed ring to carve out. */
@@ -589,7 +697,7 @@ export function prepareStroke(raw: Vec2[], options: StrokeOptions): PreparedStro
   if (closed) {
     const sequence = [...closed, closed[0]];
     const rounded = options.smooth ? chaikin(sequence, 1) : sequence;
-    const ring = dedupe(rdp(rounded, options.tolerance));
+    const ring = withBorder(dedupe(rdp(rounded, options.tolerance)), options);
     if (ring.length > 1 && dist(ring[0], ring[ring.length - 1]) <= 1e-9) {
       ring.pop();
     }
@@ -607,7 +715,7 @@ export function prepareStroke(raw: Vec2[], options: StrokeOptions): PreparedStro
     return null;
   }
   const rounded = options.smooth ? chaikin(loopless, 1) : loopless;
-  const line = removeLoops(rdp(rounded, options.tolerance));
+  const line = withBorder(removeLoops(rdp(rounded, options.tolerance)), options);
   if (line.length < 2) {
     return null;
   }

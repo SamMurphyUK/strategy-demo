@@ -87,6 +87,10 @@ export const STRIP_LAND: Record<FactionKey, string> = {
   JAP: MILITARY.terracotta,
   USSR: MILITARY.crimson,
   GER: MILITARY.feldgrau,
+  ITA: MILITARY.spruce,
+  CHI: MILITARY.brass,
+  ANZ: MILITARY.brown,
+  FRA: MILITARY.steel,
   UK: MILITARY.khaki,
   US: MILITARY.olive,
   NEUTRAL: MILITARY.bone,
@@ -109,7 +113,7 @@ export const PREVIOUS_BORDERS: readonly BorderPass[] = [
   { color: "#2B2620", width: 1.2 },
 ];
 
-const FACTION_KEYS: readonly FactionKey[] = ["US", "UK", "GER", "JAP", "USSR", "NEUTRAL"];
+const FACTION_KEYS: readonly FactionKey[] = ["US", "UK", "GER", "JAP", "USSR", "ITA", "CHI", "ANZ", "FRA", "NEUTRAL"];
 
 function knob(on = true, amount = 1): Knob {
   return { on, amount };

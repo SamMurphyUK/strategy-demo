@@ -160,6 +160,8 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_INVALID", `Ship is not in ${fromRegion}`));
     } else if (this.movesOnlyInNoncombat(unitTypeId, state)) {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
+    } else if (ruleset.isSeaUnit(unitTypeId, state) && state.canalBlocks(fromRegion, toRegion, factionId)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "The canal is closed."));
     } else if (
       !state.isAdjacent(fromRegion, toRegion) &&
       !this.floodFill(
@@ -201,6 +203,8 @@ export class MovementValidator {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "This unit moves only during non-combat"));
     } else if (patrolGrounded(state, factionId, fromRegion, unitTypeId)) {
       result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "Fighters on patrol stay up until purchase"));
+    } else if (ruleset.isSeaUnit(unitTypeId, state) && state.canalBlocks(fromRegion, toRegion, factionId)) {
+      result.errors.push(MoveError.of("MOVE_ILLEGAL_DESTINATION", "The canal is closed."));
     } else if (
       isAirUnit(state, unitTypeId)
         ? (airTransitCost(state, factionId, fromRegion, toRegion) ?? airSteps(state, fromRegion, toRegion)) >
@@ -350,7 +354,7 @@ export class MovementValidator {
       for (const n of state.getAdjacentRegions(region)) {
         const neighbor = state.regions[n];
         if (seaOnly) {
-          if (neighbor == null || !neighbor.isSeaRegion()) {
+          if (neighbor == null || !neighbor.isSeaRegion() || state.canalBlocks(region, n, factionId)) {
             continue;
           }
         } else if (!air && neighbor != null && neighbor.isSeaRegion()) {
@@ -402,7 +406,7 @@ export class MovementValidator {
       for (const n of state.getAdjacentRegions(region)) {
         const neighbor = state.regions[n];
         if (seaOnly) {
-          if (neighbor == null || !neighbor.isSeaRegion()) {
+          if (neighbor == null || !neighbor.isSeaRegion() || state.canalBlocks(region, n, factionId)) {
             continue;
           }
         } else if (neighbor != null && neighbor.isSeaRegion()) {
@@ -434,7 +438,7 @@ export class MovementValidator {
     if (from === to) {
       return [from];
     }
-    if (state.isAdjacent(from, to)) {
+    if (state.isAdjacent(from, to) && !(seaOnly && state.canalBlocks(from, to, factionId))) {
       return [from, to];
     }
 
@@ -474,7 +478,7 @@ export class MovementValidator {
       for (const n of state.getAdjacentRegions(region)) {
         const neighbor = state.regions[n];
         if (seaOnly) {
-          if (neighbor == null || !neighbor.isSeaRegion()) {
+          if (neighbor == null || !neighbor.isSeaRegion() || state.canalBlocks(region, n, factionId)) {
             continue;
           }
         } else if (!air && neighbor != null && neighbor.isSeaRegion()) {

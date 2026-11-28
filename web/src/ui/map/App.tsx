@@ -36,7 +36,9 @@ import { committedMoves, peelHeld, type HeldMove } from "./combatRedirect";
 import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
 import { concealNeutralGarrison } from "./neutralGarrison";
-import type { MasterLand } from "./svgLandLoader";
+import { coastFromMap, masterLandFromCoast, type MasterLand } from "./svgLandLoader";
+import { placeCaption } from "./facilityBadge";
+import { factionName } from "./session/event_text";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PhasePanel } from "./panels/PhasePanel";
@@ -186,7 +188,11 @@ export function App() {
   const geometry = useMemo(() => buildMapGeometry(playMapJson), [playMapJson]);
   const { land: fileLand, error: landError } = useMasterLand();
   const [coast, setCoast] = useState<MasterLand | "file" | "none">("file");
-  const [coastForPlay, setCoastForPlay] = useState(false);
+  // A played map that stored its own coast. The shared campaign file stays the board for every other map.
+  const playCoast = useMemo(() => {
+    const stored = coastFromMap(playMapJson);
+    return stored ? masterLandFromCoast(stored) : null;
+  }, [playMapJson]);
   const [editing, setEditing] = useState(false);
   const artQuery = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const spriteEditor = artQuery.get("bake") === "1";
@@ -221,8 +227,8 @@ export function App() {
   const [volume, setVolume] = useState(storedVolume);
   const [playerFaction, setPlayerFaction] = useState("ussr");
   const [saveTick, setSaveTick] = useState(0);
-  const land =
-    editing || coastForPlay ? (coast === "file" ? fileLand : coast === "none" ? null : coast) : fileLand;
+  const editorCoast = coast === "file" ? fileLand : coast === "none" ? null : coast;
+  const land = editing ? editorCoast : (playCoast ?? fileLand);
   const editor = useMapEditor(demoMapJson, land, editing, setCoast);
   const editorStacks = useMemo(() => startingStacks(editor.map), [editor.map]);
   const editorOwners = useMemo(() => {
@@ -272,7 +278,6 @@ export function App() {
     setSaveTick((n) => n + 1);
     setEditing(false);
     setBoardGate(false);
-    setCoastForPlay(false);
     setSelection(null);
     setSelectedRegionId("");
     setMenuOpen(true);
@@ -283,7 +288,6 @@ export function App() {
       game.newGame(seed, choice, launch);
       setEditing(false);
       setBoardGate(false);
-      setCoastForPlay(false);
       setSelection(null);
       setSelectedRegionId("");
       setMenuOpen(false);
@@ -299,7 +303,6 @@ export function App() {
       game.hydrateLaunch(save.launch);
       setEditing(false);
       setBoardGate(false);
-      setCoastForPlay(false);
       setSelection(null);
       setSelectedRegionId("");
       setMenuOpen(false);
@@ -313,14 +316,18 @@ export function App() {
     if (stored.error !== "") {
       return;
     }
-    game.newGame(game.seed, {
-      id: stored.id,
-      name: "Playtest",
-      map: projectMapJson(prepareSavedMap(json)),
-    });
+    const global1940 = json.scenario === "SCENARIO_GLOBAL_1940";
+    game.newGame(
+      game.seed,
+      {
+        id: stored.id,
+        name: "Playtest",
+        map: projectMapJson(prepareSavedMap(json)),
+      },
+      global1940 ? launchForScenario("SCENARIO_GLOBAL_1940") : undefined,
+    );
     setEditing(false);
     setBoardGate(false);
-    setCoastForPlay(true);
     setSelection(null);
     setSelectedRegionId("");
     setMenuOpen(false);
@@ -1319,6 +1326,32 @@ export function App() {
               {hoverRegionId !== "" && seaZoneCargoLabel(state, hoverRegionId) !== "" && (
                 <p className="cargo-hover">{seaZoneCargoLabel(state, hoverRegionId)}</p>
               )}
+              {hoverRegionId !== "" &&
+                (() => {
+                  const shape = geometry.regions.find((region) => region.id === hoverRegionId);
+                  const held = state.regions[hoverRegionId];
+                  if (!shape || !held) {
+                    return null;
+                  }
+                  const caption = placeCaption({
+                    name: held.name,
+                    owner: factionName(held.owner_faction_id),
+                    capital: shape.capital === true,
+                    factory: shape.factorySize ?? (shape.hasFactory ? "major" : "none"),
+                    airbase: shape.hasAirbase === true,
+                    harbour: shape.hasHarbour === true,
+                  });
+                  if (caption.landmark === "" && caption.works === "") {
+                    return null;
+                  }
+                  return (
+                    <p className="cargo-hover">
+                      {caption.landmark !== "" && caption.landmark}
+                      {caption.landmark !== "" && caption.works !== "" && <br />}
+                      {caption.works !== "" && caption.works}
+                    </p>
+                  );
+                })()}
             </>
           )}
         </Viewport>

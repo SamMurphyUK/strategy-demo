@@ -124,6 +124,8 @@ export class GameState {
   veteranRerollRound: Record<string, number> = {};
   nationalObjectives: NationalObjective[] = [];
   neutralBlocs: NeutralBloc[] = [];
+  /** Sea pairs a fleet may cross only while its side holds a control territory. Absent from snapshots. */
+  canals: { seas: [string, string]; control: string[] }[] = [];
   /** Faction id → PEACETIME or WARTIME. Absent from snapshots. */
   warStatus: Record<string, "PEACETIME" | "WARTIME"> = {};
   /** Faction id → the round wartime income begins. Absent from snapshots. */
@@ -168,6 +170,27 @@ export class GameState {
 
   isAdjacent(fromId: string, toId: string): boolean {
     return this.getAdjacentRegions(fromId).includes(toId);
+  }
+
+  /** A warship step across a canal the mover's side does not hold. */
+  canalBlocks(fromId: string, toId: string, factionId: string): boolean {
+    if (this.canals.length === 0 || factionId === "") {
+      return false;
+    }
+    for (const canal of this.canals) {
+      const [a, b] = canal.seas;
+      if (!((fromId === a && toId === b) || (fromId === b && toId === a))) {
+        continue;
+      }
+      const open = canal.control.some((regionId) => {
+        const owner = this.regions[regionId]?.owner_faction_id ?? "";
+        return owner !== "" && (owner === factionId || this.sameTeam(owner, factionId));
+      });
+      if (!open) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getRegionOwner(regionId: string): string {

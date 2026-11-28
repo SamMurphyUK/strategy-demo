@@ -8,8 +8,8 @@
 // (a region with islands). It is the region's true shape for drawing, hover, selection and hit-testing.
 // The cutter stays the thing you edit; the clip is recomputed from it.
 import polygonClipping from "polygon-clipping";
-import type { Vec2 } from "./geometry";
-import { parsePathRings } from "./landSvg";
+import type { Rect, Vec2 } from "./geometry";
+import { flattenLandSvg, parsePathRings, parseViewBox } from "./landSvg";
 
 export type Pair = [number, number];
 export type Ring = Pair[];
@@ -208,6 +208,60 @@ export function landFromPathData(data: string[], rule: FillRule = "evenodd"): Mu
     land.push(...(rule === "nonzero" ? nonzeroPolygons(rings) : evenoddPolygons(rings)));
   }
   return land;
+}
+
+/**
+ * Land polygons in viewBox space. Group and path transforms are baked first, and a path with no
+ * fill-rule of its own uses the nearest ancestor's, then the SVG default (nonzero). Each path is
+ * filled on its own, so a later path does not become a hole in an earlier one.
+ */
+export function polygonsFromSvg(svgText: string): { viewBox: Rect; polygons: MultiPolygon } {
+  const flat = flattenLandSvg(svgText);
+  const open = /<svg\b([^>]*)>/i.exec(flat);
+  const viewBox = parseViewBox(attrOf(open?.[1] ?? "", "viewBox"), numberAttr(open?.[1] ?? "", "width"), numberAttr(open?.[1] ?? "", "height"));
+  const stack: FillRule[] = ["nonzero"];
+  const polygons: MultiPolygon = [];
+  const tags = /<\/([A-Za-z][\w:.-]*)\s*>|<([A-Za-z][\w:.-]*)\b([^>]*)>/g;
+  for (const match of flat.matchAll(tags)) {
+    if (match[1]) {
+      if (match[1].toLowerCase() !== "path" && stack.length > 1) {
+        stack.pop();
+      }
+      continue;
+    }
+    const name = (match[2] ?? "").toLowerCase();
+    const body = match[3] ?? "";
+    const selfClosing = /\/\s*$/.test(body);
+    const rule = fillRuleAttr(body) ?? stack[stack.length - 1];
+    if (name === "path") {
+      const d = attrOf(body, "d");
+      if (d.trim() !== "") {
+        polygons.push(...landFromPathData([d], rule));
+      }
+    }
+    if (!selfClosing && name !== "path") {
+      stack.push(rule);
+    }
+  }
+  return { viewBox, polygons };
+}
+
+function attrOf(tag: string, name: string): string {
+  const match = tag.match(new RegExp(`\\s${name}\\s*=\\s*"([^"]*)"`, "i"));
+  return match?.[1] ?? "";
+}
+
+function numberAttr(tag: string, name: string): number {
+  const n = Number.parseFloat(attrOf(tag, name));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function fillRuleAttr(tag: string): FillRule | null {
+  const match = /fill-rule\s*=\s*"(nonzero|evenodd)"/i.exec(tag);
+  if (match === null) {
+    return null;
+  }
+  return match[1].toLowerCase() === "evenodd" ? "evenodd" : "nonzero";
 }
 
 /** The polygons as one SVG path. Fill and clip it with evenodd: holes are their own sub-paths. */

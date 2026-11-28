@@ -232,6 +232,59 @@ describe("freehand cuts", () => {
   });
 });
 
+describe("a knife border", () => {
+  const opts = { tolerance: 1.2, smooth: false, tangentSpan: 18, closeDist: 20, minLoop: 12, border: true };
+
+  function downTheMiddle(): Vec2[] {
+    const raw: Vec2[] = [];
+    for (let y = -10; y <= 110; y += 4) {
+      raw.push({ x: 50, y });
+    }
+    return raw;
+  }
+
+  it("wiggles a fast straight drag and keeps both halves on the same seam", () => {
+    const prepared = prepareStroke(downTheMiddle(), opts)!;
+    const again = prepareStroke(downTheMiddle(), opts)!;
+    expect(prepared.line).toEqual(again.line);
+    expect(prepared.line.length).toBeGreaterThan(4);
+    expect(prepared.line[0]).toEqual({ x: 50, y: -10 });
+    expect(prepared.line[prepared.line.length - 1]).toEqual({ x: 50, y: 110 });
+    expect(prepared.line.some((p) => Math.abs(p.x - 50) > 0.4)).toBe(true);
+
+    const cut = splitPolygonInto(square(0, 0, 100), prepared.line, { ends: prepared.ends });
+    if (!cut.ok) {
+      throw new Error(cut.error);
+    }
+    expect(cut.pieces).toHaveLength(2);
+    expect(area(cut.pieces[0]) + area(cut.pieces[1])).toBeCloseTo(10000, 4);
+    for (const p of prepared.line) {
+      if (p.y <= 0 || p.y >= 100) {
+        continue;
+      }
+      const onA = cut.pieces[0].some((v) => same(v, p));
+      const onB = cut.pieces[1].some((v) => same(v, p));
+      expect(onA && onB).toBe(true);
+    }
+  });
+
+  it("pulls a thinner border closer to the drag than the full one", () => {
+    const full = prepareStroke(downTheMiddle(), { ...opts, weight: 1 })!;
+    const thin = prepareStroke(downTheMiddle(), { ...opts, weight: 0.4 })!;
+    const wander = (line: Vec2[]) => Math.max(...line.map((p) => Math.abs(p.x - 50)));
+    expect(wander(thin.line)).toBeGreaterThan(0.15);
+    expect(wander(thin.line)).toBeLessThan(wander(full.line) * 0.55);
+    expect(thin.line[0]).toEqual(full.line[0]);
+    expect(thin.line[thin.line.length - 1]).toEqual(full.line[full.line.length - 1]);
+  });
+
+  it("leaves a Shift-drag as the ruled line", () => {
+    const prepared = prepareStroke(downTheMiddle(), { ...opts, straight: true })!;
+    expect(prepared.line.every((p) => p.x === 50)).toBe(true);
+    expect(prepared.line.length).toBeLessThan(4);
+  });
+});
+
 describe("roughen a shared border", () => {
   const base = (): EditorMap => {
     let map = editorFromMapJson({ regions: [], starting_units: [] });
