@@ -859,6 +859,7 @@ export function waterMaterial(shared: SharedUniforms, drop: number, pixie: Pixie
       ...lightUniforms(shared),
       uPixGrid: pixie.uPixGrid,
       uPixSea: pixie.uPixSea,
+      uPixLine: pixie.uPixLine,
       uPixIds: pixie.uPixIds,
       uPixCoast: pixie.uPixCoast,
       uPixFoam: pixie.uPixFoam,

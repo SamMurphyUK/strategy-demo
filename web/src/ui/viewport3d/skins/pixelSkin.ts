@@ -347,10 +347,13 @@ LandSkinOut skinLand() {
           // of it, so the line reads on dark and light ground alike. It is heavier between two factions than inside one.
           // Up close the line is a whole texel wide, so it stays a hard pixel-art step; the probes then reach the next texel.
           float hw = max(uPixLine.x * 0.5 / max(uPixLine.w, 1e-3), e);
-          vec2 c0 = pixAcross(m + vec2(hw, 0.0), ids, faction);
-          vec2 c1 = pixAcross(m - vec2(hw, 0.0), ids, faction);
-          vec2 c2 = pixAcross(m + vec2(0.0, hw), ids, faction);
-          vec2 c3 = pixAcross(m - vec2(0.0, hw), ids, faction);
+          // Where a texel is under about a pixel and a half on screen, the probes start at the exact pixel, so the line is a clean
+          // 2px at any zoom and not a ragged run of texels. Where texels are large it stays a stair of whole texels.
+          vec2 lp = mix(m, mapAt, step(e * uPixLine.w, 1.5));
+          vec2 c0 = pixAcross(lp + vec2(hw, 0.0), ids, faction);
+          vec2 c1 = pixAcross(lp - vec2(hw, 0.0), ids, faction);
+          vec2 c2 = pixAcross(lp + vec2(0.0, hw), ids, faction);
+          vec2 c3 = pixAcross(lp - vec2(0.0, hw), ids, faction);
           float core = max(max(c0.x, c1.x), max(c2.x, c3.x));
           float coreFrontier = max(max(c0.y, c1.y), max(c2.y, c3.y));
           float kw = hw * 2.6;
@@ -365,7 +368,16 @@ LandSkinOut skinLand() {
           float keyAlpha = mix(clamp(mix(uPixTint.y, uPixTint.z, ringFrontier) * lineBase, 0.0, 1.0), 1.0, uPixTint.w) * uPixLine.y;
           // The keyline: the faction's colour lifted toward chalk. The core: the faction's colour taken darker.
           c = mix(c, mix(faction, vec3(1.0), 0.6), ring * keyAlpha);
-          c = mix(c, clamp(faction * uPixTone.z, 0.0, 1.0), core * coreAlpha);
+          // On snow the border is laid over the faction's own ground colour, so it is as dark as the borders about it and not washed out.
+          vec3 under = mix(c, tintCol, snowy * core);
+          c = mix(under, clamp(faction * uPixTone.z, 0.0, 1.0), core * coreAlpha);
+          // A thin line in the brightest of the faction's colour runs down the middle of a land border, about a pixel wide drawn at half
+          // strength, so it reads as a hairline whatever the pixel density.
+          float hr = 0.5 / max(uPixLine.w, 1e-3);
+          float hairline = max(max(pixAcross(mapAt + vec2(hr, 0.0), ids, faction).x, pixAcross(mapAt - vec2(hr, 0.0), ids, faction).x),
+            max(pixAcross(mapAt + vec2(0.0, hr), ids, faction).x, pixAcross(mapAt - vec2(0.0, hr), ids, faction).x));
+          vec3 bright = faction / max(max(faction.r, max(faction.g, faction.b)), 0.05);
+          c = mix(c, min(bright, vec3(0.95)), hairline * core * 0.6 * uPixLines.w);
           // A road and a river are each one texel wide: the texels whose middle is within half a texel of the line.
           vec4 lines = textureLod(uGround, uv, 0.0);
           float within = min(0.5 * e, 2.3);
@@ -395,6 +407,7 @@ export const PIXEL_SEA_SKIN = /* glsl */ `
 uniform sampler2D uPixCoast;
 uniform sampler2D uPixIds;
 uniform vec4 uPixSea;
+uniform vec4 uPixLine;
 uniform vec4 uPixFoam;
 uniform vec3 uPixShips[${PIXIE_SHIP_SLOTS}];
 uniform float uPixShipN;
@@ -444,9 +457,14 @@ vec3 seaBase(SeaTexel t, vec2 m, vec2 foot) {
         vec3 c = band < 0.3333 ? mix(PIX_SEA[0], PIX_SEA[1], band * 3.0) : (band < 0.6667 ? mix(PIX_SEA[1], PIX_SEA[2], band * 3.0 - 1.0) : mix(PIX_SEA[2], PIX_SEA[3], band * 3.0 - 2.0));
         // A seam is where the texel to the east or the south lies in another sea zone.
         vec3 ids = textureLod(uPixIds, sheetUv(m), 0.0).rgb;
-        vec3 east = textureLod(uPixIds, sheetUv(m + vec2(t.e, 0.0)), 0.0).rgb;
-        vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, t.e)), 0.0).rgb;
-        float seam = step(0.5, ids.b) * max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)));
+        // The probes reach out by half the line's screen width (never under a texel), so a seam is as wide at every zoom.
+        float sw = max(uPixLine.x * 0.5 / max(uPixLine.w, 1e-3), t.e);
+        vec3 east = textureLod(uPixIds, sheetUv(m + vec2(sw, 0.0)), 0.0).rgb;
+        vec3 west = textureLod(uPixIds, sheetUv(m - vec2(sw, 0.0)), 0.0).rgb;
+        vec3 south = textureLod(uPixIds, sheetUv(m + vec2(0.0, sw)), 0.0).rgb;
+        vec3 north = textureLod(uPixIds, sheetUv(m - vec2(0.0, sw)), 0.0).rgb;
+        float seam = step(0.5, ids.b) * max(max(step(0.5, east.b) * step(0.002, distance(east.rg, ids.rg)), step(0.5, west.b) * step(0.002, distance(west.rg, ids.rg))),
+          max(step(0.5, south.b) * step(0.002, distance(south.rg, ids.rg)), step(0.5, north.b) * step(0.002, distance(north.rg, ids.rg))));
         // The sea zones' seams hold one strength at every zoom, dark enough to read on every band.
         c = mix(c, PIX_SEAM * 0.6, seam * 0.9);
         // In the tropics the shallows by the coast are a translucent turquoise-teal lagoon before the sea drops to deep navy.
