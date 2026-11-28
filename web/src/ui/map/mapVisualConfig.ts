@@ -248,10 +248,6 @@ export interface MapVisualConfig {
   microMinDistance: number;
   /** Degrees above the horizon the camera looks from at the closest zoom. */
   microPitchDeg: number;
-  /** The level tier past the micro one: the angle above the horizon the camera comes down to, the nearest it may come, and how far past the sharp limit it may magnify. */
-  levelPitchDeg: number;
-  levelMinDistance: number;
-  levelMagnify: number;
   /** Extra backward lean of the 2D figures in the micro tier, in degrees. */
   microSpriteTiltDeg: number;
   /** The tilt-shift blur of the top and bottom of the frame in the micro tier. 0 is none. */
@@ -509,9 +505,6 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   dioramaTileScale: 1,
   microMinDistance: 1.35,
   microPitchDeg: 38,
-  levelPitchDeg: 12,
-  levelMinDistance: 0.8,
-  levelMagnify: 2.5,
   microSpriteTiltDeg: 10,
   tiltShiftStrength: 1,
   landmarkShadowStrength: 1.7,
@@ -744,9 +737,6 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   dioramaTileScale: [0.3, 3],
   microMinDistance: [1, 4],
   microPitchDeg: [30, 60],
-  levelPitchDeg: [4, 40],
-  levelMinDistance: [0.4, 2],
-  levelMagnify: [1, 5],
   microSpriteTiltDeg: [0, 20],
   tiltShiftStrength: [0, 2],
   landmarkShadowStrength: [1, 3],

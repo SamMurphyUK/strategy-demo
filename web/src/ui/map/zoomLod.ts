@@ -9,18 +9,13 @@ const OPERATIONAL = 1.0875;
 /** Upright sprites replace the icon tokens at this zoom, then a short timed fade plays. */
 export const TACTICAL_IN = 6.245;
 /**
- * The zoom the detailed sprites' size is measured from, kept where it always was (3.8) though they now arrive later: a sprite is as big
- * at a zoom as it ever was, so moving the diorama's start did not shrink the units.
- */
-export const SPRITE_REFERENCE_ZOOM = 3.8;
-/**
  * Size of the detailed sprites and their bases, as a share of a round token at its largest. At the
  * 6.245 reveal it is `base`. From there inward it grows with the zoom by the power `lock`: at 1 a
  * sprite is steady in world space, a piece standing on the board like the terrain and the
  * landmarks; at 0 it holds one size on screen. The round token curve is not touched.
  */
 export function detailedSpriteScale(zoom: number, base: number, lock: number): number {
-  return base * Math.pow(Math.max(zoom, 1e-6) / SPRITE_REFERENCE_ZOOM, lock);
+  return base * Math.pow(Math.max(zoom, 1e-6) / TACTICAL_IN, lock);
 }
 
 /** Stay on sprites until the zoom drops back through here, so a notch of wheel does not flicker. */

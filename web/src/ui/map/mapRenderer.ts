@@ -109,7 +109,7 @@ import type { ShoreStencil } from "./figureSheet";
 import { landScreenTransform, SEA_LAND_ALPHA } from "./seaOverlap";
 import { plinthFactor, unitBaseShare } from "../viewport3d/plinthPlacement";
 import { drawHoldCircles } from "./shipHold";
-import { type MapLod, SPRITE_REFERENCE_ZOOM, uprightDrawOrder } from "./zoomLod";
+import { type MapLod, TACTICAL_IN, uprightDrawOrder } from "./zoomLod";
 
 export const TOKEN_PX = 32;
 const PAPER = MILITARY.cream;
@@ -1575,7 +1575,7 @@ function drawUprightDepth(ctx: CanvasRenderingContext2D, scene: TerrainScene, ga
           }
           // Held at the zoom the sprites arrive, so a figure keeps one size however close the camera comes.
           // In the micro tier the camera is low, and the figures lean back a few degrees more, so they stand against the horizon.
-          const lean = unitLean(Math.min(scene.view.k, SPRITE_REFERENCE_ZOOM), getBoardTune()) * microSpriteLean(scene.view.k);
+          const lean = unitLean(Math.min(scene.view.k, TACTICAL_IN), getBoardTune()) * microSpriteLean(scene.view.k);
           if (lean !== 1) {
             ctx.translate(counter.x, counter.y);
             ctx.scale(1, lean);

@@ -227,9 +227,6 @@ export const MICRO_ALPHA_TO = 2.4;
 /** The camera dives to the low pitch over this stretch of distance. */
 const MICRO_PITCH_FROM = 3.6;
 const MICRO_PITCH_TO = 2.1;
-/** Past the micro angle the camera keeps diving, from here to here (distances), toward a level look at the board. */
-const LEVEL_PITCH_FROM = 2.1;
-const LEVEL_PITCH_TO = 1.1;
 
 export type CameraTier = "strategic" | "icon" | "diorama" | "micro";
 
@@ -297,12 +294,8 @@ export function groundSquash(zoom: number, curve: TiltCurve): number {
   // A squash of 1 - sin(elevation) is a camera that high above the horizon.
   const low = 1 - Math.sin((mapVisuals.microPitchDeg * Math.PI) / 180);
   const dive = nearShare(cameraDistance(zoom), MICRO_PITCH_FROM, MICRO_PITCH_TO);
-  const micro = dive > 0 ? base + (Math.max(base, low) - base) * dive : base;
-  // Past it, the level tier: the camera comes down to look nearly along the board.
-  const level = 1 - Math.sin((mapVisuals.levelPitchDeg * Math.PI) / 180);
-  const levelDive = nearShare(cameraDistance(zoom), LEVEL_PITCH_FROM, LEVEL_PITCH_TO);
-  const squash = levelDive > 0 ? micro + (Math.max(micro, level) - micro) * levelDive : micro;
-  return Math.min(0.92, Math.max(0, squash));
+  const squash = dive > 0 ? base + (Math.max(base, low) - base) * dive : base;
+  return Math.min(0.8, Math.max(0, squash));
 }
 
 /** The figure's extra backward lean in the micro tier: a cosine foreshortening, 1 with no lean. */

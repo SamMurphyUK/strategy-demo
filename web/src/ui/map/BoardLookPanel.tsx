@@ -788,9 +788,6 @@ export function BoardLookPanel() {
         <Num name="shipSizeScale" label="Ship size" title="The size of the ships against what they were. 0.4 is 60% smaller." />
         <Num name="landmarkShadowStrength" label="Monument shadow" title="How deep the shadows drawn on the monuments go. 1 is the plain shade." />
         <Num name="tiltShiftStrength" label="Tilt-shift" title="The soft blur of the top and bottom of the frame in the micro tier. 0 is none." />
-        <Num name="levelPitchDeg" label="Level camera angle" title="Degrees above the horizon the camera comes down to in the closest, level tier. Lower looks more nearly along the board." unit="deg" />
-        <Num name="levelMinDistance" label="Level nearest camera" title="The nearest the camera may come, in camera distance. Lower zooms in further." />
-        <Num name="levelMagnify" label="Level magnify" title="How far past the sharp limit the closest zoom may enlarge the map." />
         <Num name="microMinDistance" label="Nearest camera" title="The nearest the camera may come, in camera distance. The tiers are 14, 7.5 and 3.8; micro ends here." />
         <Num name="dioramaNormalStrength" label="Diorama relief" title="How deep the diorama surface's relief reads in the light." />
         <Num name="albedoDetailStrength" label="Palette detail" title="How much of the photographed sets' luminance modulates the palette colour. 0 is the chart's flat colour." />
