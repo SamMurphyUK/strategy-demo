@@ -63,6 +63,11 @@ import { launchForScenario, legacyLaunch, type CampaignLaunchConfig } from "../.
 import { NewCampaignModal, draftLaunch, type CampaignDraft } from "./menu/NewCampaignModal";
 import { useCampaignSession } from "./session/use_campaign_session";
 import { UiLab } from "../kit/UiLab";
+import { OpsCinematic } from "./ops/OpsCinematic";
+import { nextPatrolCount, opsFor, reportFromEvents, type OpOption, type OpReport } from "./ops/specialOps";
+import { activePatrols, patrolReach } from "../../engine/rules/optional/airAndNavalRaiding";
+import { classifyUnit } from "../../engine/types/ruleset";
+import type { MapOps } from "./MapView";
 import { uiThemeChrome, useRoleVars, useUiLab, useUiTheme, useUiThemeHotkeys, useUiType } from "../kit/uiTheme";
 
 export type Selection =
@@ -514,7 +519,50 @@ export function App() {
     return [];
   }, [squad, selectedRegionId, selection, session, faction, phase, version]);
 
+  // --- Special operations (see ops/specialOps.ts). The engine decides every option, target and outcome; this only asks and shows. ---
+  const facilitiesOn = !editing && state.rulesetConfig.facilitiesAndPatrols === true;
+  const [opMode, setOpMode] = useState<string | null>(null);
+  const [escorts, setEscorts] = useState(0);
+  const [pendingPatrols, setPendingPatrols] = useState<Record<string, number>>({});
+  const [raidQueue, setRaidQueue] = useState<OpReport[]>([]);
+  const [cinema, setCinema] = useState<OpReport | null>(null);
+  const stackSel = selection?.kind === "stack" && selection.cargoOf === "" ? selection : null;
+  const opOptions = useMemo<OpOption[]>(
+    () => (facilitiesOn && stackSel ? opsFor(session, state, faction, stackSel.regionId, stackSel.unitTypeId) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facilitiesOn, stackSel?.regionId, stackSel?.unitTypeId, session, state, faction, phase, version],
+  );
+  const raidOption = opOptions.find((option) => option.kind === "raid");
+  // A patrolling fighter that is clicked shows every zone it reacts to, in green.
+  const patrolReachOf: string[] | null = useMemo(() => {
+    if (!facilitiesOn || !stackSel || classifyUnit(stackSel.unitTypeId) !== "FIGHTER") {
+      return null;
+    }
+    const up = activePatrols(state, faction).some((patrol) => patrol.station === stackSel.regionId) || (pendingPatrols[stackSel.regionId] ?? 0) > 0;
+    return up ? patrolReach(state, stackSel.regionId) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facilitiesOn, stackSel?.regionId, stackSel?.unitTypeId, state, faction, pendingPatrols, phase, version]);
+
+  useEffect(() => {
+    setOpMode(null);
+    setEscorts(0);
+  }, [selection, phase]);
+  useEffect(() => {
+    setPendingPatrols({});
+  }, [phase, faction, game.seed]);
+  useEffect(() => {
+    if (phase !== "combat_move" && phase !== "combat") {
+      setRaidQueue([]);
+    }
+  }, [phase]);
+
   const highlight: HighlightMode = useMemo(() => {
+    if (patrolReachOf && stackSel) {
+      return { kind: "move", from: stackSel.regionId, legal: patrolReachOf, hover: "", tone: "patrol" };
+    }
+    if (opMode === "raid" && raidOption?.targets && stackSel) {
+      return { kind: "move", from: stackSel.regionId, legal: raidOption.targets, hover: "", tone: "attack" };
+    }
     if (squad && squad.regionId === selectedRegionId && legalTargets.length > 0) {
       return {
         kind: "move",
@@ -539,7 +587,7 @@ export function App() {
       return { kind: "mobilize", legal: legalTargets, hover: "" };
     }
     return { kind: "none" };
-  }, [squad, selectedRegionId, selection, legalTargets, phase]);
+  }, [squad, selectedRegionId, selection, legalTargets, phase, patrolReachOf, opMode, raidOption]);
 
   const combatMarkers: CombatMarker[] = useMemo(() => {
     if (phase !== "combat_move" || faction === "") {
@@ -1062,6 +1110,124 @@ export function App() {
     })();
   };
 
+  const regionLabel = (regionId: string) => state.regions[regionId]?.name || regionId;
+
+  /** Pans the camera in on a raid, then opens its result. A raid goes in along its approach: from where it set out to where it strikes. */
+  const presentReport = async (report: OpReport) => {
+    const camera = cameraRef.current;
+    const goTo = async (regionId: string, mode: "pan" | "zoom", ms: number) => {
+      const snap = camera?.snapshot();
+      const shape = geometry.regions.find((region) => region.id === regionId);
+      if (camera && snap && shape && snap.width > 1 && snap.height > 1 && snap.fitK > 0) {
+        await camera.moveTo(combatGoal(snap.view, shape.bounds, snap.width, snap.height, snap.fitK, mode, shape.anchor, window.devicePixelRatio || 1), ms);
+      }
+    };
+    if (report.fromRegionId) {
+      await goTo(report.fromRegionId, "pan", 600);
+      await goTo(report.regionId, "pan", 2200);
+    } else {
+      await goTo(report.regionId, "zoom", COMBAT_ZOOM_MS);
+    }
+    setCinema(report);
+  };
+
+  const commitBomb = (option: OpOption) => {
+    if (!stackSel || option.kind !== "bomb") return;
+    const payload: Record<string, unknown> = { region_id: stackSel.regionId };
+    if (option.facility && option.facility !== "factory") payload.facility = option.facility;
+    if (option.facility === "factory" && escorts > 0) payload.escorts = escorts;
+    const result = game.send("strategic_bomb", payload);
+    setSelection(null);
+    if (result.result_type !== "ok") return;
+    const report = reportFromEvents((result.events ?? []) as { payload?: Record<string, unknown> }[], regionLabel);
+    if (report) void presentReport(report);
+  };
+
+  const commitRaid = (targetId: string) => {
+    if (!stackSel) return;
+    const result = game.send("naval_raid", { from_region_id: stackSel.regionId, to_region_id: targetId });
+    setOpMode(null);
+    setSelection(null);
+    if (result.result_type !== "ok") return;
+    const report = reportFromEvents((result.events ?? []) as { payload?: Record<string, unknown> }[], regionLabel);
+    // The engine resolved it at once; the raid is shown when the combat phase opens, ahead of the battles.
+    if (report) setRaidQueue((queue) => [...queue, report]);
+  };
+
+  const pickOption = (id: string) => {
+    const option = opOptions.find((item) => item.id === id);
+    if (!option || !stackSel) return;
+    if (option.kind === "bomb") {
+      commitBomb(option);
+    } else if (option.kind === "raid") {
+      setOpMode((mode) => (mode === "raid" ? null : "raid"));
+    } else if (option.kind === "patrol") {
+      const current = pendingPatrols[stackSel.regionId] ?? option.current ?? 0;
+      setPendingPatrols((patrols) => ({ ...patrols, [stackSel.regionId]: nextPatrolCount(current, option.max ?? 0) }));
+    }
+  };
+
+  const pickMarker = (id: string, regionId: string) => {
+    if (id === "raid") {
+      commitRaid(regionId);
+      return;
+    }
+    const option = opOptions.find((item) => item.id === id);
+    if (option) commitBomb(option);
+  };
+
+  // At the start of the combat phase, the raids declared in combat move play, one after another, before any battle.
+  useEffect(() => {
+    if (phase === "combat" && raidQueue.length > 0 && !cinema && !approachRef.current && !battleOnScreen) {
+      const [next, ...rest] = raidQueue;
+      setRaidQueue(rest);
+      void presentReport(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, raidQueue, cinema, battleOnScreen]);
+
+  const factoryOption = opOptions.find((option) => option.facility === "factory");
+  const patrolRows = (() => {
+    if (!facilitiesOn) return [];
+    const rows = new Map<string, { regionId: string; count: number; pending?: boolean }>();
+    for (const patrol of activePatrols(state, playerFaction)) {
+      rows.set(patrol.station, { regionId: patrol.station, count: patrol.count });
+    }
+    for (const [regionId, count] of Object.entries(pendingPatrols)) {
+      if (count > 0) rows.set(regionId, { regionId, count, pending: true });
+      else rows.delete(regionId);
+    }
+    return [...rows.values()];
+  })();
+  const ops: MapOps | null = facilitiesOn
+    ? {
+        bubble:
+          stackSel && opOptions.length > 0
+            ? {
+                regionId: stackSel.regionId,
+                key: stackSel.key,
+                options: opOptions.map((option) => ({
+                  id: option.id,
+                  icon: option.icon,
+                  label: option.label,
+                  active: opMode === option.id,
+                  badge: option.kind === "patrol" ? String(pendingPatrols[stackSel.regionId] ?? option.current ?? 0) : undefined,
+                })),
+                escorts: factoryOption ? { value: Math.min(escorts, factoryOption.maxEscorts ?? 0), max: factoryOption.maxEscorts ?? 0, set: setEscorts } : undefined,
+              }
+            : null,
+        markers: stackSel
+          ? [
+              ...(opMode === "raid" && raidOption?.targets ? raidOption.targets.map((id) => ({ id: "raid", regionId: id, icon: "raid" as const, label: `Raid ${regionLabel(id)}` })) : []),
+              ...opOptions.filter((option) => option.kind === "bomb").map((option) => ({ id: option.id, regionId: stackSel.regionId, icon: option.icon, label: option.label })),
+            ]
+          : [],
+        patrols: patrolRows,
+        onOption: pickOption,
+        onMarker: pickMarker,
+      }
+    : null;
+
   const showBriefing = () => {
     if (approachRef.current?.stage !== "darken") return;
     const next = { ...approachRef.current, stage: "briefing" as const };
@@ -1211,6 +1377,7 @@ export function App() {
             const held = state.regions[region] ?? Object.values(state.regions).find((item) => item.name === region);
             return `${label} \u00b7 Victory City \u00b7 Controlled by ${factionName(held?.owner_faction_id)}`;
           }}
+          ops={ops}
           tintOverride={!editing && (phase === "combat_move" || phase === "combat") && highlight.kind === "move"}
           regionTip={(regionId) => {
             const region = state.regions[regionId];
@@ -1329,6 +1496,11 @@ export function App() {
                 commandsEnabled={isMyTurn}
                 onFight={approachBattle}
                 onStrandedCargo={focusStrandedTransport}
+                endPayload={
+                  phase === "noncombat_move" && facilitiesOn && Object.keys(pendingPatrols).length > 0
+                    ? { patrols: Object.entries(pendingPatrols).map(([region_id, count]) => ({ region_id, count })) }
+                    : undefined
+                }
               />
               <div className="hud-log">
                 <EventLog log={game.log} />
@@ -1479,6 +1651,7 @@ export function App() {
         onBegin={beginBattle}
       />
     )}
+    {cinema && <OpsCinematic report={cinema} onContinue={() => setCinema(null)} />}
     <Soundboard />
     {uiLabOpen && <UiLab />}
     {spriteEditor && <UnitBakeReviewPanel />}

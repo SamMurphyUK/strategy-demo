@@ -416,7 +416,8 @@ export type HighlightMode =
       from: string;
       legal: string[];
       hover: string;
-      tone?: "attack" | "move";
+      /** `patrol` is an air patrol's reaction zone, washed green. */
+      tone?: "attack" | "move" | "patrol";
       /** Sea zones in `legal` that hold an enemy ship. Absent keeps the tone for every legal sea. */
       hostile?: readonly string[];
     }

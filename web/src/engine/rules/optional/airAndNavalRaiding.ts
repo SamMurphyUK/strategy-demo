@@ -266,6 +266,54 @@ export function patrolZones(state: GameState, factionId: string): PatrolZone[] {
   return zones;
 }
 
+/**
+ * Whether fighters at `station` could be set on patrol now, and the most that can fly: the same checks togglePatrol makes before it
+ * writes. Null when they cannot (the rule is off, it is not the faction's non-combat move, the patrols are locked, the station is no
+ * operational airbase or carrier, or no fighter is there). A client asks this to offer the option; togglePatrol still decides.
+ */
+export function patrolEligible(state: GameState, factionId: string, station: string): { max: number; current: number } | null {
+  if (!facilitiesActive(state) || state.current_phase !== "noncombat_move" || state.current_faction_id !== factionId) {
+    return null;
+  }
+  if (state.patrolLock[factionId] === true || !stationReady(state, factionId, station)) {
+    return null;
+  }
+  const fighters = fighterCount(state, factionId, station);
+  if (fighters <= 0) {
+    return null;
+  }
+  return { max: Math.min(3, fighters), current: Math.max(0, Math.trunc(state.patrolCounts[keyOf(factionId, station)] ?? 0)) };
+}
+
+/** The patrols a faction has up: each station and how many fighters are on it, counting only fighters that are still there. */
+export function activePatrols(state: GameState, factionId: string): { station: string; count: number }[] {
+  if (!facilitiesActive(state)) {
+    return [];
+  }
+  const rows: { station: string; count: number }[] = [];
+  for (const row of patrolEntries(state)) {
+    if (row.owner !== factionId) {
+      continue;
+    }
+    const count = Math.min(row.count, fighterCount(state, row.owner, row.station));
+    if (count > 0) {
+      rows.push({ station: row.station, count });
+    }
+  }
+  return rows;
+}
+
+/** Every zone one station's patrol reacts to: its own tile and each adjacent sea zone (the same zones patrolZones lists). */
+export function patrolReach(state: GameState, station: string): string[] {
+  const zones = [station];
+  for (const neighbor of state.getAdjacentRegions(station)) {
+    if (state.regions[neighbor]?.isSeaRegion() && !zones.includes(neighbor)) {
+      zones.push(neighbor);
+    }
+  }
+  return zones;
+}
+
 function landingSea(state: GameState, battleRegion: string, station: string): boolean {
   for (const landing of state.amphibious_landings) {
     if (landing.region_id !== battleRegion) {

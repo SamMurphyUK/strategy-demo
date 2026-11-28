@@ -38,8 +38,13 @@ const REACHABLE: [number, number, number] = [242, 38, 31];
 /** Noncombat destinations. Combat move keeps the red wash. */
 const MOVE_BLUE: [number, number, number] = [36, 112, 210];
 const SEA_TARGET: [number, number, number] = [60, 110, 140];
+/** The zones an air patrol reacts to: a clean tactical green (#2E8B57). */
+const PATROL_GREEN: [number, number, number] = [46, 139, 87];
 
 function moveWash(mode: HighlightMode): [number, number, number] {
+  if (mode.kind === "move" && mode.tone === "patrol") {
+    return PATROL_GREEN;
+  }
   return mode.kind === "move" && mode.tone === "move" ? MOVE_BLUE : REACHABLE;
 }
 

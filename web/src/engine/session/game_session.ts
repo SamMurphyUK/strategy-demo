@@ -1072,6 +1072,41 @@ export class GameSession {
     return null;
   }
 
+  /**
+   * What the faction's bombers standing in `regionId` can strike now, by the engine's own checks (validateFacilityRaid): the
+   * industrial raid on a major factory (heavy bombers, with up to `maxEscorts` fighters to escort), and an interdiction of an airbase,
+   * a harbor or a depot (tactical bombers). Empty outside the combat phase or without Facilities and patrols.
+   */
+  getBombOptions(playerId: string, regionId: string): { facility: "factory" | "airbase" | "harbor" | "depot"; maxEscorts: number }[] {
+    if (!this.state.rulesetConfig.facilitiesAndPatrols || this.state.current_phase !== "combat" || playerId !== this.state.current_faction_id) {
+      return [];
+    }
+    const options: { facility: "factory" | "airbase" | "harbor" | "depot"; maxEscorts: number }[] = [];
+    for (const facility of ["factory", "airbase", "harbor", "depot"] as const) {
+      const cmd = Command.fromDict({
+        command_id: "probe",
+        player_id: playerId,
+        type: CommandType.STRATEGIC_BOMB,
+        payload: facility === "factory" ? { region_id: regionId } : { region_id: regionId, facility },
+      });
+      if (this.validateFacilityRaid(cmd, regionId) === null) {
+        options.push({ facility, maxEscorts: facility === "factory" ? this.fighterEscorts(regionId, playerId) : 0 });
+      }
+    }
+    return options;
+  }
+
+  private fighterEscorts(regionId: string, factionId: string): number {
+    let total = 0;
+    for (const entry of this.state.region_units[regionId] ?? []) {
+      if (String(entry.faction_id ?? "") !== factionId || entry.instance_id || classifyUnit(String(entry.unit_type_id ?? "")) !== "FIGHTER") {
+        continue;
+      }
+      total += Math.max(0, Math.trunc(Number(entry.count ?? 0)));
+    }
+    return total;
+  }
+
   private validateFacilityRaid(cmd: Command, regionId: string): CommandOutcome | null {
     const region = this.state.regions[regionId];
     const owner = region?.owner_faction_id ?? "";
@@ -1151,7 +1186,16 @@ export class GameSession {
       return [
         GameEvent.create(
           GameEventType.INCOME_COLLECTED,
-          { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "tactical_interdiction", region_id: regionId },
+          {
+            faction_id: this.state.getRegionOwner(regionId),
+            amount: 0,
+            reason: "tactical_interdiction",
+            region_id: regionId,
+            facility,
+            // The raid's own figures, for a client to show: hits landed and the round the facility is closed through.
+            hits: raid.hits,
+            disabled_until: raid.disabledUntil,
+          },
           this._seq,
         ),
       ];
@@ -1164,7 +1208,19 @@ export class GameSession {
     return [
       GameEvent.create(
         GameEventType.INCOME_COLLECTED,
-        { faction_id: this.state.getRegionOwner(regionId), amount: 0, reason: "strategic_bomb", region_id: regionId },
+        {
+          faction_id: this.state.getRegionOwner(regionId),
+          amount: 0,
+          reason: "strategic_bomb",
+          region_id: regionId,
+          facility: "factory",
+          // The raid's own figures, in the order it resolves them: the facility's AA, the escort round, then the damage.
+          bomber_losses: raid.bomberLosses,
+          escort_losses: raid.escortLosses,
+          interceptor_losses: raid.interceptorLosses,
+          damage: raid.damage,
+          tokens: raid.tokens,
+        },
         this._seq,
       ),
     ];

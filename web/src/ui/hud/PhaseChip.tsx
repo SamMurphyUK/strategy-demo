@@ -9,11 +9,14 @@ export function PhaseChip({
   commandsEnabled,
   onFight,
   onStrandedCargo,
+  endPayload,
 }: {
   game: GameSessionHandle;
   commandsEnabled: boolean;
   onFight(regionId: string): void;
   onStrandedCargo?(seaZoneId: string): void;
+  /** Rides on end_phase: the air patrols set in non-combat move (see applyPatrolOrders). */
+  endPayload?: Record<string, unknown>;
 }) {
   const state = game.session.state;
   const faction = state.current_faction_id;
@@ -50,7 +53,7 @@ export function PhaseChip({
               onStrandedCargo?.(moveGate.regionId);
               return;
             }
-            game.send("end_phase");
+            game.send("end_phase", endPayload);
           }}
         >
           End phase

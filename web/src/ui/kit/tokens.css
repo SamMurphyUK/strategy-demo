@@ -760,3 +760,213 @@
   transform: translate(-50%, calc(-100% - 8px));
   pointer-events: none;
 }
+
+/* ---------- special operations: the action bubble, target icons, patrol marks and the result window ---------- */
+
+.campaign .ops-bubble {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  transform: translate(-50%, -100%);
+  background: color-mix(in srgb, var(--frame) 94%, transparent);
+  border: 1px solid var(--brass);
+}
+
+.campaign .ops-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 9px;
+  height: 9px;
+  background: color-mix(in srgb, var(--frame) 94%, transparent);
+  border-right: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.campaign .ops-chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--gold-text);
+  background: var(--button);
+  border: 1px solid var(--button-edge);
+  border-radius: 0;
+}
+
+.campaign .ops-chip.is-active {
+  color: var(--frame);
+  background: var(--gold);
+}
+
+.campaign .ops-badge {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 14px;
+  padding: 0 3px;
+  color: #f3ecdf;
+  background: #2a2023;
+  border: 1px solid #a88a5e;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.campaign .ops-escorts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  color: var(--gold-text);
+}
+
+.campaign .ops-escorts button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
+
+.campaign .ops-marker {
+  position: absolute;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #f3ecdf;
+  background: #a8243a;
+  border: 2px solid #f3ecdf;
+  border-radius: 50%;
+  transform: translate(-50%, -100%);
+  animation: ops-pulse 1.3s ease-in-out infinite;
+}
+
+.campaign .ops-patrol {
+  position: absolute;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  color: #2e8b57;
+  background: #13221a;
+  border: 1px solid #2e8b57;
+  transform: translate(-50%, -100%);
+}
+
+.campaign .ops-patrol.is-pending {
+  border-style: dashed;
+}
+
+.campaign .ops-patrol .ops-badge {
+  position: static;
+  color: #cfe9d8;
+  background: transparent;
+  border: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+@keyframes ops-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(168, 36, 58, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(168, 36, 58, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .campaign .ops-marker {
+    animation: none;
+  }
+}
+
+.ops-cinema {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 6, 6, 0.64);
+  font-family: var(--ui-font-mix, sans-serif);
+  font-size: 16px;
+}
+
+.ops-cinema-frame {
+  width: min(760px, 92vw);
+  background: #0b0a0a;
+  border: 2px solid #a88a5e;
+  box-shadow: 0 0 0 4px #14110f;
+}
+
+.ops-cinema-title {
+  padding: 8px 12px;
+  color: #ddcf99;
+  border-bottom: 1px solid #a88a5e;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ops-cinema-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  aspect-ratio: 16 / 8;
+  padding: 16px;
+  color: #f3ecdf;
+  background: #000;
+  text-align: center;
+}
+
+.ops-cinema-headline {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.ops-cinema-headline.is-success {
+  color: #7fc97f;
+}
+
+.ops-cinema-headline.is-failure {
+  color: #d0675d;
+}
+
+.ops-cinema-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-cinema-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid #a88a5e;
+}
+
+.ops-cinema-foot button {
+  padding: 6px 18px;
+  color: #14110f;
+  font: inherit;
+  font-weight: 700;
+  background: #ddcf99;
+  border: 1px solid #a88a5e;
+  border-radius: 0;
+  cursor: pointer;
+}

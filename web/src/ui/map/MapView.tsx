@@ -49,6 +49,9 @@ import { createVehicleStage, type VehicleStage } from "../../art/fieldVehicleSta
 import { borderPasses, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
 import { badgeAt, getLandmarkHits, getRoundelHits, landmarkAt, roundelAt } from "./hoverTip";
 import { getSpriteBoxes, spriteAt } from "./spriteHits";
+import { ActionBubble, PatrolMark, TargetMarker, type BubbleOption } from "./ops/OpsOverlay";
+import type { OpIcon } from "./ops/specialOps";
+import { classifyUnit } from "../../engine/types/ruleset";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
 import { getVisualRev, mapVisuals, subscribeVisuals, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
@@ -112,6 +115,15 @@ export interface EditorBinding {
   onStroke(points: Vec2[], pxToWorld: number, done: boolean, straight?: boolean): void;
   /** Paint or erase one sample of a sea-lattice stroke. `done` commits the undo step. False when nothing can be painted, so the press can pan instead. */
   onLattice?(world: Vec2, mods: { erase: boolean; shift: boolean; done: boolean; underId?: string }): boolean;
+}
+
+/** What the map shows for special operations. The overlay only places and draws; the engine decided every option and target. */
+export interface MapOps {
+  bubble: { regionId: string; key: string; options: BubbleOption[]; escorts?: { value: number; max: number; set(n: number): void } } | null;
+  markers: { id: string; regionId: string; icon: OpIcon; label: string }[];
+  patrols: { regionId: string; count: number; pending?: boolean }[];
+  onOption(id: string): void;
+  onMarker(id: string, regionId: string): void;
 }
 
 export interface MapViewProps {
@@ -208,6 +220,8 @@ export interface MapViewProps {
   regionTip?(regionId: string): string;
   /** A unit is picked in a combat phase and the board dims: the 3D ground pushes every faction tint and border to full. */
   tintOverride?: boolean;
+  /** Special operations: the action bubble over the selected unit, the matching icons on valid targets, and the patrol icons over fighters. */
+  ops?: MapOps | null;
   /** What to say of a landmark under the pointer: its city, that it is a Victory City, and who holds it. */
   landmarkTip?(region: string, label: string): string;
   /** Movement-phase orders drawn as operational arrows. Null in the editor. */
@@ -2299,6 +2313,41 @@ export function MapView(props: MapViewProps) {
 
   const hoverChip = hoverTip;
 
+  // Special operations, placed from the layouts: the bubble above the selected unit, the target icons on their regions, the patrol marks.
+  const opsRise = Math.max(tokenPxNow * 0.9, uprightReach * 1.5) + 22;
+  const regionPoint = (regionId: string): Vec2 | null => {
+    const shape = props.geometry.regions.find((region) => region.id === regionId);
+    if (!shape) {
+      return null;
+    }
+    const flat = worldToScreen(view, shape.anchor);
+    return { x: flat.x, y: flat.y - (props.board?.terrainLift?.(shape.anchor) ?? 0) };
+  };
+  const fighterPoint = (regionId: string): Vec2 | null => {
+    for (const layout of layouts) {
+      if (layout.region.id !== regionId) {
+        continue;
+      }
+      const counter = layout.counters.find((item) => classifyUnit(item.slot.entry.unit_type_id) === "FIGHTER");
+      if (counter) {
+        return { x: counter.x, y: counter.y - opsRise * 0.55 };
+      }
+    }
+    const point = regionPoint(regionId);
+    return point ? { x: point.x, y: point.y - 18 } : null;
+  };
+  let bubbleAt: Vec2 | null = null;
+  if (props.ops?.bubble) {
+    const { regionId, key } = props.ops.bubble;
+    for (const layout of layouts) {
+      const counter = layout.region.id === regionId ? layout.counters.find((item) => item.slot.key === key) : undefined;
+      if (counter) {
+        bubbleAt = { x: counter.x, y: counter.y - opsRise };
+        break;
+      }
+    }
+  }
+
   return (
     <div className="map-wrap" ref={wrapRef}>
       <div
@@ -2335,6 +2384,42 @@ export function MapView(props: MapViewProps) {
       </div>
       {tuneOpen && <CoastTuner regions={geometry.regions} land={land} viewCenter={tunerCenter} />}
       {props.children}
+      {props.ops && !editor && (
+        <>
+          {props.ops.patrols.map((mark) => {
+            const at = fighterPoint(mark.regionId);
+            return at ? <PatrolMark key={`${mark.regionId}-${mark.pending ? "p" : "a"}`} x={at.x} y={at.y} count={mark.count} pending={mark.pending} /> : null;
+          })}
+          {props.ops.markers.map((marker, index, all) => {
+            const at = regionPoint(marker.regionId);
+            // Icons on one region stand side by side.
+            const here = all.filter((item) => item.regionId === marker.regionId);
+            const slot = here.indexOf(marker) - (here.length - 1) / 2;
+            return at ? <TargetMarker key={`${marker.id}-${index}`} x={at.x + slot * 30} y={at.y - 16} icon={marker.icon} label={marker.label} onPick={() => props.ops?.onMarker(marker.id, marker.regionId)} /> : null;
+          })}
+          {props.ops.bubble && bubbleAt ? (
+            <ActionBubble
+              x={bubbleAt.x}
+              y={bubbleAt.y}
+              options={props.ops.bubble.options}
+              onOption={props.ops.onOption}
+              escorts={
+                props.ops.bubble.escorts && props.ops.bubble.escorts.max > 0 ? (
+                  <span className="ops-escorts" title="Fighter escorts for the raid">
+                    <button type="button" aria-label="Fewer escorts" onClick={() => props.ops?.bubble?.escorts?.set(Math.max(0, props.ops.bubble.escorts.value - 1))}>
+                      -
+                    </button>
+                    <b className="mono">{props.ops.bubble.escorts.value}</b>
+                    <button type="button" aria-label="More escorts" onClick={() => props.ops?.bubble?.escorts?.set(Math.min(props.ops.bubble.escorts.max, props.ops.bubble.escorts.value + 1))}>
+                      +
+                    </button>
+                  </span>
+                ) : null
+              }
+            />
+          ) : null}
+        </>
+      )}
       {hoverChip && (
         <div className="unit-hover-label" style={{ left: hoverChip.x, top: hoverChip.y }}>
           {hoverChip.label}
