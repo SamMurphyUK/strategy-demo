@@ -38,24 +38,30 @@ describe("the faction tint across the zoom tiers", () => {
   });
 
   it("keeps borders whole past the tint's end, and fainter but never gone at the closest zoom", () => {
-    expect(DEFAULT_VISUALS.factionBorderFloor).toBe(0.5);
+    expect(DEFAULT_VISUALS.factionBorderFloor).toBe(0.75);
     // Whole at the mid zoom and where the diorama begins (the tint is gone by 0.42).
     expect(factionBorderShare(0, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
     expect(factionBorderShare(DEFAULT_VISUALS.factionTintFadeTo + 0.05, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
     // Easing to the floor deep in, and holding it.
-    expect(factionBorderShare(DEFAULT_VISUALS.factionBorderFadeTo, DEFAULT_VISUALS)).toBeCloseTo(0.5, 6);
-    expect(factionBorderShare(1, DEFAULT_VISUALS)).toBeCloseTo(0.5, 6);
+    expect(factionBorderShare(DEFAULT_VISUALS.factionBorderFadeTo, DEFAULT_VISUALS)).toBeCloseTo(0.75, 6);
+    expect(factionBorderShare(1, DEFAULT_VISUALS)).toBeCloseTo(0.75, 6);
     let last = Infinity;
     for (let c = 0; c <= 1.0001; c += 0.05) {
       const now = factionBorderShare(c, DEFAULT_VISUALS);
       expect(now).toBeLessThanOrEqual(last + 1e-9);
-      expect(now).toBeGreaterThan(0.45);
+      expect(now).toBeGreaterThan(0.7);
       last = now;
     }
   });
 
-  it("ships the border strengths: 35% inside one faction, 70% between two", () => {
-    expect(DEFAULT_VISUALS.factionBorderInner).toBe(0.35);
+  it("draws the border two px wide with a keyline, and shifts each territory's value a little", () => {
+    expect(DEFAULT_VISUALS.factionBorderWidth).toBe(2);
+    expect(DEFAULT_VISUALS.factionBorderKeyline).toBeGreaterThan(0);
+    expect(DEFAULT_VISUALS.factionRegionShift).toBeCloseTo(0.05, 6);
+  });
+
+  it("ships the border strengths: 55% inside one faction, 70% between two", () => {
+    expect(DEFAULT_VISUALS.factionBorderInner).toBe(0.55);
     expect(DEFAULT_VISUALS.factionBorderFrontier).toBe(0.7);
   });
 });

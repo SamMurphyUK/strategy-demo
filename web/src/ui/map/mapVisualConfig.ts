@@ -33,6 +33,12 @@ export interface MapVisualConfig {
   factionBorderOpacity: number;
   /** How much of its strength a border keeps at the closest zoom, where the tint has faded out: 0.5 is half. Borders never fade to nothing. */
   factionBorderFloor: number;
+  /** The border line's width on the screen, in px, at every zoom. */
+  factionBorderWidth: number;
+  /** The strength of the pale keyline either side of the border's dark core. 0 is none. */
+  factionBorderKeyline: number;
+  /** How much lighter or darker a territory sits than its neighbours: 0.05 is up to 5% either way. */
+  factionRegionShift: number;
   /** How close the zoom is (0 fitted board, 1 closest) where borders start to ease toward that floor, and where they reach it. */
   factionBorderFadeFrom: number;
   factionBorderFadeTo: number;
@@ -362,13 +368,16 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionTintFadeFrom: 0.2,
   factionTintFadeTo: 0.42,
   factionEdgeBoost: 0.6,
-  factionBorderInner: 0.35,
+  factionBorderInner: 0.55,
   factionBorderFrontier: 0.7,
   factionTintBrightness: 1,
   factionTintSaturation: 1,
   factionBorderBrightness: 0.5,
   factionBorderOpacity: 1,
-  factionBorderFloor: 0.5,
+  factionBorderFloor: 0.75,
+  factionBorderWidth: 2,
+  factionBorderKeyline: 0.5,
+  factionRegionShift: 0.05,
   factionBorderFadeFrom: 0.55,
   factionBorderFadeTo: 0.9,
   factionBoostUSSR: 1.05,
@@ -615,6 +624,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionBorderBrightness: [0, 2],
   factionBorderOpacity: [0, 2],
   factionBorderFloor: [0, 1],
+  factionBorderWidth: [0.5, 6],
+  factionBorderKeyline: [0, 1],
+  factionRegionShift: [0, 0.2],
   factionBorderFadeFrom: [0, 1],
   factionBorderFadeTo: [0, 1],
   factionBoostUSSR: [0.3, 3],
