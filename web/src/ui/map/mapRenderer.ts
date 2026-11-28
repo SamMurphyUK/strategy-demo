@@ -78,6 +78,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
+import { internalBorderPaths } from "./vectorBorders";
 import { facilitySplit, landColor, microSpriteLean, unitLean } from "./boardTune";
 import { emblemLayout, starPoints } from "./regionEmblem";
 import { roundelImage } from "./roundelImages";
@@ -166,7 +167,7 @@ export interface TerrainScene {
    * Draw every territory and sea zone's outline as a vector line, in screen pixels: a land border in a darker take of its owner's colour,
    * a sea seam in the water's ink. The pixel ground leaves its own border lines off while this is set.
    */
-  vectorBorders?: { width: number; seaWidth: number; brightness: number };
+  vectorBorders?: { width: number; brightness: number; alpha: number; shapes: Map<string, MultiPolygon>; seam: { left: number; right: number } };
 }
 
 export interface PlacedCounter {
@@ -902,24 +903,6 @@ function drawBattleScars(ctx: CanvasRenderingContext2D, scars: readonly ScarFram
   ctx.restore();
 }
 
-const seaOutlines = new WeakMap<Map<string, Path2D>, Path2D>();
-
-/** All the sea zones' outlines as one path, built once for a set of region paths. */
-function seaOutlineFor(paths: Map<string, Path2D>, ids: string[]): Path2D {
-  let all = seaOutlines.get(paths);
-  if (!all) {
-    all = new Path2D();
-    for (const id of ids) {
-      const path = paths.get(id);
-      if (path) {
-        all.addPath(path);
-      }
-    }
-    seaOutlines.set(paths, all);
-  }
-  return all;
-}
-
 /** A hex colour scaled toward black by `factor` (1 leaves it as it is). */
 function darkened(hex: string, factor: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -931,48 +914,63 @@ function darkened(hex: string, factor: number): string {
   return `rgb(${scale((n >> 16) & 255)}, ${scale((n >> 8) & 255)}, ${scale(n & 255)})`;
 }
 
+/** A hex colour lifted toward white by `amount`. */
+function lightened(hex: string, amount: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) {
+    return hex;
+  }
+  const n = parseInt(m[1], 16);
+  const lift = (v: number) => Math.max(0, Math.min(255, Math.round(v + (255 - v) * amount)));
+  return `rgb(${lift((n >> 16) & 255)}, ${lift((n >> 8) & 255)}, ${lift(n & 255)})`;
+}
+
 /**
- * Every border as a crisp vector line. A land territory is stroked inside its own outline (clipped to it, at double width), so two
- * neighbours each keep their half in their own darker colour, and its coast is stroked the same. A sea zone is stroked in the water's
- * ink at the water's level, and cut back where it runs behind the land (see strokeOutline).
+ * The internal borders of the land as crisp vector lines, embossed: each territory's stretches shared with a neighbour (never its
+ * coast) are stroked inside its own outline (clipped to it, at double width) in a darker take of its owner's colour, with a lit edge
+ * toward the light and a shaded edge away from it. Two neighbours each keep their half. The sea seams are the ground's own.
  */
 function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number): void {
   const vb = s.vectorBorders;
-  if (!vb) {
+  if (!vb || vb.alpha <= 0) {
     return;
   }
+  const borders = internalBorderPaths(vb.shapes, vb.seam);
   const tune = getBoardTune();
-  const sea = darkened(PIXIE_INK.seam, 0.55);
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  const seaIds: string[] = [];
+  ctx.globalAlpha *= vb.alpha;
+  const lit = vb.width * 0.35 * px;
   for (const region of s.regions) {
     const path = s.paths.get(region.id);
-    if (!path) {
-      continue;
-    }
-    if (region.type !== "land") {
-      seaIds.push(region.id);
+    const line = borders.get(region.id);
+    if (!path || !line || region.type !== "land") {
       continue;
     }
     withLandLift(ctx, s, region.id, () => {
+      const base = landColor(s.owners[region.id] ?? "", tune);
       ctx.save();
       ctx.clip(path, "evenodd");
-      ctx.strokeStyle = darkened(landColor(s.owners[region.id] ?? "", tune), vb.brightness);
+      ctx.strokeStyle = darkened(base, vb.brightness);
       ctx.lineWidth = vb.width * 2 * px;
-      ctx.stroke(path);
+      ctx.stroke(line);
+      // The lit edge, up and to the left of the line, and the shaded edge, down and to the right.
+      ctx.save();
+      ctx.translate(-lit, -lit);
+      ctx.strokeStyle = lightened(base, 0.55);
+      ctx.globalAlpha *= 0.6;
+      ctx.lineWidth = vb.width * 0.7 * px;
+      ctx.stroke(line);
       ctx.restore();
-    });
-  }
-  // The sea zones all lie at the one water level and take the one ink, so they are stroked as a single path: one pass, and one
-  // cut-back behind the land, not one of each per zone.
-  if (seaIds.length > 0) {
-    const all = seaOutlineFor(s.paths, seaIds);
-    withLandLift(ctx, s, seaIds[0], () => {
-      ctx.strokeStyle = sea;
-      ctx.lineWidth = vb.seaWidth * px;
-      strokeOutline(ctx, s, seaIds[0], all);
+      ctx.save();
+      ctx.translate(lit, lit);
+      ctx.strokeStyle = "#000";
+      ctx.globalAlpha *= 0.4;
+      ctx.lineWidth = vb.width * 0.7 * px;
+      ctx.stroke(line);
+      ctx.restore();
+      ctx.restore();
     });
   }
   ctx.restore();

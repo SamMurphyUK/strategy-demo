@@ -1482,7 +1482,7 @@ export function BoardScene(props: BoardSceneProps) {
         tintOverride.value = wantOverride;
       }
       chartNow.uPixTint.value.set(mapVisuals.factionEdgeBoost, mapVisuals.factionBorderInner, mapVisuals.factionBorderFrontier, tintOverride.value);
-      chartNow.uPixLine.value.set(mapVisuals.vectorBorders ? 0 : mapVisuals.factionBorderWidth, mapVisuals.factionBorderKeyline, mapVisuals.factionRegionShift, frame.view.k);
+      chartNow.uPixLine.value.set(mapVisuals.factionBorderWidth, mapVisuals.factionBorderKeyline, mapVisuals.factionRegionShift, frame.view.k);
       chartNow.uPixTone.value.set(mapVisuals.factionTintBrightness, mapVisuals.factionTintSaturation, mapVisuals.factionBorderBrightness, mapVisuals.factionBorderOpacity);
       // Each faction's land colour, to tell its ground in the shader, and how much stronger its tint is at this zoom.
       const boosts: Partial<Record<string, number>> = {

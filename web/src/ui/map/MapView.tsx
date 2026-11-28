@@ -38,7 +38,7 @@ import type { OperationalOrder } from "./operationalArrows";
 import { BAKE_PAINT, type Baked, TerrainBake } from "./mapBake";
 import { sharedEdges } from "./mapBakeMath";
 import type { BoardLayer } from "./boardLayer";
-import { clipperFor } from "./regionClip";
+import { clipperFor, type MultiPolygon } from "./regionClip";
 import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
@@ -53,7 +53,7 @@ import { ActionBubble, PatrolMark, TargetMarker, type BubbleOption } from "./ops
 import type { OpIcon } from "./ops/specialOps";
 import { classifyUnit } from "../../engine/types/ruleset";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
-import { getVisualRev, mapVisuals, subscribeVisuals, tokenBoostAt, wantsFigureCards } from "./mapVisualConfig";
+import { getVisualRev, mapVisuals, subscribeVisuals, tokenBoostAt, vectorBorderShare, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
 import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
 import { CoastTuner } from "./CoastTuner";
@@ -522,6 +522,19 @@ export function MapView(props: MapViewProps) {
   // vertex re-clips only the regions that share it. Without the land, the rough cutters stand in.
   const clipped = useMemo(() => (land ? clipperFor(land.polygons).clipAll(geometry.regions) : null), [land, geometry]);
   const paths = useMemo(() => buildRegionPaths(geometry.regions, clipped), [geometry, clipped]);
+  const landShapeMap = useMemo(() => {
+    if (!clipped) {
+      return null;
+    }
+    const land = new Map<string, MultiPolygon>();
+    for (const region of geometry.regions) {
+      const shape = region.type === "land" ? clipped.get(region.id) : undefined;
+      if (shape) {
+        land.set(region.id, shape);
+      }
+    }
+    return land;
+  }, [geometry, clipped]);
   const cutterPaths = useMemo(() => buildCutterPaths(geometry.regions), [geometry]);
   const exact = clipped !== null;
   /** In the editor only the chosen layer (land or sea) can be hovered or clicked, and the other is faded. */
@@ -1027,8 +1040,14 @@ export function MapView(props: MapViewProps) {
       backdrop: boardGround,
       cliffDrop: boardGround ? SEA_DROP * mapVisuals.terrainHeightScale : 0,
       terrainLift: board?.terrainLift,
-      vectorBorders: boardGround && mapVisuals.vectorBorders
-        ? { width: mapVisuals.vectorBorderWidth, seaWidth: mapVisuals.vectorSeaWidth, brightness: mapVisuals.factionBorderBrightness }
+      vectorBorders: boardGround && mapVisuals.vectorBorders && clipped
+        ? {
+            width: mapVisuals.vectorBorderWidth,
+            brightness: mapVisuals.factionBorderBrightness,
+            alpha: vectorBorderShare(paintView.k, mapVisuals),
+            shapes: landShapeMap!,
+            seam: { left: bounds.x, right: bounds.x + bounds.w },
+          }
         : undefined,
       scars: editor || boardGround
         ? []

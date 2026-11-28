@@ -45,7 +45,10 @@ export interface MapVisualConfig {
   vectorBorders: boolean;
   /** The vector land border's width and the sea seam's, in screen px. */
   vectorBorderWidth: number;
-  vectorSeaWidth: number;
+  /** The zoom where the vector borders start to fade, where they reach their floor, and the share they keep there. */
+  vectorFadeFrom: number;
+  vectorFadeTo: number;
+  vectorFloor: number;
   /** The zoom (view scale) where the token boost starts to ease away, and where it is gone and tokens are their base size again. */
   tokenBoostFadeFrom: number;
   tokenBoostFadeTo: number;
@@ -392,8 +395,10 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   factionRegionShift: 0.05,
   tokenSizeBoost: 1.5,
   vectorBorders: true,
-  vectorBorderWidth: 2,
-  vectorSeaWidth: 1.5,
+  vectorBorderWidth: 3.5,
+  vectorFadeFrom: 3,
+  vectorFadeTo: 4.5,
+  vectorFloor: 0.5,
   tokenBoostFadeFrom: 1.3,
   tokenBoostFadeTo: 2,
   showZoomReadout: true,
@@ -648,7 +653,9 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionRegionShift: [0, 0.2],
   tokenSizeBoost: [1, 3],
   vectorBorderWidth: [0.5, 6],
-  vectorSeaWidth: [0.5, 6],
+  vectorFadeFrom: [0.5, 10],
+  vectorFadeTo: [0.5, 10],
+  vectorFloor: [0, 1],
   tokenBoostFadeFrom: [0.2, 8],
   tokenBoostFadeTo: [0.2, 8],
   factionBorderFadeFrom: [0, 1],
@@ -897,6 +904,12 @@ export function factionBorderShare(closeness: number, config: Readonly<MapVisual
 export function tokenBoostAt(zoom: number, config: Readonly<MapVisualConfig>): number {
   const span = Math.max(1e-3, config.tokenBoostFadeTo - config.tokenBoostFadeFrom);
   return 1 + (config.tokenSizeBoost - 1) * (1 - smooth((zoom - config.tokenBoostFadeFrom) / span));
+}
+
+/** How much of their strength the vector borders keep at a zoom: all of it, easing to the floor through the diorama's start. */
+export function vectorBorderShare(zoom: number, config: Readonly<MapVisualConfig>): number {
+  const span = Math.max(1e-3, config.vectorFadeTo - config.vectorFadeFrom);
+  return config.vectorFloor + (1 - config.vectorFloor) * (1 - smooth((zoom - config.vectorFadeFrom) / span));
 }
 
 /** Ink opacity of the dashed and the solid friendly line for a style. */
