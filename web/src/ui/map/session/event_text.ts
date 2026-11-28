@@ -175,6 +175,13 @@ export function describeEvent(evt: Dict, unitTypes: Record<string, { name?: stri
       if (p.reason === "strategic_bomb") {
         return `${who} bombed the factory in ${p.region_id}`;
       }
+      if (p.reason === "naval_raid") {
+        if (p.pinned === true) {
+          return `${who}'s raiders were pinned at ${p.region_id}`;
+        }
+        const lost = `${Number(p.raider_losses ?? 0)} raider${Number(p.raider_losses ?? 0) === 1 ? "" : "s"} and ${Number(p.defender_losses ?? 0)} defender${Number(p.defender_losses ?? 0) === 1 ? "" : "s"} lost`;
+        return `${who} raided ${p.region_id}${p.harbor_disabled === true ? ", closing its harbor" : ""} (${lost})`;
+      }
       if (p.reason === "tactical_interdiction") {
         return `${who} bombarded the ${p.facility} in ${p.region_id}`;
       }

@@ -787,6 +787,26 @@ function raidTarget(state: GameState, factionId: string, regionId: string): bool
   return region.harbor || state.getAdjacentRegions(regionId).some((id) => state.regions[id]?.isSeaRegion() === true);
 }
 
+/**
+ * The zones a naval raid from `from` could strike now: the adjacent enemy sea zones and coastal ports. Empty unless Facilities and
+ * patrols is on, it is the faction's combat move, and a surface raider (carrier, cruiser or destroyer) stands in `from`. This is the
+ * same test resolveNavalRaid makes before it rolls, so a client can highlight targets without declaring a raid.
+ */
+export function navalRaidTargets(state: GameState, factionId: string, from: string): string[] {
+  if (!facilitiesActive(state) || state.current_phase !== "combat_move" || state.current_faction_id !== factionId) {
+    return [];
+  }
+  const origin = state.regions[from];
+  if (origin == null || !origin.isSeaRegion()) {
+    return [];
+  }
+  const raiders = collectPieces(state, from, factionId, (id) => RAIDER.has(classOf(id) ?? ("" as RulesetUnitType)), false);
+  if (raiders.reduce((sum, line) => sum + line.count, 0) <= 0) {
+    return [];
+  }
+  return state.getAdjacentRegions(from).filter((to) => state.isAdjacent(from, to) && raidTarget(state, factionId, to));
+}
+
 function defendingSea(state: GameState, from: string, to: string): string {
   if (state.regions[to]?.isSeaRegion()) {
     return to;

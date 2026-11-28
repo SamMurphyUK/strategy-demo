@@ -8,6 +8,7 @@ export const PHASE_COMMANDS: Record<string, readonly CommandTypeValue[]> = {
     CommandType.LOAD_TRANSPORT,
     CommandType.UNLOAD_TRANSPORT,
     CommandType.DESIGNATE_AMPHIBIOUS,
+    CommandType.NAVAL_RAID,
     CommandType.CANCEL_PHASE_ORDER,
     CommandType.END_PHASE,
   ],

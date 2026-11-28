@@ -8,6 +8,7 @@ import type { GameState } from "../model/game_state";
 import { Region } from "../model/region";
 import type { Dict } from "../model/types";
 import { Unit } from "../model/unit";
+import { noteOffensive } from "../rules/optional/global1940Evaluator";
 import { Ruleset } from "../rules/ruleset";
 import { AmphibiousEngine, deployPendingAssaults } from "../amphibious/amphibious";
 import { MovementEngine } from "./movement";

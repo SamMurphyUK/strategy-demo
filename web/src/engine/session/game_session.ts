@@ -17,7 +17,7 @@ import { type Dict, deepCopy, isDict, type PurchaseLine } from "../model/types";
 import { MovementEngine } from "../movement/movement";
 import { applyCargoCommand, applyRecordedMove, cancel_phase_order, findPhaseOrder } from "../movement/phase_orders";
 import { endCombatMoveGate, retractUnlandableFlights } from "../movement/combat_move_gate";
-import { applyPatrolOrders } from "../rules/optional/airAndNavalRaiding";
+import { applyPatrolOrders, resolveNavalRaid } from "../rules/optional/airAndNavalRaiding";
 import { assaultError, unloadError } from "../transport/cargo_rules";
 import { MovementValidator } from "../movement/movement_validator";
 import { PlacementEngine } from "../placement/placement";
@@ -414,6 +414,35 @@ export class GameSession {
           return this.loadError(assault, "AMPHIBIOUS_INVALID");
         }
         events = this.syncSeq(applyCargoCommand(this.state, cmd, this.movement, this.amphibious));
+        break;
+      }
+
+      case CommandType.NAVAL_RAID: {
+        // A thin wrapper: every check and every roll is resolveNavalRaid's. The report rides on the event for a client to present.
+        const from = String(cmd.payload.from_region_id ?? "");
+        const to = String(cmd.payload.to_region_id ?? "");
+        const raid = resolveNavalRaid(this.state, cmd.player_id, from, to, () => this.d6());
+        if (!raid.ok) {
+          return { result_type: "error", error: { code: "RAID_INVALID", message: raid.error }, events: [] };
+        }
+        this._seq += 1;
+        events = this.syncSeq([
+          GameEvent.create(
+            GameEventType.INCOME_COLLECTED,
+            {
+              faction_id: cmd.player_id,
+              amount: 0,
+              reason: "naval_raid",
+              from_region_id: from,
+              region_id: to,
+              pinned: raid.pinned,
+              harbor_disabled: raid.harborDisabled,
+              raider_losses: raid.raiderLosses,
+              defender_losses: raid.defenderLosses,
+            },
+            this._seq,
+          ),
+        ]);
         break;
       }
 

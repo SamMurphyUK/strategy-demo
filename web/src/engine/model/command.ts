@@ -10,6 +10,8 @@ export const CommandType = {
   END_PHASE: "end_phase",
   END_TURN: "end_turn",
   STRATEGIC_BOMB: "strategic_bomb",
+  /** A surface raid from a sea zone into an adjacent enemy sea zone or coastal port. A thin wrapper on resolveNavalRaid. */
+  NAVAL_RAID: "naval_raid",
   START_BATTLE: "start_battle",
   BATTLE_ROLL: "battle_roll",
   BATTLE_CASUALTIES: "battle_casualties",
