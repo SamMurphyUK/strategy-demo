@@ -902,6 +902,24 @@ function drawBattleScars(ctx: CanvasRenderingContext2D, scars: readonly ScarFram
   ctx.restore();
 }
 
+const seaOutlines = new WeakMap<Map<string, Path2D>, Path2D>();
+
+/** All the sea zones' outlines as one path, built once for a set of region paths. */
+function seaOutlineFor(paths: Map<string, Path2D>, ids: string[]): Path2D {
+  let all = seaOutlines.get(paths);
+  if (!all) {
+    all = new Path2D();
+    for (const id of ids) {
+      const path = paths.get(id);
+      if (path) {
+        all.addPath(path);
+      }
+    }
+    seaOutlines.set(paths, all);
+  }
+  return all;
+}
+
 /** A hex colour scaled toward black by `factor` (1 leaves it as it is). */
 function darkened(hex: string, factor: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -928,24 +946,33 @@ function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: n
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  const seaIds: string[] = [];
   for (const region of s.regions) {
     const path = s.paths.get(region.id);
     if (!path) {
       continue;
     }
+    if (region.type !== "land") {
+      seaIds.push(region.id);
+      continue;
+    }
     withLandLift(ctx, s, region.id, () => {
-      if (region.type === "land") {
-        ctx.save();
-        ctx.clip(path, "evenodd");
-        ctx.strokeStyle = darkened(landColor(s.owners[region.id] ?? "", tune), vb.brightness);
-        ctx.lineWidth = vb.width * 2 * px;
-        ctx.stroke(path);
-        ctx.restore();
-      } else {
-        ctx.strokeStyle = sea;
-        ctx.lineWidth = vb.seaWidth * px;
-        strokeOutline(ctx, s, region.id, path);
-      }
+      ctx.save();
+      ctx.clip(path, "evenodd");
+      ctx.strokeStyle = darkened(landColor(s.owners[region.id] ?? "", tune), vb.brightness);
+      ctx.lineWidth = vb.width * 2 * px;
+      ctx.stroke(path);
+      ctx.restore();
+    });
+  }
+  // The sea zones all lie at the one water level and take the one ink, so they are stroked as a single path: one pass, and one
+  // cut-back behind the land, not one of each per zone.
+  if (seaIds.length > 0) {
+    const all = seaOutlineFor(s.paths, seaIds);
+    withLandLift(ctx, s, seaIds[0], () => {
+      ctx.strokeStyle = sea;
+      ctx.lineWidth = vb.seaWidth * px;
+      strokeOutline(ctx, s, seaIds[0], all);
     });
   }
   ctx.restore();
