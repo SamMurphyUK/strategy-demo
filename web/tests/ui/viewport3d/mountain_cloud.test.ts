@@ -39,12 +39,12 @@ describe("place captions", () => {
 describe("facility badges", () => {
   it("fade slowly to nothing as the camera comes in, whole until the sprites arrive", () => {
     expect(facilityBadgeAlpha(2)).toBe(1);
-    expect(facilityBadgeAlpha(5.216)).toBe(1);
-    const mid = facilityBadgeAlpha(7.4);
+    expect(facilityBadgeAlpha(6.245)).toBe(1);
+    const mid = facilityBadgeAlpha(8.87);
     expect(mid).toBeGreaterThan(0.3);
     expect(mid).toBeLessThan(0.7);
-    expect(facilityBadgeAlpha(6)).toBeGreaterThan(facilityBadgeAlpha(8));
-    expect(facilityBadgeAlpha(9.6)).toBe(0);
-    expect(facilityBadgeAlpha(11)).toBe(0);
+    expect(facilityBadgeAlpha(7)).toBeGreaterThan(facilityBadgeAlpha(10));
+    expect(facilityBadgeAlpha(11.49)).toBe(0);
+    expect(facilityBadgeAlpha(13)).toBe(0);
   });
 });

@@ -38,7 +38,11 @@ import type { OperationalOrder } from "./operationalArrows";
 import { BAKE_PAINT, type Baked, TerrainBake } from "./mapBake";
 import { sharedEdges } from "./mapBakeMath";
 import type { BoardLayer } from "./boardLayer";
-import { clipperFor, type MultiPolygon } from "./regionClip";
+import { clipperFor, type MultiPolygon, multiPolygonArea, uncoveredLand } from "./regionClip";
+import { OPEN_LAND_ID } from "./vectorBorders";
+
+/** The least area, in world units squared, an uncovered piece of land must have to be bordered. Slivers beside a coast are not. */
+const OPEN_LAND_MIN_AREA = 40;
 import type { MasterLand } from "./svgLandLoader";
 import { clampMoveCount, finishUnitDrag, guideOriginScreen } from "./moveDrag";
 import { SplitStackPopover } from "./splitPopover";
@@ -526,15 +530,22 @@ export function MapView(props: MapViewProps) {
     if (!clipped) {
       return null;
     }
-    const land = new Map<string, MultiPolygon>();
+    const shapes = new Map<string, MultiPolygon>();
     for (const region of geometry.regions) {
       const shape = region.type === "land" ? clipped.get(region.id) : undefined;
       if (shape) {
-        land.set(region.id, shape);
+        shapes.set(region.id, shape);
       }
     }
-    return land;
-  }, [geometry, clipped]);
+    // The land no territory covers goes in as its own piece, bordered and greyed like a territory nobody can play.
+    if (land) {
+      const open = uncoveredLand(land.polygons, [...shapes.values()]).filter((polygon) => multiPolygonArea([polygon]) >= OPEN_LAND_MIN_AREA);
+      if (open.length > 0) {
+        shapes.set(OPEN_LAND_ID, open);
+      }
+    }
+    return shapes;
+  }, [geometry, clipped, land]);
   const cutterPaths = useMemo(() => buildCutterPaths(geometry.regions), [geometry]);
   const exact = clipped !== null;
   /** In the editor only the chosen layer (land or sea) can be hovered or clicked, and the other is faded. */

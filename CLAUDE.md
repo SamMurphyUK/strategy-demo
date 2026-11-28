@@ -11,8 +11,8 @@
 - **Selective HDR Bloom:** Only snow highlights, specular water glints, and explicit glow effects may push RGB values above `1.0` into `PostStack`'s float render targets. Keep landmark reveal rims and plinth highlights clamped `<= 0.95`.
 
 ## 3. Zoom Tiers & BoardSkin Architecture (`skins/boardSkin.ts`)
-- **`zoom < 5.216` (Strategic & Icon Tier):** Lock `softLand = 0.0` (strict world-space texel-center sampling and crisp bathymetric sea steps). Round counter tokens (`4–32px`) already ensure legibility here.
-- **`zoom >= 5.216` (Diorama & Micro Tier):** Cross-fade into detailed unit standees on 3D beveled plinths (`groundLift` terrain-aligned), bottom-up landmark reveals (`3.4 -> 4.3`, locked to `1.0×` world scale), and smooth soft-land easing.
+- **`zoom < 6.245` (Strategic & Icon Tier):** Lock `softLand = 0.0` (strict world-space texel-center sampling and crisp bathymetric sea steps). Round counter tokens (`4–32px`) already ensure legibility here.
+- **`zoom >= 6.245` (Diorama & Micro Tier):** Cross-fade into detailed unit standees on 3D beveled plinths (`groundLift` terrain-aligned), bottom-up landmark reveals (`3.4 -> 4.3`, locked to `1.0×` world scale), and smooth soft-land easing.
 - Register all new skin-specific tuning parameters in `mapVisualConfig.ts` and `skins/boardSkin.ts` (`ownedSettings`) so the Board Look panel dims inactive sliders.
 
 ## 4. Performance & Three.js r187 Hygiene

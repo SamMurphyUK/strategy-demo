@@ -60,8 +60,8 @@ describe("board camera", () => {
     expect(pitchFor(4)).toBeGreaterThan(pitchFor(1.6));
     // Held through the diorama, then it dives toward the low micro angle (38 degrees above the horizon, so 52 from overhead).
     expect(pitchFor(4)).toBeCloseTo(pitchFor(3.2), 12);
-    expect(pitchFor(11)).toBeGreaterThan(pitchFor(4));
-    expect((pitchFor(11) * 180) / Math.PI).toBeCloseTo(52, 0);
+    expect(pitchFor(14)).toBeGreaterThan(pitchFor(4));
+    expect((pitchFor(14) * 180) / Math.PI).toBeCloseTo(52, 0);
   });
 
   it("lands every land-plane point on the pixel the 2D view gives it", () => {

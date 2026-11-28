@@ -2,6 +2,10 @@
 // coast. Built once for a set of shapes and kept.
 import { ringsOf, sharedEdges, type Seam } from "./mapBakeMath";
 import type { MultiPolygon } from "./regionClip";
+import { multiPolygonPath2D } from "./hitTest";
+
+/** The id the land no territory covers (desert, steppe) goes by among the land shapes. */
+export const OPEN_LAND_ID = "__open";
 
 interface Box {
   x0: number;
@@ -79,4 +83,27 @@ export function internalBorderPaths(shapes: Map<string, MultiPolygon>, seam: Sea
   }
   cache.set(shapes, paths);
   return paths;
+}
+
+const openPaths = new WeakMap<Map<string, MultiPolygon>, Path2D | null>();
+
+/** The outline of the open land (no territory's), or null where there is none. */
+export function openLandPath(shapes: Map<string, MultiPolygon>): Path2D | null {
+  if (openPaths.has(shapes)) {
+    return openPaths.get(shapes) ?? null;
+  }
+  const shape = shapes.get(OPEN_LAND_ID);
+  const path = shape && shape.length > 0 ? multiPolygonPath2D(shape) : null;
+  openPaths.set(shapes, path);
+  return path;
+}
+
+/** Where the open land's lift is read: the middle of its widest piece. */
+export function openLandAnchor(shapes: Map<string, MultiPolygon>): { x: number; y: number } | null {
+  const shape = shapes.get(OPEN_LAND_ID);
+  if (!shape || shape.length === 0) {
+    return null;
+  }
+  const box = boxOf(shape);
+  return { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
 }

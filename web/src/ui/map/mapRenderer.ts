@@ -78,7 +78,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { internalBorderPaths } from "./vectorBorders";
+import { internalBorderPaths, OPEN_LAND_ID, openLandAnchor, openLandPath } from "./vectorBorders";
 import { facilitySplit, landColor, microSpriteLean, unitLean } from "./boardTune";
 import { emblemLayout, starPoints } from "./regionEmblem";
 import { roundelImage } from "./roundelImages";
@@ -914,19 +914,18 @@ function darkened(hex: string, factor: number): string {
   return `rgb(${scale((n >> 16) & 255)}, ${scale((n >> 8) & 255)}, ${scale(n & 255)})`;
 }
 
-/** What a territory with no one to play it (no value, no owner) is washed with, and the colour its border is taken from. */
+/** What land no territory covers (a desert, a steppe: nobody can play it) is washed with, and the colour its border is taken from. */
 const UNPLAYABLE_WASH = "rgba(128, 128, 124, 0.2)";
 const UNPLAYABLE_BASE = "#9A9A94";
 
 /**
  * The internal borders of the land as crisp vector lines: each territory's stretches shared with a neighbour (never its coast) are
  * stroked inside its own outline (clipped to it, at double width) in a darker take of its owner's colour, so two neighbours each keep
- * their half. A territory nobody can play (no value, no owner: a desert, a steppe) is washed a little grey and bordered in grey.
- * The sea seams are the ground's own.
+ * their half. The land no territory covers is washed a little grey and bordered in grey the same way. The sea seams are the ground's own.
  */
 function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number): void {
   const vb = s.vectorBorders;
-  if (!vb) {
+  if (!vb || !vb.shapes) {
     return;
   }
   const borders = internalBorderPaths(vb.shapes, vb.seam);
@@ -934,18 +933,27 @@ function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: n
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  const unplayable = (region: RegionShape) => region.type === "land" && (region.ipc <= 0 || !(s.owners[region.id] ?? ""));
-  for (const region of s.regions) {
-    const path = s.paths.get(region.id);
-    if (path && unplayable(region)) {
-      withLandLift(ctx, s, region.id, () => {
-        ctx.fillStyle = UNPLAYABLE_WASH;
-        ctx.fill(path, "evenodd");
-      });
-    }
+  const open = openLandPath(vb.shapes);
+  const openAnchor = openLandAnchor(vb.shapes) ?? undefined;
+  if (open) {
+    withLandLift(ctx, s, OPEN_LAND_ID, () => {
+      ctx.fillStyle = UNPLAYABLE_WASH;
+      ctx.fill(open, "evenodd");
+    }, openAnchor);
   }
   if (vb.alpha > 0) {
     ctx.globalAlpha *= vb.alpha;
+    const openLine = borders.get(OPEN_LAND_ID);
+    if (open && openLine) {
+      withLandLift(ctx, s, OPEN_LAND_ID, () => {
+        ctx.save();
+        ctx.clip(open, "evenodd");
+        ctx.strokeStyle = darkened(UNPLAYABLE_BASE, vb.brightness);
+        ctx.lineWidth = vb.width * 2 * px;
+        ctx.stroke(openLine);
+        ctx.restore();
+      }, openAnchor);
+    }
     for (const region of s.regions) {
       const path = s.paths.get(region.id);
       const line = borders.get(region.id);
@@ -953,10 +961,9 @@ function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: n
         continue;
       }
       withLandLift(ctx, s, region.id, () => {
-        const base = unplayable(region) ? UNPLAYABLE_BASE : landColor(s.owners[region.id] ?? "", tune);
         ctx.save();
         ctx.clip(path, "evenodd");
-        ctx.strokeStyle = darkened(base, vb.brightness);
+        ctx.strokeStyle = darkened(landColor(s.owners[region.id] ?? "", tune), vb.brightness);
         ctx.lineWidth = vb.width * 2 * px;
         ctx.stroke(line);
         ctx.restore();
@@ -1029,8 +1036,21 @@ function drawDynamicTerrain(ctx: CanvasRenderingContext2D, s: TerrainScene, px: 
  * screen by the height the board gives it. A sea zone is moved down by the cliff's height, onto the water: the whole of it, at the
  * foot of the cliff along the coast and in open water between sea zones alike.
  */
-function withLandLift(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string, draw: () => void): void {
+function withLandLift(ctx: CanvasRenderingContext2D, s: TerrainScene, regionId: string, draw: () => void, anchor?: Vec2): void {
   const lift = s.terrainLift;
+  if (anchor && lift) {
+    const { sy: openSy } = projectionScales(s.view.k);
+    const up = openSy > 0 ? lift(anchor) / openSy : 0;
+    if (up !== 0) {
+      ctx.save();
+      ctx.translate(0, -up);
+      draw();
+      ctx.restore();
+      return;
+    }
+    draw();
+    return;
+  }
   const region = s.regions.find((item) => item.id === regionId);
   if (region?.type === "sea") {
     // A sea zone lies on the water, which is a cliff's height below the land: its outline and its wash drop by that much, the

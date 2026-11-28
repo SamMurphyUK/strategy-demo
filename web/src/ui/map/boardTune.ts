@@ -204,8 +204,8 @@ function smooth(from: number, to: number, value: number): number {
 //   diorama     3.8 to 7.5    the diorama surface comes in over 4.3 to 3.8
 //   micro       1.35 to 3.8   uMicroAlpha runs 0 to 1 over 3.6 to 2.4; the camera never goes nearer than 1.35
 
-/** 5.216 times 4.3: the diorama starts at zoom 5.216, and its cross-fade runs over distance 4.3 to 3.8, so over zoom 5.216 to 5.9. */
-export const DISTANCE_K = 5.216 * 4.3;
+/** 6.245 times 4.3: the diorama starts at zoom 6.245, and its cross-fade runs over distance 4.3 to 3.8, so over zoom 6.245 to 7.07. */
+export const DISTANCE_K = 6.245 * 4.3;
 /** Distance of the camera for a zoom. */
 export function cameraDistance(k: number): number {
   return DISTANCE_K / Math.max(k, 1e-6);
@@ -239,8 +239,8 @@ function nearShare(distance: number, from: number, to: number): number {
 }
 
 /** The cliffs' own shade is off at the chart's zoom, and comes in slowly over this stretch of the close zoom. */
-export const CLIFF_SHADE_FROM = 4.667;
-export const CLIFF_SHADE_TO = 10.98;
+export const CLIFF_SHADE_FROM = 5.587;
+export const CLIFF_SHADE_TO = 13.14;
 
 export function cliffShadeFade(k: number): number {
   const t = clamp01((k - CLIFF_SHADE_FROM) / (CLIFF_SHADE_TO - CLIFF_SHADE_FROM));
@@ -248,8 +248,8 @@ export function cliffShadeFade(k: number): number {
 }
 
 /** The zoom the facility badges begin to fade at (the sprites' arrival), and where they are gone. */
-export const FACILITY_FADE_FROM = 5.216;
-export const FACILITY_FADE_TO = 9.6;
+export const FACILITY_FADE_FROM = 6.245;
+export const FACILITY_FADE_TO = 11.49;
 
 /** How much of the factory, harbor and airfield badges is left at a zoom: whole up to the sprites' arrival, then a slow fade to nothing. */
 export function facilityBadgeAlpha(k: number): number {

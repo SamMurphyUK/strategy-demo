@@ -157,9 +157,9 @@ describe("the texel grid at a zoom", () => {
   it("softens the land with the zoom and by nothing else", () => {
     const at = (k: number) => landSoftness(DEFAULT_VISUALS, k);
     expect(at(1)).toBe(0);
-    // The icon tokens hold the full pixel chart: nothing softens before the sprites arrive at 5.216.
-    expect(at(5.2)).toBe(0);
-    expect(at(5.216)).toBe(0);
+    // The icon tokens hold the full pixel chart: nothing softens before the sprites arrive at 6.245.
+    expect(at(6.2)).toBe(0);
+    expect(at(6.245)).toBe(0);
     expect(at(DEFAULT_VISUALS.softLandFrom)).toBe(0);
     expect(at(DEFAULT_VISUALS.softLandTo)).toBe(1);
     expect(at(NEAR)).toBe(1);

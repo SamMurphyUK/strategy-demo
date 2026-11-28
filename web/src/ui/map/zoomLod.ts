@@ -7,10 +7,10 @@ export type MapLod = 0 | 1 | 2;
 /** Halfway from a flat zoom to the previous 1.175 mark, so the pixel pop-in is about 50% sooner. */
 const OPERATIONAL = 1.0875;
 /** Upright sprites replace the icon tokens at this zoom, then a short timed fade plays. */
-export const TACTICAL_IN = 5.216;
+export const TACTICAL_IN = 6.245;
 /**
  * Size of the detailed sprites and their bases, as a share of a round token at its largest. At the
- * 5.216 reveal it is `base`. From there inward it grows with the zoom by the power `lock`: at 1 a
+ * 6.245 reveal it is `base`. From there inward it grows with the zoom by the power `lock`: at 1 a
  * sprite is steady in world space, a piece standing on the board like the terrain and the
  * landmarks; at 0 it holds one size on screen. The round token curve is not touched.
  */
@@ -19,15 +19,15 @@ export function detailedSpriteScale(zoom: number, base: number, lock: number): n
 }
 
 /** Stay on sprites until the zoom drops back through here, so a notch of wheel does not flicker. */
-const TACTICAL_OUT = 5.066;
+const TACTICAL_OUT = 6.095;
 /** Stamps finish fading in here and stay. */
 const STAMP_FULL = 1.16;
 /** How long the handoff between icon tokens and upright sprites takes. */
 export const SPRITE_FADE_MS = 300;
 
 /**
- * LoD for `zoom`. Terrain stamps begin at 1.0875. Icon tokens hold until 5.216,
- * where the upright sprites take over. They stay until the zoom falls below 5.066.
+ * LoD for `zoom`. Terrain stamps begin at 1.0875. Icon tokens hold until 6.245,
+ * where the upright sprites take over. They stay until the zoom falls below 6.095.
  */
 export function lodForZoom(zoom: number, previous: MapLod = 0): MapLod {
   if (zoom >= TACTICAL_IN || (previous === 2 && zoom >= TACTICAL_OUT)) {
