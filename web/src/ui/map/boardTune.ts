@@ -204,8 +204,11 @@ function smooth(from: number, to: number, value: number): number {
 //   diorama     3.8 to 7.5    the diorama surface comes in over 4.3 to 3.8
 //   micro       1.35 to 3.8   uMicroAlpha runs 0 to 1 over 3.6 to 2.4; the camera never goes nearer than 1.35
 
-/** 6.245 times 4.3: the diorama starts at zoom 6.245, and its cross-fade runs over distance 4.3 to 3.8, so over zoom 6.245 to 7.07. */
-export const DISTANCE_K = 6.245 * 4.3;
+/**
+ * 3.8 times 4.3. This sets where the micro tier's dive and tilt come in, so it holds even though the diorama's own cross-fade now
+ * starts at zoom 6.245 (DIORAMA_FROM): the camera tilts as it always did.
+ */
+export const DISTANCE_K = 3.8 * 4.3;
 /** Distance of the camera for a zoom. */
 export function cameraDistance(k: number): number {
   return DISTANCE_K / Math.max(k, 1e-6);

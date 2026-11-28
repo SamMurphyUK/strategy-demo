@@ -823,6 +823,10 @@ export function BoardLookPanel() {
         <Num name="factionBorderBrightness" label="Border brightness" title="The border line against the faction's colour. Under 1 is darker, so it reads on the tint." />
         <Flag name="vectorBorders" label="Vector borders" title="Every border drawn as a crisp vector line over the pixel ground, at every zoom." />
         <Num name="vectorBorderWidth" label="Vector land width" title="The land border line, in screen px." off={!mapVisuals.vectorBorders} />
+        <Num name="vectorBrightness0" label="Vector brightness, zoom 1.3" title="How dark the vector border is at the fitted zoom. 1 is the owner's colour, 0 black." off={!mapVisuals.vectorBorders} />
+        <Num name="vectorBrightness1" label="Vector brightness, zoom 2.5" title="How dark the vector border is at zoom 2.5." off={!mapVisuals.vectorBorders} />
+        <Num name="vectorBrightness2" label="Vector brightness, zoom 4.2" title="How dark the vector border is at zoom 4.2." off={!mapVisuals.vectorBorders} />
+        <Num name="vectorBrightness3" label="Vector brightness, zoom 6.2+" title="How dark the vector border is at the diorama and nearer." off={!mapVisuals.vectorBorders} />
         <Num name="vectorFadeFrom" label="Vector fade from" title="The zoom where the vector borders start to fade." off={!mapVisuals.vectorBorders} />
         <Num name="vectorFadeTo" label="Vector at floor by" title="The zoom where the vector borders reach their floor." off={!mapVisuals.vectorBorders} />
         <Num name="vectorFloor" label="Vector at diorama" title="The share of their strength the vector borders keep at the diorama." off={!mapVisuals.vectorBorders} />

@@ -45,6 +45,11 @@ export interface MapVisualConfig {
   vectorBorders: boolean;
   /** The vector land border's width and the sea seam's, in screen px. */
   vectorBorderWidth: number;
+  /** How dark the vector border is at four zooms (1.3, 2.5, 4.2, 6.245 and nearer), 1 the owner's colour, 0 black. It eases between them. */
+  vectorBrightness0: number;
+  vectorBrightness1: number;
+  vectorBrightness2: number;
+  vectorBrightness3: number;
   /** The zoom where the vector borders start to fade, where they reach their floor, and the share they keep there. */
   vectorFadeFrom: number;
   vectorFadeTo: number;
@@ -396,6 +401,10 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   tokenSizeBoost: 1.5,
   vectorBorders: true,
   vectorBorderWidth: 3.5,
+  vectorBrightness0: 0.5,
+  vectorBrightness1: 0.5,
+  vectorBrightness2: 0.5,
+  vectorBrightness3: 0.5,
   vectorFadeFrom: 4.2,
   vectorFadeTo: 6.245,
   vectorFloor: 0.5,
@@ -653,6 +662,10 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   factionRegionShift: [0, 0.2],
   tokenSizeBoost: [1, 3],
   vectorBorderWidth: [0.5, 6],
+  vectorBrightness0: [0, 1.5],
+  vectorBrightness1: [0, 1.5],
+  vectorBrightness2: [0, 1.5],
+  vectorBrightness3: [0, 1.5],
   vectorFadeFrom: [0.5, 10],
   vectorFadeTo: [0.5, 10],
   vectorFloor: [0, 1],
@@ -904,6 +917,25 @@ export function factionBorderShare(closeness: number, config: Readonly<MapVisual
 export function tokenBoostAt(zoom: number, config: Readonly<MapVisualConfig>): number {
   const span = Math.max(1e-3, config.tokenBoostFadeTo - config.tokenBoostFadeFrom);
   return 1 + (config.tokenSizeBoost - 1) * (1 - smooth((zoom - config.tokenBoostFadeFrom) / span));
+}
+
+/** The zooms the vector border's brightness sliders sit at. */
+export const VECTOR_BRIGHTNESS_ZOOMS = [1.3, 2.5, 4.2, 6.245] as const;
+
+/** How dark the vector border is at a zoom: the four sliders, eased between, held flat beyond the first and the last. */
+export function vectorBorderBrightness(zoom: number, config: Readonly<MapVisualConfig>): number {
+  const stops = [config.vectorBrightness0, config.vectorBrightness1, config.vectorBrightness2, config.vectorBrightness3];
+  const zooms = VECTOR_BRIGHTNESS_ZOOMS;
+  if (zoom <= zooms[0]) {
+    return stops[0];
+  }
+  for (let i = 1; i < zooms.length; i++) {
+    if (zoom <= zooms[i]) {
+      const t = smooth((zoom - zooms[i - 1]) / (zooms[i] - zooms[i - 1]));
+      return stops[i - 1] + (stops[i] - stops[i - 1]) * t;
+    }
+  }
+  return stops[3];
 }
 
 /** How much of their strength the vector borders keep at a zoom: all of it, easing to the floor through the diorama's start. */

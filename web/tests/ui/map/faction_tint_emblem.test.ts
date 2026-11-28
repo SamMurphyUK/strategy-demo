@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VISUALS, factionBorderShare, factionTint, tokenBoostAt } from "../../../src/ui/map/mapVisualConfig";
+import { DEFAULT_VISUALS, factionBorderShare, factionTint, tokenBoostAt, vectorBorderBrightness, VECTOR_BRIGHTNESS_ZOOMS } from "../../../src/ui/map/mapVisualConfig";
 import { COIN_SHARE, emblemLayout, starPoints, STAR_SHARE } from "../../../src/ui/map/regionEmblem";
 
 describe("the faction tint across the zoom tiers", () => {
@@ -113,5 +113,21 @@ describe("the token boost", () => {
     expect(mid).toBeLessThan(DEFAULT_VISUALS.tokenSizeBoost);
     expect(tokenBoostAt(DEFAULT_VISUALS.tokenBoostFadeTo, DEFAULT_VISUALS)).toBeCloseTo(1, 6);
     expect(tokenBoostAt(4, DEFAULT_VISUALS)).toBe(1);
+  });
+});
+
+describe("the vector border's brightness along the zoom", () => {
+  it("is each slider at its own zoom, eased between, and flat beyond the ends", () => {
+    const config = { ...DEFAULT_VISUALS, vectorBrightness0: 0.2, vectorBrightness1: 0.4, vectorBrightness2: 0.8, vectorBrightness3: 1 };
+    const [a, b, c, d] = VECTOR_BRIGHTNESS_ZOOMS;
+    expect(vectorBorderBrightness(a, config)).toBeCloseTo(0.2, 9);
+    expect(vectorBorderBrightness(b, config)).toBeCloseTo(0.4, 9);
+    expect(vectorBorderBrightness(c, config)).toBeCloseTo(0.8, 9);
+    expect(vectorBorderBrightness(d, config)).toBeCloseTo(1, 9);
+    expect(vectorBorderBrightness(0.5, config)).toBeCloseTo(0.2, 9);
+    expect(vectorBorderBrightness(20, config)).toBeCloseTo(1, 9);
+    const between = vectorBorderBrightness((a + b) / 2, config);
+    expect(between).toBeGreaterThan(0.2);
+    expect(between).toBeLessThan(0.4);
   });
 });

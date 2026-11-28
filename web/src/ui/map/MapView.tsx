@@ -57,7 +57,7 @@ import { ActionBubble, PatrolMark, TargetMarker, type BubbleOption } from "./ops
 import type { OpIcon } from "./ops/specialOps";
 import { classifyUnit } from "../../engine/types/ruleset";
 import { getBoardTune, getBoardTuneRev, subscribeBoardTune } from "./boardTuneStore";
-import { getVisualRev, mapVisuals, subscribeVisuals, tokenBoostAt, vectorBorderShare, wantsFigureCards } from "./mapVisualConfig";
+import { getVisualRev, mapVisuals, subscribeVisuals, tokenBoostAt, vectorBorderBrightness, vectorBorderShare, wantsFigureCards } from "./mapVisualConfig";
 import { SEA_DROP } from "../viewport3d/boardCamera";
 import { createFigureCards, type FigureCardPainter, type StackPick } from "./figureCards";
 import { CoastTuner } from "./CoastTuner";
@@ -1054,7 +1054,7 @@ export function MapView(props: MapViewProps) {
       vectorBorders: boardGround && mapVisuals.vectorBorders && clipped
         ? {
             width: mapVisuals.vectorBorderWidth,
-            brightness: mapVisuals.factionBorderBrightness,
+            brightness: vectorBorderBrightness(paintView.k, mapVisuals),
             alpha: vectorBorderShare(paintView.k, mapVisuals),
             shapes: landShapeMap!,
             seam: { left: bounds.x, right: bounds.x + bounds.w },

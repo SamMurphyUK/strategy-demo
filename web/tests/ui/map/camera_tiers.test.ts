@@ -4,13 +4,14 @@ import { maxZoomK } from "../../../src/ui/map/viewMath";
 import { dioramaFade } from "../../../src/ui/viewport3d/skins/dioramaPbr";
 
 describe("camera distance and its tiers", () => {
-  it("makes the diorama cross-fade run over distance 4.3 to 3.8, as it does over zoom 6.245 to 7.07", () => {
-    expect(cameraDistance(6.245)).toBeCloseTo(4.3, 9);
-    expect(cameraDistance((6.245 * 4.3) / 3.8)).toBeCloseTo(3.8, 9);
-    expect(dioramaFade(zoomForDistance(4.3))).toBeCloseTo(0, 9);
-    expect(dioramaFade(zoomForDistance(3.8))).toBeCloseTo(1, 9);
+  it("makes the diorama cross-fade run over distance 4.3 to 3.8, and the camera keeps its own distances", () => {
+    expect(cameraDistance(3.8)).toBeCloseTo(4.3, 9);
+    expect(cameraDistance(4.3)).toBeCloseTo(3.8, 9);
+    // The diorama's own cross-fade is set apart from the camera's distance now: it runs over zoom 6.245 to 7.07.
+    expect(dioramaFade(6.245)).toBe(0);
+    expect(dioramaFade((6.245 * 4.3) / 3.8)).toBeCloseTo(1, 9);
     expect(zoomForDistance(cameraDistance(2.7))).toBeCloseTo(2.7, 9);
-    expect(DISTANCE_K).toBeCloseTo(6.245 * 4.3, 9);
+    expect(DISTANCE_K).toBeCloseTo(3.8 * 4.3, 9);
   });
   it("names the tiers by distance", () => {
     expect(cameraTier(zoomForDistance(20))).toBe("strategic");
