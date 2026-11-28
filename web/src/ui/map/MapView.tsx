@@ -1001,6 +1001,7 @@ export function MapView(props: MapViewProps) {
       unitFade,
       backdrop: boardGround,
       cliffDrop: boardGround ? SEA_DROP * mapVisuals.terrainHeightScale : 0,
+      terrainLift: board?.terrainLift,
       scars: editor || boardGround
         ? []
         : (props.relief?.scars ?? []).flatMap((scar) => {

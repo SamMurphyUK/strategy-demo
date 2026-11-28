@@ -114,8 +114,10 @@ export interface BoardStore {
   /** Bumped whenever a 2D canvas is repainted. */
   paint: number;
   invalidate: (() => void) | null;
-  /** How far the ground under a world point stands up the screen, in CSS pixels: the sculpted ranges, as they are drawn now. */
-  lift?: ((world: Vec2, stack?: { naval: boolean; count: number }) => number) | null;
+  /** How far the land under a world point stands up the screen, in CSS pixels, with no unit base added. */
+  terrain?: ((world: Vec2) => number) | null;
+  /** How far a figure's feet stand up the screen: the land, plus the top of its base. */
+  lift?: ((world: Vec2, stack?: { naval: boolean; count: number; unitType?: string }) => number) | null;
 }
 
 export interface BattleScar {
@@ -1297,10 +1299,10 @@ export function BoardScene(props: BoardSceneProps) {
       const blend = ranges?.sharpness ?? 0;
       const onRange = rise > 0.001 && patches.length > 0;
       const bases = mapVisuals.enable3DBases;
-      const look = { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus };
+      const look = { pair: mapVisuals.squadRadius2, crowd: mapVisuals.squadRadius3Plus, vehicleRadius: mapVisuals.vehiclePlinthRadius };
       const baseHeight = mapVisuals.plinthHeight;
       const tokenPx = frame.tokenPx;
-      store.lift = (world, stack) => {
+      const terrainAt = (world: Vec2) => {
         let lift = 0;
         if (onRange) {
           const under = sampleReliefFields(patches, world.x, world.y);
@@ -1308,9 +1310,15 @@ export function BoardScene(props: BoardSceneProps) {
         }
         // An island has been lowered: the figures on it stand that much lower.
         lift -= lowerAt(world.x, world.y) * scales.sx * upright;
-        // A figure on a land stack stands on the top face of its base, so it is lifted by the base's height.
+        return lift;
+      };
+      store.terrain = terrainAt;
+      store.lift = (world, stack) => {
+        let lift = terrainAt(world);
+        // A figure stands on the top of its own base. The base's radius is that unit's, so a global
+        // nudge does not have to make up the difference between a tank and an infantryman.
         if (bases && !stack?.naval) {
-          lift += plinthRadius(tokenPx, frame.view.k, stack?.count ?? 1, look) * baseHeight * scales.sx * upright;
+          lift += plinthRadius(tokenPx, frame.view.k, stack?.count ?? 1, look, stack?.unitType ?? "") * baseHeight * scales.sx * upright;
         }
         return lift;
       };
@@ -1496,9 +1504,12 @@ export function BoardScene(props: BoardSceneProps) {
         return !here || !pointInMultiPolygon({ x: x + 7, y }, land) || !pointInMultiPolygon({ x: x - 7, y }, land) || !pointInMultiPolygon({ x, y: y + 7 }, land) || !pointInMultiPolygon({ x, y: y - 7 }, land);
       },
     });
+    const snowScales = projectionScales(frame.view.k);
     flurries.update({
       x: pose.target[0],
       y: -pose.target[1],
+      reachX: frame.width / (2 * Math.max(snowScales.sx, 1e-6)),
+      reachY: frame.height / (2 * Math.max(snowScales.sy, 1e-6)),
       alpha: micro * weather.state.snow * Math.min(1, mapVisuals.windStrength * 1.2) * 1.25,
       seconds: now / 1000,
       windX: 1.6 * mapVisuals.windStrength,

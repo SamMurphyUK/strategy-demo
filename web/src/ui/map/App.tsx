@@ -37,6 +37,8 @@ import { projectMapJson } from "./map_space";
 import { type CombatMarker, MapView } from "./MapView";
 import { concealNeutralGarrison } from "./neutralGarrison";
 import { coastFromMap, masterLandFromCoast, type MasterLand } from "./svgLandLoader";
+import { placeCaption } from "./facilityBadge";
+import { factionName } from "./session/event_text";
 import { useMasterLand } from "./useMasterLand";
 import { EventLog } from "./panels/EventLog";
 import { PhasePanel } from "./panels/PhasePanel";
@@ -1320,6 +1322,32 @@ export function App() {
               {hoverRegionId !== "" && seaZoneCargoLabel(state, hoverRegionId) !== "" && (
                 <p className="cargo-hover">{seaZoneCargoLabel(state, hoverRegionId)}</p>
               )}
+              {hoverRegionId !== "" &&
+                (() => {
+                  const shape = geometry.regions.find((region) => region.id === hoverRegionId);
+                  const held = state.regions[hoverRegionId];
+                  if (!shape || !held) {
+                    return null;
+                  }
+                  const caption = placeCaption({
+                    name: held.name,
+                    owner: factionName(held.owner_faction_id),
+                    capital: shape.capital === true,
+                    factory: shape.factorySize ?? (shape.hasFactory ? "major" : "none"),
+                    airbase: shape.hasAirbase === true,
+                    harbour: shape.hasHarbour === true,
+                  });
+                  if (caption.landmark === "" && caption.works === "") {
+                    return null;
+                  }
+                  return (
+                    <p className="cargo-hover">
+                      {caption.landmark !== "" && caption.landmark}
+                      {caption.landmark !== "" && caption.works !== "" && <br />}
+                      {caption.works !== "" && caption.works}
+                    </p>
+                  );
+                })()}
             </>
           )}
         </Viewport>
