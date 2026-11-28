@@ -1,0 +1,58 @@
+/* A faction roundel with optional state overlays. Sized by --roundel-px, set by the component. */
+
+.roundel-badge {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--roundel-px);
+  height: var(--roundel-px);
+  line-height: 0;
+  vertical-align: middle;
+}
+
+.roundel-badge .roundel-face {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
+  user-select: none;
+}
+
+/* Contested: a dashed crimson ring just outside the bezel that pulses. */
+.roundel-badge .roundel-contested {
+  position: absolute;
+  inset: -3px;
+  width: calc(100% + 6px);
+  height: calc(100% + 6px);
+  pointer-events: none;
+  transform-origin: center;
+  animation: roundel-pulse 1.4s ease-in-out infinite;
+}
+
+/* Capital: a brass star pip, bottom right. About 40% of the badge. */
+.roundel-badge .roundel-capital {
+  position: absolute;
+  right: -15%;
+  bottom: -15%;
+  width: 42%;
+  height: 42%;
+  pointer-events: none;
+}
+
+@keyframes roundel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roundel-badge .roundel-contested {
+    animation: none;
+  }
+}

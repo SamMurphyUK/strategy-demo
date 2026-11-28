@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>Neutral, leaning Axis</title>
+<defs>
+<clipPath id="neutral_axis-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#neutral_axis-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#4e5463"/><circle cx="128" cy="128" r="96" fill="none" stroke="#b3322f" stroke-width="18"/><circle cx="128" cy="128" r="68" fill="none" stroke="#cfc6b3" stroke-width="5"/></g>
+<g id="emblem"><rect x="124" y="28" width="8" height="200" fill="#cfc6b3"/><rect x="28" y="124" width="200" height="8" fill="#cfc6b3"/><polygon points="128,44 143.44,112.56 212,128 143.44,143.44 128,212 112.56,143.44 44,128 112.56,112.56" fill="#cfc6b3"/><circle cx="128" cy="128" r="12" fill="#4e5463"/><circle cx="128" cy="128" r="6" fill="#b3322f"/></g>
+</g>
+</svg>

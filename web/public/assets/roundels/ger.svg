@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>Germany</title>
+<defs>
+<clipPath id="ger-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#ger-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#a8656a"/></g>
+<g id="emblem"><polygon points="102,102 88,28 168,28 154,102 228,88 228,168 154,154 168,228 88,228 102,154 28,168 28,88" fill="#f3ecdf"/><polygon points="110,110 97,40 159,40 146,110 216,97 216,159 146,146 159,216 97,216 110,146 40,159 40,97" fill="#3a2a26"/></g>
+</g>
+</svg>

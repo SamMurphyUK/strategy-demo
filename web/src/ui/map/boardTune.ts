@@ -264,6 +264,12 @@ export function facilitySplit(k: number, from: number, end: number): { split: nu
   return { split, alpha: 1 - fade * fade * (3 - 2 * fade) };
 }
 
+/** How much of the territory numerals and capital marks is left at a zoom: whole up to `from`, gone at `to`. */
+export function emblemAlpha(k: number, from: number, to: number): number {
+  const t = clamp01((k - from) / Math.max(0.05, to - from));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 /** uMicroAlpha at a zoom: 0 outside the micro tier, 1 close in. */
 export function microAlpha(k: number): number {
   return nearShare(cameraDistance(k), MICRO_ALPHA_FROM, MICRO_ALPHA_TO);

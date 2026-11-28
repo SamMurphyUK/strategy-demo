@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>France</title>
+<defs>
+<clipPath id="fra-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#fra-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#b3322f"/><circle cx="128" cy="128" r="86" fill="#f3ecdf"/><circle cx="128" cy="128" r="58" fill="#2a4a8a"/></g>
+<g id="emblem"><rect x="122" y="82" width="12" height="92" fill="#f3ecdf"/><rect x="106" y="98" width="44" height="10" fill="#f3ecdf"/><rect x="96" y="130" width="64" height="10" fill="#f3ecdf"/></g>
+</g>
+</svg>

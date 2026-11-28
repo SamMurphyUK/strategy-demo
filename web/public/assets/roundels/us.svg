@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>United States</title>
+<defs>
+<clipPath id="us-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#us-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#46607f"/></g>
+<g id="emblem"><polygon points="128,40 147.76,100.8 211.69,100.81 159.97,138.39 179.73,199.19 128,161.62 76.27,199.19 96.03,138.39 44.31,100.81 108.24,100.8" fill="#f3ecdf"/><circle cx="128" cy="128" r="17" fill="#b3322f"/></g>
+</g>
+</svg>

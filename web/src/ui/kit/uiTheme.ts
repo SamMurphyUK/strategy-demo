@@ -7,8 +7,33 @@ import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
 import { landChrome, mix } from "../map/factionChrome";
 
 export type UiTheme = "faction" | "oxblood" | "slate" | "verdigris" | "umber" | "olive";
-export type UiType = "pixel" | "thin" | "pack";
-const TYPES: UiType[] = ["pixel", "thin", "pack"];
+export type UiType = "mix" | "pixel" | "futura" | "thin" | "pack";
+const TYPES: UiType[] = ["mix", "pixel", "futura", "thin", "pack"];
+
+/** The faces a panel can be switched to in the UI Lab. */
+export const FONT_CHOICES = [
+  { id: "futura", label: "Pixel Futura", css: '"Pixel Futura", "Futura", sans-serif' },
+  { id: "vt323", label: "VT323", css: '"VT323", monospace' },
+  { id: "silkscreen", label: "Silkscreen", css: '"Silkscreen", monospace' },
+  { id: "barlow", label: "Barlow Cond.", css: '"Barlow Condensed", sans-serif' },
+  { id: "archivo", label: "Archivo Narrow", css: '"Archivo Narrow", sans-serif' },
+  { id: "jost", label: "Jost", css: '"Jost", sans-serif' },
+  { id: "plex", label: "IBM Plex Mono", css: '"IBM Plex Mono", monospace' },
+] as const;
+export type FontChoice = (typeof FONT_CHOICES)[number]["id"];
+
+/** The panels whose font the lab can swap. `var` is the CSS variable tokens.css reads. */
+export const FONT_ROLES = [
+  { id: "events", label: "Events", var: "--font-events" },
+  { id: "hover", label: "Hover text", var: "--font-hover" },
+  { id: "inspector", label: "Inspector info", var: "--font-inspector" },
+  { id: "inspectorTitle", label: "Inspector title", var: "--font-inspector-title" },
+  { id: "purchase", label: "Purchase readouts", var: "--font-purchase" },
+  { id: "phases", label: "Phases / IPC", var: "--font-phases" },
+  { id: "buttons", label: "Buttons", var: "--font-buttons" },
+  { id: "headings", label: "Headings", var: "--font-headings" },
+] as const;
+export type FontRole = (typeof FONT_ROLES)[number]["id"];
 
 /** `land` is the fading-16 colour the chrome is cut from. */
 export const UI_THEMES: { id: UiTheme; label: string; land: string }[] = [
@@ -21,7 +46,8 @@ export const UI_THEMES: { id: UiTheme; label: string; land: string }[] = [
 ];
 
 const THEME_KEY = "strategy-demo.uiTheme";
-const TYPE_KEY = "strategy-demo.uiType";
+const TYPE_KEY = "strategy-demo.uiType2"; // 2: the default became the Futura and VT323 mix
+const ROLES_KEY = "strategy-demo.uiRoleFonts";
 const LAB_KEY = "strategy-demo.uiLab";
 
 function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -53,7 +79,7 @@ function labRequested(): boolean {
 
 const browser = typeof window !== "undefined";
 let theme: UiTheme = browser ? readStored<UiTheme>(THEME_KEY, IDS, "faction") : "faction";
-let type: UiType = browser ? readStored<UiType>(TYPE_KEY, TYPES, "pixel") : "pixel";
+let type: UiType = browser ? readStored<UiType>(TYPE_KEY, TYPES, "mix") : "mix";
 let lab = browser ? labRequested() || readStored(LAB_KEY, ["0", "1"], "0") === "1" : false;
 
 export function setUiTheme(next: UiTheme): void {
@@ -72,6 +98,41 @@ export function setUiType(next: UiType): void {
   emit();
 }
 
+function readRoles(): Partial<Record<FontRole, FontChoice>> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ROLES_KEY) ?? "{}") as Record<string, string>;
+    const out: Partial<Record<FontRole, FontChoice>> = {};
+    for (const role of FONT_ROLES) {
+      if (FONT_CHOICES.some((choice) => choice.id === parsed[role.id])) out[role.id] = parsed[role.id] as FontChoice;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+let roles: Partial<Record<FontRole, FontChoice>> = browser ? readRoles() : {};
+let roleVars: CSSProperties = {};
+function rebuildRoleVars(): void {
+  const vars: Record<string, string> = {};
+  for (const role of FONT_ROLES) {
+    const choice = FONT_CHOICES.find((item) => item.id === roles[role.id]);
+    if (choice) vars[role.var] = choice.css;
+  }
+  roleVars = vars as CSSProperties;
+}
+rebuildRoleVars();
+
+/** Swap one panel's font, or hand it back to its type with `null`. */
+export function setRoleFont(role: FontRole, choice: FontChoice | null): void {
+  roles = { ...roles };
+  if (choice) roles[role] = choice;
+  else delete roles[role];
+  writeStored(ROLES_KEY, JSON.stringify(roles));
+  rebuildRoleVars();
+  emit();
+}
+
 export function setUiLab(open: boolean): void {
   lab = open;
   writeStored(LAB_KEY, open ? "1" : "0");
@@ -85,9 +146,12 @@ function subscribe(listener: () => void): () => void {
 
 export const useUiTheme = (): UiTheme => useSyncExternalStore(subscribe, () => theme, () => "faction" as UiTheme);
 export const useUiType = (): UiType => useSyncExternalStore(subscribe, () => type, () => "pixel" as UiType);
+export const useRoleFonts = (): Partial<Record<FontRole, FontChoice>> => useSyncExternalStore(subscribe, () => roles, () => ({}));
+/** The per-panel font variables, as one object that only changes when a font is swapped. */
+export const useRoleVars = (): CSSProperties => useSyncExternalStore(subscribe, () => roleVars, () => ({}));
 export const useUiLab = (): boolean => useSyncExternalStore(subscribe, () => lab, () => false);
 
-/** U cycles the colour variants. T cycles Silkscreen / thin pixel / font pack. Shift+U shows or hides the lab. Ignored while typing. */
+/** U cycles the colour variants. T cycles Futura + VT323 / Silkscreen / Pixel Futura / thin pixel / font pack. Shift+U shows or hides the lab. Ignored while typing. */
 export function useUiThemeHotkeys(): void {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

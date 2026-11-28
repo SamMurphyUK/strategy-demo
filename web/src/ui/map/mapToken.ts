@@ -17,6 +17,7 @@ import {
   TOKEN_WHITE,
   unitSilhouette,
 } from "./tokenStyle";
+import { drawIcon, iconState } from "./tokenIcons";
 import { unitDomain } from "./unitStacks";
 
 const SERIF = 'Georgia, "Iowan Old Style", "Times New Roman", serif';
@@ -63,14 +64,22 @@ function whiteLetter(ctx: CanvasRenderingContext2D, letter: string, x: number, y
   ctx.fillText(letter, x, y + px * 0.04);
 }
 
+/** A land or air piece: the sheet's icon fitted into the disc, or the old vector figure while the art loads. */
 function paintFigure(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
+  if (drawIcon(ctx, entry.unit_type_id, color, { cx: x, cy: y, maxW: d * 0.78, maxH: d * 0.66 })) {
+    return;
+  }
   ctx.fillStyle = color;
   for (const part of unitSilhouette(entry.unit_type_id, entry.faction_id)) {
     fillPolygon(ctx, part, x, y, d);
   }
 }
 
+/** A ship: the sheet's icon on the waterline, or the old vector hull while the art loads. */
 function paintHull(ctx: CanvasRenderingContext2D, entry: StackEntry, x: number, y: number, d: number, color: string): void {
+  if (drawIcon(ctx, entry.unit_type_id, color, { cx: x, cy: y, maxW: d * 0.84, maxH: d * 0.3, bottom: y + d * 0.06 })) {
+    return;
+  }
   ctx.fillStyle = color;
   for (const part of hullFor(entry.unit_type_id, entry.faction_id)) {
     fillPolygon(ctx, part, x, y, d);
@@ -243,6 +252,10 @@ function bakedFace(entry: StackEntry, d: number, paint: TokenPaint): CanvasImage
   const cached = faceCache.get(key);
   if (cached) {
     return cached;
+  }
+  // The icon's art may still be loading. Paint this frame from the vector figure and do not keep it.
+  if (iconState(entry.unit_type_id) === "pending") {
+    return null;
   }
   const layer = layerContext(size);
   if (!layer) {

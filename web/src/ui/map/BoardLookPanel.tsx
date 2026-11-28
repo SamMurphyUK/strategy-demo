@@ -815,6 +815,10 @@ export function BoardLookPanel() {
         <Num name="facilitySplitFrom" label="Split from" title="The zoom where the badge starts to split apart." />
         <Num name="facilityFadeEnd" label="Gone by" title="The zoom where the split badges have faded away. Keep it a little under the closest zoom." />
         <Num name="facilitySplitSpread" label="Spread" title="How far apart the triangles drift, in badge widths. 0 leaves them together." />
+        <h3>Territory emblems</h3>
+        <p className="muted">The IPC numerals and capital marks fade out as you zoom in, to leave the board and its pieces clear.</p>
+        <Num name="emblemFadeFrom" label="Fade from" title="The zoom where the numerals and capital marks start to fade." />
+        <Num name="emblemFadeTo" label="Gone by" title="The zoom where they are gone. Set it equal to Fade from for a quick cut." />
 
         <h3>Mountains</h3>
         <Flag name="enableShogunMountains" label="Sculpted ranges" title="Sculpted ranges in Switzerland, the Himalayas, and Persia" />

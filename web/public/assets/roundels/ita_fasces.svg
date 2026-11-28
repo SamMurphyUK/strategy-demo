@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>Italy, wartime fasces</title>
+<defs>
+<clipPath id="ita_fasces-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#ita_fasces-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#6f7a4a"/><circle cx="128" cy="128" r="88" fill="#f3ecdf"/></g>
+<g id="emblem"><polygon points="106,188 104,84 152,84 150,188" fill="#3a2a26"/><rect x="118.5" y="84" width="3" height="104" fill="#f3ecdf"/><rect x="134.5" y="84" width="3" height="104" fill="#f3ecdf"/><rect x="103" y="110" width="50" height="8" fill="#f3ecdf"/><rect x="104" y="152" width="48" height="8" fill="#f3ecdf"/><polygon points="148,94 188,62 188,128 148,114" fill="#3a2a26"/></g>
+</g>
+</svg>

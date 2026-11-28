@@ -19,7 +19,9 @@ export function MainMenu({
   saves,
   room,
   volume,
+  onVolume,
   look,
+  onLook,
   draft,
   board,
   onBoard,
@@ -35,7 +37,9 @@ export function MainMenu({
   saves: CampaignSave[];
   room: RoomControls;
   volume: number;
+  onVolume(value: number): void;
   look: "field" | "dusk";
+  onLook(look: "field" | "dusk"): void;
   draft: CampaignDraft;
   /** The board the campaign is drawn on. */
   board: BoardView;

@@ -29,6 +29,15 @@
 @font-face { font-family: "Silkscreen"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/ui/Silkscreen-Bold.ttf") format("truetype"); }
 
 
+@font-face { font-family: "Pixel Futura"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Book.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Futura"; font-weight: 500; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Medium.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Futura"; font-weight: 600; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Demi.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Futura"; font-weight: 700; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Bold.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Futura"; font-weight: 800; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Heavy.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Futura"; font-weight: 900; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-ExtraBold.ttf") format("truetype"); }
+/* Pixel Mix: one family whose weight picks the face. Regular text (400, 500) is Pixel Futura Book; anything bold (600 and up) is VT323. */
+@font-face { font-family: "Pixel Mix"; font-weight: 400 500; font-style: normal; font-display: swap; src: url("/fonts/pixel-futura/PixelFutura-Book.ttf") format("truetype"); }
+@font-face { font-family: "Pixel Mix"; font-weight: 600 900; font-style: normal; font-display: swap; src: url("/fonts/ui/VT323-Regular.ttf") format("truetype"); }
 @font-face { font-family: "VT323"; font-weight: 400; font-style: normal; font-display: swap; src: url("/fonts/ui/VT323-Regular.ttf") format("truetype"); }
 
 /* ---------- font roles ---------- */
@@ -40,6 +49,8 @@
   --ui-font-num: "IBM Plex Mono", ui-monospace, "Courier New", monospace;
   --ui-font-pixel: "Silkscreen", "Courier New", monospace;
   --ui-font-thin: "VT323", "Courier New", monospace;
+  --ui-font-futura: "Pixel Futura", "Futura", "Century Gothic", sans-serif;
+  --ui-font-mix: "Pixel Mix", "Pixel Futura", "VT323", sans-serif;
 }
 
 /* ---------- type: Silkscreen everywhere, regular and bold only ---------- */
@@ -78,6 +89,151 @@
   & .ipc span,
   & .hud-unit-label {
     letter-spacing: 0.02em;
+  }
+}
+
+/* ---------- type: Pixel Mix (the default). Regular text in Pixel Futura, bold and big text in VT323. ---------- */
+
+.campaign[data-ui-type="mix"] {
+  --serif: var(--ui-font-mix);
+  --mono: var(--ui-font-mix);
+  /* The panels that always read in Pixel Futura. The UI Lab can swap any of them. */
+  --font-events: var(--ui-font-futura);
+  --font-hover: var(--ui-font-futura);
+  --font-inspector: var(--ui-font-futura);
+  --font-purchase: var(--ui-font-futura);
+  font-family: var(--ui-font-mix);
+  font-size: 16px;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  font-synthesis: none;
+
+  & *:not(canvas) {
+    font-family: var(--ui-font-mix);
+    font-size: 16px;
+    line-height: 1.25;
+    font-synthesis: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Big text: titles in VT323 (they are bold), a size up. */
+  & h2,
+  & .faction-chip,
+  & .hud-emblem b,
+  & .hud-mini-name {
+    font-size: 24px;
+    line-height: 1.1;
+    font-weight: 700;
+  }
+
+  & .main-menu-title h1 {
+    font-size: 32px;
+    line-height: 1.05;
+    font-weight: 700;
+  }
+
+  /* The text that is never bold: it stays Pixel Futura Book whatever the old rules say. */
+  & .event-log li,
+  & .event-log p,
+  & .cargo-hover,
+  & .unit-hover-label,
+  & .hud-unit-label,
+  & .hud-pips,
+  & .hud-count,
+  & .hud-emblem span,
+  & .shop-readout,
+  & .shop-readout span,
+  & .shop-readout b,
+  & .unit-max,
+  & .phase-tracker li,
+  & .ipc span,
+  & .turn-count {
+    font-weight: 400;
+  }
+}
+
+/* ---------- per-panel fonts: the UI Lab sets --font-<panel>; with none set a panel keeps its type's own face ---------- */
+
+.campaign[data-ui-type] {
+  & .event-log li,
+  & .event-log p {
+    font-family: var(--font-events, inherit);
+  }
+
+  & .cargo-hover,
+  & .unit-hover-label {
+    font-family: var(--font-hover, inherit);
+  }
+
+  & .hud-unit-label,
+  & .hud-pips,
+  & .hud-count,
+  & .hud-emblem span,
+  & .hud-select-all {
+    font-family: var(--font-inspector, inherit);
+  }
+
+  & .hud-emblem b,
+  & .hud-mini-name {
+    font-family: var(--font-inspector-title, inherit);
+  }
+
+  & .shop-readout,
+  & .shop-readout span,
+  & .shop-readout b,
+  & .unit-max {
+    font-family: var(--font-purchase, inherit);
+  }
+
+  & .phase-tracker li,
+  & .ipc span {
+    font-family: var(--font-phases, inherit);
+  }
+
+  & button:not(.hud-fold),
+  & .shop-tabs button {
+    font-family: var(--font-buttons, inherit);
+  }
+
+  & h2,
+  & .faction-chip,
+  & .main-menu-title h1 {
+    font-family: var(--font-headings, inherit);
+  }
+}
+
+/* ---------- type: Pixel Futura, on its own 16px grid. Real weights 400 to 900, so the HUD's bold stays bold. ---------- */
+
+.campaign[data-ui-type="futura"] {
+  --serif: var(--ui-font-futura);
+  --mono: var(--ui-font-futura);
+  font-family: var(--ui-font-futura);
+  font-size: 16px;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  font-synthesis: none;
+
+  & *:not(canvas) {
+    font-family: var(--ui-font-futura);
+    font-size: 16px;
+    line-height: 1.25;
+    font-synthesis: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  & h2,
+  & .faction-chip,
+  & .hud-emblem b,
+  & .hud-mini-name {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  & .main-menu-title h1 {
+    font-size: 32px;
+    line-height: 1.1;
+    font-weight: 800;
   }
 }
 
@@ -415,6 +571,42 @@
     gap: 4px;
   }
 
+  & details {
+    margin-top: 8px;
+  }
+
+  & summary {
+    cursor: pointer;
+    font: 700 12px/1.5 var(--ui-font-pixel);
+    text-transform: uppercase;
+  }
+
+  & .ui-lab-roles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 6px;
+    margin-top: 6px;
+  }
+
+  & .ui-lab-roles label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font: 400 12px/1.2 var(--ui-font-pixel);
+    color: #a99c8d;
+    text-transform: uppercase;
+  }
+
+  & .ui-lab-roles select {
+    width: 100%;
+    padding: 2px;
+    font: 400 12px/1.2 var(--ui-font-pixel);
+    color: #ddcf99;
+    background: #4b3d44;
+    border: 1px solid #846d59;
+    border-radius: 0;
+  }
+
   & .ui-lab-types {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -461,4 +653,17 @@
   & .ui-lab-pixel.is-bold {
     font-weight: 700;
   }
+}
+
+/* ---------- faction roundels in the HUD ---------- */
+
+.campaign .faction-chip .roundel-badge,
+.campaign .ipc span .roundel-badge {
+  margin-right: 6px;
+  vertical-align: -5px;
+}
+
+.campaign .hud-roundel-owner {
+  align-self: center;
+  margin-left: 8px;
 }

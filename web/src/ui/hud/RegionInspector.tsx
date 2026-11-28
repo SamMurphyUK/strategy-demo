@@ -1,4 +1,5 @@
 import { Copy } from "lucide-react";
+import { RoundelBadge } from "../../components/ui/RoundelBadge";
 import { type CSSProperties, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { fuelRemaining } from "../../engine/air/air_fuel";
 import { factionPalette } from "../theme/factionPalette";
@@ -117,6 +118,8 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
   const ground = region ? inspectorStacks(state.getUnitsInRegion(shown)) : [];
   const entries = region ? sortMedallions(state, faction, [...ground, ...cargoStacks(state, shown)], (entry) => movableCount(shown, entry) > 0) : [];
   const occupied = entries.length > 0;
+  // A territory the current player has a battle to fight in is contested.
+  const contested = phase === "combat" && region != null && game.session.getPendingBattles(faction).some((battle) => battle.region_id === shown);
   const status = region ? territoryStatus(state, faction, region.owner_faction_id, entries) : "FRIENDLY";
   const cover = region?.land_cover ? region.land_cover.toLowerCase() : region?.type === "sea" ? "sea" : "open";
   const squad = entries
@@ -200,6 +203,7 @@ export function RegionInspector({ game, regionId, selectedKey, movableCount, mov
                 Select all
               </button>
             )}
+            <RoundelBadge faction={region.owner_faction_id} size="lg" capital={region.is_capital} contested={contested} label={factionName(region.owner_faction_id)} className="hud-roundel-owner" />
             <div className="hud-emblem" style={{ borderColor: factionPalette(region.owner_faction_id).ring }}>
               <b>{region.type === "sea" ? (region.name.match(/\d+/)?.[0] ?? region.name) : region.name}</b>
               <span>{status}</span>

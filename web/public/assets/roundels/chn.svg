@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>China</title>
+<defs>
+<clipPath id="chn-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#chn-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#2c4f9e"/></g>
+<g id="emblem"><polygon points="128,36 140.38,81.79 174,48.33 161.83,94.17 207.67,82 174.21,115.62 220,128 174.21,140.38 207.67,174 161.83,161.83 174,207.67 140.38,174.21 128,220 115.62,174.21 82,207.67 94.17,161.83 48.33,174 81.79,140.38 36,128 81.79,115.62 48.33,82 94.17,94.17 82,48.33 115.62,81.79" fill="#f3ecdf"/><circle cx="128" cy="128" r="36" fill="#2c4f9e"/><circle cx="128" cy="128" r="27" fill="#f3ecdf"/></g>
+</g>
+</svg>

@@ -61,7 +61,7 @@ import { launchForScenario, legacyLaunch, type CampaignLaunchConfig } from "../.
 import { NewCampaignModal, draftLaunch, type CampaignDraft } from "./menu/NewCampaignModal";
 import { useCampaignSession } from "./session/use_campaign_session";
 import { UiLab } from "../kit/UiLab";
-import { uiThemeChrome, useUiLab, useUiTheme, useUiThemeHotkeys, useUiType } from "../kit/uiTheme";
+import { uiThemeChrome, useRoleVars, useUiLab, useUiTheme, useUiThemeHotkeys, useUiType } from "../kit/uiTheme";
 
 export type Selection =
   | {
@@ -160,6 +160,7 @@ export function App() {
   const state = session.state;
   const uiTheme = useUiTheme();
   const uiType = useUiType();
+  const roleVars = useRoleVars();
   const uiLabOpen = useUiLab();
   useUiThemeHotkeys();
   const faction = state.current_faction_id;
@@ -1096,7 +1097,7 @@ export function App() {
       data-look={look}
       data-ui-theme={uiTheme}
       data-ui-type={uiType}
-      style={uiThemeChrome(uiTheme) ?? (look === "dusk" ? duskChrome() : factionChrome(faction))}
+      style={{ ...(uiThemeChrome(uiTheme) ?? (look === "dusk" ? duskChrome() : factionChrome(faction))), ...roleVars }}
       inert={covered ? true : undefined}
       onClickCapture={(event) => {
         const target = event.target;

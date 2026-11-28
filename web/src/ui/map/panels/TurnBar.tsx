@@ -5,6 +5,7 @@ import { factionPalette } from "../../theme/factionPalette";
 import type { MapVersion } from "../editor/mapVersions";
 import { factionName, phaseName } from "../session/event_text";
 import type { RoomControls } from "../session/use_campaign_session";
+import { RoundelBadge } from "../../../components/ui/RoundelBadge";
 import { RoomPill } from "./RoomPill";
 import { DEMO_MAP_ID, demoPlayChoice, playChoiceFromVersion } from "../session/play_map";
 import type { GameSessionHandle } from "../session/use_game_session";
@@ -48,6 +49,7 @@ export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, play
     <header className="turn-bar">
       <div className="turn-info">
         <span className="faction-chip" style={factionStyle(faction)}>
+          <RoundelBadge faction={faction} size="sm" label="" />
           {factionName(faction)}
         </span>
         <span className="turn-count">
@@ -68,6 +70,7 @@ export function TurnBar({ game, editing, versions, onToggleEditing, onMenu, play
       <div className="ipc">
         {state.turn_order.map((f) => (
           <span key={f} className={f === faction ? "ipc-active" : ""} style={factionStyle(f)}>
+            <RoundelBadge faction={f} size="sm" label="" />
             {factionName(f)} <b className="mono">{state.getFactionIpc(f)}</b> IO
           </span>
         ))}

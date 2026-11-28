@@ -78,7 +78,7 @@ import {
 import type { FrontlineSegment, ScarFrame } from "./terrainRelief";
 import { getDrawFlags } from "./renderDebug";
 import { landMaskAt } from "./landMask";
-import { facilitySplit, microSpriteLean, unitLean } from "./boardTune";
+import { emblemAlpha, facilitySplit, microSpriteLean, unitLean } from "./boardTune";
 import { facilityTarget } from "./facilityTargets";
 import { getBoardTune } from "./boardTuneStore";
 import { mapVisuals, plinthLook } from "./mapVisualConfig";
@@ -1574,6 +1574,13 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
     if (region.type !== "land" || region.ipc <= 0) {
       return;
     }
+    // The numeral and the capital's diamond fade out as the camera comes in: close up the board carries enough already.
+    const fade = emblemAlpha(scene.view.k, mapVisuals.emblemFadeFrom, mapVisuals.emblemFadeTo);
+    if (fade < 0.02) {
+      return;
+    }
+    ctx.save();
+    ctx.globalAlpha *= fade;
     const shieldY = layout.shieldY;
     const label = String(region.ipc);
     const size = Math.max(9, 13 * s);
@@ -1589,6 +1596,7 @@ export function drawGameOverlay(ctx: CanvasRenderingContext2D, scene: TerrainSce
     if (region.capital) {
       drawDiamond(ctx, anchor.x, shieldY - size * 0.95, Math.max(3, 4 * s));
     }
+    ctx.restore();
   };
   const drawMarker = (layout: RegionLayout) => {
     const combat = markers.get(layout.region.id);

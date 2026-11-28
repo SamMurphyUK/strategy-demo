@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<title>Italy</title>
+<defs>
+<clipPath id="ita-clip"><circle cx="128" cy="128" r="114"/></clipPath>
+</defs>
+<circle cx="128" cy="128" r="122" fill="#2a2023"/>
+<circle cx="128" cy="128" r="118" fill="none" stroke="#a88a5e" stroke-width="1.5"/>
+<g clip-path="url(#ita-clip)">
+<g id="face"><circle cx="128" cy="128" r="114" fill="#6f7a4a"/><circle cx="128" cy="128" r="86" fill="#3d7a4f"/><circle cx="128" cy="128" r="58" fill="#f3ecdf"/></g>
+<g id="emblem"><circle cx="128" cy="128" r="30" fill="#b3322f"/></g>
+</g>
+</svg>
