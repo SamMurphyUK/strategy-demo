@@ -914,25 +914,19 @@ function darkened(hex: string, factor: number): string {
   return `rgb(${scale((n >> 16) & 255)}, ${scale((n >> 8) & 255)}, ${scale(n & 255)})`;
 }
 
-/** A hex colour lifted toward white by `amount`. */
-function lightened(hex: string, amount: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) {
-    return hex;
-  }
-  const n = parseInt(m[1], 16);
-  const lift = (v: number) => Math.max(0, Math.min(255, Math.round(v + (255 - v) * amount)));
-  return `rgb(${lift((n >> 16) & 255)}, ${lift((n >> 8) & 255)}, ${lift(n & 255)})`;
-}
+/** What a territory with no one to play it (no value, no owner) is washed with, and the colour its border is taken from. */
+const UNPLAYABLE_WASH = "rgba(128, 128, 124, 0.2)";
+const UNPLAYABLE_BASE = "#9A9A94";
 
 /**
- * The internal borders of the land as crisp vector lines, embossed: each territory's stretches shared with a neighbour (never its
- * coast) are stroked inside its own outline (clipped to it, at double width) in a darker take of its owner's colour, with a lit edge
- * toward the light and a shaded edge away from it. Two neighbours each keep their half. The sea seams are the ground's own.
+ * The internal borders of the land as crisp vector lines: each territory's stretches shared with a neighbour (never its coast) are
+ * stroked inside its own outline (clipped to it, at double width) in a darker take of its owner's colour, so two neighbours each keep
+ * their half. A territory nobody can play (no value, no owner: a desert, a steppe) is washed a little grey and bordered in grey.
+ * The sea seams are the ground's own.
  */
 function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: number): void {
   const vb = s.vectorBorders;
-  if (!vb || vb.alpha <= 0) {
+  if (!vb) {
     return;
   }
   const borders = internalBorderPaths(vb.shapes, vb.seam);
@@ -940,38 +934,34 @@ function drawVectorBorders(ctx: CanvasRenderingContext2D, s: TerrainScene, px: n
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.globalAlpha *= vb.alpha;
-  const lit = vb.width * 0.35 * px;
+  const unplayable = (region: RegionShape) => region.type === "land" && (region.ipc <= 0 || !(s.owners[region.id] ?? ""));
   for (const region of s.regions) {
     const path = s.paths.get(region.id);
-    const line = borders.get(region.id);
-    if (!path || !line || region.type !== "land") {
-      continue;
+    if (path && unplayable(region)) {
+      withLandLift(ctx, s, region.id, () => {
+        ctx.fillStyle = UNPLAYABLE_WASH;
+        ctx.fill(path, "evenodd");
+      });
     }
-    withLandLift(ctx, s, region.id, () => {
-      const base = landColor(s.owners[region.id] ?? "", tune);
-      ctx.save();
-      ctx.clip(path, "evenodd");
-      ctx.strokeStyle = darkened(base, vb.brightness);
-      ctx.lineWidth = vb.width * 2 * px;
-      ctx.stroke(line);
-      // The lit edge, up and to the left of the line, and the shaded edge, down and to the right.
-      ctx.save();
-      ctx.translate(-lit, -lit);
-      ctx.strokeStyle = lightened(base, 0.55);
-      ctx.globalAlpha *= 0.6;
-      ctx.lineWidth = vb.width * 0.7 * px;
-      ctx.stroke(line);
-      ctx.restore();
-      ctx.save();
-      ctx.translate(lit, lit);
-      ctx.strokeStyle = "#000";
-      ctx.globalAlpha *= 0.4;
-      ctx.lineWidth = vb.width * 0.7 * px;
-      ctx.stroke(line);
-      ctx.restore();
-      ctx.restore();
-    });
+  }
+  if (vb.alpha > 0) {
+    ctx.globalAlpha *= vb.alpha;
+    for (const region of s.regions) {
+      const path = s.paths.get(region.id);
+      const line = borders.get(region.id);
+      if (!path || !line || region.type !== "land") {
+        continue;
+      }
+      withLandLift(ctx, s, region.id, () => {
+        const base = unplayable(region) ? UNPLAYABLE_BASE : landColor(s.owners[region.id] ?? "", tune);
+        ctx.save();
+        ctx.clip(path, "evenodd");
+        ctx.strokeStyle = darkened(base, vb.brightness);
+        ctx.lineWidth = vb.width * 2 * px;
+        ctx.stroke(line);
+        ctx.restore();
+      });
+    }
   }
   ctx.restore();
 }

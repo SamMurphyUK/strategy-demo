@@ -17,8 +17,8 @@ export const SNOW_PEAK = 1.05;
 export const SAND_CEILING = 0.92;
 
 /** The zoom the cross-fade starts at and finishes at. */
-export const DIORAMA_FROM = 3.8;
-export const DIORAMA_TO = 4.3;
+export const DIORAMA_FROM = 5.216;
+export const DIORAMA_TO = (5.216 * 4.3) / 3.8;
 
 /** The cross-fade at a zoom: 0 up to `DIORAMA_FROM`, 1 from `DIORAMA_TO`, an ease between. Pure. */
 export function dioramaFade(k: number): number {

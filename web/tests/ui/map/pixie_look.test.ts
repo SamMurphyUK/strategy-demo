@@ -20,6 +20,8 @@ import {
 /** The fitted board and the closest zoom on a laptop, in screen pixels to a world unit. */
 const FIT = 1.75;
 const MAX = 7.48;
+/** A zoom past where the soft land is whole. */
+const NEAR = 10.3;
 
 afterEach(() => {
   resetVisuals();
@@ -155,23 +157,23 @@ describe("the texel grid at a zoom", () => {
   it("softens the land with the zoom and by nothing else", () => {
     const at = (k: number) => landSoftness(DEFAULT_VISUALS, k);
     expect(at(1)).toBe(0);
-    // The icon tokens hold the full pixel chart: nothing softens before the sprites arrive at 3.8.
-    expect(at(3.79)).toBe(0);
-    expect(at(3.8)).toBe(0);
+    // The icon tokens hold the full pixel chart: nothing softens before the sprites arrive at 5.216.
+    expect(at(5.2)).toBe(0);
+    expect(at(5.216)).toBe(0);
     expect(at(DEFAULT_VISUALS.softLandFrom)).toBe(0);
     expect(at(DEFAULT_VISUALS.softLandTo)).toBe(1);
-    expect(at(MAX)).toBe(1);
+    expect(at(NEAR)).toBe(1);
     let last = 0;
-    for (let k = 1; k <= MAX; k += 0.1) {
+    for (let k = 1; k <= NEAR; k += 0.1) {
       expect(at(k)).toBeGreaterThanOrEqual(last);
       last = at(k);
     }
-    expect(landSoftness({ ...DEFAULT_VISUALS, enableSoftLand: false }, MAX)).toBe(0);
+    expect(landSoftness({ ...DEFAULT_VISUALS, enableSoftLand: false }, NEAR)).toBe(0);
   });
 
   it("hands the soft land's keeps to the shader and leaves the shared numbers alone, so the ranges stay pixelated", () => {
-    const far = pixieLook(DEFAULT_VISUALS, 1.5, MAX)!;
-    const near = pixieLook(DEFAULT_VISUALS, MAX, MAX)!;
+    const far = pixieLook(DEFAULT_VISUALS, 1.5, NEAR)!;
+    const near = pixieLook(DEFAULT_VISUALS, NEAR, NEAR)!;
     expect(far.soft).toBe(0);
     expect(far.brush).toBe(0);
     expect(near.soft).toBe(1);
@@ -187,7 +189,7 @@ describe("the texel grid at a zoom", () => {
   });
 
   it("passes the weights through, with the tones and the sea bands as whole numbers", () => {
-    const look = pixieLook({ ...DEFAULT_VISUALS, pixelShadowSteps: 2.6, seaContourSteps: 3.4, pixelDitherStrength: 0.25, coastRimIntensity: 0.5 }, FIT, MAX)!;
+    const look = pixieLook({ ...DEFAULT_VISUALS, pixelShadowSteps: 2.6, seaContourSteps: 3.4, pixelDitherStrength: 0.25, coastRimIntensity: 0.5 }, FIT, NEAR)!;
     expect(look.steps).toBe(3);
     expect(look.seaSteps).toBe(3);
     expect(look.dither).toBe(0.25);

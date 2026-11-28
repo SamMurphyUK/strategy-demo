@@ -30,16 +30,16 @@ describe("oblique tilt", () => {
 });
 
 describe("semantic zoom lod", () => {
-  it("keeps icon tokens until 3.8, then switches to upright sprites", () => {
+  it("keeps icon tokens until 5.216, then switches to upright sprites", () => {
     expect(lodForZoom(1.08, 0)).toBe(0);
     expect(lodForZoom(1.09, 0)).toBe(1);
     expect(lodForZoom(2.2, 1)).toBe(1);
-    expect(lodForZoom(3.79, 1)).toBe(1);
-    expect(lodForZoom(3.8, 0)).toBe(2);
-    expect(lodForZoom(3.8, 1)).toBe(2);
-    expect(lodForZoom(3.7, 2)).toBe(2);
-    expect(lodForZoom(3.65, 2)).toBe(2);
-    expect(lodForZoom(3.649, 2)).toBe(1);
+    expect(lodForZoom(5.2, 1)).toBe(1);
+    expect(lodForZoom(5.216, 0)).toBe(2);
+    expect(lodForZoom(5.216, 1)).toBe(2);
+    expect(lodForZoom(5.1, 2)).toBe(2);
+    expect(lodForZoom(5.066, 2)).toBe(2);
+    expect(lodForZoom(5.0, 2)).toBe(1);
     expect(lodForZoom(1.08, 2)).toBe(0);
     expect(SPRITE_FADE_MS).toBe(300);
     expect(terrainStampAlpha(1.08)).toBe(0);
@@ -81,20 +81,20 @@ describe("semantic zoom lod", () => {
 });
 
 describe("the detailed sprites' scale curve", () => {
-  it("is the base at the 3.8 reveal, whatever the lock", () => {
+  it("is the base at the 5.216 reveal, whatever the lock", () => {
     for (const lock of [0, 0.5, 1]) {
-      expect(detailedSpriteScale(3.8, 0.85, lock)).toBeCloseTo(0.85, 9);
+      expect(detailedSpriteScale(5.216, 0.85, lock)).toBeCloseTo(0.85, 9);
     }
   });
 
   it("holds one size on screen at lock 0, and grows with the board at lock 1", () => {
-    expect(detailedSpriteScale(7.5, 0.85, 0)).toBeCloseTo(0.85, 9);
-    expect(detailedSpriteScale(7.6, 0.85, 1) / detailedSpriteScale(3.8, 0.85, 1)).toBeCloseTo(2, 9);
+    expect(detailedSpriteScale(10.3, 0.85, 0)).toBeCloseTo(0.85, 9);
+    expect(detailedSpriteScale(10.432, 0.85, 1) / detailedSpriteScale(5.216, 0.85, 1)).toBeCloseTo(2, 9);
   });
 
   it("never shrinks as the camera comes in", () => {
     let last = 0;
-    for (let k = 3.8; k <= 7.5; k += 0.1) {
+    for (let k = 5.216; k <= 10.3; k += 0.1) {
       const scale = detailedSpriteScale(k, 0.85, 1);
       expect(scale).toBeGreaterThanOrEqual(last);
       last = scale;

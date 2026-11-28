@@ -763,12 +763,12 @@ export function BoardLookPanel() {
         <Num name="terrainHeightScale" label="Land height" title="How high the land stands above the sea: the ceiling of the land and the height of its cliffs. 1 is as shipped." />
 
         <h3>Detailed sprites</h3>
-        <Num name="detailedSpriteBaseScale" label="Sprite size" title="Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace." />
+        <Num name="detailedSpriteBaseScale" label="Sprite size" title="Size of the detailed unit sprites and their bases at the 5.216 reveal, as a share of the round token they replace." />
         <Num name="detailedSpriteWorldLock" label="Sprite world lock" title="How far the detailed sprites follow the board as the camera comes in. 1 is steady in world space, like the terrain and landmarks; 0 holds their size on screen." />
 
         <h3>Soft land</h3>
         <Flag name="enableSoftLand" label="Soft land" title="Close in, where the detailed figures stand, the land eases from the pixel chart to a soft posterized wash." />
-        <Num name="dioramaPbrBlend" label="Diorama surface" title="How far the tiled grass, sand, snow and slate surface comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart." />
+        <Num name="dioramaPbrBlend" label="Diorama surface" title="How far the tiled grass, sand, snow and slate surface comes in over the pixel chart from zoom 5.216 to 5.9. 0 keeps the chart." />
         <Num name="dioramaTileScale" label="Diorama tile scale" title="The repeats of the diorama surface against the shipped size." />
         <Num name="microPitchDeg" label="Micro camera angle" title="Degrees above the horizon the camera looks from at the closest zoom. Lower is a more dramatic diorama angle." unit="deg" />
         <Num name="microSpriteTiltDeg" label="Micro figure lean" title="How far the 2D figures lean back more in the micro tier, so they stand against the horizon." unit="deg" />
@@ -796,7 +796,7 @@ export function BoardLookPanel() {
         <Num name="desertHeatHaze" label="Desert haze" title="The warm amber haze over the desert, close in." />
         <Num name="snowColdTint" label="Snow cold tint" title="The cool slate-blue overcast over the snow, and the cold in its shade." />
         <Num name="windStrength" label="Wind" title="How strongly the wind drives the snow flurries." />
-        <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 3.8." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
+        <Num name="softLandFrom" label="Soft from" title="The zoom where the land starts to soften. The sprites arrive at 5.216." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandTo" label="Soft to" title="The zoom where the land is fully soft." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandDither" label="Soft dither" title="Dither left on the soft land. 0 is none, 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />
         <Num name="softLandSaturation" label="Soft colour" title="Colour left on the soft land. 1 is as the strategic chart." off={!mapVisuals.enableFauxPixelMap || !mapVisuals.enableSoftLand} />

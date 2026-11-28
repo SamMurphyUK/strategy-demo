@@ -233,9 +233,9 @@ export interface MapVisualConfig {
   seaSheenPops: number;
   /** At sprite zoom the land eases from the pixel chart to a soft posterized wash, so the figures stand out. */
   enableSoftLand: boolean;
-  /** The zoom where the softening starts, and the zoom where it is whole. The icon tokens hold the full pixel chart up to 3.8, where the sprites arrive. */
+  /** The zoom where the softening starts, and the zoom where it is whole. The icon tokens hold the full pixel chart up to 5.216, where the sprites arrive. */
   softLandFrom: number;
-  /** How far the world-space diorama surface (grass flock, sand ripples, snow, slate) comes in over the pixel chart from zoom 3.8 to 4.3. 0 keeps the chart. */
+  /** How far the world-space diorama surface (grass flock, sand ripples, snow, slate) comes in over the pixel chart from zoom 5.216 to 5.9. 0 keeps the chart. */
   dioramaPbrBlend: number;
   /** The diorama surface's repeats, against the shipped size. */
   dioramaTileScale: number;
@@ -297,9 +297,9 @@ export interface MapVisualConfig {
   softLandValueBand: number;
   /** How far brush strokes wander the soft bands. 0 is clean bands. */
   softLandBrush: number;
-  /** Size of the detailed unit sprites and their bases at the 3.8 reveal, as a share of the round token they replace. */
+  /** Size of the detailed unit sprites and their bases at the 5.216 reveal, as a share of the round token they replace. */
   detailedSpriteBaseScale: number;
-  /** How far the detailed sprites follow the board as the camera comes in from 3.8. 1 is steady in world space, like the terrain; 0 holds their size on screen. */
+  /** How far the detailed sprites follow the board as the camera comes in from 5.216. 1 is steady in world space, like the terrain; 0 holds their size on screen. */
   detailedSpriteWorldLock: number;
   /** How high the land stands above the sea: the ceiling of the land, and so the height of the cliffs. 1 is as shipped. */
   terrainHeightScale: number;
@@ -396,8 +396,8 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   tokenSizeBoost: 1.5,
   vectorBorders: true,
   vectorBorderWidth: 3.5,
-  vectorFadeFrom: 3,
-  vectorFadeTo: 4.5,
+  vectorFadeFrom: 3.5,
+  vectorFadeTo: 5.216,
   vectorFloor: 0.5,
   tokenBoostFadeFrom: 1.3,
   tokenBoostFadeTo: 2,
@@ -491,7 +491,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   seaSheenFrequency: 1,
   seaSheenPops: 0.5,
   enableSoftLand: true,
-  softLandFrom: 3.8,
+  softLandFrom: 5.216,
   dioramaPbrBlend: 0.85,
   dioramaTileScale: 1,
   microMinDistance: 1.35,
@@ -519,7 +519,7 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   forestUnderstoryTint: 0.5,
   windStrength: 0.5,
   terrainHillRelief: 0.2,
-  softLandTo: 5.6,
+  softLandTo: 7.69,
   softLandDither: 0.1,
   softLandSaturation: 0.58,
   softLandValueBand: 0.6,
@@ -529,19 +529,19 @@ export const DEFAULT_VISUALS: Readonly<MapVisualConfig> = Object.freeze({
   terrainHeightScale: 1,
   mountainReliefHeight: 1,
   navalSubmergeDepth: 0.6,
-  landmarkRevealFrom: 4.4,
-  landmarkRevealTo: 7,
+  landmarkRevealFrom: 6.04,
+  landmarkRevealTo: 9.61,
   landmarkRevealBand: 0.08,
   landmarkBuildSeconds: 3.75,
   landmarkBuildCube: 0.06,
-  facilitySplitFrom: 2.6,
+  facilitySplitFrom: 3.57,
   facilityFadeEnd: 6.4,
-  facilitySplitSpread: 2.4,
+  facilitySplitSpread: 3.29,
   enableRegionRoundels: true,
   roundelRadiusShare: 0.82,
   roundelHeight: 0.05,
-  emblemFadeFrom: 3.4,
-  emblemFadeTo: 6,
+  emblemFadeFrom: 4.67,
+  emblemFadeTo: 8.24,
   enable3DBases: true,
   plinthHeight: 0.22,
   plinthBevel: 0.11,
@@ -719,7 +719,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   seaSheenScatter: [0, 1],
   seaSheenFrequency: [0, 4],
   seaSheenPops: [0, 1],
-  softLandFrom: [0.5, 6],
+  softLandFrom: [0.5, 9],
   dioramaPbrBlend: [0, 1],
   dioramaTileScale: [0.3, 3],
   microMinDistance: [1, 4],
@@ -747,7 +747,7 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   forestUnderstoryTint: [0, 1],
   windStrength: [0, 2],
   terrainHillRelief: [0, 0.5],
-  softLandTo: [1, 8],
+  softLandTo: [1, 12],
   softLandDither: [0, 1],
   softLandSaturation: [0, 1.2],
   softLandValueBand: [0.2, 1.2],
@@ -757,18 +757,18 @@ export const VISUAL_RANGES: Readonly<Record<string, readonly [number, number]>> 
   terrainHeightScale: [0.3, 2],
   mountainReliefHeight: [0, 3],
   navalSubmergeDepth: [0, 3],
-  landmarkRevealFrom: [1, 8],
-  landmarkRevealTo: [1.5, 9],
+  landmarkRevealFrom: [1, 12],
+  landmarkRevealTo: [1.5, 14],
   landmarkRevealBand: [0.01, 0.4],
   landmarkBuildSeconds: [0.5, 30],
   landmarkBuildCube: [0.02, 0.25],
-  facilitySplitFrom: [1, 8],
+  facilitySplitFrom: [1, 12],
   facilityFadeEnd: [2, 9],
-  facilitySplitSpread: [0, 6],
+  facilitySplitSpread: [0, 9],
   roundelRadiusShare: [0.3, 1.2],
   roundelHeight: [0.01, 0.3],
-  emblemFadeFrom: [1, 9],
-  emblemFadeTo: [1.5, 10],
+  emblemFadeFrom: [1, 13],
+  emblemFadeTo: [1.5, 14],
   plinthHeight: [0.05, 0.6],
   plinthBevel: [0, 0.3],
   squadRadius2: [1, 2],

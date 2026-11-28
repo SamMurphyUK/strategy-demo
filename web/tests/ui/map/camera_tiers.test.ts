@@ -4,13 +4,13 @@ import { maxZoomK } from "../../../src/ui/map/viewMath";
 import { dioramaFade } from "../../../src/ui/viewport3d/skins/dioramaPbr";
 
 describe("camera distance and its tiers", () => {
-  it("makes the diorama cross-fade run over distance 4.3 to 3.8, as it does over zoom 3.8 to 4.3", () => {
-    expect(cameraDistance(3.8)).toBeCloseTo(4.3, 9);
-    expect(cameraDistance(4.3)).toBeCloseTo(3.8, 9);
+  it("makes the diorama cross-fade run over distance 4.3 to 3.8, as it does over zoom 5.216 to 5.9", () => {
+    expect(cameraDistance(5.216)).toBeCloseTo(4.3, 9);
+    expect(cameraDistance((5.216 * 4.3) / 3.8)).toBeCloseTo(3.8, 9);
     expect(dioramaFade(zoomForDistance(4.3))).toBeCloseTo(0, 9);
     expect(dioramaFade(zoomForDistance(3.8))).toBeCloseTo(1, 9);
     expect(zoomForDistance(cameraDistance(2.7))).toBeCloseTo(2.7, 9);
-    expect(DISTANCE_K).toBeCloseTo(16.34, 9);
+    expect(DISTANCE_K).toBeCloseTo(5.216 * 4.3, 9);
   });
   it("names the tiers by distance", () => {
     expect(cameraTier(zoomForDistance(20))).toBe("strategic");
@@ -36,9 +36,9 @@ import { cliffShadeFade } from "../../../src/ui/map/boardTune";
 describe("the cliff shade", () => {
   it("is off at the chart's zoom and comes in slowly over the close zoom", () => {
     expect(cliffShadeFade(2)).toBe(0);
-    expect(cliffShadeFade(3.4)).toBe(0);
-    expect(cliffShadeFade(5.7)).toBeGreaterThan(0.4);
-    expect(cliffShadeFade(5.7)).toBeLessThan(0.6);
-    expect(cliffShadeFade(8)).toBe(1);
+    expect(cliffShadeFade(4.667)).toBe(0);
+    expect(cliffShadeFade(7.82)).toBeGreaterThan(0.4);
+    expect(cliffShadeFade(7.82)).toBeLessThan(0.6);
+    expect(cliffShadeFade(10.98)).toBe(1);
   });
 });
